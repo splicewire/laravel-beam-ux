@@ -26,6 +26,7 @@
         "splicewire/laravel-beam": "*",
         "splicewire/laravel-beam-mdx": "*",
         "splicewire/laravel-beam-sitemap": "*",
+        "splicewire/laravel-beam-taxonomy": "*",
         "splicewire/laravel-beam-workflows": "*"
     },
     "require-dev": {
@@ -56,6 +57,16 @@
         "merge-plugin": {
             "include": [
                 "composer.local.json"
+            ]
+        },
+        "package-topology": {
+            "because": "beam-ux is the paid splicewire/* authoring engine; it composes free-tier beam-family arms DOWN (beam-core, mdx, sitemap, workflows, and — S7 — beam-taxonomy for the BeamSilo/BeamTag classification facets) and must NEVER reach UP into satellite / tower / the host App tier.",
+            "mustRequire": [
+                "splicewire/laravel-beam-taxonomy"
+            ],
+            "mustNotRequire": [
+                "splicewire/laravel-satellite",
+                "splicewire/tower"
             ]
         }
     },
@@ -96,6 +107,10 @@
         {
             "type": "git",
             "url": "https://github.com/splicewire/laravel-beam-sitemap.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/splicewire/laravel-beam-taxonomy.git"
         },
         {
             "type": "git",

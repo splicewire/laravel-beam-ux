@@ -12,6 +12,8 @@ use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Format\BodyStyle;
 use Splicewire\Beam\Ux\Format\UxFormat;
+use Splicewire\Beam\Ux\Models\Concerns\HasFacets;
+use Splicewire\Beam\Ux\Sitemap\SiloVisibilityEntitlementGate;
 use Splicewire\Beam\Ux\Sitemap\WorkflowMarkingPublishGate;
 use Splicewire\Beam\Ux\Type\UxType;
 use Splicewire\Beam\Workflows\Type\Concerns\WorkflowManaged as WorkflowManagedTrait;
@@ -74,9 +76,21 @@ use Splicewire\Beam\Write\ParticleWriter;
  * routing publish gate reads for visibility (S6 replaces S4's `AlwaysPublishedGate` stub). The engine
  * (guards, versioned definitions, activitylog Display projection) comes for free from the package; this
  * model owns only the subject shape (the paid arm).
+ *
+ * **Classification facets (S7 — OPTIONAL, ADR-0165 §2).** Via {@see HasFacets} the entry attaches the
+ * free-tier beam-taxonomy `BeamSilo` (`silos()`, hierarchical, `siloable` morph) + `BeamTag` (`tags()`,
+ * flat, `taggable` morph) as OPTIONAL polymorphic classification — null for fragments, filled for content.
+ * These are FACETS, not the spine: they drive filtering / related / secondary-nav and a silo's visibility
+ * MAY gate the sitemap (see {@see SiloVisibilityEntitlementGate}), but they
+ * NEVER touch the canonical URL — that is containment's job (`realm`/`sitemap_id`/`parent_id`/`segment`).
+ * Both morphs are pivot-based (`taggables`/`siloables` from beam-taxonomy's tables), so S7 adds NO column
+ * to `beam_ux_entries`. Classifying a *content* entry with `BeamSilo` is correct (the issue-03 refinement);
+ * only reusing the *compliance* silo for a component's structural *namespace* was the category error. The
+ * facet attachment on the entry is paid `splicewire/*`; `BeamSilo`/`BeamTag` are free-tier (ADR-0092).
  */
 class BeamUxEntry extends Model implements WorkflowManaged
 {
+    use HasFacets;
     use HasUuids;
     use WorkflowManagedTrait;
 
