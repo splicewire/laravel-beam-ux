@@ -3,16 +3,19 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\ServiceProvider;
+use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Ux\BeamUxServiceProvider;
 
 /**
  * The BeamUx authoring-entry table (charter S0). A deliberately generic, flat row that **has-a** a
- * versioned {@see \Splicewire\Beam\Models\BeamParticle} body via `particle_id` — the particle table
+ * versioned {@see BeamParticle} body via `particle_id` — the particle table
  * (`beam_particles`, beam-core) holds the migrate-on-read content; this row holds the queryable
  * authoring envelope.
  *
  * **Ubiquitous shape (charter §Q7).** This migration lives in beam-ux's `database/migrations/shared`
- * dir, registered by {@see \Splicewire\Beam\Ux\BeamUxServiceProvider::bootMigrations()} into BOTH the
- * central `migrate` pass ({@see \Illuminate\Support\ServiceProvider::loadMigrationsFrom()}) AND the
+ * dir, registered by {@see BeamUxServiceProvider::bootMigrations()} into BOTH the
+ * central `migrate` pass ({@see ServiceProvider::loadMigrationsFrom()}) AND the
  * tenant `tenants:migrate` pass (Stancl's `tenancy.migration_parameters.--path` array), so
  * `beam_ux_entries` exists identically in central and every tenant. Residency is `context-following`
  * (default): an entry lives wherever it is authored; only the central path is exercised for now.

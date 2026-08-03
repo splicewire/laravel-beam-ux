@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Write\ParticleWriter;
 
 /**
  * The BeamUx authoring **entry** — the paid `splicewire/*` engine's central model (ADR-0092 vendor
@@ -19,7 +20,7 @@ use Splicewire\Beam\Models\BeamParticle;
  * entry, cost accepted): the particle carries the versioned, migrate-on-read **body** (schema-typed,
  * snapshot-versioned — the whole ADR-0138 beam-core discipline for free), while this row carries the
  * flat, queryable **authoring envelope**. The body is written through beam-core's shared
- * {@see \Splicewire\Beam\Write\ParticleWriter} against the related particle — NO fork of the write
+ * {@see ParticleWriter} against the related particle — NO fork of the write
  * pipeline, NO row-level restructuring of the particle.
  *
  * **Authoring envelope (S0 — the base columns only).** `slug` · `schema_ref` · `facade_ref` (nullable —
@@ -61,7 +62,7 @@ class BeamUxEntry extends Model
 
     /**
      * The versioned, migrate-on-read **body** this entry has-a: a generic {@see BeamParticle} row keyed
-     * by `particle_id`. The body is what the shared {@see \Splicewire\Beam\Write\ParticleWriter} writes;
+     * by `particle_id`. The body is what the shared {@see ParticleWriter} writes;
      * this method is how a read re-loads it through the particle reader (migrate-on-read intact).
      */
     public function particle(): BelongsTo

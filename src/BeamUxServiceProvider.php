@@ -3,12 +3,15 @@
 namespace Splicewire\Beam\Ux;
 
 use Illuminate\Support\ServiceProvider;
+use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Write\ParticleWriter;
 
 /**
  * The BeamUx authoring engine's provider (charter S0). Paid `splicewire/*` tier (ADR-0092): it homes
- * the {@see \Splicewire\Beam\Ux\Models\BeamUxEntry} model + `beam_ux_entries` table. The versioned
- * body it rides is a beam-core {@see \Splicewire\Beam\Models\BeamParticle}, written through beam-core's
- * shared {@see \Splicewire\Beam\Write\ParticleWriter} — this package forks neither.
+ * the {@see BeamUxEntry} model + `beam_ux_entries` table. The versioned
+ * body it rides is a beam-core {@see BeamParticle}, written through beam-core's
+ * shared {@see ParticleWriter} — this package forks neither.
  */
 class BeamUxServiceProvider extends ServiceProvider
 {
@@ -22,7 +25,7 @@ class BeamUxServiceProvider extends ServiceProvider
      * the SAME migration dir runs in BOTH migration passes, so the table exists identically in central
      * and every tenant.
      *
-     * The mechanism (recohere T11, mirroring {@see \Splicewire\Tower\TowerServiceProvider::bootMigrations()}):
+     * The mechanism (recohere T11, mirroring `Splicewire\Tower\TowerServiceProvider::bootMigrations()`):
      *
      *  - CENTRAL — {@see loadMigrationsFrom()} registers the shared dir with the framework migrator, so
      *    a plain `migrate` runs it against the central connection.

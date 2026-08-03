@@ -64,6 +64,20 @@
             }
         },
         {
+            "type": "path",
+            "url": "../../rushing/*",
+            "options": {
+                "symlink": true
+            }
+        },
+        {
+            "type": "path",
+            "url": "../../schemastud/*",
+            "options": {
+                "symlink": true
+            }
+        },
+        {
             "type": "git",
             "url": "https://github.com/splicewire/laravel-beam.git"
         }
