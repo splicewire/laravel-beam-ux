@@ -7,7 +7,6 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
 use Splicewire\Beam\Models\BeamParticle;
-use Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController;
 use Splicewire\Beam\Sitemap\SitemapSourceRegistry;
 use Splicewire\Beam\Storage\DiskStorageDriver;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
@@ -23,6 +22,7 @@ use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Disk\RegisterFromDisk;
 use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
+use Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
@@ -65,7 +65,10 @@ class BeamUxServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->bootMigrations();
+        if ($this->app->runningInConsole()) {
+            $this->bootMigrations();
+        }
+
         $this->bootSitemap();
         $this->registerEntryWorkflow();
         $this->bootCommands();
@@ -303,42 +306,41 @@ class BeamUxServiceProvider extends ServiceProvider
     }
 
     /**
-     * Home the `beam_ux_entries` table with a **ubiquitous, context-following** shape (charter §Q7):
-     * the SAME migration dir runs in BOTH migration passes, so the table exists identically in central
-     * and every tenant.
+     * PUBLISH-ONLY migrations for the **ubiquitous** `beam_ux_entries` + `sitemaps` tables — the
+     * idiomatic pattern for a PLAIN ServiceProvider, mirroring the beam-core PackageServiceProvider
+     * exemplar (commit e7ae9b7) and the plain-provider beam-workflows analogue (commit 994aba1). This
+     * is the undo of the recohere runtime `loadMigrationsFrom` + Stancl `--path` push.
      *
-     * The mechanism (recohere T11, mirroring `Splicewire\Tower\TowerServiceProvider::bootMigrations()`):
+     * A plain provider has no spatie/laravel-package-tools machinery, so this uses Laravel's native
+     * {@see ServiceProvider::publishesMigrations()} (Laravel 11+). It does NOT loadMigrationsFrom and
+     * does NOT push onto `tenancy.migration_parameters.--path`: the package never runs these at
+     * runtime. `vendor:publish --tag=beam-ux-migrations` drops the copies into the HOST's
+     * `database/migrations/` (central pass) + `database/migrations/tenant/` (Stancl tenant pass), and
+     * the host runs each pass.
      *
-     *  - CENTRAL — {@see loadMigrationsFrom()} registers the shared dir with the framework migrator, so
-     *    a plain `migrate` runs it against the central connection.
-     *  - TENANT — Stancl tenancy has no auto-discovery; `tenants:migrate` reads the ARRAY at
-     *    `config('tenancy.migration_parameters.--path')` at runtime. We push the SAME shared dir onto
-     *    that array (install-location-agnostic, idempotent), so tenant provisioning runs it too. Boot
-     *    runs at app-bootstrap, well before the command reads config, so ordering holds. (The app test
-     *    harness's `migrateTenantPathIntoPublic()` reads this same array, so the shared table lands on
-     *    the test DB via the tenant pass as well.)
+     * **UBIQUITOUS (central + every tenant).** Every table exists identically in central and each
+     * tenant, so each migration ships TWICE under the SAME source dir:
+     *  - the flat copy at `database/migrations/<ts>_<name>.php` publishes into `database/migrations/`
+     *    (central pass);
+     *  - a `tenant/` twin (identical DDL) at `database/migrations/tenant/<ts>_<name>.php` publishes,
+     *    relative subpath preserved, into `database/migrations/tenant/` (tenant pass).
+     * ONE directory mapping covers both: the publish command lists the source dir RECURSIVELY and
+     * preserves each file's relative subpath, so a single `database/migrations` → `database_path
+     * ('migrations')` mapping lands the flat copies in `migrations/` and the twins in `migrations/tenant/`.
+     * The tenant twins carry a `Schema::hasTable()` / `Schema::hasColumn()` dup-guard so a host that
+     * migrates BOTH passes into ONE schema (the shared-test-DB harness) does not re-create/re-alter;
+     * production targets separate schemas, so the guard is simply false there.
      *
-     * Gated by `config('beam.ux.register_migrations', true)` — defaults on, matching the beam-family
-     * opt-out shape.
+     * The publishable sources carry real, sequential timestamp prefixes (`2026_08_03_170000…170006`),
+     * landing AFTER beam-core's `beam_particles` (`2026_08_03_162536`) since `beam_ux_entries` has-a
+     * particle body. With `database.migrations.update_date_on_publish` at its default (false), native
+     * `publishesMigrations` copies each file verbatim — one correctly-timestamped migration per file,
+     * no double-stamp, order preserved.
      */
     protected function bootMigrations(): void
     {
-        if (! config('beam.ux.register_migrations', true)) {
-            return;
-        }
-
-        $sharedDir = realpath(__DIR__.'/../database/migrations/shared')
-            ?: __DIR__.'/../database/migrations/shared';
-
-        // Central estate — auto-discovered by `migrate`.
-        $this->loadMigrationsFrom($sharedDir);
-
-        // Tenant estate — pushed onto Stancl's `--path` array (no auto-discovery). Same dir, so the
-        // table shape is identical central + tenant.
-        $paths = config('tenancy.migration_parameters.--path', []);
-
-        if (! in_array($sharedDir, $paths, true)) {
-            config()->push('tenancy.migration_parameters.--path', $sharedDir);
-        }
+        $this->publishesMigrations([
+            __DIR__.'/../database/migrations' => $this->app->databasePath('migrations'),
+        ], 'beam-ux-migrations');
     }
 }

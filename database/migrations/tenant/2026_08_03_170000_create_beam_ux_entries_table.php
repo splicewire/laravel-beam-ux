@@ -5,7 +5,6 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use Splicewire\Beam\Models\BeamParticle;
-use Splicewire\Beam\Ux\BeamUxServiceProvider;
 
 /**
  * The BeamUx authoring-entry table (charter S0). A deliberately generic, flat row that **has-a** a
@@ -13,11 +12,16 @@ use Splicewire\Beam\Ux\BeamUxServiceProvider;
  * (`beam_particles`, beam-core) holds the migrate-on-read content; this row holds the queryable
  * authoring envelope.
  *
- * **Ubiquitous shape (charter §Q7).** This migration lives in beam-ux's `database/migrations/shared`
- * dir, registered by {@see BeamUxServiceProvider::bootMigrations()} into BOTH the
- * central `migrate` pass ({@see ServiceProvider::loadMigrationsFrom()}) AND the
- * tenant `tenants:migrate` pass (Stancl's `tenancy.migration_parameters.--path` array), so
- * `beam_ux_entries` exists identically in central and every tenant. Residency is `context-following`
+ * **TENANT TWIN.** Identical DDL to the flat central copy at `../2026_08_03_170000_create_beam_ux_entries_table.php`.
+ * The `Schema::hasTable()` dup-guard below is there so a host that migrates BOTH passes into ONE schema (the
+ * shared-test-DB harness) doesn't re-create the table; production separates schemas, so the guard is false.
+ *
+ * **Ubiquitous shape (charter §Q7).** This migration ships PUBLISH-ONLY via the plain provider's native
+ * {@see ServiceProvider::publishesMigrations()} under the `beam-ux-migrations` tag:
+ * `vendor:publish --tag=beam-ux-migrations` copies the flat central file into the host's `database/migrations/`
+ * (central pass) and this `tenant/` twin into `database/migrations/tenant/` (Stancl tenant pass), and the
+ * HOST runs each pass. The package no longer `loadMigrationsFrom`'s or runs migrations at runtime.
+ * `beam_ux_entries` thus exists identically in central and every tenant. Residency is `context-following`
  * (default): an entry lives wherever it is authored; only the central path is exercised for now.
  *
  * **S0 columns only — the authoring envelope.** The optional aspects (format, file placement,
@@ -28,6 +32,13 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // TENANT TWIN dup-guard: the shared-test-DB harness migrates BOTH the central and tenant
+        // passes into ONE `public` schema, so the central pass may already have created this table.
+        // Production targets separate schemas, so this guard is simply false there.
+        if (Schema::hasTable('beam_ux_entries')) {
+            return;
+        }
+
         Schema::create('beam_ux_entries', function (Blueprint $table) {
             $table->uuid('id')->primary();
 

@@ -4,7 +4,6 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Storage\StorageDriver;
-use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Placement\FilePlacement;
 
 /**
@@ -17,15 +16,27 @@ use Splicewire\Beam\Ux\Placement\FilePlacement;
  *  - `driver_ref` — names the free-beam-core {@see StorageDriver} this entry
  *    persists through; nullable → falls through to the default `Stacked(Particle, Disk)`.
  *
- * **Shared-migration ordering (S1 footgun):** shared migrations carry NO timestamp and sort
- * LEXICALLY, so the `s2_` prefix keeps this alter AFTER `create_beam_ux_entries_table` and `s1_…`. Runs
- * in BOTH the central `migrate` and tenant `tenants:migrate` passes via
- * {@see BeamUxServiceProvider::bootMigrations()}, so the columns exist identically central + tenant.
+ * **Migration ordering:** files now carry REAL sequential timestamps, so this alter's `170002` prefix
+ * sorts it AFTER the `170000` create and the `170001` type-axes alter; the whole beam-ux set lands after
+ * beam-core's `beam_particles` (`2026_08_03_162536`). Shipped PUBLISH-ONLY via the plain provider's
+ * {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag): `vendor:publish` copies the
+ * flat central file into the host's `database/migrations/` and this `tenant/` twin into
+ * `database/migrations/tenant/`, and the HOST runs each pass, so the columns exist identically central + tenant.
+ *
+ * **TENANT TWIN.** Identical DDL to the flat central copy. The `Schema::hasColumn()` dup-guard below is
+ * there so a host that migrates BOTH passes into ONE schema (the shared-test-DB harness) doesn't re-alter;
+ * production separates schemas, so the guard is false.
  */
 return new class extends Migration
 {
     public function up(): void
     {
+        // TENANT TWIN dup-guard: the shared-test-DB harness runs both passes into one `public`
+        // schema, so the columns may already exist from the central pass. Production separates schemas.
+        if (Schema::hasColumn('beam_ux_entries', 'placement_ref')) {
+            return;
+        }
+
         Schema::table('beam_ux_entries', function (Blueprint $table) {
             // per-entry FilePlacement strategy ref (S2 precedence rung 1). Disk grouping only (ADR-0165).
             $table->string('placement_ref')->nullable()->after('namespace');

@@ -3,7 +3,6 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Format\UxFormat;
 
 /**
@@ -16,9 +15,11 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  *  - `body_style` — a **tsx-codec-local flavor** (`full | inline`), nullable/meaningless for other
  *    formats. Governs auto-import-preamble injection in the TSX codec.
  *
- * Runs in BOTH the central `migrate` and tenant `tenants:migrate` passes — same shared-dir mechanism
- * S0 established via {@see BeamUxServiceProvider::bootMigrations()}, so the columns exist identically
- * central + every tenant.
+ * Runs in BOTH the central `migrate` and tenant `tenants:migrate` passes — shipped PUBLISH-ONLY via the
+ * plain provider's {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag), same as S0:
+ * `vendor:publish` copies this flat file into the host's `database/migrations/` and its `tenant/` twin
+ * into `database/migrations/tenant/`, and the HOST runs each pass, so the columns exist identically
+ * central + every tenant. This alter's `170001` timestamp sorts it right after S0's `170000` create.
  */
 return new class extends Migration
 {

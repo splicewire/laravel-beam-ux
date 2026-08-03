@@ -3,7 +3,6 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
@@ -23,16 +22,28 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *  - `workflow_version` — the definition VERSION this entry is pinned to (the package pins it on first
  *    transition so its graph never shifts under it). NULL until a managed entry first transitions.
  *
- * **Shared-migration ordering (S1 footgun):** shared migrations sort LEXICALLY (no timestamp). The
- * `s6_` prefix keeps this alter AFTER `create_`/`s1_`/`s2_`/`s3_a`/`s3_b` (`create_` < `s1_` < … < `s6_`),
- * so the base table + its earlier aspects already exist. Runs in BOTH the central `migrate` and tenant
- * `tenants:migrate` passes via {@see BeamUxServiceProvider::bootMigrations()}, so the column shape is
- * identical central + tenant.
+ * **Migration ordering:** files now carry REAL sequential timestamps. This `170005` alter sorts AFTER the
+ * `170000`–`170004` beam-ux migrations, so the base table + its earlier aspects already exist; the whole
+ * set lands after beam-core's `beam_particles` (`2026_08_03_162536`). Shipped PUBLISH-ONLY via the plain
+ * provider's {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag): `vendor:publish`
+ * copies the flat central file into the host's `database/migrations/` and this `tenant/` twin into
+ * `database/migrations/tenant/`, and the HOST runs each pass (central `migrate` + tenant `tenants:migrate`),
+ * so the column shape is identical central + tenant.
+ *
+ * **TENANT TWIN.** Identical DDL to the flat central copy. The `Schema::hasColumn()` dup-guard below is
+ * there so a host that migrates BOTH passes into ONE schema (the shared-test-DB harness) doesn't re-alter;
+ * production separates schemas, so the guard is false.
  */
 return new class extends Migration
 {
     public function up(): void
     {
+        // TENANT TWIN dup-guard: the shared-test-DB harness runs both passes into one `public`
+        // schema, so the columns may already exist from the central pass. Production separates schemas.
+        if (Schema::hasColumn('beam_ux_entries', 'workflow_marking')) {
+            return;
+        }
+
         Schema::table('beam_ux_entries', function (Blueprint $table) {
             // The entry's current workflow marking (single-place lifecycle state). NULL = unmanaged /
             // at-initial. The published-marking gate reads this column.

@@ -3,7 +3,6 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Models\Sitemap;
 
 /**
@@ -15,11 +14,14 @@ use Splicewire\Beam\Ux\Models\Sitemap;
  * (many sitemaps per site, per-tenant sitemaps) is DEFERRED — the door is held open by the shape (a
  * table + a `realm` key + a `default` marker), not by a built feature. {@see Sitemap} is the model.
  *
- * **Shared-migration ordering (S1 footgun):** shared migrations carry NO timestamp and sort LEXICALLY.
- * This `s3_a_` create MUST sort before the `s3_b_` alter that FKs `beam_ux_entries.sitemap_id` to it
- * (`a` < `b`), and after `create_` / `s1_` / `s2_`. Registered into BOTH the central `migrate` and
- * tenant `tenants:migrate` passes via {@see BeamUxServiceProvider::bootMigrations()}, so the table
- * exists identically central + every tenant (residency is context-following).
+ * **Migration ordering:** files now carry REAL sequential timestamps. This `170003` sitemaps create sorts
+ * before the `170004` containment alter that FKs `beam_ux_entries.sitemap_id` to it (so the FK target
+ * exists first), and after the `170000`–`170002` beam-ux migrations; the whole set lands after beam-core's
+ * `beam_particles` (`2026_08_03_162536`). Shipped PUBLISH-ONLY via the plain provider's
+ * {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag): `vendor:publish` copies this
+ * flat file into the host's `database/migrations/` and its `tenant/` twin into `database/migrations/tenant/`,
+ * and the HOST runs each pass, so the table exists identically central + every tenant (residency is
+ * context-following).
  */
 return new class extends Migration
 {

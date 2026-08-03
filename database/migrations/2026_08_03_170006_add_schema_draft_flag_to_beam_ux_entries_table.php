@@ -3,7 +3,6 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use Splicewire\Beam\Ux\BeamUxServiceProvider;
 
 /**
  * The BeamUx **draft-schema marker** column added additively to `beam_ux_entries` (charter S9,
@@ -18,11 +17,13 @@ use Splicewire\Beam\Ux\BeamUxServiceProvider;
  *    it. Widgets/validation/refs are never fabricated by inference, so a draft is the honest floor.
  *    Indexed so an authoring surface can list "still-draft" components cheaply.
  *
- * **Shared-migration ordering (S1 footgun):** shared migrations sort LEXICALLY (no timestamp). The
- * `s9_` prefix keeps this alter AFTER `create_`/`s1_`/`s2_`/`s3_a`/`s3_b`/`s6_`
- * (`create_` < `s1_` < … < `s6_` < `s9_`), so the base table already exists. Runs in BOTH the central
- * `migrate` and tenant `tenants:migrate` passes via {@see BeamUxServiceProvider::bootMigrations()}, so
- * the column shape is identical central + tenant.
+ * **Migration ordering:** files now carry REAL sequential timestamps. This `170006` alter sorts AFTER the
+ * `170000`–`170005` beam-ux migrations, so the base table already exists; the whole set lands after
+ * beam-core's `beam_particles` (`2026_08_03_162536`). Shipped PUBLISH-ONLY via the plain provider's
+ * {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag): `vendor:publish` copies this
+ * flat file into the host's `database/migrations/` and its `tenant/` twin into `database/migrations/tenant/`,
+ * and the HOST runs each pass (central `migrate` + tenant `tenants:migrate`), so the column shape is
+ * identical central + tenant.
  */
 return new class extends Migration
 {

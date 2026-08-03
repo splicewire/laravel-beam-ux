@@ -3,7 +3,6 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\Sitemap;
 
@@ -22,17 +21,30 @@ use Splicewire\Beam\Ux\Models\Sitemap;
  *  - `segment`    — this node's own path piece. Composes DOWN the tree: bare/`./segment` is
  *    parent-relative (folder semantics); `/segment` resets to the realm/sitemap root.
  *
- * **Shared-migration ordering (S1 footgun):** shared migrations sort LEXICALLY (no timestamp). The
- * `s3_b_` prefix keeps this alter AFTER `s3_a_create_sitemaps_table` (so the FK target exists) and after
- * `create_`/`s1_`/`s2_`. Not a DB-constrained FK — the sitemaps table rides no host prefix seam here,
- * but the beam-ux table shape stays portable central + tenant, so `sitemap_id` is a plain indexed uuid
- * the {@see BeamUxEntry::sitemap()} relation resolves. Runs in BOTH the
- * central `migrate` and tenant `tenants:migrate` passes via {@see BeamUxServiceProvider::bootMigrations()}.
+ * **Migration ordering:** files now carry REAL sequential timestamps. This `170004` containment alter
+ * sorts AFTER the `170003` `create_sitemaps_table` (so the FK target exists) and after the `170000`–`170002`
+ * beam-ux migrations; the whole set lands after beam-core's `beam_particles` (`2026_08_03_162536`). Not a
+ * DB-constrained FK — the sitemaps table rides no host prefix seam here, but the beam-ux table shape stays
+ * portable central + tenant, so `sitemap_id` is a plain indexed uuid the {@see BeamUxEntry::sitemap()}
+ * relation resolves. Shipped PUBLISH-ONLY via the plain provider's
+ * {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag): `vendor:publish` copies the
+ * flat central file into the host's `database/migrations/` and this `tenant/` twin into
+ * `database/migrations/tenant/`, and the HOST runs each pass (central `migrate` + tenant `tenants:migrate`).
+ *
+ * **TENANT TWIN.** Identical DDL to the flat central copy. The `Schema::hasColumn()` dup-guard below is
+ * there so a host that migrates BOTH passes into ONE schema (the shared-test-DB harness) doesn't re-alter;
+ * production separates schemas, so the guard is false.
  */
 return new class extends Migration
 {
     public function up(): void
     {
+        // TENANT TWIN dup-guard: the shared-test-DB harness runs both passes into one `public`
+        // schema, so the columns may already exist from the central pass. Production separates schemas.
+        if (Schema::hasColumn('beam_ux_entries', 'realm')) {
+            return;
+        }
+
         Schema::table('beam_ux_entries', function (Blueprint $table) {
             // The realm this entry's public route roots under (ADR-0165). Public content → `site`.
             $table->string('realm')->default('site')->index()->after('residency_mode');
