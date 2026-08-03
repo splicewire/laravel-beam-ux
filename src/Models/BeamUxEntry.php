@@ -67,6 +67,8 @@ class BeamUxEntry extends Model
         'format',
         'body_style',
         'namespace',
+        'placement_ref',
+        'driver_ref',
         'residency_mode',
         'particle_id',
     ];

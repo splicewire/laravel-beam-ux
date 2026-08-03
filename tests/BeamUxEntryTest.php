@@ -153,6 +153,8 @@ class BeamUxEntryTest extends TestCase
             $table->string('format')->default('tsx')->index();
             $table->string('body_style')->nullable();
             $table->string('namespace')->nullable()->index();
+            $table->string('placement_ref')->nullable();
+            $table->string('driver_ref')->nullable();
             $table->string('residency_mode')->default('context-following')->index();
             $table->timestamps();
             $table->unique(['namespace', 'slug']);

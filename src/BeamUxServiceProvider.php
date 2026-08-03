@@ -2,12 +2,21 @@
 
 namespace Splicewire\Beam\Ux;
 
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
 use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Storage\DiskStorageDriver;
+use Splicewire\Beam\Storage\ParticleStorageDriver;
+use Splicewire\Beam\Storage\StackedStorageDriver;
+use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
+use Splicewire\Beam\Ux\Placement\DefaultPlacement;
+use Splicewire\Beam\Ux\Placement\PlacementResolver;
+use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Write\ParticleWriter;
 
 /**
@@ -21,6 +30,8 @@ class BeamUxServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->registerCodecs();
+        $this->registerPlacement();
+        $this->registerStorage();
     }
 
     public function boot(): void
@@ -40,6 +51,60 @@ class BeamUxServiceProvider extends ServiceProvider
             return (new CodecRegistry)
                 ->register(new TsxBodyCodec)
                 ->register(new MdxBodyCodec);
+        });
+    }
+
+    /**
+     * The {@see PlacementResolver} — the paid `FilePlacement` selection seam (charter S2, ADR-0165).
+     * Seeded with the default (`namespace/type/slug.ext`, extension from `format`) + the
+     * date-partitioned strategy, plus any `namespace → strategy` map from config. A host registers
+     * further strategies on the same singleton. `namespace` derives DISK only, never the URL (two trees).
+     */
+    protected function registerPlacement(): void
+    {
+        $this->app->singleton(PlacementResolver::class, function () {
+            $resolver = (new PlacementResolver)
+                ->register(PlacementResolver::DEFAULT, new DefaultPlacement)
+                ->register('date-partitioned', new DatePartitionedPlacement(
+                    (string) config('beam.ux.placement.date_root', 'articles'),
+                ));
+
+            $map = config('beam.ux.placement.namespaces', []);
+            if (is_array($map) && $map !== []) {
+                $resolver->mapNamespaces($map);
+            }
+
+            return $resolver;
+        });
+    }
+
+    /**
+     * The {@see StorageDriverResolver} — beam-ux as the SECOND consumer of the free-beam-core
+     * {@see StorageDriver} seam (generalized from `BeamSchemaRegistry`). The
+     * default driver is `Stacked(Particle-primary, Disk-mirror)` (charter): the DB particle is
+     * source-of-record, a filesystem disk a materialized projection. The mirror disk is configurable
+     * (`beam.ux.storage.disk`, default the framework default disk); a host maps `namespace → driver` for
+     * alternate backings.
+     */
+    protected function registerStorage(): void
+    {
+        $this->app->singleton(StorageDriverResolver::class, function ($app) {
+            $particle = new ParticleStorageDriver($app->make(ParticleWriter::class));
+            $disk = Storage::disk(config('beam.ux.storage.disk'));
+
+            $resolver = (new StorageDriverResolver)
+                ->register(StorageDriverResolver::DEFAULT, new StackedStorageDriver(
+                    $particle,
+                    new DiskStorageDriver($disk),
+                ))
+                ->register('particle', $particle);
+
+            $map = config('beam.ux.storage.namespaces', []);
+            if (is_array($map) && $map !== []) {
+                $resolver->mapNamespaces($map);
+            }
+
+            return $resolver;
         });
     }
 
