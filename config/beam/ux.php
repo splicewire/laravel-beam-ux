@@ -24,4 +24,26 @@ return [
 
     'route_name' => env('BEAM_UX_ROUTE_NAME', 'beam.ux.'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Storage (ADR-0165 S2 — the disk seam)
+    |--------------------------------------------------------------------------
+    |
+    | `disk`         — the filesystem disk the DEFAULT Stacked(Particle, Disk)
+    |                  driver mirrors to, keyed by particle id. Null ⇒ the
+    |                  framework default disk.
+    | `mirror_disk`  — the filesystem disk the placement-keyed PlacedDiskMirror
+    |                  projects to on Publish, keyed by the paid FilePlacement
+    |                  path (`{namespace}/{type}/{slug}.{ext}`). This is the
+    |                  human/git-facing projection — point it at a git-tracked
+    |                  dev dir to version-control Puck pages. Null/unset ⇒ the
+    |                  mirror is a no-op (degrade-not-fabricate).
+    | `namespaces`   — namespace-prefix → driver-name map for the resolver.
+    |
+    */
+    'storage' => [
+        'disk' => env('BEAM_UX_STORAGE_DISK'),
+        'mirror_disk' => env('BEAM_UX_STORAGE_MIRROR_DISK'),
+    ],
+
 ];

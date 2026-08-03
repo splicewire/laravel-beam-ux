@@ -24,6 +24,15 @@ enum UxFormat: string
     /** MDX — folded in from the free-tier `laravel-beam-mdx` arm; `body_style` is meaningless here. */
     case Mdx = 'mdx';
 
+    /**
+     * JSON — a **structural** body whose disk file IS the particle body verbatim (a Puck `Data`
+     * `{root,content,zones}` document, ADR-0164). Its codec is a passthrough: the body is already the
+     * structured array beam-core versions, so there is no raw-source ⇄ array compile step. `body_style`
+     * is meaningless here. The disk file is a pretty-printed `.json` so a Puck-page Publish mirrors to a
+     * git-trackable file with no lossy round-trip through a text codec.
+     */
+    case Json = 'json';
+
     /** The file extension the format materializes to (drives disk placement, S2). */
     public function extension(): string
     {

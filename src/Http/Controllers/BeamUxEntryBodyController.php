@@ -11,6 +11,8 @@ use Splicewire\Beam\Schema\Contracts\SchemaTargetResolver;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Placement\PlacementResolver;
+use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Write\ParticleWriter;
 use Splicewire\Beam\Write\PolicyWriteGate;
@@ -40,6 +42,8 @@ class BeamUxEntryBodyController
     public function __construct(
         private StorageDriverResolver $drivers,
         private Gate $gate,
+        private PlacementResolver $placements,
+        private PlacedDiskMirror $mirror,
     ) {}
 
     /** Load an entry's body + schema for seeding the inspector SchemaForm, or 404 when absent. */
@@ -82,6 +86,16 @@ class BeamUxEntryBodyController
             $entry->particle_id = $written->key;
             $entry->save();
         }
+
+        // Materialize-on-save the disk MIRROR at the entry's FilePlacement path (charter S2 / ADR-0165):
+        // the particle above is the source-of-record; this projects the same body to a git-trackable file
+        // at `{namespace}/{type}/{slug}.{ext}` under the configured dev root. Particle-primary is preserved
+        // (the DB write already landed); the mirror is a no-op when the storage disk is not configured.
+        $this->mirror->mirror(
+            $this->placements->resolve($entry)->pathFor($entry),
+            $written->body,
+            $entry->namespace,
+        );
 
         $reloaded = $this->drivers->resolve($entry)->read($written->key);
 

@@ -13,6 +13,7 @@ use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Storage\StackedStorageDriver;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
+use Splicewire\Beam\Ux\Codec\JsonBodyCodec;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
 use Splicewire\Beam\Ux\Console\RegisterFromDiskCommand;
@@ -32,6 +33,7 @@ use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 use Splicewire\Beam\Ux\Sitemap\EntrySitemapSource;
 use Splicewire\Beam\Ux\Sitemap\PublicEntitlementGate;
 use Splicewire\Beam\Ux\Sitemap\WorkflowMarkingPublishGate;
+use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 use Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle;
@@ -166,7 +168,8 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->app->singleton(CodecRegistry::class, function () {
             return (new CodecRegistry)
                 ->register(new TsxBodyCodec)
-                ->register(new MdxBodyCodec);
+                ->register(new MdxBodyCodec)
+                ->register(new JsonBodyCodec);
         });
     }
 
@@ -221,6 +224,18 @@ class BeamUxServiceProvider extends ServiceProvider
             }
 
             return $resolver;
+        });
+
+        // The placement-keyed disk mirror — the outbound projection that lands a git-trackable file at the
+        // entry's FilePlacement path on Publish (charter S2 / ADR-0165). Its own `beam.ux.storage.mirror_disk`
+        // key (DISTINCT from the default Stacked driver's `storage.disk`, which keys by particle uuid): the
+        // mirror is the human/git-facing projection and a host opts into it by naming a git-tracked disk.
+        // Unset ⇒ a null (no-op) mirror so an un-opted host never grows a disk write.
+        $this->app->singleton(PlacedDiskMirror::class, function () {
+            $name = config('beam.ux.storage.mirror_disk');
+            $disk = ($name === null || $name === '') ? null : Storage::disk($name);
+
+            return new PlacedDiskMirror($disk);
         });
     }
 
