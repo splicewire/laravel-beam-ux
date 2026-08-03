@@ -12,6 +12,8 @@ use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
+use Splicewire\Beam\Ux\Containment\NavProjector;
+use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
@@ -32,6 +34,7 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->registerCodecs();
         $this->registerPlacement();
         $this->registerStorage();
+        $this->registerContainment();
     }
 
     public function boot(): void
@@ -106,6 +109,20 @@ class BeamUxServiceProvider extends ServiceProvider
 
             return $resolver;
         });
+    }
+
+    /**
+     * The **containment** seam (charter S3, ADR-0165 — the "two trees": containment → URL/nav). Binds the
+     * {@see UrlResolver} (composes `segment` DOWN the realm/sitemap-rooted tree into the public URL,
+     * decoupled from `namespace`) and the {@see NavProjector} (projects a `Sitemap`'s tree into a
+     * free-tier `rushing/laravel-data-nav` `NavTree`). Both singletons — the resolver is stateless; the
+     * `BeamUxEntry::url()` accessor resolves the bound instance. Multiplicity is NOT built (one default
+     * sitemap per site); the FK shape holds the door open.
+     */
+    protected function registerContainment(): void
+    {
+        $this->app->singleton(UrlResolver::class, fn () => new UrlResolver);
+        $this->app->singleton(NavProjector::class, fn ($app) => new NavProjector($app->make(UrlResolver::class)));
     }
 
     /**

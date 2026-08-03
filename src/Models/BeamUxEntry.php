@@ -5,9 +5,11 @@ namespace Splicewire\Beam\Ux\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Ux\Codec\BodyCodec;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
+use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Format\BodyStyle;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -35,6 +37,13 @@ use Splicewire\Beam\Write\ParticleWriter;
  * (file placement S2; containment/route S3; workflow S6; taxonomy S7) are additive columns the
  * later charter steps add.
  *
+ * **Containment aspect (S3 — ADR-0165, the "two trees").** `realm` + `sitemap_id` + `parent_id` +
+ * `segment` place the entry in a rooted {@see Sitemap} containment tree. That tree — NOT `namespace`
+ * (disk-only) — derives the entry's PUBLIC URL: `segment` composes DOWN the tree from the realm/sitemap
+ * root via {@see UrlResolver} (bare/`./segment` = parent-relative folder semantics; `/segment` =
+ * realm/sitemap-root absolute). `sitemap_id` defaults to the one auto-provisioned default {@see Sitemap}
+ * per site; multiplicity is DEFERRED (FK-shaped, not built). Silo/Tags do NOT participate here (S7).
+ *
  * **The two orthogonal axes (S1, ADR-0164).** `type` is the ENFORCED structural axis (cast to
  * {@see UxType} — exactly one of layout/template/page/component). `format` is its **sibling** body-
  * language axis (cast to {@see UxFormat} — `tsx | mdx | …`), NOT a fifth `type`: the two compose as a
@@ -59,6 +68,9 @@ class BeamUxEntry extends Model
     /** The context-following default (charter §Q7): the entry lives wherever it is authored. */
     public const RESIDENCY_CONTEXT_FOLLOWING = 'context-following';
 
+    /** The public content realm an entry roots its URL under by default (the `site` realm, ADR-0165). */
+    public const REALM_SITE = 'site';
+
     protected $fillable = [
         'slug',
         'schema_ref',
@@ -71,11 +83,17 @@ class BeamUxEntry extends Model
         'driver_ref',
         'residency_mode',
         'particle_id',
+        // Containment aspect (S3, ADR-0165): the URL/nav tree, decoupled from `namespace` (disk).
+        'realm',
+        'sitemap_id',
+        'parent_id',
+        'segment',
     ];
 
     protected $attributes = [
         'residency_mode' => self::RESIDENCY_CONTEXT_FOLLOWING,
         'format' => UxFormat::Tsx->value,
+        'realm' => self::REALM_SITE,
     ];
 
     /**
@@ -96,6 +114,30 @@ class BeamUxEntry extends Model
     }
 
     /**
+     * Default a new entry's `sitemap_id` onto the one auto-provisioned default {@see Sitemap} for its
+     * realm (ADR-0165 "the `sitemap_id` FK defaults to it"). Only fires when the entry has a realm and no
+     * sitemap was set explicitly — so a host that assigns a specific sitemap (deferred multiplicity) is
+     * never overridden. Provisioning is find-or-create, so the first entry mints the default sitemap.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (BeamUxEntry $entry): void {
+            if ($entry->sitemap_id === null && $entry->realm !== null) {
+                $entry->sitemap_id = static::defaultSitemapId($entry->realm);
+            }
+        });
+    }
+
+    /**
+     * The id of the default {@see Sitemap} for a realm — auto-provisioned on first ask (find-or-create),
+     * so a fresh install always resolves exactly one default per site without a seeder.
+     */
+    public static function defaultSitemapId(string $realm = self::REALM_SITE): string
+    {
+        return Sitemap::forRealm($realm)->getKey();
+    }
+
+    /**
      * The versioned, migrate-on-read **body** this entry has-a: a generic {@see BeamParticle} row keyed
      * by `particle_id`. The body is what the shared {@see ParticleWriter} writes;
      * this method is how a read re-loads it through the particle reader (migrate-on-read intact).
@@ -103,6 +145,33 @@ class BeamUxEntry extends Model
     public function particle(): BelongsTo
     {
         return $this->belongsTo(BeamParticle::class, 'particle_id');
+    }
+
+    /** The {@see Sitemap} (containment tree) this entry belongs to (S3, ADR-0165). */
+    public function sitemap(): BelongsTo
+    {
+        return $this->belongsTo(Sitemap::class, 'sitemap_id');
+    }
+
+    /** The containing entry node (adjacency parent; the strict single home). Null = top-level. */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_id');
+    }
+
+    /** The child entry nodes contained directly under this one. */
+    public function children(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_id');
+    }
+
+    /**
+     * This entry's inherited PUBLIC URL — composed DOWN the containment tree from the realm/sitemap root
+     * (ADR-0165 §5), decoupled from `namespace` (disk-only). Delegates to the {@see UrlResolver}.
+     */
+    public function url(): string
+    {
+        return app(UrlResolver::class)->resolve($this);
     }
 
     /**

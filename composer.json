@@ -22,6 +22,7 @@
         "illuminate/contracts": "^11.0|^12.0|^13.0",
         "illuminate/database": "^11.0|^12.0|^13.0",
         "illuminate/support": "^11.0|^12.0|^13.0",
+        "rushing/laravel-data-nav": "*",
         "splicewire/laravel-beam": "*",
         "splicewire/laravel-beam-mdx": "*"
     },
@@ -77,6 +78,10 @@
             "options": {
                 "symlink": true
             }
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-data-nav.git"
         },
         {
             "type": "git",
