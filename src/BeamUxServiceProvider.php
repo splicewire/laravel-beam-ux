@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
 use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Sitemap\SitemapSourceRegistry;
 use Splicewire\Beam\Storage\DiskStorageDriver;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Storage\StackedStorageDriver;
@@ -18,6 +19,11 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
+use Splicewire\Beam\Ux\Sitemap\AlwaysPublishedGate;
+use Splicewire\Beam\Ux\Sitemap\EntryEntitlementGate;
+use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
+use Splicewire\Beam\Ux\Sitemap\EntrySitemapSource;
+use Splicewire\Beam\Ux\Sitemap\PublicEntitlementGate;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Write\ParticleWriter;
 
@@ -35,11 +41,13 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->registerPlacement();
         $this->registerStorage();
         $this->registerContainment();
+        $this->registerSitemap();
     }
 
     public function boot(): void
     {
         $this->bootMigrations();
+        $this->bootSitemap();
     }
 
     /**
@@ -123,6 +131,45 @@ class BeamUxServiceProvider extends ServiceProvider
     {
         $this->app->singleton(UrlResolver::class, fn () => new UrlResolver);
         $this->app->singleton(NavProjector::class, fn ($app) => new NavProjector($app->make(UrlResolver::class)));
+    }
+
+    /**
+     * The **sitemap** seam (charter S5, ADR-0166). beam-ux is the arm's first-class
+     * consumer: it binds the two gate ports the {@see EntrySitemapSource} composes,
+     * then registers that source onto the free-tier `laravel-beam-sitemap`
+     * registry at boot. The arm owns the plumbing (contract, registry, controller,
+     * command, RouteSitemapSource); beam-ux owns the ENTRY data source.
+     *
+     * Both gate ports default permissive:
+     *  - {@see EntryPublishGate} → {@see AlwaysPublishedGate} (S6 marking unwired;
+     *    every entry treated as published — re-bind when S6 lands).
+     *  - {@see EntryEntitlementGate} → {@see PublicEntitlementGate} (every entry
+     *    public; a gating host re-binds to consult its own entitlement authority).
+     */
+    protected function registerSitemap(): void
+    {
+        $this->app->bind(EntryPublishGate::class, AlwaysPublishedGate::class);
+        $this->app->bind(EntryEntitlementGate::class, PublicEntitlementGate::class);
+    }
+
+    /**
+     * Register {@see EntrySitemapSource} onto the arm's {@see SitemapSourceRegistry}.
+     * Guarded on the registry existing (the arm being installed) so beam-ux still
+     * boots standalone without the sitemap arm. Gated by
+     * `beam.ux.sitemap.enabled` (default on).
+     */
+    protected function bootSitemap(): void
+    {
+        if (! config('beam.ux.sitemap.enabled', true)) {
+            return;
+        }
+
+        if (! class_exists(SitemapSourceRegistry::class)) {
+            return;
+        }
+
+        $this->app->make(SitemapSourceRegistry::class)
+            ->register(EntrySitemapSource::class);
     }
 
     /**

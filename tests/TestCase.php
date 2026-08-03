@@ -10,6 +10,7 @@ use Spatie\Activitylog\ActivitylogServiceProvider;
 use Spatie\LaravelData\LaravelDataServiceProvider;
 use Spatie\MediaLibrary\MediaLibraryServiceProvider;
 use Splicewire\Beam\BeamServiceProvider;
+use Splicewire\Beam\Sitemap\BeamSitemapServiceProvider;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 
 abstract class TestCase extends Orchestra
@@ -25,6 +26,9 @@ abstract class TestCase extends Orchestra
     {
         return [
             BeamUxServiceProvider::class,
+            // The free-tier sitemap arm (ADR-0166): beam-ux registers EntrySitemapSource
+            // onto its registry and reads its SitemapBaseUrlResolver port.
+            BeamSitemapServiceProvider::class,
             BeamServiceProvider::class,
             MediaLibraryServiceProvider::class,
             ActivitylogServiceProvider::class,
