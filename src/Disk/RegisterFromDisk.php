@@ -4,6 +4,8 @@ namespace Splicewire\Beam\Ux\Disk;
 
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Format\UxFormat;
+use Splicewire\Beam\Ux\Placement\DefaultPlacement;
+use Splicewire\Beam\Ux\Type\UxType;
 
 /**
  * The **format-aware `register-from-disk`** seam (ADR-0164). The pre-format world hardcoded `.tsx`:
@@ -56,5 +58,48 @@ class RegisterFromDisk
         $ext = pathinfo($filename, PATHINFO_EXTENSION);
 
         return UxFormat::tryFrom($ext);
+    }
+
+    /**
+     * Reverse S2's {@see DefaultPlacement} — derive the authoring envelope
+     * a disk-relative path implies (`{namespace dots→slashes}/{type}/{slug}.{ext}`):
+     *
+     *  - **format** ← the extension (an unrecognized extension is not a body → null envelope).
+     *  - **type** ← the path segment IMMEDIATELY before the filename, when it names a {@see UxType}
+     *    (`.../component/hero.tsx` → `component`); a path whose last dir is not a type keeps `type = null`
+     *    (the operator/host decides), and the whole dir chain becomes namespace.
+     *  - **namespace** ← the remaining leading segments joined by `.` (`kit/hero/component/hero.tsx` →
+     *    `kit.hero`); empty when the file sits at the type root or the scan root.
+     *  - **slug** ← the filename without its extension.
+     *
+     * @return array{slug: string, type: ?string, namespace: ?string, format: string}|null
+     *                                                                                     null when the extension is not a recognized body format.
+     */
+    public function envelopeForPath(string $relativePath): ?array
+    {
+        $format = $this->formatForFile($relativePath);
+        if ($format === null) {
+            return null;
+        }
+
+        $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
+        $slug = pathinfo($relativePath, PATHINFO_FILENAME);
+
+        $dir = trim((string) pathinfo($relativePath, PATHINFO_DIRNAME), '/.');
+        $segments = $dir === '' ? [] : explode('/', $dir);
+
+        $type = null;
+        if ($segments !== [] && UxType::tryFrom(end($segments)) !== null) {
+            $type = array_pop($segments);
+        }
+
+        $namespace = $segments === [] ? null : implode('.', $segments);
+
+        return [
+            'slug' => $slug,
+            'type' => $type,
+            'namespace' => $namespace,
+            'format' => $format->value,
+        ];
     }
 }

@@ -13,8 +13,13 @@ use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
+use Splicewire\Beam\Ux\Console\RegisterFromDiskCommand;
+use Splicewire\Beam\Ux\Console\UpdateFromNewerCommand;
 use Splicewire\Beam\Ux\Containment\NavProjector;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
+use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
+use Splicewire\Beam\Ux\Disk\RegisterFromDisk;
+use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
@@ -48,6 +53,7 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->registerStorage();
         $this->registerContainment();
         $this->registerSitemap();
+        $this->registerDisk();
     }
 
     public function boot(): void
@@ -55,6 +61,38 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->bootMigrations();
         $this->bootSitemap();
         $this->registerEntryWorkflow();
+        $this->bootCommands();
+    }
+
+    /**
+     * The **explicit-operator-batch** disk seam (charter S8, `beamux-build/issues/05`). Binds the
+     * format-aware {@see RegisterFromDisk} recognizer/path-envelope deriver + the two batch operations —
+     * {@see RegisterEntriesFromDisk} (scan → create → S9-infer-at-import) and {@see UpdateFromNewer}
+     * (config-gated, OFF by default). There is deliberately NO ambient filesystem watcher: every inbound
+     * disk→DB flow is one of these operator-run batches. Paid `splicewire/*` (ADR-0092): the batch
+     * orchestration over the storage port is paid; the particle records the body rides are free beam-core.
+     */
+    protected function registerDisk(): void
+    {
+        $this->app->singleton(RegisterFromDisk::class);
+        $this->app->singleton(RegisterEntriesFromDisk::class);
+        $this->app->singleton(UpdateFromNewer::class);
+    }
+
+    /**
+     * Register the two operator-run batch commands (charter S8). Names mirror the package tree (ADR-0167):
+     * `splicewire:beam:ux-register-from-disk` + `splicewire:beam:ux-update-from-newer`. Only in console.
+     */
+    protected function bootCommands(): void
+    {
+        if (! $this->app->runningInConsole()) {
+            return;
+        }
+
+        $this->commands([
+            RegisterFromDiskCommand::class,
+            UpdateFromNewerCommand::class,
+        ]);
     }
 
     /**
