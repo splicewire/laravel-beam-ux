@@ -13,9 +13,9 @@ use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Storage\StackedStorageDriver;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
-use Splicewire\Beam\Ux\Codec\JsonBodyCodec;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
+use Splicewire\Beam\Ux\Codegen\PuckPageCodegen;
 use Splicewire\Beam\Ux\Console\RegisterFromDiskCommand;
 use Splicewire\Beam\Ux\Console\UpdateFromNewerCommand;
 use Splicewire\Beam\Ux\Containment\NavProjector;
@@ -168,8 +168,7 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->app->singleton(CodecRegistry::class, function () {
             return (new CodecRegistry)
                 ->register(new TsxBodyCodec)
-                ->register(new MdxBodyCodec)
-                ->register(new JsonBodyCodec);
+                ->register(new MdxBodyCodec);
         });
     }
 
@@ -231,11 +230,16 @@ class BeamUxServiceProvider extends ServiceProvider
         // key (DISTINCT from the default Stacked driver's `storage.disk`, which keys by particle uuid): the
         // mirror is the human/git-facing projection and a host opts into it by naming a git-tracked disk.
         // Unset ⇒ a null (no-op) mirror so an un-opted host never grows a disk write.
-        $this->app->singleton(PlacedDiskMirror::class, function () {
+        $this->app->singleton(PlacedDiskMirror::class, function ($app) {
             $name = config('beam.ux.storage.mirror_disk');
             $disk = ($name === null || $name === '') ? null : Storage::disk($name);
 
-            return new PlacedDiskMirror($disk);
+            // The Puck-page codegen the mirror runs for a structural page body. Its block-import module is
+            // host-configured (`beam.ux.puck.blocks_module`) so the generated `.tsx` imports the host's own
+            // Puck block vocabulary (satellite-local), keeping the codegen generic over any host's blocks.
+            $codegen = new PuckPageCodegen((string) config('beam.ux.puck.blocks_module', '@/puck/blocks'));
+
+            return new PlacedDiskMirror($disk, $codegen);
         });
     }
 

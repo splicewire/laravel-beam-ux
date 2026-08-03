@@ -46,4 +46,23 @@ return [
         'mirror_disk' => env('BEAM_UX_STORAGE_MIRROR_DISK'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Puck codegen (ADR-0164 — the "NEXT" slice)
+    |--------------------------------------------------------------------------
+    |
+    | `blocks_module` — the JS module the CODEGEN'd `.tsx` imports its block
+    |                   components from. A Puck `page`'s body is a Puck `Data`
+    |                   document; on Publish the PlacedDiskMirror compiles it to
+    |                   a composed-JSX React file whose import line is
+    |                   `import { Heading, … } from '<blocks_module>'`. The block
+    |                   vocabulary is the HOST's (satellite-local), so this points
+    |                   at wherever the host exports it. Default matches a Vite
+    |                   `@`-alias'd `resources/js/puck/blocks`.
+    |
+    */
+    'puck' => [
+        'blocks_module' => env('BEAM_UX_PUCK_BLOCKS_MODULE', '@/puck/blocks'),
+    ],
+
 ];

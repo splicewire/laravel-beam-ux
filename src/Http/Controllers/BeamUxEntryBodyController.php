@@ -92,9 +92,9 @@ class BeamUxEntryBodyController
         // at `{namespace}/{type}/{slug}.{ext}` under the configured dev root. Particle-primary is preserved
         // (the DB write already landed); the mirror is a no-op when the storage disk is not configured.
         $this->mirror->mirror(
+            $entry,
             $this->placements->resolve($entry)->pathFor($entry),
             $written->body,
-            $entry->namespace,
         );
 
         $reloaded = $this->drivers->resolve($entry)->read($written->key);
