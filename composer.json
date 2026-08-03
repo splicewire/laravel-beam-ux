@@ -22,7 +22,8 @@
         "illuminate/contracts": "^11.0|^12.0|^13.0",
         "illuminate/database": "^11.0|^12.0|^13.0",
         "illuminate/support": "^11.0|^12.0|^13.0",
-        "splicewire/laravel-beam": "*"
+        "splicewire/laravel-beam": "*",
+        "splicewire/laravel-beam-mdx": "*"
     },
     "require-dev": {
         "orchestra/testbench": "^9.0|^10.0|^11.0",
@@ -80,6 +81,10 @@
         {
             "type": "git",
             "url": "https://github.com/splicewire/laravel-beam.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/splicewire/laravel-beam-mdx.git"
         }
     ],
     "minimum-stability": "dev",

@@ -4,6 +4,9 @@ namespace Splicewire\Beam\Ux;
 
 use Illuminate\Support\ServiceProvider;
 use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Ux\Codec\CodecRegistry;
+use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
+use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Write\ParticleWriter;
 
@@ -15,9 +18,29 @@ use Splicewire\Beam\Write\ParticleWriter;
  */
 class BeamUxServiceProvider extends ServiceProvider
 {
+    public function register(): void
+    {
+        $this->registerCodecs();
+    }
+
     public function boot(): void
     {
         $this->bootMigrations();
+    }
+
+    /**
+     * The {@see CodecRegistry} — the format→codec dispatch seam (ADR-0164). Bound as a singleton
+     * seeded with the TSX + MDX codecs. The dispatch is paid `splicewire/*`; the MDX codec's engine is
+     * the free-tier `laravel-beam-mdx` arm, folded in (not deleted) via {@see MdxBodyCodec}. A host can
+     * `register()` further codecs on the same singleton for formats beyond the tsx/mdx seed set.
+     */
+    protected function registerCodecs(): void
+    {
+        $this->app->singleton(CodecRegistry::class, function () {
+            return (new CodecRegistry)
+                ->register(new TsxBodyCodec)
+                ->register(new MdxBodyCodec);
+        });
     }
 
     /**
