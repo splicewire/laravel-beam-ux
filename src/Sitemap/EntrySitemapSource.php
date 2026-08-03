@@ -23,9 +23,10 @@ use Splicewire\Beam\Ux\Type\UxType;
  *     placement in the containment tree yields nothing). Context-following
  *     residency (ADR-0166 §4) means running in a tenant context already scopes the
  *     query to that tenant's entries — no per-tenant filter here.
- *  2. **Published marking** — {@see EntryPublishGate}. **S6 not yet wired**: the
- *     default {@see AlwaysPublishedGate} stubs this to `true`. A real
- *     marking-reading gate re-binds the port when S6 lands.
+ *  2. **Published marking** — {@see EntryPublishGate}. Wired in S6: the default
+ *     {@see WorkflowMarkingPublishGate} reads the entry's persisted
+ *     `workflow_marking` (a managed entry is public only at its published place; an
+ *     unmanaged entry — no binding — stays published). A host may re-bind the port.
  *  3. **Entitlement** — {@see EntryEntitlementGate}. Never leak gated content; the
  *     default {@see PublicEntitlementGate} treats every entry as public, a gating
  *     host re-binds it.

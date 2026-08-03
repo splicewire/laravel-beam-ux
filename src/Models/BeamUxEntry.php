@@ -12,7 +12,10 @@ use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Format\BodyStyle;
 use Splicewire\Beam\Ux\Format\UxFormat;
+use Splicewire\Beam\Ux\Sitemap\WorkflowMarkingPublishGate;
 use Splicewire\Beam\Ux\Type\UxType;
+use Splicewire\Beam\Workflows\Type\Concerns\WorkflowManaged as WorkflowManagedTrait;
+use Splicewire\Beam\Workflows\Type\Contracts\WorkflowManaged;
 use Splicewire\Beam\Write\ParticleWriter;
 
 /**
@@ -58,10 +61,24 @@ use Splicewire\Beam\Write\ParticleWriter;
  * and is registered into BOTH the central `migrate` and the tenant `tenants:migrate` passes, so
  * `beam_ux_entries` exists identically in central and every tenant. Only the central path is exercised for
  * now; tenant-resident BeamUx needs no rework later because the shape is already committed.
+ *
+ * **Workflow subject (S6 — OPTIONAL, ADR-0092 vendor seam).** The entry implements the free-tier
+ * `laravel-beam-workflows` {@see WorkflowManaged} contract, so it is a subject the generic workflow
+ * engine can govern — but only when a `Binding` is registered for its `type` (`page`, `component`, …)
+ * on the package's `WorkflowBindingRegistry`. NO binding ⇒ NO workflow: the entry is unmanaged, exactly
+ * as before, never forced through a state machine. The current marking persists on the `workflow_marking`
+ * column (the package's "marking rides the host's typed port envelope" design); the definition version
+ * it pins on first transition lives on `workflow_version`. `workflowType()` keys the resolver off the
+ * entry's structural `type` axis, so a host binding on `page` governs every page while `component`
+ * entries stay unmanaged unless separately bound. The persisted marking is EXACTLY what the sitemap /
+ * routing publish gate reads for visibility (S6 replaces S4's `AlwaysPublishedGate` stub). The engine
+ * (guards, versioned definitions, activitylog Display projection) comes for free from the package; this
+ * model owns only the subject shape (the paid arm).
  */
-class BeamUxEntry extends Model
+class BeamUxEntry extends Model implements WorkflowManaged
 {
     use HasUuids;
+    use WorkflowManagedTrait;
 
     protected $table = 'beam_ux_entries';
 
@@ -70,6 +87,13 @@ class BeamUxEntry extends Model
 
     /** The public content realm an entry roots its URL under by default (the `site` realm, ADR-0165). */
     public const REALM_SITE = 'site';
+
+    /**
+     * The marking a bound entry must sit at to count as publicly visible (S6). The published-marking
+     * gate ({@see WorkflowMarkingPublishGate}) reads `workflow_marking`
+     * against this; a host whose publish lifecycle names its live place differently re-binds the gate.
+     */
+    public const MARKING_PUBLISHED = 'published';
 
     protected $fillable = [
         'slug',
@@ -88,6 +112,9 @@ class BeamUxEntry extends Model
         'sitemap_id',
         'parent_id',
         'segment',
+        // Workflow aspect (S6): the optional beam-workflows subject envelope.
+        'workflow_marking',
+        'workflow_version',
     ];
 
     protected $attributes = [
@@ -183,5 +210,32 @@ class BeamUxEntry extends Model
     public function codec(): BodyCodec
     {
         return app(CodecRegistry::class)->for($this->format ?? UxFormat::Tsx);
+    }
+
+    /**
+     * The stable workflow-type key this entry resolves through (S6 — the binding registry's selector).
+     * Keyed off the entry's structural `type` axis (`page` / `component` / `layout` / `template`), so a
+     * host binding a workflow to `page` governs EVERY page while other types stay unmanaged unless
+     * separately bound. An entry with no `type` set resolves to the empty key, which the resolver reads
+     * as unresolvable ⇒ unmanaged (the optional-workflow fallback).
+     */
+    public function workflowType(): string
+    {
+        $type = $this->type;
+
+        if ($type instanceof UxType) {
+            return $type->value;
+        }
+
+        return (string) ($type ?? '');
+    }
+
+    /**
+     * The marking projects onto `workflow_marking`, NOT the trait's default `status` — the entry has no
+     * `status` column; its lifecycle state is the dedicated S6 aspect column.
+     */
+    public function workflowStatusAttribute(): string
+    {
+        return 'workflow_marking';
     }
 }

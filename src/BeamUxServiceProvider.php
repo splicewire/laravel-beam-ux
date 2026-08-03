@@ -19,12 +19,17 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
-use Splicewire\Beam\Ux\Sitemap\AlwaysPublishedGate;
 use Splicewire\Beam\Ux\Sitemap\EntryEntitlementGate;
 use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 use Splicewire\Beam\Ux\Sitemap\EntrySitemapSource;
 use Splicewire\Beam\Ux\Sitemap\PublicEntitlementGate;
+use Splicewire\Beam\Ux\Sitemap\WorkflowMarkingPublishGate;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
+use Splicewire\Beam\Ux\Type\UxType;
+use Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle;
+use Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry;
+use Splicewire\Beam\Workflows\Control\WorkflowRegistry;
+use Splicewire\Beam\Workflows\Type\WorkflowTypeRegistry;
 use Splicewire\Beam\Write\ParticleWriter;
 
 /**
@@ -48,6 +53,7 @@ class BeamUxServiceProvider extends ServiceProvider
     {
         $this->bootMigrations();
         $this->bootSitemap();
+        $this->registerEntryWorkflow();
     }
 
     /**
@@ -140,16 +146,44 @@ class BeamUxServiceProvider extends ServiceProvider
      * registry at boot. The arm owns the plumbing (contract, registry, controller,
      * command, RouteSitemapSource); beam-ux owns the ENTRY data source.
      *
-     * Both gate ports default permissive:
-     *  - {@see EntryPublishGate} → {@see AlwaysPublishedGate} (S6 marking unwired;
-     *    every entry treated as published — re-bind when S6 lands).
+     * The two gate ports:
+     *  - {@see EntryPublishGate} → {@see WorkflowMarkingPublishGate} (S6, real): reads
+     *    the entry's persisted `workflow_marking`. An unmanaged entry (no binding) is
+     *    published; a managed entry is public only at the published marking. This
+     *    replaces the S4/S5 `AlwaysPublishedGate` stub, which is now deleted. Still
+     *    re-bindable by a host.
      *  - {@see EntryEntitlementGate} → {@see PublicEntitlementGate} (every entry
      *    public; a gating host re-binds to consult its own entitlement authority).
      */
     protected function registerSitemap(): void
     {
-        $this->app->bind(EntryPublishGate::class, AlwaysPublishedGate::class);
+        $this->app->bind(EntryPublishGate::class, WorkflowMarkingPublishGate::class);
         $this->app->bind(EntryEntitlementGate::class, PublicEntitlementGate::class);
+    }
+
+    /**
+     * The **workflow** seam (charter S6): beam-ux ships the default entry publish lifecycle
+     * ({@see EntryPublishLifecycle}) so a host can bind a type into it, and enumerates the entry
+     * type keys for the workflows admin. It registers NO binding — the optional-workflow rule: an
+     * entry is unmanaged (no state machine) until a host binds its `type` on the
+     * {@see WorkflowBindingRegistry}. Guarded on the free-tier
+     * `laravel-beam-workflows` engine being installed, so beam-ux still boots without it (the
+     * publish gate then simply reports every entry unmanaged ⇒ published).
+     */
+    protected function registerEntryWorkflow(): void
+    {
+        if (! class_exists(WorkflowRegistry::class) || ! $this->app->bound(WorkflowRegistry::class)) {
+            return;
+        }
+
+        $this->app->make(WorkflowRegistry::class)
+            ->register(EntryPublishLifecycle::DEFINITION, EntryPublishLifecycle::blueprint());
+
+        if (class_exists(WorkflowTypeRegistry::class) && $this->app->bound(WorkflowTypeRegistry::class)) {
+            $this->app->make(WorkflowTypeRegistry::class)
+                ->register(UxType::Page->value, 'Page')
+                ->register(UxType::Component->value, 'Component');
+        }
     }
 
     /**

@@ -12,6 +12,7 @@ use Spatie\MediaLibrary\MediaLibraryServiceProvider;
 use Splicewire\Beam\BeamServiceProvider;
 use Splicewire\Beam\Sitemap\BeamSitemapServiceProvider;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
+use Splicewire\Beam\Workflows\BeamWorkflowsServiceProvider;
 
 abstract class TestCase extends Orchestra
 {
@@ -29,6 +30,9 @@ abstract class TestCase extends Orchestra
             // The free-tier sitemap arm (ADR-0166): beam-ux registers EntrySitemapSource
             // onto its registry and reads its SitemapBaseUrlResolver port.
             BeamSitemapServiceProvider::class,
+            // The free-tier workflows engine (S6): the entry is an OPTIONAL MarkingSubject of it;
+            // beam-ux registers its publish lifecycle blueprint and reads the LifecycleService.
+            BeamWorkflowsServiceProvider::class,
             BeamServiceProvider::class,
             MediaLibraryServiceProvider::class,
             ActivitylogServiceProvider::class,

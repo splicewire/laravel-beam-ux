@@ -25,7 +25,8 @@
         "rushing/laravel-data-nav": "*",
         "splicewire/laravel-beam": "*",
         "splicewire/laravel-beam-mdx": "*",
-        "splicewire/laravel-beam-sitemap": "*"
+        "splicewire/laravel-beam-sitemap": "*",
+        "splicewire/laravel-beam-workflows": "*"
     },
     "require-dev": {
         "orchestra/testbench": "^9.0|^10.0|^11.0",
@@ -95,6 +96,10 @@
         {
             "type": "git",
             "url": "https://github.com/splicewire/laravel-beam-sitemap.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/splicewire/laravel-beam-workflows.git"
         }
     ],
     "minimum-stability": "dev",

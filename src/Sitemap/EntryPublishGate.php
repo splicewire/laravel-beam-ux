@@ -9,11 +9,12 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * entry in a publicly-crawlable state?" (charter S6 — the workflow-marking aspect,
  * ADR-0166 §4).
  *
- * **S6 not yet wired.** BeamUxEntry does not carry a workflow marking column yet
- * (that aspect lands in charter S6). Until then the default binding
- * ({@see AlwaysPublishedGate}) stubs this to `true` — every entry counts as
- * "published". When S6 wires a real marking onto the entry, re-bind this port to
- * read it; every consumer follows with no source-side change.
+ * **Wired in S6.** {@see BeamUxEntry} now carries a `workflow_marking` column (the
+ * optional beam-workflows subject envelope). The default binding
+ * ({@see WorkflowMarkingPublishGate}) reads it: an unmanaged entry (no workflow
+ * binding) counts as published, a managed entry is published only at its published
+ * marking. A host may re-bind this port to its own visibility policy; every consumer
+ * follows with no source-side change.
  */
 interface EntryPublishGate
 {
