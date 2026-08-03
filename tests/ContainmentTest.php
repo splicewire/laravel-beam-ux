@@ -134,6 +134,18 @@ class ContainmentTest extends TestCase
         $this->assertSame('/', $tree->items[0]->href);
     }
 
+    public function test_nav_projection_orders_siblings_by_nav_order(): void
+    {
+        // Insert out of nav order; `nav_order` (not insertion/slug order) must drive the menu sequence.
+        BeamUxEntry::create(['slug' => 'songs', 'title' => 'Songs', 'type' => UxType::Page, 'segment' => '/songs', 'nav_order' => 30]);
+        BeamUxEntry::create(['slug' => 'home', 'title' => 'Home', 'type' => UxType::Page, 'segment' => '/', 'nav_order' => 10]);
+        BeamUxEntry::create(['slug' => 'discover', 'title' => 'Discover', 'type' => UxType::Page, 'segment' => '/discover', 'nav_order' => 20]);
+
+        $tree = $this->app->make(NavProjector::class)->project(Sitemap::forRealm());
+
+        $this->assertSame(['Home', 'Discover', 'Songs'], array_map(fn ($n) => $n->title, $tree->items));
+    }
+
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {
@@ -154,6 +166,7 @@ class ContainmentTest extends TestCase
             $table->uuid('sitemap_id')->nullable()->index();
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
+            $table->integer('nav_order')->nullable();
             $table->timestamps();
             $table->unique(['namespace', 'slug']);
         });

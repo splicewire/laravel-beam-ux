@@ -142,6 +142,8 @@ class BeamUxEntry extends Model implements WorkflowManaged
         'sitemap_id',
         'parent_id',
         'segment',
+        // Sibling nav order (host-provided; nullable — projector orders by it when the column is present).
+        'nav_order',
         // Workflow aspect (S6): the optional beam-workflows subject envelope.
         'workflow_marking',
         'workflow_version',

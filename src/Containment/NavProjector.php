@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Containment;
 
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavTree;
@@ -40,10 +41,18 @@ class NavProjector
      */
     public function project(Sitemap $sitemap): NavTree
     {
-        $entries = BeamUxEntry::query()
+        $query = BeamUxEntry::query()
             ->where('sitemap_id', $sitemap->getKey())
-            ->where('type', UxType::Page->value)
-            ->get();
+            ->where('type', UxType::Page->value);
+
+        // Order siblings by an optional host-provided `nav_order` (like `title`, this column is
+        // host-supplied — guard on its presence so a consumer without it isn't broken by an orderBy on a
+        // missing column). `slug` is the stable tiebreaker / fallback for unordered entries.
+        if (Schema::hasColumn('beam_ux_entries', 'nav_order')) {
+            $query->orderBy('nav_order');
+        }
+
+        $entries = $query->orderBy('slug')->get();
 
         return NavTree::make($this->nodesFor($entries, null, []));
     }
