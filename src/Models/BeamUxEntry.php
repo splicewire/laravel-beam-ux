@@ -123,6 +123,8 @@ class BeamUxEntry extends Model implements WorkflowManaged
 
     protected $fillable = [
         'slug',
+        // Human nav label (host-provided; nullable — absent everywhere else falls back to a humanized slug).
+        'title',
         'schema_ref',
         // Draft-schema marker (S9): is `schema_ref` an INFERRED draft, not an authored/graduated spec?
         'schema_is_draft',

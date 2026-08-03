@@ -93,21 +93,45 @@ class ContainmentTest extends TestCase
 
     public function test_the_containment_tree_projects_into_a_free_tier_navtree(): void
     {
-        $blog = BeamUxEntry::create(['slug' => 'blog', 'type' => UxType::Page, 'segment' => '/blog']);
+        // `blog` carries an EXPLICIT title (used verbatim); `discover-songs` has none (humanized-slug fallback).
+        $blog = BeamUxEntry::create(['slug' => 'blog', 'title' => 'The Blog', 'type' => UxType::Page, 'segment' => '/blog']);
         BeamUxEntry::create(['slug' => 'testing', 'type' => UxType::Page, 'segment' => 'testing', 'parent_id' => $blog->id]);
-        BeamUxEntry::create(['slug' => 'about', 'type' => UxType::Page, 'segment' => '/about']);
+        BeamUxEntry::create(['slug' => 'discover-songs', 'type' => UxType::Page, 'segment' => '/discover']);
 
         $tree = $this->app->make(NavProjector::class)->project(Sitemap::forRealm());
 
         $this->assertInstanceOf(NavTree::class, $tree);
 
-        // Two top-level nodes (blog, about); blog has one child whose href is the INHERITED URL.
+        // Two top-level nodes; the explicit-title node keeps its author-provided label.
         $this->assertCount(2, $tree->items);
 
-        $blogNode = collect($tree->items)->firstWhere('title', 'blog');
+        $blogNode = collect($tree->items)->firstWhere('title', 'The Blog');
+        $this->assertNotNull($blogNode, 'an explicit `title` is used verbatim');
         $this->assertSame('/blog', $blogNode->href);
         $this->assertCount(1, $blogNode->children);
+
+        // The child has no explicit title → humanized slug (`testing` → `Testing`); href is the INHERITED URL.
+        $this->assertSame('Testing', $blogNode->children[0]->title);
         $this->assertSame('/blog/testing', $blogNode->children[0]->href);
+
+        // A title-less top node falls back to Str::headline(slug): `discover-songs` → `Discover Songs`.
+        $discover = collect($tree->items)->firstWhere('href', '/discover');
+        $this->assertSame('Discover Songs', $discover->title);
+    }
+
+    public function test_non_page_entries_are_excluded_from_the_nav_projection(): void
+    {
+        // A template shares the default sitemap (minted with the default realm) but has NO route — it must
+        // never surface as a nav destination, even though its null segment would resolve to `/`.
+        BeamUxEntry::create(['slug' => 'home', 'type' => UxType::Page, 'segment' => '/']);
+        BeamUxEntry::create(['slug' => 'section-template', 'type' => UxType::Template, 'segment' => null]);
+
+        $tree = $this->app->make(NavProjector::class)->project(Sitemap::forRealm());
+
+        // Only the `page` survives; the template is filtered out (no phantom `/` collision).
+        $this->assertCount(1, $tree->items);
+        $this->assertSame('Home', $tree->items[0]->title);
+        $this->assertSame('/', $tree->items[0]->href);
     }
 
     private function createTables(): void
@@ -116,6 +140,7 @@ class ContainmentTest extends TestCase
             $table->uuid('id')->primary();
             $table->uuid('particle_id')->nullable()->index();
             $table->string('slug')->index();
+            $table->string('title')->nullable();
             $table->string('schema_ref')->nullable()->index();
             $table->string('facade_ref')->nullable();
             $table->string('type')->index();
