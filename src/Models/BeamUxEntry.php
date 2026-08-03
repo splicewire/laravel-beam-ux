@@ -12,6 +12,7 @@ use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Format\BodyStyle;
 use Splicewire\Beam\Ux\Format\UxFormat;
+use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\Models\Concerns\HasFacets;
 use Splicewire\Beam\Ux\Sitemap\SiloVisibilityEntitlementGate;
 use Splicewire\Beam\Ux\Sitemap\WorkflowMarkingPublishGate;
@@ -87,6 +88,17 @@ use Splicewire\Beam\Write\ParticleWriter;
  * to `beam_ux_entries`. Classifying a *content* entry with `BeamSilo` is correct (the issue-03 refinement);
  * only reusing the *compliance* silo for a component's structural *namespace* was the category error. The
  * facet attachment on the entry is paid `splicewire/*`; `BeamSilo`/`BeamTag` are free-tier (ADR-0092).
+ *
+ * **Draft schema inference (S9 — DRAFT, never final, ADR-0138).** A freshly-registered `component` is
+ * editable immediately because {@see InferDraftSchema} deterministically
+ * infers a JSON-Schema from its `.tsx` props and stores it as `schema_ref`, marking the record with
+ * `schema_is_draft = true`. The draft flag is the load-bearing rule: inference produces the honest FLOOR
+ * (name→key, TS type→JSON type, literal-union→enum, `?`→optional, destructure-default→`default`,
+ * JSDoc→`title`/`description`) and NEVER fabricates widgets, validation, or `$ref`s — those stay explicit
+ * authoring acts. Graduation (clearing `schema_is_draft`) is a separate deliberate step, never a side
+ * effect of inference. `page`/`layout`/`template` are EXCLUDED: their schemas come from the composition
+ * model (slots/regions), not props. The inference engine + draft schema-ref = paid `splicewire/*`; the
+ * particle body it rides = free beam-core (ADR-0092 vendor seam).
  */
 class BeamUxEntry extends Model implements WorkflowManaged
 {
@@ -112,6 +124,8 @@ class BeamUxEntry extends Model implements WorkflowManaged
     protected $fillable = [
         'slug',
         'schema_ref',
+        // Draft-schema marker (S9): is `schema_ref` an INFERRED draft, not an authored/graduated spec?
+        'schema_is_draft',
         'facade_ref',
         'type',
         'format',
@@ -151,6 +165,8 @@ class BeamUxEntry extends Model implements WorkflowManaged
             'type' => UxType::class,
             'format' => UxFormat::class,
             'body_style' => BodyStyle::class,
+            // The inferred-draft marker (S9): true only when `schema_ref` is an inference draft.
+            'schema_is_draft' => 'boolean',
         ];
     }
 

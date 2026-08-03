@@ -43,6 +43,7 @@ class BeamUxServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->registerCodecs();
+        $this->registerInference();
         $this->registerPlacement();
         $this->registerStorage();
         $this->registerContainment();
@@ -54,6 +55,20 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->bootMigrations();
         $this->bootSitemap();
         $this->registerEntryWorkflow();
+    }
+
+    /**
+     * The prop→draft-schema inference seam (charter S9, `beamux-build/issues/06`). Binds the
+     * deterministic {@see TsxPropInference} parser + the {@see InferDraftSchema} authoring action as
+     * singletons — the clean service port S8's `register-from-disk` batch resolves to infer a DRAFT
+     * schema for a freshly-registered `component` at import. Paid `splicewire/*` (ADR-0092): the
+     * inference engine + the draft schema-ref it writes are the paid arm; the particle body is free
+     * beam-core.
+     */
+    protected function registerInference(): void
+    {
+        $this->app->singleton(Inference\TsxPropInference::class);
+        $this->app->singleton(Inference\InferDraftSchema::class);
     }
 
     /**
