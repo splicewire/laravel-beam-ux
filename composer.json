@@ -1,0 +1,84 @@
+{
+    "name": "splicewire/laravel-beam-ux",
+    "description": "The BeamUx authoring engine (paid splicewire/* tier, ADR-0092): the BeamUxEntry model + beam_ux_entries table — the generic authoring entry that has-a versioned BeamParticle body ridden through beam-core's shared ParticleWriter. The base spans content AND components (a layout is not a component), so it is BeamUxEntry, never BeamUxComponent. Residency is context-following (default central); the table shape is ubiquitous from day one via a shared migration dir run in both the central and tenant passes.",
+    "keywords": [
+        "laravel",
+        "splicewire",
+        "beam",
+        "ux",
+        "cms",
+        "authoring"
+    ],
+    "type": "library",
+    "license": "proprietary",
+    "authors": [
+        {
+            "name": "Stephen Rushing",
+            "email": "stephen@rushing.dev"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/contracts": "^11.0|^12.0|^13.0",
+        "illuminate/database": "^11.0|^12.0|^13.0",
+        "illuminate/support": "^11.0|^12.0|^13.0",
+        "splicewire/laravel-beam": "*"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
+        "phpunit/phpunit": "^11.0|^12.0",
+        "laravel/pint": "^1.0",
+        "wikimedia/composer-merge-plugin": "^2.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Splicewire\\Beam\\Ux\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Splicewire\\Beam\\Ux\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.0.x-dev"
+        },
+        "laravel": {
+            "providers": [
+                "Splicewire\\Beam\\Ux\\BeamUxServiceProvider"
+            ]
+        },
+        "merge-plugin": {
+            "include": [
+                "composer.local.json"
+            ]
+        }
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../*",
+            "options": {
+                "symlink": true
+            }
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/splicewire/laravel-beam.git"
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "scripts": {
+        "test": "@php vendor/bin/phpunit",
+        "pint": "@php -d memory_limit=512M vendor/bin/pint"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "php-http/discovery": true,
+            "wikimedia/composer-merge-plugin": true
+        }
+    }
+}
