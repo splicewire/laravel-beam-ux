@@ -2,9 +2,12 @@
 
 namespace Splicewire\Beam\Ux;
 
+use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
 use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController;
 use Splicewire\Beam\Sitemap\SitemapSourceRegistry;
 use Splicewire\Beam\Storage\DiskStorageDriver;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
@@ -47,6 +50,10 @@ class BeamUxServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        // Merge the entry-body route config (api_root / route_name) as `config('beam.ux.*')`, so the
+        // beamUxEntries() macro reads a config-driven, env-overridable prefix instead of a hardcoded one.
+        $this->mergeConfigFrom(__DIR__.'/../config/beam/ux.php', 'beam.ux');
+
         $this->registerCodecs();
         $this->registerInference();
         $this->registerPlacement();
@@ -62,6 +69,42 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->bootSitemap();
         $this->registerEntryWorkflow();
         $this->bootCommands();
+        $this->bootRouteMacro();
+    }
+
+    /**
+     * Register the `Route::beamUxEntries()` macro — the declarative mount for the entry-body transport
+     * ({@see BeamUxEntryBodyController}), so a host stops hand-rolling the `beam/ux/entries/{slug}/body`
+     * load/save routes app-locally (they were promoted here from splicewire-app, beam-native-controllers P4).
+     *
+     *   Route::beamUxEntries()  →  GET  beam/ux/entries/{slug}/body → show   (beam.ux.entries.body.show)
+     *                              PUT  beam/ux/entries/{slug}/body → update (beam.ux.entries.body.update)
+     *
+     * The uri prefix + name stem default from config (`beam.ux.api_root` / `beam.ux.route_name`,
+     * env-overridable — ADR-0124), NOT hardcoded, so a host relocates the mount per-deploy without a code
+     * change; explicit args still override. Routing (the enclosing middleware group) stays a HOST concern:
+     * a host calls this inside its own auth/tenant-guarded group — the middleware IS the write gate (the
+     * controller binds a permissive PolicyWriteGate).
+     */
+    protected function bootRouteMacro(): void
+    {
+        if (Route::hasMacro('beamUxEntries')) {
+            return;
+        }
+
+        Route::macro('beamUxEntries', function (
+            ?string $apiRoot = null,
+            ?string $routeName = null,
+        ): void {
+            /** @var Router $this */
+            $apiRoot ??= config('beam.ux.api_root', 'beam/ux');
+            $routeName ??= config('beam.ux.route_name', 'beam.ux.');
+
+            $this->get("{$apiRoot}/entries/{slug}/body", [BeamUxEntryBodyController::class, 'show'])
+                ->name("{$routeName}entries.body.show");
+            $this->put("{$apiRoot}/entries/{slug}/body", [BeamUxEntryBodyController::class, 'update'])
+                ->name("{$routeName}entries.body.update");
+        });
     }
 
     /**
