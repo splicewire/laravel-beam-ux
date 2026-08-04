@@ -27,7 +27,8 @@
         "splicewire/laravel-beam-mdx": "*",
         "splicewire/laravel-beam-sitemap": "*",
         "splicewire/laravel-beam-taxonomy": "*",
-        "splicewire/laravel-beam-workflows": "*"
+        "splicewire/laravel-beam-workflows": "*",
+        "symfony/process": "^6.4|^7.0"
     },
     "require-dev": {
         "orchestra/testbench": "^9.0|^10.0|^11.0",

@@ -63,6 +63,28 @@ return [
     */
     'puck' => [
         'blocks_module' => env('BEAM_UX_PUCK_BLOCKS_MODULE', '@/puck/blocks'),
+
+        /*
+        | The Node PuckData ⟷ BlockDoc bridge (ticket 08 — the reverse .tsx→body leg).
+        |
+        | `script` — absolute path to `bin/puck-bridge.mjs` in the resolved `@splicewire/beam-ux`
+        |            package (e.g. `<app>/node_modules/@splicewire/beam-ux/bin/puck-bridge.mjs`).
+        |            Null/unset ⇒ the reverse page-sync is UNAVAILABLE (degrade-not-fabricate): a
+        |            composed page `.tsx` is never re-encoded as raw component source.
+        | `node`   — the node interpreter (resolved on PATH; default `node`).
+        | `timeout`— the per-invocation process timeout, seconds.
+        |
+        | Lossless JSX↔PuckData parsing needs the JS toolchain (recast + babel), so the parse runs in
+        | Node, not PHP. `splicewire:beam:ux-sync-from-disk` + `register-from-disk` shell to this CLI.
+        */
+        'bridge' => [
+            // Defaults to the CLI in the host's resolved `@splicewire/beam-ux` node_modules — the
+            // host-agnostic path that "just works" once the JS package is installed + built. Override
+            // via env for a non-standard layout; unset ⇒ degrade (the reverse page-sync is a no-op).
+            'script' => env('BEAM_UX_PUCK_BRIDGE_SCRIPT', base_path('node_modules/@splicewire/beam-ux/bin/puck-bridge.mjs')),
+            'node' => env('BEAM_UX_PUCK_BRIDGE_NODE', 'node'),
+            'timeout' => (int) env('BEAM_UX_PUCK_BRIDGE_TIMEOUT', 30),
+        ],
     ],
 
 ];

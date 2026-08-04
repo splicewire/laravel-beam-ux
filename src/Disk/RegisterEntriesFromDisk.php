@@ -10,6 +10,7 @@ use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
+use Splicewire\Beam\Ux\Type\UxType;
 
 /**
  * The **`register-from-disk` batch** (charter S8, `beamux-build/issues/05`) — the PAID `splicewire/*`
@@ -37,6 +38,7 @@ class RegisterEntriesFromDisk
         protected RegisterFromDisk $disk,
         protected StorageDriverResolver $drivers,
         protected InferDraftSchema $inference,
+        protected PuckBridge $bridge,
     ) {}
 
     /**
@@ -104,8 +106,15 @@ class RegisterEntriesFromDisk
 
         // The body rides the free-beam-core StorageDriver (ParticleWriter under the default Stacked
         // driver) — the paid batch selects the driver, beam-core does the versioned write.
+        //
+        // A `page` `.tsx` is a COMPOSED Puck page (PuckPageCodegen output), NOT component source — so
+        // it is parsed back into Puck Data via the Node bridge and stored AS Data (ticket 08 deliverable
+        // 4: "no re-encoding composed JSX as component source"). Any other body (a component, an mdx
+        // page) — or a page the bridge cannot parse (degrade) — keeps its raw source.
+        $body = $this->bodyFor($entry, $source);
+
         $driver = $this->drivers->resolve($entry);
-        $item = $driver->write('', ['source' => $source], $entry->namespace);
+        $item = $driver->write('', $body, $entry->namespace);
 
         if ($entry->particle_id === null && $item->key !== '') {
             $entry->particle_id = $item->key;
@@ -116,6 +125,29 @@ class RegisterEntriesFromDisk
         $this->inference->forEntry($entry, $source, persist: true);
 
         return $entry->refresh();
+    }
+
+    /**
+     * The body to persist for a freshly-registered entry. A `page` `.tsx` (a composed Puck page) is
+     * parsed to Puck `Data` via the Node bridge so it is stored structurally — never re-encoded as
+     * component source. Everything else (a component, an mdx page) — or a page the bridge can't parse or
+     * that has no bridge available (degrade-not-fabricate) — keeps its raw `['source' => …]`.
+     *
+     * @return array<string, mixed>
+     */
+    protected function bodyFor(BeamUxEntry $entry, string $source): array
+    {
+        if ($entry->type === UxType::Page
+            && $entry->format?->value === 'tsx'
+            && $this->bridge->available()
+        ) {
+            $data = $this->bridge->toPuck($source);
+            if ($data !== null) {
+                return $data;
+            }
+        }
+
+        return ['source' => $source];
     }
 
     /**

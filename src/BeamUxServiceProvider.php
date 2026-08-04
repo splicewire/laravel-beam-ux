@@ -125,6 +125,18 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->app->singleton(RegisterFromDisk::class);
         $this->app->singleton(RegisterEntriesFromDisk::class);
         $this->app->singleton(UpdateFromNewer::class);
+
+        // The PHP side of the PuckData ⟷ BlockDoc bridge (ticket 08) — shells to the Node
+        // `@splicewire/beam-ux` `beam-ux-puck-bridge` CLI to parse a composed page `.tsx` back into Puck
+        // Data. Config-driven (`beam.ux.puck.bridge`); degrade-not-fabricate when the script is absent.
+        $this->app->singleton(Disk\PuckBridge::class, function () {
+            return new Disk\PuckBridge(
+                script: config('beam.ux.puck.bridge.script'),
+                node: (string) config('beam.ux.puck.bridge.node', 'node'),
+                timeout: (int) config('beam.ux.puck.bridge.timeout', 30),
+            );
+        });
+        $this->app->singleton(Disk\SyncPagesFromDisk::class);
     }
 
     /**
@@ -140,6 +152,7 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->commands([
             RegisterFromDiskCommand::class,
             UpdateFromNewerCommand::class,
+            Console\SyncFromDiskCommand::class,
         ]);
     }
 

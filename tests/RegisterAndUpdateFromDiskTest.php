@@ -158,7 +158,10 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         $names = array_map(fn ($p) => basename($p, '.php'), $disk);
         sort($names);
 
-        $this->assertSame(['RegisterEntriesFromDisk', 'RegisterFromDisk', 'UpdateFromNewer'], $names);
+        $this->assertSame(
+            ['PuckBridge', 'RegisterEntriesFromDisk', 'RegisterFromDisk', 'SyncPagesFromDisk', 'UpdateFromNewer'],
+            $names,
+        );
 
         // No watcher/daemon MECHANISM anywhere in the disk seam (the prose may *say* "no watcher"; what
         // matters is no actual watch loop / daemon / filesystem-event hook is coded).
