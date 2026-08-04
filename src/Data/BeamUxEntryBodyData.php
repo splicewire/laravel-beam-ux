@@ -34,11 +34,15 @@ class BeamUxEntryBodyData extends Data
      * @param  array<string, mixed>|null  $schema  the resolved JSON-Schema for the SchemaForm, or null when
      *                                             the entry declares no inline schema (permissive fallback)
      * @param  array<string, mixed>  $body  the current particle body — seeds the SchemaForm's formData
+     * @param  bool  $composable  editability tier (ticket 14): is this entry's body free composition (true)
+     *                            or a fixed/behavior template (false)? The AUTHORITATIVE gate the frontend
+     *                            host reads to seal structural editing regardless of body shape (F06).
      */
     public function __construct(
         public string $slug,
         public string $type,
         public ?array $schema,
         public array $body,
+        public bool $composable = true,
     ) {}
 }

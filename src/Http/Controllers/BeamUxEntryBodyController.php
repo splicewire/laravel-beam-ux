@@ -60,6 +60,7 @@ class BeamUxEntryBodyController
             type: $this->typeValue($entry),
             schema: $this->resolveSchema($entry),
             body: $item?->body ?? [],
+            composable: (bool) $entry->composable,
         )]);
     }
 
@@ -104,6 +105,7 @@ class BeamUxEntryBodyController
             type: $this->typeValue($entry),
             schema: $this->resolveSchema($entry),
             body: $reloaded?->body ?? $body,
+            composable: (bool) $entry->composable,
         )]);
     }
 
