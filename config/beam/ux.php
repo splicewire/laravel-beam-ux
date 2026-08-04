@@ -26,6 +26,47 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Default disk-grouping namespace (ADR-0165 — NOT the URL)
+    |--------------------------------------------------------------------------
+    |
+    | The default `namespace` the authoring/seed commands
+    | (`ux-scaffold` / `ux-seed-nav` / `ux-enrich-page-schemas`) group entries
+    | under when no explicit `--namespace` is passed. `namespace` is the
+    | disk-grouping coordinate ONLY (ADR-0165 two-trees) — it derives the disk
+    | *path* (`{namespace}/{type}/{slug}.{ext}`), never the URL, and is unrelated
+    | to multi-tenancy. In a single-tenant install it is arbitrary-but-consistent;
+    | set it once here (or via env) instead of hard-coding it per command.
+    |
+    | Default `''` — an empty namespace files entries at the type root
+    | (`{type}/{slug}.{ext}`). A host that groups on disk sets its own slug.
+    |
+    */
+    'namespace' => env('BEAM_UX_NAMESPACE', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Content nav source (ux-seed-nav)
+    |--------------------------------------------------------------------------
+    |
+    | The data `splicewire:beam:ux-seed-nav` seeds the sitemap content nav from.
+    | Resolution priority (highest first):
+    |
+    |   1. `beam.ux.nav` (this key)     — an explicit override; a list of nav
+    |      rows `[slug, segment, title, type, realm]` (or the assoc-map form).
+    |      Highest so a host can pin the nav exactly.
+    |   2. `resources/beam-ux/nav.{yml,json}` on disk — an authored nav file, if
+    |      present (relative to the mirror-disk root, else base_path()).
+    |   3. DERIVED from registered entries' frontmatter (`segment`/`realm`/
+    |      `nav_order`) — the default when neither above is set. A fresh site
+    |      seeds its nav with NO bespoke PHP: the frontmatter carries it.
+    |
+    | Null (default) ⇒ fall through to disk, then to frontmatter derivation.
+    |
+    */
+    'nav' => null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Storage (ADR-0165 S2 — the disk seam)
     |--------------------------------------------------------------------------
     |

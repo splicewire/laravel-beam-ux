@@ -16,7 +16,10 @@ use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
 use Splicewire\Beam\Ux\Codegen\PuckPageCodegen;
+use Splicewire\Beam\Ux\Console\EnrichPageSchemasCommand;
 use Splicewire\Beam\Ux\Console\RegisterFromDiskCommand;
+use Splicewire\Beam\Ux\Console\ScaffoldCommand;
+use Splicewire\Beam\Ux\Console\SeedNavCommand;
 use Splicewire\Beam\Ux\Console\UpdateFromNewerCommand;
 use Splicewire\Beam\Ux\Containment\NavProjector;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
@@ -153,6 +156,9 @@ class BeamUxServiceProvider extends ServiceProvider
             RegisterFromDiskCommand::class,
             UpdateFromNewerCommand::class,
             Console\SyncFromDiskCommand::class,
+            ScaffoldCommand::class,
+            SeedNavCommand::class,
+            EnrichPageSchemasCommand::class,
         ]);
     }
 
