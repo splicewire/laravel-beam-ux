@@ -175,6 +175,7 @@ class DraftSchemaInferenceTest extends TestCase
             $table->string('body_style')->nullable();
             $table->string('namespace')->nullable()->index();
             $table->string('residency_mode')->default('context-following')->index();
+            $table->boolean('composable')->default(true);
             $table->string('realm')->default('site')->index();
             $table->uuid('sitemap_id')->nullable()->index();
             $table->uuid('parent_id')->nullable()->index();
