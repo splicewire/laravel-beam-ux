@@ -67,6 +67,30 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Realm conventions (register-from-disk path → realm fallback)
+    |--------------------------------------------------------------------------
+    |
+    | When a page file declares no `realm:` in its frontmatter, `register-from-disk`
+    | maps its DISK PATH to a realm through this ordered `glob => realm` map
+    | (fnmatch against the disk-relative path — scope by segment, e.g.
+    | `*​/page/library-*`). First match wins; no match ⇒ the model's `site`
+    | default. This is a realm-only fallback: `segment` (the URL) is still declared
+    | in frontmatter, never guessed. Frontmatter `realm:` always outranks this.
+    |
+    | Default `[]` ⇒ no convention (pure frontmatter). A host groups its realms by
+    | path here so a fresh page lands in the right realm with zero per-file `realm:`:
+    |
+    |   'realm_conventions' => [
+    |       '*​/page/library-*'  => 'account',
+    |       '*​/page/operator-*' => 'operator',
+    |       '*​/page/auth-*'     => 'auth',
+    |   ],
+    |
+    */
+    'realm_conventions' => [],
+
+    /*
+    |--------------------------------------------------------------------------
     | Storage (ADR-0165 S2 — the disk seam)
     |--------------------------------------------------------------------------
     |

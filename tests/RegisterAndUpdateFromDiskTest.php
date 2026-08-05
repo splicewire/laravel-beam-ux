@@ -9,6 +9,8 @@ use Splicewire\Beam\Storage\StorageItem;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Models\Sitemap;
+use Splicewire\Beam\Ux\Nav\NavSource;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -84,6 +86,86 @@ class RegisterAndUpdateFromDiskTest extends TestCase
 
         $this->assertFalse((bool) $about->schema_is_draft);
         $this->assertNull($about->schema_ref);
+    }
+
+    public function test_register_from_disk_persists_realm_segment_nav_order_title_from_frontmatter(): void
+    {
+        // A page whose OWN frontmatter declares its containment — the co-located registry, no nav.yml.
+        $this->writeFile('site/pages/page/about.mdx', <<<'MDX'
+        ---
+        realm: account
+        segment: /account/about
+        nav_order: 20
+        title: About Us
+        ---
+        # About
+
+        Hello.
+        MDX);
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $about = BeamUxEntry::where('slug', 'about')->firstOrFail();
+        $this->assertSame('account', $about->realm);
+        $this->assertSame('/account/about', $about->segment);
+        $this->assertSame(20, (int) $about->nav_order);
+        $this->assertSame('About Us', $about->title);
+
+        // The `realm` was set at CREATE time, so the model's creating hook bound the ACCOUNT sitemap.
+        $accountSitemap = Sitemap::forRealm('account');
+        $this->assertSame($accountSitemap->getKey(), $about->sitemap_id);
+
+        // …and it DERIVES into nav with no nav.yml / config override (the derive leg of the priority chain).
+        config()->set('beam.ux.nav', null);
+        $rows = $this->app->make(NavSource::class)->resolve('site.pages');
+        $row = collect($rows)->firstWhere('slug', 'about');
+        $this->assertNotNull($row, 'the page derives into nav from its own frontmatter');
+        $this->assertSame('account', $row['realm']);
+        $this->assertSame('/account/about', $row['segment']);
+        $this->assertSame(20, $row['nav_order']);
+    }
+
+    public function test_register_from_disk_falls_back_to_the_path_realm_convention_when_frontmatter_omits_realm(): void
+    {
+        // No `realm:` in frontmatter — the disk-path convention supplies it (frontmatter still owns segment).
+        config()->set('beam.ux.realm_conventions', [
+            '*/page/library-*' => 'account',
+            '*/page/operator-*' => 'operator',
+        ]);
+
+        $this->writeFile('audiostud/page/library-lyrics.mdx', <<<'MDX'
+        ---
+        segment: /account/lyrics
+        title: Lyrics
+        ---
+        The words a songwriter brought.
+        MDX);
+        $this->writeFile('audiostud/page/operator-dashboard.mdx', "---\nsegment: /operator\n---\nOps.");
+        // A file matching NO convention keeps the model default `site`.
+        $this->writeFile('audiostud/page/home.mdx', "---\nsegment: /\n---\nWelcome.");
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $this->assertSame('account', BeamUxEntry::where('slug', 'library-lyrics')->firstOrFail()->realm);
+        $this->assertSame('operator', BeamUxEntry::where('slug', 'operator-dashboard')->firstOrFail()->realm);
+        $this->assertSame('site', BeamUxEntry::where('slug', 'home')->firstOrFail()->realm);
+    }
+
+    public function test_register_from_disk_leaves_realm_default_and_no_nav_segment_when_nothing_declared(): void
+    {
+        // No frontmatter, no convention → model default `site`, null segment (⇒ NOT a nav row).
+        $this->writeFile('site/pages/page/about.mdx', "# About\n\nHello.");
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $about = BeamUxEntry::where('slug', 'about')->firstOrFail();
+        $this->assertSame('site', $about->realm);
+        $this->assertNull($about->segment);
+
+        // With no segment it does not appear in the derived nav.
+        config()->set('beam.ux.nav', null);
+        $rows = $this->app->make(NavSource::class)->resolve('site.pages');
+        $this->assertNull(collect($rows)->firstWhere('slug', 'about'));
     }
 
     public function test_register_from_disk_is_idempotent_skipping_files_already_in_the_db(): void
@@ -202,6 +284,7 @@ class RegisterAndUpdateFromDiskTest extends TestCase
             $table->uuid('id')->primary();
             $table->uuid('particle_id')->nullable()->index();
             $table->string('slug')->index();
+            $table->string('title')->nullable();
             $table->string('schema_ref')->nullable()->index();
             $table->boolean('schema_is_draft')->default(false)->index();
             $table->string('facade_ref')->nullable();
@@ -216,6 +299,7 @@ class RegisterAndUpdateFromDiskTest extends TestCase
             $table->uuid('sitemap_id')->nullable()->index();
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
+            $table->integer('nav_order')->nullable();
             $table->timestamps();
             $table->unique(['namespace', 'slug']);
         });

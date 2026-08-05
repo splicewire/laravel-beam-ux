@@ -82,7 +82,7 @@ class RegisterEntriesFromDisk
                 continue;
             }
 
-            $created[] = $this->register($envelope, (string) file_get_contents($absolute));
+            $created[] = $this->register($envelope, (string) file_get_contents($absolute), $relative);
         }
 
         return compact('created', 'skipped', 'ignored');
@@ -93,16 +93,22 @@ class RegisterEntriesFromDisk
      * through the resolved StorageDriver, and run S9 draft-schema inference (a no-op for
      * page/layout/template — only a `component` gets a draft).
      *
+     * The record is created with its **containment** ({@see containmentFor}: `realm`/`segment`/`nav_order`/
+     * `title`) resolved from the file's own frontmatter (+ a config `realm` convention) — so a page lands
+     * in the right realm and derives into nav with NO hand-authored `nav.yml` (ADR-0165; the derive leg
+     * the nav-source priority chain already promised). `realm` is set at CREATE time so the model's
+     * `creating` hook assigns the matching realm sitemap.
+     *
      * @param  array{slug: string, type: ?string, namespace: ?string, format: string}  $envelope
      */
-    protected function register(array $envelope, string $source): BeamUxEntry
+    protected function register(array $envelope, string $source, string $relative = ''): BeamUxEntry
     {
-        $entry = BeamUxEntry::create([
+        $entry = BeamUxEntry::create(array_merge([
             'slug' => $envelope['slug'],
             'type' => $envelope['type'],
             'namespace' => $envelope['namespace'],
             'format' => $envelope['format'],
-        ]);
+        ], $this->containmentFor($source, $relative)));
 
         // The body rides the free-beam-core StorageDriver (ParticleWriter under the default Stacked
         // driver) — the paid batch selects the driver, beam-core does the versioned write.
@@ -148,6 +154,90 @@ class RegisterEntriesFromDisk
         }
 
         return ['source' => $source];
+    }
+
+    /**
+     * The **containment** fields to stamp on a freshly-registered entry, resolved from the file itself so
+     * nav DERIVES with no hand-authored `nav.yml`. Only resolved keys are returned (an unresolved field
+     * falls to the model default — `realm` → `site`, `segment`/`nav_order`/`title` → null ⇒ not in nav).
+     *
+     * Realm priority (highest first): the file's own `realm:` frontmatter → the config `realm`
+     * convention ({@see realmByConvention}) → omitted (the model's `site` default). `segment`/`nav_order`/
+     * `title` come from frontmatter only — a URL is never guessed, so a page auto-surfaces into nav only
+     * once it declares its `segment` (co-located in the page file, not a separate registry). The explicit
+     * `beam.ux.nav` override and an authored `nav.yml` still outrank all of this at the NavSource seam.
+     *
+     * @return array<string, mixed>
+     */
+    protected function containmentFor(string $source, string $relative): array
+    {
+        $fm = $this->frontmatter($source);
+        $out = [];
+
+        $realm = $fm['realm'] ?? $this->realmByConvention($relative);
+        if ($realm !== null && $realm !== '') {
+            $out['realm'] = $realm;
+        }
+
+        if (isset($fm['segment']) && $fm['segment'] !== '') {
+            $out['segment'] = $fm['segment'];
+        }
+
+        if (isset($fm['nav_order']) && $fm['nav_order'] !== '' && is_numeric($fm['nav_order'])) {
+            $out['nav_order'] = (int) $fm['nav_order'];
+        }
+
+        if (isset($fm['title']) && $fm['title'] !== '') {
+            $out['title'] = $fm['title'];
+        }
+
+        return $out;
+    }
+
+    /**
+     * The scalar frontmatter of a body source — the leading `---` … `---` block parsed as flat
+     * `key: value` pairs (the same shape `MdxBody` stores into the body). A `.tsx` page or any file with
+     * no frontmatter block yields `[]`. Kept local (a tiny reader) so the disk seam takes no hard
+     * dependency on the mdx package.
+     *
+     * @return array<string, string>
+     */
+    protected function frontmatter(string $source): array
+    {
+        if (! preg_match('/^---\r?\n(.*?)\r?\n---\r?\n?/s', $source, $match)) {
+            return [];
+        }
+
+        $fields = [];
+        foreach (preg_split('/\r?\n/', $match[1]) as $line) {
+            if (preg_match('/^([A-Za-z0-9_-]+):\s*(.*)$/', $line, $kv)) {
+                $fields[$kv[1]] = trim($kv[2], " \t\"'");
+            }
+        }
+
+        return $fields;
+    }
+
+    /**
+     * The realm a file's DISK PATH maps to by convention, when its frontmatter declares none — the
+     * config `beam.ux.realm_conventions` ordered map of `glob => realm` (fnmatch against the disk-relative
+     * path, so a host scopes by segment, e.g. `*​/page/library-*` → `account`). First match wins; no
+     * match ⇒ null (the model's `site` default applies). Default `[]` ⇒ pure frontmatter, no convention.
+     */
+    protected function realmByConvention(string $relative): ?string
+    {
+        $conventions = config('beam.ux.realm_conventions', []);
+        if (! is_array($conventions)) {
+            return null;
+        }
+
+        foreach ($conventions as $pattern => $realm) {
+            if (is_string($pattern) && fnmatch($pattern, $relative)) {
+                return (string) $realm;
+            }
+        }
+
+        return null;
     }
 
     /**
