@@ -7,7 +7,7 @@ use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
- * `php artisan splicewire:beam:ux-register-from-disk {path}` — the operator-run **`register-from-disk`**
+ * `php artisan splicewire:beam:ux:register-from-disk {path}` — the operator-run **`register-from-disk`**
  * batch (charter S8). Scans `{path}` for every registered body-format file NOT yet in the DB, creates a
  * {@see BeamUxEntry} for each, infers `type` + `namespace` from the path
  * (reverse of S2's placement), writes the body through the free-beam-core StorageDriver, and runs S9
@@ -19,7 +19,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  */
 class RegisterFromDiskCommand extends Command
 {
-    protected $signature = 'splicewire:beam:ux-register-from-disk {path : The directory to scan for un-registered body files}';
+    protected $signature = 'splicewire:beam:ux:register-from-disk {path : The directory to scan for un-registered body files}';
 
     protected $description = 'Register on-disk BeamUx bodies (every format) not yet in the DB; infer type+namespace from path; run S9 draft inference at import.';
 

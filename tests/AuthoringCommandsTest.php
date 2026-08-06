@@ -49,7 +49,7 @@ class AuthoringCommandsTest extends TestCase
     {
         Config::set('beam.ux.namespace', 'demo');
 
-        $this->artisan('splicewire:beam:ux-scaffold', ['slug' => 'section-template', '--type' => 'template'])
+        $this->artisan('splicewire:beam:ux:scaffold', ['slug' => 'section-template', '--type' => 'template'])
             ->assertSuccessful();
 
         $entry = BeamUxEntry::query()->where('namespace', 'demo')->where('slug', 'section-template')->first();
@@ -57,7 +57,7 @@ class AuthoringCommandsTest extends TestCase
         $this->assertSame(UxType::Template, $entry->type);
 
         // Idempotent — a re-run leaves the row untouched, no duplicate.
-        $this->artisan('splicewire:beam:ux-scaffold', ['slug' => 'section-template', '--type' => 'template'])
+        $this->artisan('splicewire:beam:ux:scaffold', ['slug' => 'section-template', '--type' => 'template'])
             ->assertSuccessful();
         $this->assertSame(1, BeamUxEntry::query()->where('slug', 'section-template')->count());
     }
@@ -66,7 +66,7 @@ class AuthoringCommandsTest extends TestCase
     {
         Config::set('beam.ux.namespace', 'demo');
 
-        $this->artisan('splicewire:beam:ux-scaffold', ['slug' => 'foo', '--namespace' => 'other', '--type' => 'page'])
+        $this->artisan('splicewire:beam:ux:scaffold', ['slug' => 'foo', '--namespace' => 'other', '--type' => 'page'])
             ->assertSuccessful();
 
         $this->assertNotNull(BeamUxEntry::query()->where('namespace', 'other')->where('slug', 'foo')->first());
@@ -81,7 +81,7 @@ class AuthoringCommandsTest extends TestCase
             'lyrics' => ['segment' => '/account/lyrics', 'title' => 'Lyrics', 'type' => 'page', 'realm' => 'account'],
         ]);
 
-        $this->artisan('splicewire:beam:ux-seed-nav')->assertSuccessful();
+        $this->artisan('splicewire:beam:ux:seed-nav')->assertSuccessful();
 
         $home = BeamUxEntry::query()->where('namespace', 'demo')->where('slug', 'home')->first();
         $this->assertNotNull($home);
@@ -105,7 +105,7 @@ class AuthoringCommandsTest extends TestCase
             'login' => ['segment' => '/login', 'title' => 'Log in', 'realm' => 'auth'],
         ]);
 
-        $this->artisan('splicewire:beam:ux-seed-nav')->assertSuccessful();
+        $this->artisan('splicewire:beam:ux:seed-nav')->assertSuccessful();
 
         $this->assertTrue((bool) BeamUxEntry::query()->where('slug', 'home')->first()->composable);
         $this->assertFalse((bool) BeamUxEntry::query()->where('slug', 'login')->first()->composable);
@@ -124,7 +124,7 @@ class AuthoringCommandsTest extends TestCase
         // An entry with no segment is NOT nav (a template).
         BeamUxEntry::create(['slug' => 'tpl', 'namespace' => 'demo', 'type' => 'template', 'realm' => 'site']);
 
-        $this->artisan('splicewire:beam:ux-seed-nav')->assertSuccessful();
+        $this->artisan('splicewire:beam:ux:seed-nav')->assertSuccessful();
 
         // The two segmented entries are restamped in nav_order; the template is not touched into nav.
         $home = BeamUxEntry::query()->where('slug', 'home')->first();
@@ -149,7 +149,7 @@ class AuthoringCommandsTest extends TestCase
 
         BeamUxEntry::create(['slug' => 'about', 'namespace' => 'demo', 'type' => 'page', 'format' => 'mdx', 'realm' => 'site']);
 
-        $this->artisan('splicewire:beam:ux-enrich-page-schemas')->assertSuccessful();
+        $this->artisan('splicewire:beam:ux:enrich-page-schemas')->assertSuccessful();
 
         $entry = BeamUxEntry::query()->where('slug', 'about')->first();
         $this->assertNotNull($entry->schema_ref);

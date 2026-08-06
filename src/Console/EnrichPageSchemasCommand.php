@@ -10,7 +10,7 @@ use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
- * `php artisan splicewire:beam:ux-enrich-page-schemas {--namespace=} {--schema-json=} {--root=}` — the
+ * `php artisan splicewire:beam:ux:enrich-page-schemas {--namespace=} {--schema-json=} {--root=}` — the
  * GENERIC encode→stamp batch (F02).
  *
  * `register-from-disk` stores an `.mdx` page's raw `source` verbatim (it bypasses the codec's
@@ -33,7 +33,7 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class EnrichPageSchemasCommand extends Command
 {
-    protected $signature = 'splicewire:beam:ux-enrich-page-schemas
+    protected $signature = 'splicewire:beam:ux:enrich-page-schemas
         {--namespace= : Disk-grouping namespace (default config beam.ux.namespace)}
         {--schema-json= : JSON page-chrome schema to stamp (default a minimal heading/intent/content shape)}
         {--root= : The mirror-disk root the page files were registered from (default the mirror disk)}';
@@ -72,7 +72,7 @@ class EnrichPageSchemasCommand extends Command
             ->get();
 
         if ($entries->isEmpty()) {
-            $this->components->warn("No page entries under [{$namespace}] — run splicewire:beam:ux-register-from-disk first.");
+            $this->components->warn("No page entries under [{$namespace}] — run splicewire:beam:ux:register-from-disk first.");
 
             return self::SUCCESS;
         }

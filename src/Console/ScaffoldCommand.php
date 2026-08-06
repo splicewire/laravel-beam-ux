@@ -7,7 +7,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
- * `php artisan splicewire:beam:ux-scaffold {slug} {--namespace=} {--type=}` — mint an EMPTY authoring
+ * `php artisan splicewire:beam:ux:scaffold {slug} {--namespace=} {--type=}` — mint an EMPTY authoring
  * entry row when no on-disk body exists (F02).
  *
  * The generic residual of the retired app-local `puck-seed`: for a `page` authored on disk,
@@ -25,7 +25,7 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class ScaffoldCommand extends Command
 {
-    protected $signature = 'splicewire:beam:ux-scaffold
+    protected $signature = 'splicewire:beam:ux:scaffold
         {slug : The entry slug to mint}
         {--namespace= : Disk-grouping namespace (default config beam.ux.namespace)}
         {--type=template : The Ux type (layout|template|page|component)}';

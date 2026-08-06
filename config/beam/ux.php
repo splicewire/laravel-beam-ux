@@ -48,7 +48,7 @@ return [
     | Content nav source (ux-seed-nav)
     |--------------------------------------------------------------------------
     |
-    | The data `splicewire:beam:ux-seed-nav` seeds the sitemap content nav from.
+    | The data `splicewire:beam:ux:seed-nav` seeds the sitemap content nav from.
     | Resolution priority (highest first):
     |
     |   1. `beam.ux.nav` (this key)     — an explicit override; a list of nav
@@ -140,7 +140,7 @@ return [
         | `timeout`— the per-invocation process timeout, seconds.
         |
         | Lossless JSX↔PuckData parsing needs the JS toolchain (recast + babel), so the parse runs in
-        | Node, not PHP. `splicewire:beam:ux-sync-from-disk` + `register-from-disk` shell to this CLI.
+        | Node, not PHP. `splicewire:beam:ux:sync-from-disk` + `register-from-disk` shell to this CLI.
         */
         'bridge' => [
             // Defaults to the CLI in the host's resolved `@splicewire/beam-ux` node_modules — the

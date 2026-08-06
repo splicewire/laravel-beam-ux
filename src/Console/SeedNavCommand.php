@@ -8,7 +8,7 @@ use Splicewire\Beam\Ux\Models\Sitemap;
 use Splicewire\Beam\Ux\Nav\NavSource;
 
 /**
- * `php artisan splicewire:beam:ux-seed-nav {--namespace=}` — the DATA-DRIVEN content-nav seeder (F02).
+ * `php artisan splicewire:beam:ux:seed-nav {--namespace=}` — the DATA-DRIVEN content-nav seeder (F02).
  *
  * Seeds the per-realm sitemaps' CONTENT nav — the entry rows (`segment`/`realm`/`nav_order`) the
  * NavProjector reads. It reads its data from {@see NavSource} (config `beam.ux.nav` → disk
@@ -26,7 +26,7 @@ use Splicewire\Beam\Ux\Nav\NavSource;
  */
 class SeedNavCommand extends Command
 {
-    protected $signature = 'splicewire:beam:ux-seed-nav {--namespace= : Disk-grouping namespace (default config beam.ux.namespace)}';
+    protected $signature = 'splicewire:beam:ux:seed-nav {--namespace= : Disk-grouping namespace (default config beam.ux.namespace)}';
 
     protected $description = 'Seed the content nav (per-realm sitemaps) from config/disk/derived data — no hard-coded array.';
 

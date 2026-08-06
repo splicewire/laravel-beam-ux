@@ -9,7 +9,7 @@ use RecursiveIteratorIterator;
 use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
 
 /**
- * `php artisan splicewire:beam:ux-update-from-newer {path}` — the operator-run **`update-from-newer`**
+ * `php artisan splicewire:beam:ux:update-from-newer {path}` — the operator-run **`update-from-newer`**
  * batch (charter S8). Config-gated and **OFF by default** (`beam.ux.update_from_newer.enabled`): disk
  * edits flow back to the source-of-record ONLY on this explicit command with the gate on. Compares each
  * registered entry's file mtime against the record and, per the configured `direction`
@@ -20,7 +20,7 @@ use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
  */
 class UpdateFromNewerCommand extends Command
 {
-    protected $signature = 'splicewire:beam:ux-update-from-newer {path : The directory whose files are reconciled against records by mtime}';
+    protected $signature = 'splicewire:beam:ux:update-from-newer {path : The directory whose files are reconciled against records by mtime}';
 
     protected $description = 'Reconcile registered BeamUx entries against on-disk files by mtime (config-gated, direction-configurable, OFF by default).';
 

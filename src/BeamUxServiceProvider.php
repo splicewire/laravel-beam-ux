@@ -144,7 +144,7 @@ class BeamUxServiceProvider extends ServiceProvider
 
     /**
      * Register the two operator-run batch commands (charter S8). Names mirror the package tree (ADR-0167):
-     * `splicewire:beam:ux-register-from-disk` + `splicewire:beam:ux-update-from-newer`. Only in console.
+     * `splicewire:beam:ux:register-from-disk` + `splicewire:beam:ux:update-from-newer`. Only in console.
      */
     protected function bootCommands(): void
     {

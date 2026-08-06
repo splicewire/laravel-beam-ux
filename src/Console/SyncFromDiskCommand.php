@@ -10,7 +10,7 @@ use Splicewire\Beam\Ux\Disk\PuckBridge;
 use Splicewire\Beam\Ux\Disk\SyncPagesFromDisk;
 
 /**
- * `php artisan splicewire:beam:ux-sync-from-disk {path}` — the operator-run **reverse Puck-page sync**
+ * `php artisan splicewire:beam:ux:sync-from-disk {path}` — the operator-run **reverse Puck-page sync**
  * (beam Model-B ticket 08). Scans `{path}` for composed page `.tsx` files and, per the last-writer
  * policy, pulls any file NEWER than its record back into the DB particle body — parsing the JSX into
  * Puck `Data` via the Node {@see PuckBridge} (lossless JSX↔PuckData needs the
@@ -26,7 +26,7 @@ use Splicewire\Beam\Ux\Disk\SyncPagesFromDisk;
  */
 class SyncFromDiskCommand extends Command
 {
-    protected $signature = 'splicewire:beam:ux-sync-from-disk {path : The directory whose page .tsx files are synced back into the DB}';
+    protected $signature = 'splicewire:beam:ux:sync-from-disk {path : The directory whose page .tsx files are synced back into the DB}';
 
     protected $description = 'Sync composed page .tsx edits on disk back into the DB particle body (Puck Data) via the Node bridge; last-writer by mtime.';
 

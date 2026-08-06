@@ -6,7 +6,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Resolves the CONTENT-NAV data `splicewire:beam:ux-seed-nav` seeds — data-driven, never a hard-coded
+ * Resolves the CONTENT-NAV data `splicewire:beam:ux:seed-nav` seeds — data-driven, never a hard-coded
  * array. Resolution priority (highest first, F02):
  *
  *   1. **`config('beam.ux.nav')`** — an explicit host override. Highest so a host can pin the nav.
