@@ -134,6 +134,20 @@ class ContainmentTest extends TestCase
         $this->assertSame('/', $tree->items[0]->href);
     }
 
+    public function test_unplaced_page_entries_without_a_segment_are_excluded_from_nav(): void
+    {
+        // An entry can exist without being PLACED in nav — e.g. one auto-provisioned so a page is editable
+        // carries a null segment. It must not surface (and several such entries must not all collide at `/`).
+        BeamUxEntry::create(['slug' => 'home', 'title' => 'Home', 'type' => UxType::Page, 'segment' => '/']);
+        BeamUxEntry::create(['slug' => 'about', 'type' => UxType::Page, 'segment' => null]);
+        BeamUxEntry::create(['slug' => 'faq', 'type' => UxType::Page, 'segment' => null]);
+
+        $tree = $this->app->make(NavProjector::class)->project(Sitemap::forRealm());
+
+        $this->assertCount(1, $tree->items);
+        $this->assertSame('Home', $tree->items[0]->title);
+    }
+
     public function test_nav_projection_orders_siblings_by_nav_order(): void
     {
         // Insert out of nav order; `nav_order` (not insertion/slug order) must drive the menu sequence.

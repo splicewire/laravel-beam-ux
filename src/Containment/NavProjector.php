@@ -45,6 +45,14 @@ class NavProjector
             ->where('sitemap_id', $sitemap->getKey())
             ->where('type', UxType::Page->value);
 
+        // Only PLACED entries are nav items. An entry can exist (e.g. auto-provisioned on an author's first
+        // visit so the page is editable) without being placed in the nav — those carry a null `segment`.
+        // Excluding them keeps such entries out of the projected nav (and avoids colliding hrefs when
+        // several unplaced entries would all resolve to the root URL). Guarded on the column's presence.
+        if (Schema::hasColumn('beam_ux_entries', 'segment')) {
+            $query->whereNotNull('segment');
+        }
+
         // Order siblings by an optional host-provided `nav_order` (like `title`, this column is
         // host-supplied — guard on its presence so a consumer without it isn't broken by an orderBy on a
         // missing column). `slug` is the stable tiebreaker / fallback for unordered entries.
