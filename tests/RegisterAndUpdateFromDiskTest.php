@@ -241,7 +241,7 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         sort($names);
 
         $this->assertSame(
-            ['PuckBridge', 'RegisterEntriesFromDisk', 'RegisterFromDisk', 'SyncPagesFromDisk', 'UpdateFromNewer'],
+            ['PuckBridge', 'RawMdxReader', 'RegisterEntriesFromDisk', 'RegisterFromDisk', 'SyncPagesFromDisk', 'UpdateFromNewer'],
             $names,
         );
 

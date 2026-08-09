@@ -67,6 +67,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Raw-MDX content root (RawMdxReader)
+    |--------------------------------------------------------------------------
+    |
+    | The base-path-relative root the `RawMdxReader` reads disk-authored `.mdx`
+    | content files from, to seed an mdxeditor buffer with the EXISTING copy.
+    | The vite `@mdx-js` plugin compiles every `.mdx` (regardless of `?raw`), so
+    | the client can't obtain the original source — the read happens server-side.
+    |
+    | Default `resources/js/content` — a Vite-served content dir alongside the
+    | app. A host that authors its MDX elsewhere overrides via env; a `{name}.mdx`
+    | that is absent degrades to `null` (the caller renders its default).
+    |
+    */
+    'content_path' => env('BEAM_UX_CONTENT_PATH', 'resources/js/content'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Realm conventions (register-from-disk path → realm fallback)
     |--------------------------------------------------------------------------
     |

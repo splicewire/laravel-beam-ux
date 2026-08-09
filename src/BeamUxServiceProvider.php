@@ -188,6 +188,15 @@ class BeamUxServiceProvider extends PackageServiceProvider
             );
         });
         $this->app->singleton(Disk\SyncPagesFromDisk::class);
+
+        // The frontmatter-stripped raw-`.mdx` reader — seeds an mdxeditor buffer with the existing copy
+        // (the vite `@mdx-js` plugin compiles `.mdx`, so the client can't `?raw`-load the source). Root
+        // config-driven (`beam.ux.content_path`); a missing file degrades to null.
+        $this->app->singleton(Disk\RawMdxReader::class, function () {
+            return new Disk\RawMdxReader(
+                root: (string) config('beam.ux.content_path', 'resources/js/content'),
+            );
+        });
     }
 
     /**
