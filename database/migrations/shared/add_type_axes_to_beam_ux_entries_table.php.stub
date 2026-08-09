@@ -15,16 +15,26 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  *  - `body_style` — a **tsx-codec-local flavor** (`full | inline`), nullable/meaningless for other
  *    formats. Governs auto-import-preamble injection in the TSX codec.
  *
- * Runs in BOTH the central `migrate` and tenant `tenants:migrate` passes — shipped PUBLISH-ONLY via the
- * plain provider's {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag), same as S0:
- * `vendor:publish` copies this flat file into the host's `database/migrations/` and its `tenant/` twin
- * into `database/migrations/tenant/`, and the HOST runs each pass, so the columns exist identically
- * central + every tenant. This alter's `170001` timestamp sorts it right after S0's `170000` create.
+ * Runs in BOTH the central `migrate` and tenant `tenants:migrate` passes — shipped as a publish-only
+ * spatie/laravel-package-tools stub (`runsMigrations` FALSE), same as S0: registered via
+ * `configurePackage()`'s `->hasMigrations([...])`, `vendor:publish --tag=beam-ux-migrations` re-stamps +
+ * sequences a single copy into the host's `database/migrations/shared/`, so the columns exist identically central + every tenant. The declared
+ * `->hasMigrations([...])` order keeps this alter right after S0's create.
+ *
+ * SHARED (central + every tenant): published to the single `database/migrations/shared/` destination. The `Schema::hasColumn()` dup-guard below is
+ * there so a host that migrates BOTH passes into ONE schema (the shared-test-DB harness) doesn't re-alter;
+ * production separates schemas, so the guard is false.
  */
 return new class extends Migration
 {
     public function up(): void
     {
+        // SHARED-table dup-guard: the shared-test-DB harness may run the same shared/ file via both
+        // passes into one `public` schema, so the columns may already exist from the central pass. Production separates schemas.
+        if (Schema::hasColumn('beam_ux_entries', 'format')) {
+            return;
+        }
+
         Schema::table('beam_ux_entries', function (Blueprint $table) {
             // Sibling axis to `type` (ADR-0164): the body language / codec + file extension.
             $table->string('format')->default(UxFormat::Tsx->value)->index()->after('type');

@@ -3,7 +3,6 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\ServiceProvider;
 use Splicewire\Beam\Models\BeamParticle;
 
 /**
@@ -12,17 +11,19 @@ use Splicewire\Beam\Models\BeamParticle;
  * (`beam_particles`, beam-core) holds the migrate-on-read content; this row holds the queryable
  * authoring envelope.
  *
- * **TENANT TWIN.** Identical DDL to the flat central copy at `../2026_08_03_170000_create_beam_ux_entries_table.php`.
+ * SHARED (central + every tenant): published to the single `database/migrations/shared/` destination.
  * The `Schema::hasTable()` dup-guard below is there so a host that migrates BOTH passes into ONE schema (the
  * shared-test-DB harness) doesn't re-create the table; production separates schemas, so the guard is false.
  *
- * **Ubiquitous shape (charter §Q7).** This migration ships PUBLISH-ONLY via the plain provider's native
- * {@see ServiceProvider::publishesMigrations()} under the `beam-ux-migrations` tag:
- * `vendor:publish --tag=beam-ux-migrations` copies the flat central file into the host's `database/migrations/`
- * (central pass) and this `tenant/` twin into `database/migrations/tenant/` (Stancl tenant pass), and the
- * HOST runs each pass. The package no longer `loadMigrationsFrom`'s or runs migrations at runtime.
- * `beam_ux_entries` thus exists identically in central and every tenant. Residency is `context-following`
- * (default): an entry lives wherever it is authored; only the central path is exercised for now.
+ * **Ubiquitous shape (charter §Q7).** Shipped as a publish-only spatie/laravel-package-tools stub
+ * (`runsMigrations` FALSE): the package publishes this timestamp-less `.php.stub` via
+ * `configurePackage()`'s `->hasMigrations([...])` (`vendor:publish --tag=beam-ux-migrations`), which
+ * re-stamps + sequences a single copy into the host's `database/migrations/shared/` destination at
+ * install time — beam-tenancy's `registerSharedMigrationsPath()` runs that directory in both the
+ * central `migrate` pass and Stancl's tenant pass. The package never `loadMigrationsFrom`'s or runs
+ * migrations at runtime. `beam_ux_entries` thus exists identically in central and every tenant.
+ * Residency is `context-following` (default): an entry lives wherever it is authored; only the
+ * central path is exercised for now.
  *
  * **S0 columns only — the authoring envelope.** The optional aspects (format, file placement,
  * containment/route, workflow, taxonomy) are additive columns the later charter steps add; they are
@@ -32,9 +33,9 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // TENANT TWIN dup-guard: the shared-test-DB harness migrates BOTH the central and tenant
-        // passes into ONE `public` schema, so the central pass may already have created this table.
-        // Production targets separate schemas, so this guard is simply false there.
+        // SHARED-table dup-guard: the shared-test-DB harness may migrate the same shared/ file via
+        // BOTH the central and tenant passes into ONE `public` schema, so it may already have created
+        // this table. Production targets separate schemas, so this guard is simply false there.
         if (Schema::hasTable('beam_ux_entries')) {
             return;
         }

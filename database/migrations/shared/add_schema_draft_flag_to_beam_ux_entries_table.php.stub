@@ -17,18 +17,26 @@ use Illuminate\Support\Facades\Schema;
  *    it. Widgets/validation/refs are never fabricated by inference, so a draft is the honest floor.
  *    Indexed so an authoring surface can list "still-draft" components cheaply.
  *
- * **Migration ordering:** files now carry REAL sequential timestamps. This `170006` alter sorts AFTER the
- * `170000`–`170005` beam-ux migrations, so the base table already exists; the whole set lands after
- * beam-core's `beam_particles` (`2026_08_03_162536`). Shipped PUBLISH-ONLY via the plain provider's
- * {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag): `vendor:publish` copies this
- * flat file into the host's `database/migrations/` and its `tenant/` twin into `database/migrations/tenant/`,
- * and the HOST runs each pass (central `migrate` + tenant `tenants:migrate`), so the column shape is
- * identical central + tenant.
+ * Shipped as a publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE), registered via
+ * `configurePackage()`'s `->hasMigrations([...])`, whose declared order keeps this alter after the base
+ * table. `vendor:publish --tag=beam-ux-migrations` re-stamps + sequences the flat central file into the
+ * host's single `database/migrations/shared/` destination
+ * `migrate` + tenant `tenants:migrate`), so the column shape is identical central + tenant.
+ *
+ * SHARED (central + every tenant): published to the single `database/migrations/shared/` destination. The `Schema::hasColumn()` dup-guard below is
+ * there so a host that migrates BOTH passes into ONE schema (the shared-test-DB harness) doesn't re-alter;
+ * production separates schemas, so the guard is false.
  */
 return new class extends Migration
 {
     public function up(): void
     {
+        // SHARED-table dup-guard: the shared-test-DB harness may run the same shared/ file via both
+        // passes into one `public` schema, so the column may already exist from the central pass. Production separates schemas.
+        if (Schema::hasColumn('beam_ux_entries', 'schema_is_draft')) {
+            return;
+        }
+
         Schema::table('beam_ux_entries', function (Blueprint $table) {
             // Is the current schema_ref an INFERRED draft (never final until graduated)?
             $table->boolean('schema_is_draft')->default(false)->index()->after('schema_ref');

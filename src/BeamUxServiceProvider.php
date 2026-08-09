@@ -5,7 +5,10 @@ namespace Splicewire\Beam\Ux;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\ServiceProvider;
+use Spatie\LaravelPackageTools\Package;
+use Spatie\LaravelPackageTools\PackageServiceProvider;
+use Splicewire\Beam\Doctor\BeamDoctorManifest;
+use Splicewire\Beam\Install\BeamInstallManifest;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Sitemap\SitemapSourceRegistry;
 use Splicewire\Beam\Storage\DiskStorageDriver;
@@ -26,6 +29,7 @@ use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Disk\RegisterFromDisk;
 use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
+use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
@@ -50,10 +54,42 @@ use Splicewire\Beam\Write\ParticleWriter;
  * the {@see BeamUxEntry} model + `beam_ux_entries` table. The versioned
  * body it rides is a beam-core {@see BeamParticle}, written through beam-core's
  * shared {@see ParticleWriter} — this package forks neither.
+ *
+ * The `beam_ux_entries` + `sitemaps` migrations ship as PUBLISH-ONLY spatie/laravel-package-tools stubs
+ * (`runsMigrations` FALSE, the estate-wide convention beam-core set — commit e7ae9b7): beam-ux never
+ * `loadMigrationsFrom`'s or runs them at runtime; `vendor:publish --tag=beam-ux-migrations` (or
+ * `splicewire:beam:install`) re-stamps + sequences timestamped copies into the HOST at install time,
+ * which runs them. Both tables are ubiquitous (central + every tenant — "everything is shared by
+ * default"), so each publishes to the SINGLE `database/migrations/shared/` destination, not a
+ * duplicated flat+tenant pair, registered via `->hasMigrations([...])` in
+ * {@see self::configurePackage()}. beam-tenancy's `registerSharedMigrationsPath()` runs that one
+ * directory in both the central `migrate` pass and Stancl's tenant pass.
  */
-class BeamUxServiceProvider extends ServiceProvider
+class BeamUxServiceProvider extends PackageServiceProvider
 {
-    public function register(): void
+    public function configurePackage(Package $package): void
+    {
+        $package
+            ->name('laravel-beam-ux')
+            // beam-ux's migrations ship PUBLISH-ONLY as spatie/laravel-package-tools stubs — the
+            // estate-wide convention (mirrors beam-core). Every table/ALTER is UBIQUITOUS (central +
+            // every tenant — "everything is shared by default"), so each publishes to the SINGLE
+            // `shared/…` destination, not a duplicated flat+tenant pair, in the package's existing
+            // declared order (package-tools re-stamps sequentially in listed order).
+            ->hasMigrations([
+                'shared/create_beam_ux_entries_table',
+                'shared/add_type_axes_to_beam_ux_entries_table',
+                'shared/add_placement_and_driver_refs_to_beam_ux_entries_table',
+                'shared/create_sitemaps_table',
+                'shared/add_containment_to_beam_ux_entries_table',
+                'shared/add_workflow_marking_to_beam_ux_entries_table',
+                'shared/add_schema_draft_flag_to_beam_ux_entries_table',
+                'shared/add_title_and_nav_order_to_beam_ux_entries_table',
+                'shared/add_composable_flag_to_beam_ux_entries_table',
+            ]);
+    }
+
+    public function packageRegistered(): void
     {
         // Merge the entry-body route config (api_root / route_name) as `config('beam.ux.*')`, so the
         // beamUxEntries() macro reads a config-driven, env-overridable prefix instead of a hardcoded one.
@@ -68,16 +104,35 @@ class BeamUxServiceProvider extends ServiceProvider
         $this->registerDisk();
     }
 
-    public function boot(): void
+    public function packageBooted(): void
     {
-        if ($this->app->runningInConsole()) {
-            $this->bootMigrations();
-        }
-
         $this->bootSitemap();
         $this->registerEntryWorkflow();
         $this->bootCommands();
         $this->bootRouteMacro();
+
+        // beam-ux is an "operator" of the estate-wide publish-only stub migrations convention — self
+        // registers the doctor/operator check on ITS OWN migrations DOWN into beam-core's aggregation
+        // manifest, guarded on the manifest being bound (a host predating it still boots beam-ux fine).
+        if ($this->app->bound(BeamDoctorManifest::class)) {
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxMigrationsAudit::class,
+            );
+        }
+
+        // Self-registers its own install step (config merge is automatic; migrations publish tag +
+        // migrate flag) DOWN into beam-core's install manifest, guarded the same way.
+        if ($this->app->bound(BeamInstallManifest::class)) {
+            $this->app->make(BeamInstallManifest::class)->register(
+                package: 'splicewire/laravel-beam-ux',
+                publishTags: ['beam-ux-migrations'],
+                migrates: true,
+                note: 'Optional: set beam.ux.storage.mirror_disk to a git-tracked disk (see config/filesystems.php) '.
+                    'for diffable, version-controlled page bodies on publish. Unset by default — no disk writes '.
+                    'until you opt in.',
+            );
+        }
     }
 
     /**
@@ -341,44 +396,5 @@ class BeamUxServiceProvider extends ServiceProvider
 
         $this->app->make(SitemapSourceRegistry::class)
             ->register(EntrySitemapSource::class);
-    }
-
-    /**
-     * PUBLISH-ONLY migrations for the **ubiquitous** `beam_ux_entries` + `sitemaps` tables — the
-     * idiomatic pattern for a PLAIN ServiceProvider, mirroring the beam-core PackageServiceProvider
-     * exemplar (commit e7ae9b7) and the plain-provider beam-workflows analogue (commit 994aba1). This
-     * is the undo of the recohere runtime `loadMigrationsFrom` + Stancl `--path` push.
-     *
-     * A plain provider has no spatie/laravel-package-tools machinery, so this uses Laravel's native
-     * {@see ServiceProvider::publishesMigrations()} (Laravel 11+). It does NOT loadMigrationsFrom and
-     * does NOT push onto `tenancy.migration_parameters.--path`: the package never runs these at
-     * runtime. `vendor:publish --tag=beam-ux-migrations` drops the copies into the HOST's
-     * `database/migrations/` (central pass) + `database/migrations/tenant/` (Stancl tenant pass), and
-     * the host runs each pass.
-     *
-     * **UBIQUITOUS (central + every tenant).** Every table exists identically in central and each
-     * tenant, so each migration ships TWICE under the SAME source dir:
-     *  - the flat copy at `database/migrations/<ts>_<name>.php` publishes into `database/migrations/`
-     *    (central pass);
-     *  - a `tenant/` twin (identical DDL) at `database/migrations/tenant/<ts>_<name>.php` publishes,
-     *    relative subpath preserved, into `database/migrations/tenant/` (tenant pass).
-     * ONE directory mapping covers both: the publish command lists the source dir RECURSIVELY and
-     * preserves each file's relative subpath, so a single `database/migrations` → `database_path
-     * ('migrations')` mapping lands the flat copies in `migrations/` and the twins in `migrations/tenant/`.
-     * The tenant twins carry a `Schema::hasTable()` / `Schema::hasColumn()` dup-guard so a host that
-     * migrates BOTH passes into ONE schema (the shared-test-DB harness) does not re-create/re-alter;
-     * production targets separate schemas, so the guard is simply false there.
-     *
-     * The publishable sources carry real, sequential timestamp prefixes (`2026_08_03_170000…170006`),
-     * landing AFTER beam-core's `beam_particles` (`2026_08_03_162536`) since `beam_ux_entries` has-a
-     * particle body. With `database.migrations.update_date_on_publish` at its default (false), native
-     * `publishesMigrations` copies each file verbatim — one correctly-timestamped migration per file,
-     * no double-stamp, order preserved.
-     */
-    protected function bootMigrations(): void
-    {
-        $this->publishesMigrations([
-            __DIR__.'/../database/migrations' => $this->app->databasePath('migrations'),
-        ], 'beam-ux-migrations');
     }
 }

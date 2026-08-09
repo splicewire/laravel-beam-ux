@@ -16,12 +16,10 @@ use Illuminate\Support\Facades\Schema;
  *  - `nav_order` — an optional sibling sort key. The projector orders by it WHEN present and falls back to
  *    `slug` otherwise. Nullable so an unordered sitemap is never broken by an orderBy on a missing value.
  *
- * **Migration ordering:** carries a REAL sequential timestamp. This `170007` alter sorts AFTER the
- * `170000`–`170006` beam-ux migrations, so the base table (and its `slug`/`segment` columns) already
- * exist. Shipped PUBLISH-ONLY via {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations`
- * tag): `vendor:publish` copies this flat file into the host's `database/migrations/` and its `tenant/`
- * twin into `database/migrations/tenant/`, and the HOST runs each pass, so the shape is identical
- * central + tenant.
+ * Shipped as a publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE), registered via
+ * `configurePackage()`'s `->hasMigrations([...])`, whose declared order keeps this alter after the base
+ * table (and its `slug`/`segment` columns). `vendor:publish --tag=beam-ux-migrations` re-stamps +
+ * sequences a single copy into the host's `database/migrations/shared/`, so the shape is identical central + tenant.
  */
 return new class extends Migration
 {

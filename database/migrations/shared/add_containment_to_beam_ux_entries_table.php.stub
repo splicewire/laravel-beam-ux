@@ -21,17 +21,16 @@ use Splicewire\Beam\Ux\Models\Sitemap;
  *  - `segment`    — this node's own path piece. Composes DOWN the tree: bare/`./segment` is
  *    parent-relative (folder semantics); `/segment` resets to the realm/sitemap root.
  *
- * **Migration ordering:** files now carry REAL sequential timestamps. This `170004` containment alter
- * sorts AFTER the `170003` `create_sitemaps_table` (so the FK target exists) and after the `170000`–`170002`
- * beam-ux migrations; the whole set lands after beam-core's `beam_particles` (`2026_08_03_162536`). Not a
- * DB-constrained FK — the sitemaps table rides no host prefix seam here, but the beam-ux table shape stays
- * portable central + tenant, so `sitemap_id` is a plain indexed uuid the {@see BeamUxEntry::sitemap()}
- * relation resolves. Shipped PUBLISH-ONLY via the plain provider's
- * {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag): `vendor:publish` copies the
- * flat central file into the host's `database/migrations/` and this `tenant/` twin into
- * `database/migrations/tenant/`, and the HOST runs each pass (central `migrate` + tenant `tenants:migrate`).
+ * Not a DB-constrained FK — the sitemaps table rides no host prefix seam here, but the beam-ux table shape
+ * stays portable central + tenant, so `sitemap_id` is a plain indexed uuid the {@see BeamUxEntry::sitemap()}
+ * relation resolves. Shipped as a publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE),
+ * registered via `configurePackage()`'s `->hasMigrations([...])`, whose declared order keeps this alter
+ * after `create_sitemaps_table` (so the FK target exists). `vendor:publish --tag=beam-ux-migrations`
+ * re-stamps + sequences a single copy into the host's `database/migrations/shared/` destination —
+ * beam-tenancy's `registerSharedMigrationsPath()` runs that directory in both the central `migrate`
+ * pass and Stancl's tenant pass.
  *
- * **TENANT TWIN.** Identical DDL to the flat central copy. The `Schema::hasColumn()` dup-guard below is
+ * SHARED (central + every tenant): published to the single `database/migrations/shared/` destination. The `Schema::hasColumn()` dup-guard below is
  * there so a host that migrates BOTH passes into ONE schema (the shared-test-DB harness) doesn't re-alter;
  * production separates schemas, so the guard is false.
  */
@@ -39,8 +38,8 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // TENANT TWIN dup-guard: the shared-test-DB harness runs both passes into one `public`
-        // schema, so the columns may already exist from the central pass. Production separates schemas.
+        // SHARED-table dup-guard: the shared-test-DB harness may run the same shared/ file via both
+        // passes into one `public` schema, so the columns may already exist from the central pass. Production separates schemas.
         if (Schema::hasColumn('beam_ux_entries', 'realm')) {
             return;
         }

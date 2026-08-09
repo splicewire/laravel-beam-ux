@@ -18,11 +18,11 @@ use Illuminate\Support\Facades\Schema;
  * column landed. A host demotes a behavior realm to `composable = false` at seed time (the host owns the
  * realm→default policy; see the satellite's `RealmRegistry`).
  *
- * **Migration ordering:** carries a REAL sequential timestamp. This `170008` alter sorts AFTER the
- * `170000`–`170007` beam-ux migrations, so the base table already exists. Shipped PUBLISH-ONLY via
- * {@see Illuminate\Support\ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag): the flat
- * file publishes into the host's `database/migrations/` (central pass) and its `tenant/` twin into
- * `database/migrations/tenant/` (Stancl tenant pass), so the shape is identical central + tenant.
+ * Shipped as a publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE), registered via
+ * `configurePackage()`'s `->hasMigrations([...])`, whose declared order keeps this alter after the base
+ * table. `vendor:publish --tag=beam-ux-migrations` re-stamps + sequences this flat file into the host's
+ * the single `database/migrations/shared/` destination (beam-tenancy's registerSharedMigrationsPath runs it in both the central and Stancl tenant
+ * tenant pass), so the shape is identical central + tenant.
  */
 return new class extends Migration
 {

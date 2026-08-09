@@ -16,14 +16,12 @@ use Splicewire\Beam\Ux\Placement\FilePlacement;
  *  - `driver_ref` — names the free-beam-core {@see StorageDriver} this entry
  *    persists through; nullable → falls through to the default `Stacked(Particle, Disk)`.
  *
- * **Migration ordering:** files now carry REAL sequential timestamps, so this alter's `170002` prefix
- * sorts it AFTER the `170000` create and the `170001` type-axes alter; the whole beam-ux set lands after
- * beam-core's `beam_particles` (`2026_08_03_162536`). Shipped PUBLISH-ONLY via the plain provider's
- * {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag): `vendor:publish` copies the
- * flat central file into the host's `database/migrations/` and this `tenant/` twin into
- * `database/migrations/tenant/`, and the HOST runs each pass, so the columns exist identically central + tenant.
+ * Shipped as a publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE), registered via
+ * `configurePackage()`'s `->hasMigrations([...])`, whose declared order keeps this alter after the create
+ * and the type-axes alter. `vendor:publish --tag=beam-ux-migrations` re-stamps + sequences the flat
+ * a single copy into the host's `database/migrations/shared/` destination
  *
- * **TENANT TWIN.** Identical DDL to the flat central copy. The `Schema::hasColumn()` dup-guard below is
+ * SHARED (central + every tenant): published to the single `database/migrations/shared/` destination. The `Schema::hasColumn()` dup-guard below is
  * there so a host that migrates BOTH passes into ONE schema (the shared-test-DB harness) doesn't re-alter;
  * production separates schemas, so the guard is false.
  */
@@ -31,8 +29,8 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // TENANT TWIN dup-guard: the shared-test-DB harness runs both passes into one `public`
-        // schema, so the columns may already exist from the central pass. Production separates schemas.
+        // SHARED-table dup-guard: the shared-test-DB harness may run the same shared/ file via both
+        // passes into one `public` schema, so the columns may already exist from the central pass. Production separates schemas.
         if (Schema::hasColumn('beam_ux_entries', 'placement_ref')) {
             return;
         }

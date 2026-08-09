@@ -14,19 +14,29 @@ use Splicewire\Beam\Ux\Models\Sitemap;
  * (many sitemaps per site, per-tenant sitemaps) is DEFERRED — the door is held open by the shape (a
  * table + a `realm` key + a `default` marker), not by a built feature. {@see Sitemap} is the model.
  *
- * **Migration ordering:** files now carry REAL sequential timestamps. This `170003` sitemaps create sorts
- * before the `170004` containment alter that FKs `beam_ux_entries.sitemap_id` to it (so the FK target
- * exists first), and after the `170000`–`170002` beam-ux migrations; the whole set lands after beam-core's
- * `beam_particles` (`2026_08_03_162536`). Shipped PUBLISH-ONLY via the plain provider's
- * {@see ServiceProvider::publishesMigrations()} (`beam-ux-migrations` tag): `vendor:publish` copies this
- * flat file into the host's `database/migrations/` and its `tenant/` twin into `database/migrations/tenant/`,
- * and the HOST runs each pass, so the table exists identically central + every tenant (residency is
- * context-following).
+ * Shipped as a publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE), registered
+ * alongside the other beam-ux stubs via `configurePackage()`'s `->hasMigrations([...])`. `vendor:publish
+ * --tag=beam-ux-migrations` re-stamps + sequences the flat central file into the host's
+ * the single `database/migrations/shared/` destination at install time, so
+ * the table exists identically central + every tenant (residency is context-following). The declared
+ * `->hasMigrations([...])` order keeps this create ahead of the containment alter that FKs
+ * `beam_ux_entries.sitemap_id` to it.
+ *
+ * SHARED (central + every tenant): published to the single `database/migrations/shared/` destination. The `Schema::hasTable()` dup-guard below is
+ * there so a host that migrates BOTH passes into ONE schema (the shared-test-DB harness) doesn't re-create
+ * the table; production separates schemas, so the guard is false.
  */
 return new class extends Migration
 {
     public function up(): void
     {
+        // SHARED-table dup-guard: the shared-test-DB harness may migrate the same shared/ file via
+        // BOTH the central and tenant passes into ONE `public` schema, so it may already have created
+        // this table. Production targets separate schemas, so this guard is simply false there.
+        if (Schema::hasTable('sitemaps')) {
+            return;
+        }
+
         Schema::create('sitemaps', function (Blueprint $table) {
             $table->uuid('id')->primary();
 
