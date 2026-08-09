@@ -72,20 +72,13 @@ class BeamUxServiceProvider extends PackageServiceProvider
         $package
             ->name('laravel-beam-ux')
             // beam-ux's migrations ship PUBLISH-ONLY as spatie/laravel-package-tools stubs — the
-            // estate-wide convention (mirrors beam-core). Every table/ALTER is UBIQUITOUS (central +
-            // every tenant — "everything is shared by default"), so each publishes to the SINGLE
-            // `shared/…` destination, not a duplicated flat+tenant pair, in the package's existing
-            // declared order (package-tools re-stamps sequentially in listed order).
+            // estate-wide convention (mirrors beam-core). Both tables are UBIQUITOUS (central + every
+            // tenant — "everything is shared by default"), so each publishes to the SINGLE `shared/…`
+            // destination. create_sitemaps_table is listed first since beam_ux_entries' sitemap_id
+            // column conceptually follows it (not a DB-constrained FK, so order isn't load-bearing).
             ->hasMigrations([
-                'shared/create_beam_ux_entries_table',
-                'shared/add_type_axes_to_beam_ux_entries_table',
-                'shared/add_placement_and_driver_refs_to_beam_ux_entries_table',
                 'shared/create_sitemaps_table',
-                'shared/add_containment_to_beam_ux_entries_table',
-                'shared/add_workflow_marking_to_beam_ux_entries_table',
-                'shared/add_schema_draft_flag_to_beam_ux_entries_table',
-                'shared/add_title_and_nav_order_to_beam_ux_entries_table',
-                'shared/add_composable_flag_to_beam_ux_entries_table',
+                'shared/create_beam_ux_entries_table',
             ]);
     }
 
