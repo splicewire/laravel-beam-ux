@@ -216,6 +216,7 @@ class BeamUxServiceProvider extends PackageServiceProvider
             ScaffoldCommand::class,
             SeedNavCommand::class,
             EnrichPageSchemasCommand::class,
+            Console\PnpmOverridesCommand::class,
         ]);
     }
 
