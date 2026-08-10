@@ -3,3 +3,5 @@ composer.local.json
 composer.lock
 .phpunit.result.cache
 .phpunit.cache
+
+CLAUDE.md
