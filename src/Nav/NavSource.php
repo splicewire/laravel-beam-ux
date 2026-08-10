@@ -51,8 +51,8 @@ class NavSource
     }
 
     /**
-     * Read `resources/beam-ux/nav.{yml,yaml,json}` if present, relative to the mirror-disk root (else
-     * base_path). Returns the raw decoded array, or null when no file exists.
+     * Read `resources/beam-ux/nav.{yml,yaml,json}` if present, relative to the mirror-disk root (else the
+     * `resource_path('beam-ux')` default). Returns the raw decoded array, or null when no file exists.
      *
      * @return array<mixed>|null
      */
@@ -75,7 +75,13 @@ class NavSource
         return null;
     }
 
-    /** The dir a `nav.{yml,json}` is looked up in — the mirror-disk root when configured, else base_path. */
+    /**
+     * The dir a `nav.{yml,json}` is looked up in. The mirror-disk root when a git-tracked mirror disk is
+     * configured (bodies + nav.yml then co-locate under it), else `resource_path('beam-ux')` — the estate's
+     * canonical author-source dir (where `register-from-disk` reads page files from), so a fresh host that
+     * drops `resources/beam-ux/nav.yml` is found with ZERO config (beam-install-turnkey trap 2). It was
+     * `base_path()` before, which never matched the documented `resources/beam-ux/` location.
+     */
     private function navRoot(): string
     {
         $disk = config('beam.ux.storage.mirror_disk');
@@ -86,7 +92,7 @@ class NavSource
             }
         }
 
-        return rtrim(base_path(), '/');
+        return rtrim(resource_path('beam-ux'), '/');
     }
 
     /**
