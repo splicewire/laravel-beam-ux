@@ -67,6 +67,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Seed the content nav via splicewire:beam:seed
+    |--------------------------------------------------------------------------
+    |
+    | The config GATE for beam-ux's NavSeeder registration in beam-core's
+    | package-registered seed manifest (`splicewire:beam:seed`). The NavSeeder
+    | is a thin `db:seed --class` adapter over `splicewire:beam:ux:seed-nav`, so
+    | a host's one `beam:seed` run restamps the per-realm sitemaps' nav after a
+    | migrate:fresh — no bespoke DatabaseSeeder call.
+    |
+    | Default true. Set false to keep nav-seeding out of the aggregate run (a
+    | host that seeds nav on its own schedule); the `splicewire:beam:ux:seed-nav`
+    | command stays independently callable either way.
+    |
+    */
+    'seed_nav' => env('BEAM_UX_SEED_NAV', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Raw-MDX content root (RawMdxReader)
     |--------------------------------------------------------------------------
     |

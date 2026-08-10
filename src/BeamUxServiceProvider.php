@@ -9,6 +9,8 @@ use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
+use Splicewire\Beam\Seed\BeamSeedManifest;
+use Splicewire\Beam\Ux\Database\Seeders\NavSeeder;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Sitemap\SitemapSourceRegistry;
 use Splicewire\Beam\Storage\DiskStorageDriver;
@@ -124,6 +126,19 @@ class BeamUxServiceProvider extends PackageServiceProvider
                 note: 'Optional: set beam.ux.storage.mirror_disk to a git-tracked disk (see config/filesystems.php) '.
                     'for diffable, version-controlled page bodies on publish. Unset by default — no disk writes '.
                     'until you opt in.',
+            );
+        }
+
+        // Self-registers its NavSeeder (a thin db:seed adapter over splicewire:beam:ux:seed-nav) DOWN into
+        // beam-core's seed manifest, so one `splicewire:beam:seed` restamps the content nav alongside every
+        // other package's seeders after a migrate:fresh. Gated by `beam.ux.seed_nav` (default true); order 20
+        // so it runs after the accounts substrate. Guarded on the manifest being bound.
+        if ($this->app->bound(BeamSeedManifest::class)) {
+            $this->app->make(BeamSeedManifest::class)->register(
+                package: 'splicewire/laravel-beam-ux',
+                seederClass: NavSeeder::class,
+                order: 20,
+                configGate: 'beam.ux.seed_nav',
             );
         }
     }
