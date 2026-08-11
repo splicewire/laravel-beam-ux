@@ -129,7 +129,7 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertSame('', $data->toModelAttributes()['namespace']);
     }
 
-    public function test_after_write_seeds_page_and_component_with_an_empty_puck_body(): void
+    public function test_after_write_seeds_page_and_component_with_an_empty_blockdoc_body(): void
     {
         foreach ([UxType::Page, UxType::Component] as $type) {
             $entry = BeamUxEntry::create(['namespace' => '', 'slug' => 'x-'.$type->value, 'type' => $type]);
@@ -138,13 +138,12 @@ class BeamUxEntryDataTest extends TestCase
 
             $this->assertNotNull($entry->particle_id);
             $body = app(StorageDriverResolver::class)->resolve($entry)->read($entry->particle_id)?->body;
-            $this->assertSame(['root' => [], 'content' => [], 'zones' => []], $body);
+            $this->assertSame([], $body);
 
-            // The RAW stored JSON must have root/zones as OBJECTS ({}), not arrays ([]) — Puck's
-            // Data shape ({root: {}, content: [], zones: {}}); PHP's decode-to-array collapses this
-            // distinction on read, so assert against the raw column string directly.
+            // The RAW stored JSON is `[]` (a blockdoc JsonDoc — JsonNode[] — is a genuine list; unlike
+            // Puck's retired {root,content,zones} shape there is no object/array ambiguity to guard).
             $raw = (string) DB::table('beam_particles')->where('id', $entry->particle_id)->value('payload');
-            $this->assertJsonStringEqualsJsonString('{"root":{},"content":[],"zones":{}}', $raw);
+            $this->assertJsonStringEqualsJsonString('[]', $raw);
         }
     }
 

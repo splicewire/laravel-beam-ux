@@ -20,7 +20,6 @@ use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
-use Splicewire\Beam\Ux\Codegen\PuckPageCodegen;
 use Splicewire\Beam\Ux\Console\EnrichPageSchemasCommand;
 use Splicewire\Beam\Ux\Console\RegisterFromDiskCommand;
 use Splicewire\Beam\Ux\Console\ScaffoldCommand;
@@ -211,18 +210,6 @@ class BeamUxServiceProvider extends PackageServiceProvider
         $this->app->singleton(RegisterEntriesFromDisk::class);
         $this->app->singleton(UpdateFromNewer::class);
 
-        // The PHP side of the PuckData ⟷ BlockDoc bridge (ticket 08) — shells to the Node
-        // `@splicewire/beam-ux` `beam-ux-puck-bridge` CLI to parse a composed page `.tsx` back into Puck
-        // Data. Config-driven (`beam.ux.puck.bridge`); degrade-not-fabricate when the script is absent.
-        $this->app->singleton(Disk\PuckBridge::class, function () {
-            return new Disk\PuckBridge(
-                script: config('beam.ux.puck.bridge.script'),
-                node: (string) config('beam.ux.puck.bridge.node', 'node'),
-                timeout: (int) config('beam.ux.puck.bridge.timeout', 30),
-            );
-        });
-        $this->app->singleton(Disk\SyncPagesFromDisk::class);
-
         // The frontmatter-stripped raw-`.mdx` reader — seeds an mdxeditor buffer with the existing copy
         // (the vite `@mdx-js` plugin compiles `.mdx`, so the client can't `?raw`-load the source). Root
         // config-driven (`beam.ux.content_path`); a missing file degrades to null.
@@ -246,7 +233,6 @@ class BeamUxServiceProvider extends PackageServiceProvider
         $this->commands([
             RegisterFromDiskCommand::class,
             UpdateFromNewerCommand::class,
-            Console\SyncFromDiskCommand::class,
             ScaffoldCommand::class,
             SeedNavCommand::class,
             EnrichPageSchemasCommand::class,
@@ -345,12 +331,7 @@ class BeamUxServiceProvider extends PackageServiceProvider
             $name = config('beam.ux.storage.mirror_disk');
             $disk = ($name === null || $name === '') ? null : Storage::disk($name);
 
-            // The Puck-page codegen the mirror runs for a structural page body. Its block-import module is
-            // host-configured (`beam.ux.puck.blocks_module`) so the generated `.tsx` imports the host's own
-            // Puck block vocabulary (satellite-local), keeping the codegen generic over any host's blocks.
-            $codegen = new PuckPageCodegen((string) config('beam.ux.puck.blocks_module', '@/puck/blocks'));
-
-            return new PlacedDiskMirror($disk, $codegen);
+            return new PlacedDiskMirror($disk);
         });
     }
 

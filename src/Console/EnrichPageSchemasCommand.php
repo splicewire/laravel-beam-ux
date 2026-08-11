@@ -84,8 +84,8 @@ class EnrichPageSchemasCommand extends Command
             $relative = $placements->resolve($entry)->pathFor($entry);
             $file = rtrim($root, '/').'/'.ltrim($relative, '/');
 
-            // This batch only enriches .mdx pages — a .tsx page is a Puck-composed body (structural, no
-            // flat page-chrome schema), enriched via the bridge, not this encode path.
+            // This batch only enriches .mdx pages — a .tsx page's structural body has no flat
+            // page-chrome schema this frontmatter-encode path applies to.
             if (! str_ends_with($file, '.mdx') || ! is_file($file)) {
                 continue;
             }

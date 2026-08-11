@@ -60,13 +60,16 @@ class BeamUxEntryData extends Data
     ) {}
 
     /**
-     * The per-kind default body (ADR-0016 — `@splicewire/beam-ux/blockdoc`'s Puck `Data` shape, not
-     * raw `JsonNode[]`): `page`/`component` both start as the same empty Puck seed
-     * (`{root: {}, content: [], zones: {}}` — `PuckPage.tsx`'s `EMPTY_SEED()`, the shape a
-     * WYSIWYG-created `component` also composes through, no separate mechanism). A freshly created
-     * tenant `theme` override pre-fills with the CURRENTLY-resolved theme (central row + schema
-     * defaults, {@see ThemeResolver::resolve()}) — a real starting point to edit deltas from, never
-     * blank.
+     * The per-kind default body (ADR-0016 — `@splicewire/beam-ux/blockdoc`'s `JsonNode[]` tree, NOT
+     * Puck): `page`/`component` both start as the same empty `JsonDoc` (`[]`, zero nodes) — the shape
+     * `@splicewire/beam-ux/canvas`'s `VisualEditor`/`PageEditor`/`TreeRender` actually consume (that
+     * module's own docblock names `JsonDoc` as its body type; Puck's `{root,content,zones}` shape,
+     * this method previously — incorrectly — seeded, is retired fleet-wide). An author starts with a
+     * blank canvas and inserts their first block via the editor's Insert palette — no separate
+     * mechanism for `component` vs `page`. A freshly created tenant `theme` override pre-fills with
+     * the CURRENTLY-resolved theme (central row + schema defaults, {@see ThemeResolver::resolve()}) —
+     * a real starting point to edit deltas from, never blank; `theme` bodies are a distinct
+     * `{canvas,shell,site}` token object, not a `JsonDoc`, and are unaffected by this.
      */
     public static function afterWrite(Model $model, mixed $input): void
     {
@@ -74,12 +77,9 @@ class BeamUxEntryData extends Data
             return;
         }
 
-        // `root`/`zones` are JSON OBJECTS in Puck's Data shape ({root: {}, content: [], zones: {}},
-        // PuckPage.tsx's EMPTY_SEED()) — a bare PHP `[]` always json_encodes as `[]`, never `{}`, so
-        // an empty object needs the explicit (object) cast or the client sees the wrong JSON shape.
         $body = $model->type === UxType::Theme
             ? app(ThemeResolver::class)->resolve()
-            : ['root' => (object) [], 'content' => [], 'zones' => (object) []];
+            : [];
 
         $item = app(StorageDriverResolver::class)->resolve($model)->write('', $body, $model->namespace);
 

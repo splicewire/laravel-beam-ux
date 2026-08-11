@@ -24,11 +24,10 @@ enum UxFormat: string
     /** MDX — folded in from the free-tier `laravel-beam-mdx` arm; `body_style` is meaningless here. */
     case Mdx = 'mdx';
 
-    // NOTE: there is intentionally NO `json` format. A Puck `page`'s structural body was briefly mirrored
-    // as verbatim `.json` — the category error ADR-0164's "NEXT" slice retired: json is a serialization,
-    // not a SOURCE language. A Puck page is `format: tsx`; on Publish its Puck `Data` is CODEGEN'd to a
-    // composed-JSX `.tsx` (see PuckPageCodegen + PlacedDiskMirror), the same extension a hand-authored
-    // component uses, disambiguated by `{type, body-shape}` — never a fifth format value.
+    // NOTE: there is intentionally NO `json` format. A structural page's body was briefly mirrored to
+    // disk as verbatim `.json` — the category error ADR-0164's "NEXT" slice retired: json is a
+    // serialization, not a SOURCE language. A structural page stays `format: tsx`, the same extension a
+    // hand-authored component uses, disambiguated by `{type, body-shape}` — never a fifth format value.
 
     /** The file extension the format materializes to (drives disk placement, S2). */
     public function extension(): string
