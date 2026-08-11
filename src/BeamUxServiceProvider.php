@@ -5,13 +5,13 @@ namespace Splicewire\Beam\Ux;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
+use Schemastud\DataSchemas\Lifecycle\FilesystemSchemaRegistry;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
-use Splicewire\Beam\Seed\BeamSeedManifest;
-use Splicewire\Beam\Ux\Database\Seeders\NavSeeder;
 use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Sitemap\SitemapSourceRegistry;
 use Splicewire\Beam\Storage\DiskStorageDriver;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
@@ -28,6 +28,7 @@ use Splicewire\Beam\Ux\Console\SeedNavCommand;
 use Splicewire\Beam\Ux\Console\UpdateFromNewerCommand;
 use Splicewire\Beam\Ux\Containment\NavProjector;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
+use Splicewire\Beam\Ux\Database\Seeders\NavSeeder;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Disk\RegisterFromDisk;
 use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
@@ -37,6 +38,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
+use Splicewire\Beam\Ux\Schema\ThemeSchemas;
 use Splicewire\Beam\Ux\Sitemap\EntryEntitlementGate;
 use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 use Splicewire\Beam\Ux\Sitemap\EntrySitemapSource;
@@ -105,6 +107,7 @@ class BeamUxServiceProvider extends PackageServiceProvider
         $this->registerEntryWorkflow();
         $this->bootCommands();
         $this->bootRouteMacro();
+        $this->registerThemeSchemas();
 
         // beam-ux is an "operator" of the estate-wide publish-only stub migrations convention — self
         // registers the doctor/operator check on ITS OWN migrations DOWN into beam-core's aggregation
@@ -393,6 +396,30 @@ class BeamUxServiceProvider extends PackageServiceProvider
             $this->app->make(WorkflowTypeRegistry::class)
                 ->register(UxType::Page->value, 'Page')
                 ->register(UxType::Component->value, 'Component');
+        }
+    }
+
+    /**
+     * Ship the namespaced theme token schemas (theme-entries-and-authoring ticket 01) into their
+     * OWN {@see FilesystemSchemaRegistry} tier — {@see ThemeSchemas::directory()}, NOT through the
+     * host's `SchemaRegistry::class` binding, whose `register()` always lands in that host's FIRST
+     * configured source (typically the DB tier). Package defaults must live in the FILE tier
+     * specifically, so a host's later DB-tier registration of e.g. `theme.site` has something to
+     * shadow (`BeamSchemaRegistry`'s whole read-order contract). `register()` is idempotent
+     * (fingerprint-checked) and the artifact directory is regenerated from {@see ThemeSchemas} on
+     * every boot — never hand-edit the generated `.schema.json` files.
+     *
+     * A host that wants these namespaces resolvable through ITS OWN `BeamSchemaRegistry` points (or
+     * adds) a `file` source factory at {@see ThemeSchemas::directory()} — that host-side wiring is
+     * out of this package's scope; this method only guarantees the artifacts exist and are
+     * BeamSchemaRegistry-compatible (proven in `tests/ThemeSchemaTest.php`).
+     */
+    protected function registerThemeSchemas(): void
+    {
+        $registry = new FilesystemSchemaRegistry(ThemeSchemas::directory());
+
+        foreach (ThemeSchemas::all() as $schema) {
+            $registry->register($schema);
         }
     }
 

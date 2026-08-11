@@ -5,3 +5,6 @@ composer.lock
 .phpunit.cache
 
 CLAUDE.md
+
+# Generated FilesystemSchemaRegistry artifacts (regenerated from ThemeSchemas on every boot).
+/resources/schemas/theme/
