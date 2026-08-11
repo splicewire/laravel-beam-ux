@@ -33,6 +33,7 @@ use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Disk\RegisterFromDisk;
 use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
+use Splicewire\Beam\Ux\Entitlements\BeamUxRealmGrantable;
 use Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
@@ -98,6 +99,7 @@ class BeamUxServiceProvider extends PackageServiceProvider
         $this->registerContainment();
         $this->registerSitemap();
         $this->registerDisk();
+        $this->registerEntitlements();
     }
 
     public function packageBooted(): void
@@ -142,6 +144,21 @@ class BeamUxServiceProvider extends PackageServiceProvider
                 order: 20,
                 configGate: 'beam.ux.seed_nav',
             );
+        }
+    }
+
+    /**
+     * ACC-01: bind beam-ux's OOTB `RealmGrantable` implementation
+     * ({@see BeamUxRealmGrantable} — `BeamUxEntry` IS the realm root) onto beam-accounts'
+     * `config('beam.accounts.entitlements.realm_grantable')` port, UNLESS the host already set that
+     * key itself — mirroring the same conditional-bind idiom `BeamAccountsServiceProvider` uses for
+     * `permission-cascade.entitlement_resolver`. This is what turns `DefaultEntitlementResolver`'s
+     * grant cascade on for a fresh beam-ux install with no host edit required.
+     */
+    protected function registerEntitlements(): void
+    {
+        if (config('beam.accounts.entitlements.realm_grantable') === null) {
+            config(['beam.accounts.entitlements.realm_grantable' => BeamUxRealmGrantable::class]);
         }
     }
 

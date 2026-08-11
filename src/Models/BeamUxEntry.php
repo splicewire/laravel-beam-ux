@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Rushing\PermissionCascade\Concerns\HasVisibility;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Ux\Codec\BodyCodec;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
@@ -109,6 +110,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
 {
     use HasFacets;
     use HasUuids;
+    use HasVisibility;
     use WorkflowManagedTrait;
 
     protected $table = 'beam_ux_entries';
@@ -231,6 +233,24 @@ class BeamUxEntry extends Model implements WorkflowManaged
     public function children(): HasMany
     {
         return $this->hasMany(self::class, 'parent_id');
+    }
+
+    /**
+     * Feeds `rushing/laravel-permission-cascade`'s topology-agnostic `HasVisibility` concern its
+     * ancestor chain (ACC-01): nearest-first, walking `parent_id` up to the containment root (a
+     * realm root entry has none — an empty chain). This is what lets a Team's `manage` grant on a
+     * REALM ROOT cascade down to every entry beneath it via
+     * `Rushing\PermissionCascade\Policies\BaseModelPolicy::resolveShared()`.
+     *
+     * @return list<self>
+     */
+    public function visibilityAncestors(): iterable
+    {
+        if ($this->parent === null) {
+            return [];
+        }
+
+        return [$this->parent, ...$this->parent->visibilityAncestors()];
     }
 
     /**

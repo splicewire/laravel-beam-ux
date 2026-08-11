@@ -8,7 +8,6 @@ use Rushing\Versioning\VersioningServiceProvider;
 use Schemastud\DataSchemas\LaravelDataSchemasServiceProvider;
 use Spatie\Activitylog\ActivitylogServiceProvider;
 use Spatie\LaravelData\LaravelDataServiceProvider;
-use Spatie\MediaLibrary\MediaLibraryServiceProvider;
 use Splicewire\Beam\BeamServiceProvider;
 use Splicewire\Beam\Sitemap\BeamSitemapServiceProvider;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
@@ -34,7 +33,6 @@ abstract class TestCase extends Orchestra
             // beam-ux registers its publish lifecycle blueprint and reads the LifecycleService.
             BeamWorkflowsServiceProvider::class,
             BeamServiceProvider::class,
-            MediaLibraryServiceProvider::class,
             ActivitylogServiceProvider::class,
             LaravelDataServiceProvider::class,
             VersioningServiceProvider::class,
