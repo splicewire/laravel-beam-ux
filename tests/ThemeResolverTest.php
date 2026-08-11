@@ -51,6 +51,7 @@ class ThemeResolverTest extends TestCase
                 $table->string('realm')->default('site')->index();
                 $table->json('realms')->nullable();
                 $table->timestamps();
+                $table->softDeletes();
                 $table->unique(['namespace', 'slug']);
             });
         }

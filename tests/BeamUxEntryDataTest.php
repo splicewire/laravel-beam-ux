@@ -40,6 +40,7 @@ class BeamUxEntryDataTest extends TestCase
             $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();
             $table->timestamps();
+            $table->softDeletes();
             $table->unique(['namespace', 'slug']);
         });
 

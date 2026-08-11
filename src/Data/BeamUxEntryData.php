@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Data;
 
 use Illuminate\Database\Eloquent\Model;
 use Schemastud\Frame\Attributes\Column;
+use Schemastud\Frame\Attributes\RowActions;
 use Spatie\LaravelData\Data;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -38,6 +39,11 @@ use Splicewire\Beam\Ux\Type\UxType;
     icon: 'file-text',
     section: 'authoring',
 )]
+// Ticket 06: the row-actions manifest a consuming host's mounted RowActions component reads to know
+// which actions this resource supports — 'promote-to-central' is CONDITIONAL client-side (rendered
+// only when the viewer holds the required central-root grant; see EntryPromoter::authorized()), not
+// filtered out of this static list, which just declares the action VOCABULARY.
+#[RowActions(['edit', 'duplicate', 'delete', 'promote-to-central'])]
 class BeamUxEntryData extends Data
 {
     public function __construct(

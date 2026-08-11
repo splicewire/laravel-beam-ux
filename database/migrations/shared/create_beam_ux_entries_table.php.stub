@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Ux\Format\UxFormat;
@@ -36,6 +37,14 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  * `driver_ref` are the S2 storage precedence refs. `workflow_marking`/`workflow_version` make the entry
  * an OPTIONAL subject of the free-tier `laravel-beam-workflows` engine. `schema_is_draft` marks an
  * inferred (vs. authored) `schema_ref`.
+ *
+ * `deleted_at` (theme-entries-and-authoring ticket 06): `SoftDeletes` — a delete is reversible (Frame's
+ * RowActions "delete" is a confirm-guarded soft-delete, never a hard one) and independent of workflow
+ * governance (opt-in per creatable type, never forced on just to get delete/restore). The
+ * `[namespace, slug]` uniqueness becomes a PARTIAL index (`WHERE deleted_at IS NULL`) on drivers that
+ * support one (sqlite, pgsql — the two this fleet actually runs), so a deleted entry's slug can be
+ * reused; other drivers fall back to the plain (non-excluding) unique constraint, where a deleted
+ * entry's slug stays reserved — a documented limitation, not a silent gap.
  */
 return new class extends Migration
 {
@@ -107,10 +116,24 @@ return new class extends Migration
             $table->string('workflow_version')->nullable();
 
             $table->timestamps();
-
-            // One entry per slug within a build namespace.
-            $table->unique(['namespace', 'slug']);
+            $table->softDeletes();
         });
+
+        // One entry per slug within a build namespace — but a soft-deleted row must not block
+        // reusing its slug (ticket 06). Partial unique index on the drivers that support one;
+        // plain unique constraint elsewhere (deleted slugs stay reserved there).
+        $driver = Schema::getConnection()->getDriverName();
+
+        if (in_array($driver, ['sqlite', 'pgsql'], true)) {
+            DB::statement(
+                'create unique index beam_ux_entries_namespace_slug_active_unique '
+                .'on beam_ux_entries (namespace, slug) where deleted_at is null'
+            );
+        } else {
+            Schema::table('beam_ux_entries', function (Blueprint $table) {
+                $table->unique(['namespace', 'slug']);
+            });
+        }
     }
 
     public function down(): void

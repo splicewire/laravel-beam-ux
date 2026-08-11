@@ -146,6 +146,7 @@ class TaxonomyFacetsTest extends TestCase
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
             $table->timestamps();
+            $table->softDeletes();
             $table->unique(['namespace', 'slug']);
         });
         // beam-taxonomy's tables (create migrations ship in tower for the host; the beam-ux harness stands

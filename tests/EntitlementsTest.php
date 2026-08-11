@@ -132,6 +132,7 @@ class EntitlementsTest extends TestCase
             $table->string('segment')->nullable();
             $table->integer('nav_order')->nullable();
             $table->timestamps();
+            $table->softDeletes();
             $table->unique(['namespace', 'slug']);
         });
     }

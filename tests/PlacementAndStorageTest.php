@@ -114,6 +114,7 @@ class PlacementAndStorageTest extends TestCase
             $table->string('driver_ref')->nullable();
             $table->string('residency_mode')->default('context-following')->index();
             $table->timestamps();
+            $table->softDeletes();
             $table->unique(['namespace', 'slug']);
         });
     }

@@ -6,8 +6,10 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Rushing\PermissionCascade\Concerns\HasVisibility;
 use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Revisions\RevisionRecorder;
 use Splicewire\Beam\Ux\Codec\BodyCodec;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
@@ -111,6 +113,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
     use HasFacets;
     use HasUuids;
     use HasVisibility;
+    use SoftDeletes;
     use WorkflowManagedTrait;
 
     protected $table = 'beam_ux_entries';
@@ -187,7 +190,9 @@ class BeamUxEntry extends Model implements WorkflowManaged
     /**
      * Default a new entry's `realms` fallback stack onto `[realm]` (ticket 03). Only fires when the
      * entry has a realm and no stack was set explicitly — so a host that authors a multi-realm entry
-     * directly is never overridden.
+     * directly is never overridden. Also records soft-delete/restore as ordinary
+     * {@see RevisionRecorder} transitions (ticket 06) — audit continuity independent of the OPTIONAL
+     * workflow aspect (S6), which governs a `workflow_marking` state machine, not delete/restore.
      */
     protected static function booted(): void
     {
@@ -195,6 +200,34 @@ class BeamUxEntry extends Model implements WorkflowManaged
             if (($entry->realms === null || $entry->realms === []) && $entry->realm !== null) {
                 $entry->realms = [$entry->realm];
             }
+        });
+
+        static::deleted(function (BeamUxEntry $entry): void {
+            // Eloquent fires `deleted` for BOTH a soft-delete AND a forceDelete() on a SoftDeletes
+            // model — but forceDelete() never runs runSoftDelete(), so `deleted_at` stays whatever it
+            // was before the call. Recording a transition here on a force-delete would log a
+            // misleading 'deleted' revision claiming nothing changed, for a row that's actually gone.
+            // Nothing in this package calls forceDelete() on an entry today (Frame's generic
+            // destroy() just calls delete()), but the guard is cheap and correct either way.
+            if ($entry->isForceDeleting()) {
+                return;
+            }
+
+            app(RevisionRecorder::class)->record(
+                $entry,
+                ['deleted_at' => null],
+                ['deleted_at' => $entry->deleted_at?->toISOString()],
+                'deleted',
+            );
+        });
+
+        static::restored(function (BeamUxEntry $entry): void {
+            app(RevisionRecorder::class)->record(
+                $entry,
+                ['deleted_at' => $entry->getOriginal('deleted_at')],
+                ['deleted_at' => null],
+                'restored',
+            );
         });
     }
 

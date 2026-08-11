@@ -169,6 +169,7 @@ class EntryWorkflowTest extends TestCase
             $table->string('workflow_marking')->nullable()->index();
             $table->string('workflow_version')->nullable();
             $table->timestamps();
+            $table->softDeletes();
             $table->unique(['namespace', 'slug']);
         });
         // The beam-workflows definition-store tables. Left EMPTY: the entry publish lifecycle resolves

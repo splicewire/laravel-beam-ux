@@ -125,6 +125,7 @@ class EntrySitemapSourceTest extends TestCase
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
             $table->timestamps();
+            $table->softDeletes();
             $table->unique(['namespace', 'slug']);
         });
     }
