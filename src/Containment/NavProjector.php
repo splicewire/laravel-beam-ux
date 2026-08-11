@@ -8,41 +8,42 @@ use Illuminate\Support\Str;
 use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavTree;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
-use Splicewire\Beam\Ux\Models\Sitemap;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
- * Projects a {@see Sitemap}'s containment tree into a `rushing/laravel-data-nav` {@see NavTree} — the
+ * Projects a realm's containment tree into a `rushing/laravel-data-nav` {@see NavTree} — the
  * NAVIGATION projection of the org spine (beamux-entry-charter S3, ADR-0165: "Navigation is another
  * projection, via `laravel-data-nav`'s `NavTree`"). The `href` of each node is the inherited public URL
  * from {@see UrlResolver}, so the nav rides the SAME containment tree that derives the route (never
  * `namespace`).
  *
  * **Vendor seam (ADR-0092):** this projection is FREE-TIER — it reuses `laravel-data-nav`'s `NavTree`
- * rather than rebuilding a nav primitive. The paid engine is the `site` realm + Sitemap + containment +
- * URL inheritance it projects FROM.
+ * rather than rebuilding a nav primitive. The paid engine is the `site` realm + containment + URL
+ * inheritance it projects FROM.
  *
- * **Multiplicity is NOT built** but FK-shaped: the projector takes ONE sitemap (the default one today);
- * a future multi-sitemap host loops it per sitemap without a shape change.
+ * **Multiplicity IS built (ticket 03):** an entry's `realms` fallback stack means it can be reachable in
+ * several realms at once — the projector takes ONE realm at a time; a host renders several realms' navs
+ * by calling `project()` once per realm.
  */
 class NavProjector
 {
     public function __construct(private UrlResolver $urls = new UrlResolver) {}
 
     /**
-     * Build a {@see NavTree} for a sitemap's public containment tree. Loads every entry in the sitemap,
-     * assembles the parent→children adjacency in memory (one query, no N+1), and recurses from the roots
-     * (top-level nodes: `parent_id === null`), stamping each node's inherited URL as its `href`.
+     * Build a {@see NavTree} for a realm's public containment tree. Loads every entry whose `realms`
+     * fallback stack contains the given realm, assembles the parent→children adjacency in memory (one
+     * query, no N+1), and recurses from the roots (top-level nodes: `parent_id === null`), stamping each
+     * node's inherited URL as its `href`.
      *
      * Nav is a projection of navigable **content** (`page` entries): a `template`/`layout`/`component`
      * has no route (charter §Q1), so it never becomes a nav destination even if it incidentally shares
-     * the sitemap (e.g. a template minted with the default `realm`/`sitemap_id`). Filtering by the `page`
+     * the realm (e.g. a template minted with the default `realm`/`realms`). Filtering by the `page`
      * type keeps those structural authoring artifacts out of the public nav without touching their rows.
      */
-    public function project(Sitemap $sitemap): NavTree
+    public function project(string $realm): NavTree
     {
         $query = BeamUxEntry::query()
-            ->where('sitemap_id', $sitemap->getKey())
+            ->whereJsonContains('realms', $realm)
             ->where('type', UxType::Page->value);
 
         // Only PLACED entries are nav items. An entry can exist (e.g. auto-provisioned on an author's first

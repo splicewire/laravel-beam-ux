@@ -4,19 +4,18 @@ namespace Splicewire\Beam\Ux\Console;
 
 use Illuminate\Console\Command;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
-use Splicewire\Beam\Ux\Models\Sitemap;
 use Splicewire\Beam\Ux\Nav\NavSource;
 
 /**
  * `php artisan splicewire:beam:ux:seed-nav {--namespace=}` — the DATA-DRIVEN content-nav seeder (F02).
  *
- * Seeds the per-realm sitemaps' CONTENT nav — the entry rows (`segment`/`realm`/`nav_order`) the
+ * Seeds the per-realm CONTENT nav — the entry rows (`segment`/`realm`/`nav_order`) the
  * NavProjector reads. It reads its data from {@see NavSource} (config `beam.ux.nav` → disk
  * `resources/beam-ux/nav.{yml,json}` → DERIVED from entry frontmatter), so the app provides only DATA,
  * never a bespoke command. A fresh site whose page files carry `segment`/`realm`/`nav_order` frontmatter
  * seeds its nav with NO bespoke PHP — the derivation carries it.
  *
- * Idempotent (`updateOrCreate` keyed by slug + namespace): re-running restamps realm/sitemap/segment/
+ * Idempotent (`updateOrCreate` keyed by slug + namespace): re-running restamps realm/segment/
  * title/order without duplicating. `composable` defaults per the `beam-realms.behavior` config list
  * (behavior realms get a fixed-template body → composable=false); a realm not named there is a content
  * realm (composable=true) — the entry model's own default.
@@ -44,13 +43,18 @@ class SeedNavCommand extends Command
         }
 
         $behaviorRealms = $this->behaviorRealms();
-        $sitemaps = [];
+        $provisionedRoots = [];
         $order = 0;
 
         foreach ($rows as $row) {
             $order += 10; // gaps of 10 so a later insert can slot between without a full re-stamp.
             $realm = $row['realm'];
-            $sitemap = $sitemaps[$realm] ??= Sitemap::forRealm($realm);
+
+            // Auto-provision the realm's canonical root entry once per realm seen (ticket 03).
+            if (! isset($provisionedRoots[$realm])) {
+                BeamUxEntry::rootFor($realm);
+                $provisionedRoots[$realm] = true;
+            }
 
             BeamUxEntry::updateOrCreate(
                 ['slug' => $row['slug'], 'namespace' => $namespace],
@@ -61,7 +65,7 @@ class SeedNavCommand extends Command
                     // composable=false; every other realm is a content realm (composable). Config-driven
                     // via `beam-realms.behavior` so a host adds a behavior realm without editing here.
                     'composable' => ! in_array($realm, $behaviorRealms, true),
-                    'sitemap_id' => $sitemap->getKey(),
+                    'realms' => [$realm],
                     'parent_id' => null,
                     'segment' => $row['segment'],
                     'title' => $row['title'],

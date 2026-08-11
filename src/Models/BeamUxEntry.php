@@ -43,12 +43,17 @@ use Splicewire\Beam\Write\ParticleWriter;
  * (file placement S2; containment/route S3; workflow S6; taxonomy S7) are additive columns the
  * later charter steps add.
  *
- * **Containment aspect (S3 — ADR-0165, the "two trees").** `realm` + `sitemap_id` + `parent_id` +
- * `segment` place the entry in a rooted {@see Sitemap} containment tree. That tree — NOT `namespace`
- * (disk-only) — derives the entry's PUBLIC URL: `segment` composes DOWN the tree from the realm/sitemap
+ * **Containment aspect (S3 — ADR-0165, the "two trees").** `realm` + `realms` + `parent_id` +
+ * `segment` place the entry in a rooted containment tree. That tree — NOT `namespace`
+ * (disk-only) — derives the entry's PUBLIC URL: `segment` composes DOWN the tree from the realm
  * root via {@see UrlResolver} (bare/`./segment` = parent-relative folder semantics; `/segment` =
- * realm/sitemap-root absolute). `sitemap_id` defaults to the one auto-provisioned default {@see Sitemap}
- * per site; multiplicity is DEFERRED (FK-shaped, not built). Silo/Tags do NOT participate here (S7).
+ * realm-root absolute). `realms` is the ordered fallback stack (theme-entries-and-authoring ticket
+ * 03) an entry is reachable under — defaults to `[realm]` on create. Same `list<string>` shape as
+ * `Splicewire\Beam\Realm\RealmRegistry::$stack`, but a DIFFERENT resolution: `RealmRegistry::effective()`
+ * walks a single realm's stack to find ONE effective source; `realms` is a flat multi-membership list
+ * (an entry is reachable under EVERY realm it names, not the last-resolvable-wins fallback that idiom
+ * performs). Each realm auto-provisions exactly one canonical root entry via {@see self::rootFor()}.
+ * Silo/Tags do NOT participate here (S7).
  *
  * **The two orthogonal axes (S1, ADR-0164).** `type` is the ENFORCED structural axis (cast to
  * {@see UxType} — exactly one of layout/template/page/component). `format` is its **sibling** body-
@@ -82,8 +87,8 @@ use Splicewire\Beam\Write\ParticleWriter;
  * free-tier beam-taxonomy `BeamSilo` (`silos()`, hierarchical, `siloable` morph) + `BeamTag` (`tags()`,
  * flat, `taggable` morph) as OPTIONAL polymorphic classification — null for fragments, filled for content.
  * These are FACETS, not the spine: they drive filtering / related / secondary-nav and a silo's visibility
- * MAY gate the sitemap (see {@see SiloVisibilityEntitlementGate}), but they
- * NEVER touch the canonical URL — that is containment's job (`realm`/`sitemap_id`/`parent_id`/`segment`).
+ * MAY gate the sitemap.xml feed (see {@see SiloVisibilityEntitlementGate}), but they
+ * NEVER touch the canonical URL — that is containment's job (`realm`/`realms`/`parent_id`/`segment`).
  * Both morphs are pivot-based (`taggables`/`siloables` from beam-taxonomy's tables), so S7 adds NO column
  * to `beam_ux_entries`. Classifying a *content* entry with `BeamSilo` is correct (the issue-03 refinement);
  * only reusing the *compliance* silo for a component's structural *namespace* was the category error. The
@@ -141,7 +146,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
         'particle_id',
         // Containment aspect (S3, ADR-0165): the URL/nav tree, decoupled from `namespace` (disk).
         'realm',
-        'sitemap_id',
+        'realms',
         'parent_id',
         'segment',
         // Sibling nav order (host-provided; nullable — projector orders by it when the column is present).
@@ -178,31 +183,39 @@ class BeamUxEntry extends Model implements WorkflowManaged
             'schema_is_draft' => 'boolean',
             // The editability-tier flag (ticket 14): body is free composition (true) vs fixed template.
             'composable' => 'boolean',
+            // The ordered realm fallback stack (ticket 03) — a list<string>, same shape as
+            // RealmRegistry::$stack.
+            'realms' => 'array',
         ];
     }
 
     /**
-     * Default a new entry's `sitemap_id` onto the one auto-provisioned default {@see Sitemap} for its
-     * realm (ADR-0165 "the `sitemap_id` FK defaults to it"). Only fires when the entry has a realm and no
-     * sitemap was set explicitly — so a host that assigns a specific sitemap (deferred multiplicity) is
-     * never overridden. Provisioning is find-or-create, so the first entry mints the default sitemap.
+     * Default a new entry's `realms` fallback stack onto `[realm]` (ticket 03). Only fires when the
+     * entry has a realm and no stack was set explicitly — so a host that authors a multi-realm entry
+     * directly is never overridden.
      */
     protected static function booted(): void
     {
         static::creating(function (BeamUxEntry $entry): void {
-            if ($entry->sitemap_id === null && $entry->realm !== null) {
-                $entry->sitemap_id = static::defaultSitemapId($entry->realm);
+            if (($entry->realms === null || $entry->realms === []) && $entry->realm !== null) {
+                $entry->realms = [$entry->realm];
             }
         });
     }
 
     /**
-     * The id of the default {@see Sitemap} for a realm — auto-provisioned on first ask (find-or-create),
-     * so a fresh install always resolves exactly one default per site without a seeder.
+     * The one canonical root entry for a realm — auto-provisioned on first ask (find-or-create), so
+     * every configured realm resolves exactly one root without a seeder (ticket 03): the top of the
+     * containment chain, and the coarse grant anchor a host's authority model grants `manage` on.
+     * Identified structurally by the reserved `realms` build namespace + the realm as its slug — that
+     * pair is already unique (`unique(namespace, slug)`), so no extra marker column is needed.
      */
-    public static function defaultSitemapId(string $realm = self::REALM_SITE): string
+    public static function rootFor(string $realm = self::REALM_SITE): self
     {
-        return Sitemap::forRealm($realm)->getKey();
+        return static::query()->firstOrCreate(
+            ['namespace' => 'realms', 'slug' => $realm],
+            ['type' => UxType::Page, 'title' => 'Realm root', 'realm' => $realm, 'realms' => [$realm]],
+        );
     }
 
     /**
@@ -213,12 +226,6 @@ class BeamUxEntry extends Model implements WorkflowManaged
     public function particle(): BelongsTo
     {
         return $this->belongsTo(BeamParticle::class, 'particle_id');
-    }
-
-    /** The {@see Sitemap} (containment tree) this entry belongs to (S3, ADR-0165). */
-    public function sitemap(): BelongsTo
-    {
-        return $this->belongsTo(Sitemap::class, 'sitemap_id');
     }
 
     /** The containing entry node (adjacency parent; the strict single home). Null = top-level. */
@@ -234,7 +241,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
     }
 
     /**
-     * This entry's inherited PUBLIC URL — composed DOWN the containment tree from the realm/sitemap root
+     * This entry's inherited PUBLIC URL — composed DOWN the containment tree from the realm root
      * (ADR-0165 §5), decoupled from `namespace` (disk-only). Delegates to the {@see UrlResolver}.
      */
     public function url(): string

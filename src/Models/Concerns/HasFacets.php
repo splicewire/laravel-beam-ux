@@ -5,7 +5,6 @@ namespace Splicewire\Beam\Ux\Models\Concerns;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Splicewire\Beam\Taxonomy\Models\Concerns\HasTags;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
-use Splicewire\Beam\Ux\Sitemap\SiloVisibilityEntitlementGate;
 
 /**
  * The **classification facet** surface for a {@see BeamUxEntry} (charter S7,
@@ -13,10 +12,10 @@ use Splicewire\Beam\Ux\Sitemap\SiloVisibilityEntitlementGate;
  * to the entry as **OPTIONAL polymorphic** relations — null for fragments, filled for content.
  *
  * **Classification, NOT the spine.** These facets drive filtering / related / secondary-nav, and a
- * silo's authority/visibility MAY gate (see {@see SiloVisibilityEntitlementGate}),
+ * silo's authority/visibility MAY gate (see `Splicewire\Beam\Ux\Sitemap\SiloVisibilityEntitlementGate`),
  * but they NEVER determine the canonical URL — that is the containment tree (S3, ADR-0165 §2). The two
  * are deliberately orthogonal: an entry can carry many silos/tags while its route is composed purely from
- * `realm` + `sitemap_id` + `parent_id` + `segment`.
+ * `realm` + `realms` + `parent_id` + `segment`.
  *
  * **The morphs (pivot-based — no new `beam_ux_entries` column):**
  *  - `tags()` — spatie taggable morph (`taggables` pivot), from beam-taxonomy's {@see HasTags} concern. The

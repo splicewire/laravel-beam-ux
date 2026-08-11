@@ -59,12 +59,12 @@ use Splicewire\Beam\Write\ParticleWriter;
  * body it rides is a beam-core {@see BeamParticle}, written through beam-core's
  * shared {@see ParticleWriter} — this package forks neither.
  *
- * The `beam_ux_entries` + `sitemaps` migrations ship as PUBLISH-ONLY spatie/laravel-package-tools stubs
+ * The `beam_ux_entries` migration ships as a PUBLISH-ONLY spatie/laravel-package-tools stub
  * (`runsMigrations` FALSE, the estate-wide convention beam-core set — commit e7ae9b7): beam-ux never
- * `loadMigrationsFrom`'s or runs them at runtime; `vendor:publish --tag=beam-ux-migrations` (or
- * `splicewire:beam:install`) re-stamps + sequences timestamped copies into the HOST at install time,
- * which runs them. Both tables are ubiquitous (central + every tenant — "everything is shared by
- * default"), so each publishes to the SINGLE `database/migrations/shared/` destination, not a
+ * `loadMigrationsFrom`'s or runs it at runtime; `vendor:publish --tag=beam-ux-migrations` (or
+ * `splicewire:beam:install`) re-stamps + sequences a timestamped copy into the HOST at install time,
+ * which runs it. The table is ubiquitous (central + every tenant — "everything is shared by
+ * default"), so it publishes to the SINGLE `database/migrations/shared/` destination, not a
  * duplicated flat+tenant pair, registered via `->hasMigrations([...])` in
  * {@see self::configurePackage()}. beam-tenancy's `registerSharedMigrationsPath()` runs that one
  * directory in both the central `migrate` pass and Stancl's tenant pass.
@@ -76,12 +76,11 @@ class BeamUxServiceProvider extends PackageServiceProvider
         $package
             ->name('laravel-beam-ux')
             // beam-ux's migrations ship PUBLISH-ONLY as spatie/laravel-package-tools stubs — the
-            // estate-wide convention (mirrors beam-core). Both tables are UBIQUITOUS (central + every
-            // tenant — "everything is shared by default"), so each publishes to the SINGLE `shared/…`
-            // destination. create_sitemaps_table is listed first since beam_ux_entries' sitemap_id
-            // column conceptually follows it (not a DB-constrained FK, so order isn't load-bearing).
+            // estate-wide convention (mirrors beam-core). The table is UBIQUITOUS (central + every
+            // tenant — "everything is shared by default"), so it publishes to the SINGLE `shared/…`
+            // destination. The old per-realm sitemap-anchor migration retired with ticket 03, in favor
+            // of the `realms` fallback stack directly on `beam_ux_entries`.
             ->hasMigrations([
-                'shared/create_sitemaps_table',
                 'shared/create_beam_ux_entries_table',
             ]);
     }
@@ -340,11 +339,11 @@ class BeamUxServiceProvider extends PackageServiceProvider
 
     /**
      * The **containment** seam (charter S3, ADR-0165 — the "two trees": containment → URL/nav). Binds the
-     * {@see UrlResolver} (composes `segment` DOWN the realm/sitemap-rooted tree into the public URL,
-     * decoupled from `namespace`) and the {@see NavProjector} (projects a `Sitemap`'s tree into a
+     * {@see UrlResolver} (composes `segment` DOWN the realm-rooted tree into the public URL,
+     * decoupled from `namespace`) and the {@see NavProjector} (projects a realm's tree into a
      * free-tier `rushing/laravel-data-nav` `NavTree`). Both singletons — the resolver is stateless; the
-     * `BeamUxEntry::url()` accessor resolves the bound instance. Multiplicity is NOT built (one default
-     * sitemap per site); the FK shape holds the door open.
+     * `BeamUxEntry::url()` accessor resolves the bound instance. Multiplicity IS built (ticket 03): an
+     * entry's `realms` fallback stack means it can be reachable in several realms at once.
      */
     protected function registerContainment(): void
     {

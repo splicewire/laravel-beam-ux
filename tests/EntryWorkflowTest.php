@@ -163,7 +163,7 @@ class EntryWorkflowTest extends TestCase
             $table->string('residency_mode')->default('context-following')->index();
             $table->boolean('composable')->default(true);
             $table->string('realm')->default('site')->index();
-            $table->uuid('sitemap_id')->nullable()->index();
+            $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
             // S6 workflow aspect columns.
@@ -172,15 +172,6 @@ class EntryWorkflowTest extends TestCase
             $table->timestamps();
             $table->unique(['namespace', 'slug']);
         });
-
-        Schema::create('sitemaps', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('realm')->default('site')->index();
-            $table->string('name')->nullable();
-            $table->boolean('is_default')->default(false);
-            $table->timestamps();
-        });
-
         // The beam-workflows definition-store tables. Left EMPTY: the entry publish lifecycle resolves
         // through the code-registered blueprint (the package's back-compat path), so no DB lineage is
         // needed — but `LifecycleService::resolve()` probes `activeVersion()` before falling through to

@@ -28,9 +28,11 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  * tenant pass. The package never `loadMigrationsFrom`'s or runs migrations at runtime.
  *
  * Residency is `context-following` (default): an entry lives wherever it is authored. `realm` is the
- * containment root (defaults to the public `site` realm); `sitemap_id`/`parent_id`/`segment` are the
+ * containment root (defaults to the public `site` realm); `realms`/`parent_id`/`segment` are the
  * adjacency-list containment tree (decoupled from `namespace`, which is disk-only build grouping — the
- * "two trees"). `format`/`body_style` are the body-language axis (sibling to `type`). `placement_ref`/
+ * "two trees"). `realms` is the ordered fallback stack (theme-entries-and-authoring ticket 03) an entry
+ * is reachable under — `realm` stays the primary/first entry, `realms` the full ordered membership.
+ * `format`/`body_style` are the body-language axis (sibling to `type`). `placement_ref`/
  * `driver_ref` are the S2 storage precedence refs. `workflow_marking`/`workflow_version` make the entry
  * an OPTIONAL subject of the free-tier `laravel-beam-workflows` engine. `schema_is_draft` marks an
  * inferred (vs. authored) `schema_ref`. `composable` gates the WYSIWYG edit chrome (free composition vs.
@@ -86,13 +88,15 @@ return new class extends Migration
             $table->string('residency_mode')->default('context-following')->index();
 
             // Containment: the organization spine deriving the entry's PUBLIC URL — decoupled from
-            // `namespace` (the "two trees"). realm is the public route root (defaults to `site`).
-            // sitemap_id/parent_id are plain indexed uuids (not DB-constrained FKs, portable central +
-            // tenant) resolved via their model relations. segment composes DOWN the tree (bare/`./` is
-            // parent-relative, `/` resets to the realm/sitemap root). nav_order is an optional sibling
-            // sort key the NavProjector orders by when present, falling back to slug otherwise.
+            // `namespace` (the "two trees"). realm is the public route root (defaults to `site`) and
+            // stays the primary/first realm; realms is the full ordered fallback stack an entry is
+            // reachable under (theme-entries-and-authoring ticket 03). parent_id is a plain indexed
+            // uuid (not a DB-constrained FK, portable central + tenant) resolved via its model relation.
+            // segment composes DOWN the tree (bare/`./` is parent-relative, `/` resets to the realm
+            // root). nav_order is an optional sibling sort key the NavProjector orders by when present,
+            // falling back to slug otherwise.
             $table->string('realm')->default('site')->index();
-            $table->uuid('sitemap_id')->nullable()->index();
+            $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
             $table->integer('nav_order')->nullable();

@@ -39,8 +39,8 @@ abstract class TestCase extends Orchestra
             LaravelDataServiceProvider::class,
             VersioningServiceProvider::class,
             LaravelDataSchemasServiceProvider::class,
-            // Free-tier nav primitive (ADR-0092): beam-ux's containment NavProjector projects the
-            // Sitemap tree into this package's NavTree rather than rebuilding one (S3, ADR-0165).
+            // Free-tier nav primitive (ADR-0092): beam-ux's containment NavProjector projects a realm's
+            // tree into this package's NavTree rather than rebuilding one (S3, ADR-0165).
             DataNavServiceProvider::class,
         ];
     }

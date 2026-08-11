@@ -97,7 +97,7 @@ class RegisterEntriesFromDisk
      * `title`) resolved from the file's own frontmatter (+ a config `realm` convention) — so a page lands
      * in the right realm and derives into nav with NO hand-authored `nav.yml` (ADR-0165; the derive leg
      * the nav-source priority chain already promised). `realm` is set at CREATE time so the model's
-     * `creating` hook assigns the matching realm sitemap.
+     * `creating` hook defaults its `realms` fallback stack onto it.
      *
      * @param  array{slug: string, type: ?string, namespace: ?string, format: string}  $envelope
      */

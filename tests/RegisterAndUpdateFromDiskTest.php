@@ -9,7 +9,6 @@ use Splicewire\Beam\Storage\StorageItem;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
-use Splicewire\Beam\Ux\Models\Sitemap;
 use Splicewire\Beam\Ux\Nav\NavSource;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -111,9 +110,8 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         $this->assertSame(20, (int) $about->nav_order);
         $this->assertSame('About Us', $about->title);
 
-        // The `realm` was set at CREATE time, so the model's creating hook bound the ACCOUNT sitemap.
-        $accountSitemap = Sitemap::forRealm('account');
-        $this->assertSame($accountSitemap->getKey(), $about->sitemap_id);
+        // The `realm` was set at CREATE time, so the model's creating hook defaulted `realms` to it.
+        $this->assertSame(['account'], $about->realms);
 
         // …and it DERIVES into nav with no nav.yml / config override (the derive leg of the priority chain).
         config()->set('beam.ux.nav', null);
@@ -297,20 +295,12 @@ class RegisterAndUpdateFromDiskTest extends TestCase
             $table->string('residency_mode')->default('context-following')->index();
             $table->boolean('composable')->default(true);
             $table->string('realm')->default('site')->index();
-            $table->uuid('sitemap_id')->nullable()->index();
+            $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
             $table->integer('nav_order')->nullable();
             $table->timestamps();
             $table->unique(['namespace', 'slug']);
-        });
-
-        Schema::create('sitemaps', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('realm')->default('site')->index();
-            $table->string('name')->nullable();
-            $table->boolean('is_default')->default(false);
-            $table->timestamps();
         });
     }
 }

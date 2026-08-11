@@ -8,14 +8,14 @@ use Rushing\DataNav\NavTree;
 use Splicewire\Beam\Ux\Containment\NavProjector;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
-use Splicewire\Beam\Ux\Models\Sitemap;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
- * beamux-entry-charter S3 (ADR-0165) — the containment aspect: a realm/sitemap-rooted containment tree
- * derives the PUBLIC URL, decoupled from `namespace` (the "two trees"). Asserts:
- *  - default sitemap auto-provisioning (one per site, FK-defaulted, idempotent);
- *  - URL inheritance — `./segment` resolves against the PARENT, `/segment` against the realm/sitemap ROOT;
+ * beamux-entry-charter S3 (ADR-0165) — the containment aspect: a realm-rooted containment tree derives
+ * the PUBLIC URL, decoupled from `namespace` (the "two trees"). Asserts:
+ *  - realm root auto-provisioning (one per realm, idempotent — ticket 03);
+ *  - the `realms` fallback stack defaults to `[realm]` and an entry resolves in every listed realm;
+ *  - URL inheritance — `./segment` resolves against the PARENT, `/segment` against the realm ROOT;
  *  - the route is decoupled from `namespace` (disk grouping does not touch the URL);
  *  - the free-tier `NavTree` projection of the containment tree.
  */
@@ -27,23 +27,43 @@ class ContainmentTest extends TestCase
         $this->createTables();
     }
 
-    public function test_the_default_sitemap_is_auto_provisioned_once_per_site_and_the_fk_defaults_to_it(): void
+    public function test_the_realm_root_is_auto_provisioned_once_per_realm_and_realms_defaults_to_the_realm(): void
     {
-        $this->assertSame(0, Sitemap::query()->count());
+        $this->assertSame(0, BeamUxEntry::query()->count());
 
-        // Creating the first entry (no sitemap set) mints AND defaults onto the one-per-site default.
+        $root = BeamUxEntry::rootFor();
+        $this->assertSame('site', $root->realm);
+        $this->assertSame(['site'], $root->realms);
+        $this->assertSame('realms', $root->namespace);
+
+        // Idempotent — asking again reuses the same root, no duplicate.
+        $this->assertTrue(BeamUxEntry::rootFor()->is($root));
+        $this->assertSame(1, BeamUxEntry::query()->count());
+
+        // A plain entry with no explicit `realms` defaults its fallback stack to `[realm]`.
         $home = BeamUxEntry::create(['slug' => 'home', 'type' => UxType::Page, 'segment' => '/']);
+        $this->assertSame(['site'], $home->realms);
+    }
 
-        $this->assertSame(1, Sitemap::query()->count());
-        $default = Sitemap::forRealm();
-        $this->assertTrue($default->is_default);
-        $this->assertSame('site', $default->realm);
-        $this->assertSame($default->getKey(), $home->sitemap_id, 'the sitemap_id FK defaults to the auto-provisioned default');
+    public function test_an_entry_can_be_created_with_a_multi_realm_fallback_stack_and_resolves_in_each_listed_realm(): void
+    {
+        $entry = BeamUxEntry::create([
+            'slug' => 'shared-hero',
+            'type' => UxType::Page,
+            'segment' => '/hero',
+            'realm' => 'operator',
+            'realms' => ['operator', 'tenant', 'site'],
+        ]);
 
-        // A SECOND entry reuses the same default — provisioning is idempotent (no second sitemap).
-        $about = BeamUxEntry::create(['slug' => 'about', 'type' => UxType::Page, 'segment' => 'about']);
-        $this->assertSame(1, Sitemap::query()->count());
-        $this->assertSame($default->getKey(), $about->sitemap_id);
+        foreach (['operator', 'tenant', 'site'] as $realm) {
+            $tree = $this->app->make(NavProjector::class)->project($realm);
+            $this->assertCount(1, $tree->items, "entry must resolve under realm [{$realm}]");
+            $this->assertSame('/hero', $tree->items[0]->href);
+        }
+
+        // A realm NOT in the stack does not see it.
+        $this->assertCount(0, $this->app->make(NavProjector::class)->project('checkout')->items);
+        unset($entry);
     }
 
     public function test_relative_segment_resolves_against_the_parent_absolute_against_the_root(): void
@@ -65,7 +85,7 @@ class ContainmentTest extends TestCase
         // `./segment` is equivalent to a bare relative segment — resolves against the parent.
         $this->assertSame('/blog/testing/deep', $resolver->resolve($relPost));
 
-        // `/segment` resets to the realm/sitemap ROOT, discarding the /blog/testing ancestor path.
+        // `/segment` resets to the realm ROOT, discarding the /blog/testing ancestor path.
         $this->assertSame('/reset', $resolver->resolve($absPost));
 
         // The accessor delegates to the same resolver.
@@ -98,7 +118,7 @@ class ContainmentTest extends TestCase
         BeamUxEntry::create(['slug' => 'testing', 'type' => UxType::Page, 'segment' => 'testing', 'parent_id' => $blog->id]);
         BeamUxEntry::create(['slug' => 'discover-songs', 'type' => UxType::Page, 'segment' => '/discover']);
 
-        $tree = $this->app->make(NavProjector::class)->project(Sitemap::forRealm());
+        $tree = $this->app->make(NavProjector::class)->project('site');
 
         $this->assertInstanceOf(NavTree::class, $tree);
 
@@ -121,12 +141,12 @@ class ContainmentTest extends TestCase
 
     public function test_non_page_entries_are_excluded_from_the_nav_projection(): void
     {
-        // A template shares the default sitemap (minted with the default realm) but has NO route — it must
-        // never surface as a nav destination, even though its null segment would resolve to `/`.
+        // A template shares the default realm but has NO route — it must never surface as a nav
+        // destination, even though its null segment would resolve to `/`.
         BeamUxEntry::create(['slug' => 'home', 'type' => UxType::Page, 'segment' => '/']);
         BeamUxEntry::create(['slug' => 'section-template', 'type' => UxType::Template, 'segment' => null]);
 
-        $tree = $this->app->make(NavProjector::class)->project(Sitemap::forRealm());
+        $tree = $this->app->make(NavProjector::class)->project('site');
 
         // Only the `page` survives; the template is filtered out (no phantom `/` collision).
         $this->assertCount(1, $tree->items);
@@ -142,7 +162,7 @@ class ContainmentTest extends TestCase
         BeamUxEntry::create(['slug' => 'about', 'type' => UxType::Page, 'segment' => null]);
         BeamUxEntry::create(['slug' => 'faq', 'type' => UxType::Page, 'segment' => null]);
 
-        $tree = $this->app->make(NavProjector::class)->project(Sitemap::forRealm());
+        $tree = $this->app->make(NavProjector::class)->project('site');
 
         $this->assertCount(1, $tree->items);
         $this->assertSame('Home', $tree->items[0]->title);
@@ -155,7 +175,7 @@ class ContainmentTest extends TestCase
         BeamUxEntry::create(['slug' => 'home', 'title' => 'Home', 'type' => UxType::Page, 'segment' => '/', 'nav_order' => 10]);
         BeamUxEntry::create(['slug' => 'discover', 'title' => 'Discover', 'type' => UxType::Page, 'segment' => '/discover', 'nav_order' => 20]);
 
-        $tree = $this->app->make(NavProjector::class)->project(Sitemap::forRealm());
+        $tree = $this->app->make(NavProjector::class)->project('site');
 
         $this->assertSame(['Home', 'Discover', 'Songs'], array_map(fn ($n) => $n->title, $tree->items));
     }
@@ -178,20 +198,12 @@ class ContainmentTest extends TestCase
             $table->string('residency_mode')->default('context-following')->index();
             $table->boolean('composable')->default(true);
             $table->string('realm')->default('site')->index();
-            $table->uuid('sitemap_id')->nullable()->index();
+            $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
             $table->integer('nav_order')->nullable();
             $table->timestamps();
             $table->unique(['namespace', 'slug']);
-        });
-
-        Schema::create('sitemaps', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('realm')->default('site')->index();
-            $table->string('name')->nullable();
-            $table->boolean('is_default')->default(false);
-            $table->timestamps();
         });
     }
 }

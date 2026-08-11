@@ -70,11 +70,11 @@ class EntrySitemapSource implements SitemapSource
      * The fine route gate: the entry must resolve to a concrete, non-root
      * containment URL. A page with no segment anywhere in its chain resolves to
      * bare `/` — that is the home index, addressable, so it is allowed; but an
-     * entry with no containment placement at all (no realm/sitemap) is not a
+     * entry with no containment placement at all (no realm membership) is not a
      * public page and is skipped.
      */
     private function routable(BeamUxEntry $entry): bool
     {
-        return $entry->realm !== null && $entry->sitemap_id !== null;
+        return $entry->realm !== null && ! empty($entry->realms);
     }
 }

@@ -6,13 +6,13 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
  * Resolves a {@see BeamUxEntry}'s PUBLIC URL by composing `segment` DOWN the containment tree from the
- * realm/sitemap root (beamux-entry-charter S3, ADR-0165 §5). The route is **decoupled from `namespace`**
+ * realm root (beamux-entry-charter S3, ADR-0165 §5). The route is **decoupled from `namespace`**
  * (that is disk grouping only, S2 — the "two trees") and **inherited from the containment tree**.
  *
  * **Segment grammar (ADR-0165 §5):**
  *  - bare `segment` or `./segment` — **parent-relative** (folder semantics): appended under the parent's
  *    resolved path, so moving a subtree carries its children's URLs with it.
- *  - `/segment` — **realm/sitemap-root absolute**: resets to the root, ignoring every ancestor above.
+ *  - `/segment` — **realm root absolute**: resets to the root, ignoring every ancestor above.
  *
  * A null/empty segment contributes nothing (a structural/pass-through node inherits its parent's path).
  * The resolver walks `parent_id` up to the root; a host that has the ancestor chain in hand can pass it
@@ -23,7 +23,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 class UrlResolver
 {
     /**
-     * The public URL path for an entry, composing its ancestor chain from the sitemap root. Walks
+     * The public URL path for an entry, composing its ancestor chain from the realm root. Walks
      * `parent()` up the tree (loads ancestors lazily). Pass a pre-loaded ancestor chain to
      * {@see resolveChain()} to skip the walk.
      */
@@ -44,7 +44,7 @@ class UrlResolver
     /**
      * Compose a public URL from an ordered **root-first** chain of entries (`[root, …, leaf]`). Applies
      * the segment grammar per node: a `/`-prefixed segment RESETS the accumulated path to the
-     * realm/sitemap root; a bare/`./` segment appends under it; an empty segment passes through.
+     * realm root; a bare/`./` segment appends under it; an empty segment passes through.
      *
      * @param  array<int, BeamUxEntry>  $chain  root-first ancestor chain ending at the target entry
      */
@@ -61,7 +61,7 @@ class UrlResolver
             }
 
             if (str_starts_with($raw, '/')) {
-                // Root-absolute: reset to the realm/sitemap root, ignoring everything above this node.
+                // Root-absolute: reset to the realm root, ignoring everything above this node.
                 $segments = [];
                 $piece = ltrim($raw, '/');
             } else {

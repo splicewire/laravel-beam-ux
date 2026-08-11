@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Storage\StorageItem;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
-use Splicewire\Beam\Ux\Models\Sitemap;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
@@ -90,10 +89,11 @@ class AuthoringCommandsTest extends TestCase
         $this->assertSame('site', $home->realm);
         $this->assertGreaterThan(0, $home->nav_order);
 
-        // A second realm gets its own sitemap.
+        // A second realm gets its own realms fallback stack (and its own auto-provisioned root entry).
         $lyrics = BeamUxEntry::query()->where('slug', 'lyrics')->first();
         $this->assertSame('account', $lyrics->realm);
-        $this->assertNotSame($home->sitemap_id, $lyrics->sitemap_id);
+        $this->assertSame(['account'], $lyrics->realms);
+        $this->assertNotNull(BeamUxEntry::query()->where('namespace', 'realms')->where('slug', 'account')->first());
     }
 
     public function test_seed_nav_demotes_behavior_realms_to_non_composable(): void
@@ -118,7 +118,7 @@ class AuthoringCommandsTest extends TestCase
 
         // Pre-register two entries carrying segment/realm/nav_order (as register-from-disk would from
         // frontmatter) — the derive path must project THESE into nav with no bespoke array.
-        Sitemap::forRealm('site');
+        BeamUxEntry::rootFor('site');
         BeamUxEntry::create(['slug' => 'studio', 'namespace' => 'demo', 'type' => 'page', 'realm' => 'site', 'segment' => '/studio', 'title' => 'Studio', 'nav_order' => 20]);
         BeamUxEntry::create(['slug' => 'home', 'namespace' => 'demo', 'type' => 'page', 'realm' => 'site', 'segment' => '/', 'title' => 'Home', 'nav_order' => 10]);
         // An entry with no segment is NOT nav (a template).
@@ -180,20 +180,12 @@ class AuthoringCommandsTest extends TestCase
             $table->string('driver_ref')->nullable();
             $table->string('residency_mode')->default('context-following')->index();
             $table->string('realm')->default('site')->index();
-            $table->uuid('sitemap_id')->nullable()->index();
+            $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
             $table->integer('nav_order')->nullable();
             $table->timestamps();
             $table->unique(['namespace', 'slug']);
-        });
-
-        Schema::create('sitemaps', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('realm')->default('site')->index();
-            $table->string('name')->nullable();
-            $table->boolean('is_default')->default(false);
-            $table->timestamps();
         });
     }
 

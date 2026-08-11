@@ -158,21 +158,12 @@ class BeamUxEntryTest extends TestCase
             $table->string('residency_mode')->default('context-following')->index();
             $table->boolean('composable')->default(true);
             $table->string('realm')->default('site')->index();
-            $table->uuid('sitemap_id')->nullable()->index();
+            $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
             $table->timestamps();
             $table->unique(['namespace', 'slug']);
         });
-
-        Schema::create('sitemaps', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('realm')->default('site')->index();
-            $table->string('name')->nullable();
-            $table->boolean('is_default')->default(false);
-            $table->timestamps();
-        });
-
         // beam-core body tables (mirrors beam-core's ParticleWriterTest fixtures).
         Schema::create(Beam::table('particles'), function (Blueprint $table) {
             $table->uuid('id')->primary();
