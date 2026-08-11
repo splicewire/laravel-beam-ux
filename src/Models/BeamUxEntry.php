@@ -135,8 +135,6 @@ class BeamUxEntry extends Model implements WorkflowManaged
         'schema_is_draft',
         'facade_ref',
         'type',
-        // Editability tier (ticket 14): is this entry's body free composition or a fixed template?
-        'composable',
         'format',
         'body_style',
         'namespace',
@@ -160,9 +158,6 @@ class BeamUxEntry extends Model implements WorkflowManaged
         'residency_mode' => self::RESIDENCY_CONTEXT_FOLLOWING,
         'format' => UxFormat::Tsx->value,
         'realm' => self::REALM_SITE,
-        // Editability tier default (ticket 14): composable unless a host demotes a behavior realm. This
-        // keeps every pre-existing entry composable exactly as before the column landed.
-        'composable' => true,
     ];
 
     /**
@@ -181,8 +176,6 @@ class BeamUxEntry extends Model implements WorkflowManaged
             'body_style' => BodyStyle::class,
             // The inferred-draft marker (S9): true only when `schema_ref` is an inference draft.
             'schema_is_draft' => 'boolean',
-            // The editability-tier flag (ticket 14): body is free composition (true) vs fixed template.
-            'composable' => 'boolean',
             // The ordered realm fallback stack (ticket 03) — a list<string>, same shape as
             // RealmRegistry::$stack.
             'realms' => 'array',

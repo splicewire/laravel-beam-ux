@@ -35,8 +35,7 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  * `format`/`body_style` are the body-language axis (sibling to `type`). `placement_ref`/
  * `driver_ref` are the S2 storage precedence refs. `workflow_marking`/`workflow_version` make the entry
  * an OPTIONAL subject of the free-tier `laravel-beam-workflows` engine. `schema_is_draft` marks an
- * inferred (vs. authored) `schema_ref`. `composable` gates the WYSIWYG edit chrome (free composition vs.
- * a fixed template around a sealed behavior island).
+ * inferred (vs. authored) `schema_ref`.
  */
 return new class extends Migration
 {
@@ -67,15 +66,15 @@ return new class extends Migration
             $table->boolean('schema_is_draft')->default(false)->index();
             $table->string('facade_ref')->nullable();
 
-            // type ∈ {layout, template, page, component}. format is the sibling body-language/codec axis
-            // (ADR-0164) — which codec compiles/renders the body and which extension it materializes to.
-            // body_style is a tsx-codec-local flavor, meaningless for other formats. composable gates
-            // whether the body is free structural composition or a fixed template (default true —
-            // backward-compatible; a host demotes a behavior realm to false at seed time).
+            // type ∈ {layout, template, page, component, theme}. format is the sibling body-language/
+            // codec axis (ADR-0164) — which codec compiles/renders the body and which extension it
+            // materializes to. body_style is a tsx-codec-local flavor, meaningless for other formats.
+            // The former `composable` flag (editability tier) is retired (theme-entries-and-authoring
+            // ticket 04) — fully subsumed by ADR-0016's per-node opacity overlay, computed per node in
+            // the canvas, not a coarser entry-level gate.
             $table->string('type')->index();
             $table->string('format')->default(UxFormat::Tsx->value)->index();
             $table->string('body_style')->nullable();
-            $table->boolean('composable')->default(true);
 
             // namespace is the dot-nestable BUILD grouping (disk placement only, NOT URL/taxonomy).
             // placement_ref/driver_ref are the S2 per-entry storage precedence refs (fall through to the

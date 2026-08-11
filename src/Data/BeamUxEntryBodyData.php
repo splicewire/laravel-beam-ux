@@ -30,19 +30,15 @@ class BeamUxEntryBodyData extends Data
 {
     /**
      * @param  string  $slug  the entry's authoring-envelope slug (the body endpoint's addressing key)
-     * @param  string  $type  the UxType (layout|template|page|component) — kind-driven placement input
+     * @param  string  $type  the UxType (layout|template|page|component|theme) — kind-driven placement input
      * @param  array<string, mixed>|null  $schema  the resolved JSON-Schema for the SchemaForm, or null when
      *                                             the entry declares no inline schema (permissive fallback)
      * @param  array<string, mixed>  $body  the current particle body — seeds the SchemaForm's formData
-     * @param  bool  $composable  editability tier (ticket 14): is this entry's body free composition (true)
-     *                            or a fixed/behavior template (false)? The AUTHORITATIVE gate the frontend
-     *                            host reads to seal structural editing regardless of body shape (F06).
      */
     public function __construct(
         public string $slug,
         public string $type,
         public ?array $schema,
         public array $body,
-        public bool $composable = true,
     ) {}
 }

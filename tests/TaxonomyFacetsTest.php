@@ -141,7 +141,6 @@ class TaxonomyFacetsTest extends TestCase
             $table->string('placement_ref')->nullable();
             $table->string('driver_ref')->nullable();
             $table->string('residency_mode')->default('context-following')->index();
-            $table->boolean('composable')->default(true);
             $table->string('realm')->default('site')->index();
             $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();

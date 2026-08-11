@@ -96,21 +96,6 @@ class AuthoringCommandsTest extends TestCase
         $this->assertNotNull(BeamUxEntry::query()->where('namespace', 'realms')->where('slug', 'account')->first());
     }
 
-    public function test_seed_nav_demotes_behavior_realms_to_non_composable(): void
-    {
-        Config::set('beam.ux.namespace', 'demo');
-        Config::set('beam-realms.behavior', ['auth']);
-        Config::set('beam.ux.nav', [
-            'home' => ['segment' => '/', 'title' => 'Home', 'realm' => 'site'],
-            'login' => ['segment' => '/login', 'title' => 'Log in', 'realm' => 'auth'],
-        ]);
-
-        $this->artisan('splicewire:beam:ux:seed-nav')->assertSuccessful();
-
-        $this->assertTrue((bool) BeamUxEntry::query()->where('slug', 'home')->first()->composable);
-        $this->assertFalse((bool) BeamUxEntry::query()->where('slug', 'login')->first()->composable);
-    }
-
     public function test_seed_nav_derives_from_entry_frontmatter_when_no_config_or_disk(): void
     {
         Config::set('beam.ux.namespace', 'demo');
@@ -172,7 +157,6 @@ class AuthoringCommandsTest extends TestCase
             $table->boolean('schema_is_draft')->default(false)->index();
             $table->string('facade_ref')->nullable();
             $table->string('type')->nullable()->index();
-            $table->boolean('composable')->default(true);
             $table->string('format')->default('tsx')->index();
             $table->string('body_style')->nullable();
             $table->string('namespace')->nullable()->index();

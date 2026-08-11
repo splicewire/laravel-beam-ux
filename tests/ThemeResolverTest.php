@@ -50,7 +50,6 @@ class ThemeResolverTest extends TestCase
                 $table->string('residency_mode')->default('context-following')->index();
                 $table->string('realm')->default('site')->index();
                 $table->json('realms')->nullable();
-                $table->boolean('composable')->default(true);
                 $table->timestamps();
                 $table->unique(['namespace', 'slug']);
             });

@@ -16,9 +16,7 @@ use Splicewire\Beam\Ux\Nav\NavSource;
  * seeds its nav with NO bespoke PHP — the derivation carries it.
  *
  * Idempotent (`updateOrCreate` keyed by slug + namespace): re-running restamps realm/segment/
- * title/order without duplicating. `composable` defaults per the `beam-realms.behavior` config list
- * (behavior realms get a fixed-template body → composable=false); a realm not named there is a content
- * realm (composable=true) — the entry model's own default.
+ * title/order without duplicating.
  *
  * The command name mirrors the package tree (ADR-0167): vendor `splicewire` · tier `beam` ·
  * package-path `ux` · verb `seed-nav`.
@@ -42,7 +40,6 @@ class SeedNavCommand extends Command
             return self::SUCCESS;
         }
 
-        $behaviorRealms = $this->behaviorRealms();
         $provisionedRoots = [];
         $order = 0;
 
@@ -61,10 +58,6 @@ class SeedNavCommand extends Command
                 [
                     'type' => $row['type'],
                     'realm' => $realm,
-                    // Behavior realms (auth/studio/checkout/operator) carry a fixed-template body →
-                    // composable=false; every other realm is a content realm (composable). Config-driven
-                    // via `beam-realms.behavior` so a host adds a behavior realm without editing here.
-                    'composable' => ! in_array($realm, $behaviorRealms, true),
                     'realms' => [$realm],
                     'parent_id' => null,
                     'segment' => $row['segment'],
@@ -90,20 +83,5 @@ class SeedNavCommand extends Command
         $option = $this->option('namespace');
 
         return is_string($option) && $option !== '' ? $option : (string) config('beam.ux.namespace', '');
-    }
-
-    /**
-     * The behavior-realm list (fixed-template body, composable=false), config-overridable via
-     * `beam-realms.behavior` so a host names its own without editing the package.
-     *
-     * @return list<string>
-     */
-    private function behaviorRealms(): array
-    {
-        $configured = config('beam-realms.behavior');
-
-        return is_array($configured)
-            ? array_values(array_map('strval', $configured))
-            : [];
     }
 }
