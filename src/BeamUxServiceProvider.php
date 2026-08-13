@@ -11,6 +11,7 @@ use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
 use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Schema\SchemaSources;
 use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Sitemap\SitemapSourceRegistry;
 use Splicewire\Beam\Storage\DiskStorageDriver;
@@ -406,10 +407,12 @@ class BeamUxServiceProvider extends PackageServiceProvider
      * (fingerprint-checked) and the artifact directory is regenerated from {@see ThemeSchemas} on
      * every boot — never hand-edit the generated `.schema.json` files.
      *
-     * A host that wants these namespaces resolvable through ITS OWN `BeamSchemaRegistry` points (or
-     * adds) a `file` source factory at {@see ThemeSchemas::directory()} — that host-side wiring is
-     * out of this package's scope; this method only guarantees the artifacts exist and are
-     * BeamSchemaRegistry-compatible (proven in `tests/ThemeSchemaTest.php`).
+     * Host-side resolvability (JN-15 / ADR-0192 §5 — the formerly documented gap, now closed):
+     * the tier is contributed into beam-core's boot-time {@see SchemaSources} registry under the
+     * `theme` key, so a host's `BeamSchemaRegistry` resolves these artifacts with NO host edit —
+     * appended after the configured sources (lowest precedence) unless the host's
+     * `beam.core.schema.sources` names `theme` explicitly to place it. Guarded on the registry
+     * class existing so beam-ux still boots against an older beam-core.
      */
     protected function registerThemeSchemas(): void
     {
@@ -417,6 +420,13 @@ class BeamUxServiceProvider extends PackageServiceProvider
 
         foreach (ThemeSchemas::all() as $schema) {
             $registry->register($schema);
+        }
+
+        if (class_exists(SchemaSources::class)) {
+            $this->app->make(SchemaSources::class)->register(
+                'theme',
+                fn () => new FilesystemSchemaRegistry(ThemeSchemas::directory()),
+            );
         }
     }
 
