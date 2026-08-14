@@ -43,14 +43,27 @@ class ThemeResolver
     private const CENTRAL_CONNECTION = 'central';
 
     /**
+     * @param  string|null  $realm  A "sub-brand" override on top of the default cascade — e.g. a Beam-
+     *                              branded section living inside an otherwise Splicewire-themed host.
+     *                              Resolved as an ADDITIVE fourth tier (default → central default →
+     *                              tenant default → realm), so a realm only needs to declare the tokens
+     *                              it actually deviates on; anything it doesn't override still falls
+     *                              through to the site's own resolved default. `null` (or a realm with
+     *                              no theme row of its own) is a pure no-op — identical to calling this
+     *                              with no argument at all.
      * @return array{canvas: array<string, mixed>, shell: array<string, mixed>, site: array<string, mixed>}
      */
-    public function resolve(): array
+    public function resolve(?string $realm = null): array
     {
         try {
             $theme = $this->defaults();
-            $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry(), self::CENTRAL_CONNECTION));
-            $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry(), null));
+            $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry(self::SLUG), self::CENTRAL_CONNECTION));
+            $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry(self::SLUG), null));
+
+            if ($realm !== null && $realm !== self::SLUG) {
+                $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry($realm), self::CENTRAL_CONNECTION));
+                $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry($realm), null));
+            }
 
             return $theme;
         } catch (Throwable) {
@@ -90,7 +103,7 @@ class ThemeResolver
         return $defaults;
     }
 
-    private function centralEntry(): ?BeamUxEntry
+    private function centralEntry(string $slug): ?BeamUxEntry
     {
         if (! is_array(config('database.connections.'.self::CENTRAL_CONNECTION))) {
             return null;
@@ -98,15 +111,15 @@ class ThemeResolver
 
         return BeamUxEntry::on(self::CENTRAL_CONNECTION)
             ->where('namespace', self::NAMESPACE)
-            ->where('slug', self::SLUG)
+            ->where('slug', $slug)
             ->first();
     }
 
-    private function tenantEntry(): ?BeamUxEntry
+    private function tenantEntry(string $slug): ?BeamUxEntry
     {
         return BeamUxEntry::query()
             ->where('namespace', self::NAMESPACE)
-            ->where('slug', self::SLUG)
+            ->where('slug', $slug)
             ->first();
     }
 

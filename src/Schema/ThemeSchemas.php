@@ -113,6 +113,12 @@ class ThemeSchemas
                 'accent' => self::color('Primary accent (links, buttons).', '#4F7CFF'),
                 'accentHover' => self::color('Accent :hover treatment (buttons, links).', '#3A63E0'),
                 'border' => self::color('Dividers/card borders.', '#D4D4D8'),
+                // Typography (theme-entries-and-authoring follow-up: a brand-distinct sub-site needs more
+                // than recoloring — mirrors canvas's fontBody/fontMono naming, split a third way since a
+                // site brand commonly carries a serif/display face too, unlike the neutral editor chrome).
+                'fontSans' => self::font('Primary UI/body font stack.', 'system-ui, sans-serif'),
+                'fontSerif' => self::font('Display/headline font stack (falls back to fontSans when a brand has none).', 'system-ui, sans-serif'),
+                'fontMono' => self::font('Code/label font stack.', 'ui-monospace, monospace'),
             ],
         ];
     }
