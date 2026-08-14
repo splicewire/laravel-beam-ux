@@ -17,12 +17,15 @@ use Illuminate\Console\Command;
  * `file:` path — so `pnpm install` resolves the whole surface set with no registry round-trip.
  *
  * Idempotent + safe: only runs for a pnpm host (a `pnpm-lock.yaml`/`pnpm-workspace.yaml` present), only
- * pins names that resolve to a real local package dir, never touches an npm/yarn host. Run once after
- * adding the surface packages, or from `splicewire:beam:install`.
+ * pins names that resolve to a real local package dir, never touches an npm/yarn host. An override entry
+ * a host has already hand-edited to something other than the computed value survives a routine run —
+ * `--force` is required to overwrite it, matching `vendor:publish`'s safe-by-default semantics (new pins
+ * for names with no existing entry are always added, force or not). Run once after adding the surface
+ * packages, or from `splicewire:beam:install`.
  */
 class PnpmOverridesCommand extends Command
 {
-    protected $signature = 'splicewire:beam:ux:pnpm-overrides {--path= : Host project root (defaults to base_path())} {--dry-run : Print the computed overrides without writing}';
+    protected $signature = 'splicewire:beam:ux:pnpm-overrides {--path= : Host project root (defaults to base_path())} {--dry-run : Print the computed overrides without writing} {--force : Overwrite already-present override entries that differ from the computed value}';
 
     protected $description = 'Write pnpm.overrides pinning the beam/schemastud JS surfaces\' unpublished transitive deps to their local file: paths (pnpm hosts).';
 
@@ -84,7 +87,13 @@ class PnpmOverridesCommand extends Command
         }
 
         $existing = $pkg['pnpm']['overrides'] ?? [];
-        $merged = $overrides + (is_array($existing) ? $existing : []); // computed wins on conflict
+        $existing = is_array($existing) ? $existing : [];
+        // Safe-unless-force: an entry the host already has (hand-edited or from a prior run) wins over the
+        // freshly computed value unless --force says otherwise; a name with no existing entry is always
+        // added, since there's nothing to protect.
+        $merged = $this->option('force')
+            ? $overrides + $existing
+            : $existing + $overrides;
         ksort($merged);
 
         if ($this->option('dry-run')) {

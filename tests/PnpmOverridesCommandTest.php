@@ -94,6 +94,44 @@ class PnpmOverridesCommandTest extends TestCase
         $this->assertSame($first, file_get_contents("{$host}/package.json"));
     }
 
+    /**
+     * beam-install-turnkey ticket 12: safe-unless-force, matching `vendor:publish` — a host that hand-edits
+     * an override entry (e.g. to point at a different local checkout) keeps that edit on a routine run;
+     * only `--force` lets the freshly computed value win.
+     */
+    public function test_preserves_a_hand_edited_override_entry_without_force(): void
+    {
+        $host = $this->scaffold();
+        $this->artisan('splicewire:beam:ux:pnpm-overrides', ['--path' => $host])->assertSuccessful();
+
+        $pkg = json_decode((string) file_get_contents("{$host}/package.json"), true);
+        $pkg['pnpm']['overrides']['@schemastud/seam'] = 'file:../custom/seam-path';
+        file_put_contents("{$host}/package.json", json_encode($pkg, JSON_PRETTY_PRINT));
+
+        $this->artisan('splicewire:beam:ux:pnpm-overrides', ['--path' => $host])->assertSuccessful();
+
+        $pkg = json_decode((string) file_get_contents("{$host}/package.json"), true);
+        $this->assertSame('file:../custom/seam-path', $pkg['pnpm']['overrides']['@schemastud/seam']);
+        // A name with no existing entry is still added even without --force.
+        $this->assertArrayHasKey('@schemastud/frame-remote', $pkg['pnpm']['overrides']);
+    }
+
+    public function test_force_overwrites_a_hand_edited_override_entry(): void
+    {
+        $host = $this->scaffold();
+        $this->artisan('splicewire:beam:ux:pnpm-overrides', ['--path' => $host])->assertSuccessful();
+
+        $pkg = json_decode((string) file_get_contents("{$host}/package.json"), true);
+        $computed = $pkg['pnpm']['overrides']['@schemastud/seam'];
+        $pkg['pnpm']['overrides']['@schemastud/seam'] = 'file:../custom/seam-path';
+        file_put_contents("{$host}/package.json", json_encode($pkg, JSON_PRETTY_PRINT));
+
+        $this->artisan('splicewire:beam:ux:pnpm-overrides', ['--path' => $host, '--force' => true])->assertSuccessful();
+
+        $pkg = json_decode((string) file_get_contents("{$host}/package.json"), true);
+        $this->assertSame($computed, $pkg['pnpm']['overrides']['@schemastud/seam']);
+    }
+
     private function rmrf(string $dir): void
     {
         if (! is_dir($dir)) {
