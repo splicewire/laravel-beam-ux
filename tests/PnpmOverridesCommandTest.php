@@ -3,7 +3,7 @@
 namespace Splicewire\Beam\Ux\Tests;
 
 /**
- * beam-install-turnkey (pnpm-host trap): `beam:pnpm-overrides` walks the `@splicewire/@schemastud`
+ * beam-install-turnkey (pnpm-host trap): `splicewire:beam:ux:pnpm-overrides` walks the `@splicewire/@schemastud`
  * packages a host `file:`-links, follows THEIR dep graph, and pins every unpublished transitive name to
  * its local `file:` path — so a pnpm host resolves the surface set without hitting `ERR_PNPM_FETCH_404`.
  */
@@ -60,7 +60,7 @@ class PnpmOverridesCommandTest extends TestCase
     {
         $host = $this->scaffold();
 
-        $this->artisan('beam:pnpm-overrides', ['--path' => $host])->assertSuccessful();
+        $this->artisan('splicewire:beam:ux:pnpm-overrides', ['--path' => $host])->assertSuccessful();
 
         $pkg = json_decode((string) file_get_contents("{$host}/package.json"), true);
         $overrides = $pkg['pnpm']['overrides'];
@@ -79,7 +79,7 @@ class PnpmOverridesCommandTest extends TestCase
     {
         $host = $this->scaffold(pnpm: false);
 
-        $this->artisan('beam:pnpm-overrides', ['--path' => $host])->assertSuccessful();
+        $this->artisan('splicewire:beam:ux:pnpm-overrides', ['--path' => $host])->assertSuccessful();
 
         $pkg = json_decode((string) file_get_contents("{$host}/package.json"), true);
         $this->assertArrayNotHasKey('pnpm', $pkg);
@@ -88,9 +88,9 @@ class PnpmOverridesCommandTest extends TestCase
     public function test_is_idempotent(): void
     {
         $host = $this->scaffold();
-        $this->artisan('beam:pnpm-overrides', ['--path' => $host])->assertSuccessful();
+        $this->artisan('splicewire:beam:ux:pnpm-overrides', ['--path' => $host])->assertSuccessful();
         $first = file_get_contents("{$host}/package.json");
-        $this->artisan('beam:pnpm-overrides', ['--path' => $host])->assertSuccessful();
+        $this->artisan('splicewire:beam:ux:pnpm-overrides', ['--path' => $host])->assertSuccessful();
         $this->assertSame($first, file_get_contents("{$host}/package.json"));
     }
 

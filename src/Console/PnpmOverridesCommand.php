@@ -7,7 +7,7 @@ namespace Splicewire\Beam\Ux\Console;
 use Illuminate\Console\Command;
 
 /**
- * `beam:pnpm-overrides` — make a pnpm host resolve the beam/schemastud JS surfaces.
+ * `splicewire:beam:ux:pnpm-overrides` — make a pnpm host resolve the beam/schemastud JS surfaces.
  *
  * npm leniently resolves a `file:`-linked package's own UNPUBLISHED transitive semver deps; pnpm does
  * not — it hits `ERR_PNPM_FETCH_404` when `@splicewire/beam-mainframe` → `@schemastud/mainframe` →
@@ -18,11 +18,11 @@ use Illuminate\Console\Command;
  *
  * Idempotent + safe: only runs for a pnpm host (a `pnpm-lock.yaml`/`pnpm-workspace.yaml` present), only
  * pins names that resolve to a real local package dir, never touches an npm/yarn host. Run once after
- * adding the surface packages, or from `beam:install`.
+ * adding the surface packages, or from `splicewire:beam:install`.
  */
 class PnpmOverridesCommand extends Command
 {
-    protected $signature = 'beam:pnpm-overrides {--path= : Host project root (defaults to base_path())} {--dry-run : Print the computed overrides without writing}';
+    protected $signature = 'splicewire:beam:ux:pnpm-overrides {--path= : Host project root (defaults to base_path())} {--dry-run : Print the computed overrides without writing}';
 
     protected $description = 'Write pnpm.overrides pinning the beam/schemastud JS surfaces\' unpublished transitive deps to their local file: paths (pnpm hosts).';
 
@@ -35,20 +35,20 @@ class PnpmOverridesCommand extends Command
         $pkgPath = "{$root}/package.json";
 
         if (! is_file($pkgPath)) {
-            $this->warn("beam:pnpm-overrides — no package.json at {$root}; nothing to do.");
+            $this->warn("splicewire:beam:ux:pnpm-overrides — no package.json at {$root}; nothing to do.");
 
             return self::SUCCESS;
         }
 
         if (! is_file("{$root}/pnpm-lock.yaml") && ! is_file("{$root}/pnpm-workspace.yaml")) {
-            $this->info('beam:pnpm-overrides — not a pnpm host (no pnpm-lock.yaml / pnpm-workspace.yaml); skipping (npm/yarn resolve these transitively).');
+            $this->info('splicewire:beam:ux:pnpm-overrides — not a pnpm host (no pnpm-lock.yaml / pnpm-workspace.yaml); skipping (npm/yarn resolve these transitively).');
 
             return self::SUCCESS;
         }
 
         $pkg = json_decode((string) file_get_contents($pkgPath), true);
         if (! is_array($pkg)) {
-            $this->error("beam:pnpm-overrides — {$pkgPath} is not valid JSON.");
+            $this->error("splicewire:beam:ux:pnpm-overrides — {$pkgPath} is not valid JSON.");
 
             return self::FAILURE;
         }
@@ -59,7 +59,7 @@ class PnpmOverridesCommand extends Command
         // packages discoverable from their org roots (name => absolute dir).
         $linked = $this->linkedSurfacePackages($directDeps, $root);
         if ($linked === []) {
-            $this->info('beam:pnpm-overrides — no file:-linked @splicewire/@schemastud packages; nothing to pin.');
+            $this->info('splicewire:beam:ux:pnpm-overrides — no file:-linked @splicewire/@schemastud packages; nothing to pin.');
 
             return self::SUCCESS;
         }
@@ -78,7 +78,7 @@ class PnpmOverridesCommand extends Command
         ksort($overrides);
 
         if ($overrides === []) {
-            $this->info('beam:pnpm-overrides — every transitive surface dep is already a direct dependency; no overrides needed.');
+            $this->info('splicewire:beam:ux:pnpm-overrides — every transitive surface dep is already a direct dependency; no overrides needed.');
 
             return self::SUCCESS;
         }
@@ -94,7 +94,7 @@ class PnpmOverridesCommand extends Command
         }
 
         if (($pkg['pnpm']['overrides'] ?? null) === $merged) {
-            $this->info('beam:pnpm-overrides — pnpm.overrides already current ('.count($merged).' pins).');
+            $this->info('splicewire:beam:ux:pnpm-overrides — pnpm.overrides already current ('.count($merged).' pins).');
 
             return self::SUCCESS;
         }
@@ -106,7 +106,7 @@ class PnpmOverridesCommand extends Command
             json_encode($pkg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n",
         );
 
-        $this->info('beam:pnpm-overrides — wrote '.count($merged).' pnpm override(s):');
+        $this->info('splicewire:beam:ux:pnpm-overrides — wrote '.count($merged).' pnpm override(s):');
         foreach ($merged as $name => $spec) {
             $this->line("  {$name} → {$spec}");
         }
