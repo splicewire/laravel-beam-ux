@@ -48,8 +48,13 @@ class BeamUxEntryData extends Data
 {
     public function __construct(
         public string $id,
+        // The model casts `type` to the UxType enum (BeamUxEntry::casts()); a plain `string` hint
+        // here throws when spatie/laravel-data hydrates straight off the model's already-cast
+        // attribute (DataFromArrayResolver, not the raw DB column). spatie/laravel-data serializes
+        // a native enum property to its ->value on the wire, so JSON consumers see the same plain
+        // string either way — this only fixes the PHP-side type mismatch.
         #[Column(label: 'Type', sort: 0)]
-        public string $type,
+        public UxType $type,
         #[Column(label: 'Title', sort: 1)]
         public ?string $title,
         #[Column(label: 'Slug', sort: 2)]
