@@ -12,8 +12,10 @@ use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
+use Splicewire\Beam\Ux\Schema\ThemeSchemas;
 use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
+use Splicewire\Beam\Ux\Type\UxType;
 use Splicewire\Beam\Write\ParticleWriter;
 use Splicewire\Beam\Write\PolicyWriteGate;
 
@@ -133,20 +135,37 @@ class BeamUxEntryBodyController
 
     /**
      * The JSON-Schema the SchemaForm renders. `schema_ref` carries EITHER an inline JSON schema (an
-     * inferred draft) OR a bare registry stem; we surface the inline object when present, else null.
+     * inferred draft) OR a bare registry stem; we surface the inline object when present. A `theme`
+     * entry carries no `schema_ref` (its body is a `{canvas,site}` token object, not a component's
+     * inferred props) — it falls back to `ThemeSchemas::canvas()`/`site()`, INLINED by value rather
+     * than `$ref`-composed (the two sub-schemas are already flat; a caller's `SchemaForm` renders
+     * this with no `schemaFetcher` round trip). `shell` is omitted — no host consuming this today
+     * has an `/os` windowed-desktop chrome to theme.
      *
      * @return array<string, mixed>|null
      */
     private function resolveSchema(BeamUxEntry $entry): ?array
     {
         $ref = $entry->schema_ref;
-        if (! is_string($ref) || $ref === '') {
-            return null;
+        if (is_string($ref) && $ref !== '') {
+            $decoded = json_decode($ref, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
         }
 
-        $decoded = json_decode($ref, true);
+        if ($entry->type === UxType::Theme) {
+            return [
+                'type' => 'object',
+                'title' => 'Theme',
+                'properties' => [
+                    'canvas' => ThemeSchemas::canvas(),
+                    'site' => ThemeSchemas::site(),
+                ],
+            ];
+        }
 
-        return is_array($decoded) ? $decoded : null;
+        return null;
     }
 
     private function typeValue(BeamUxEntry $entry): string
