@@ -33,7 +33,7 @@ class TsxBodyCodecTest extends TestCase
             ],
         ]);
 
-        $this->assertSame('<h1>Hello</h1>', $decoded);
+        $this->assertSame('<h1>Hello</h1>;', $decoded);
     }
 
     public function test_an_empty_blockdoc_body_decodes_to_an_empty_string_not_a_crash(): void

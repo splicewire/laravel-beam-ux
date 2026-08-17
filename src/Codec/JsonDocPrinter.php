@@ -19,13 +19,20 @@ class JsonDocPrinter
     private const INDENT = '  ';
 
     /**
-     * Print a JSON document (the doc-root array) to indented JSX source.
+     * Print a JSON document (the doc-root array) to indented JSX source. Each root prints as its own
+     * top-level JSX expression STATEMENT (a trailing `;`) — bare adjacent JSX elements/fragments with
+     * no separator are a parse error ("Adjacent JSX elements must be wrapped in an enclosing tag"), so
+     * a multi-root document (the normal shape for a real page: several top-level sections) needs an
+     * explicit statement terminator between roots to stay re-parseable by
+     * `@splicewire/beam-ux/blockdoc`'s `parse()`. Mirrors the identical fix in that package's own JS
+     * printer, `jsonToTsx()` (`blockdoc/json.ts`) — found live: this package's materialize-on-save
+     * disk mirror was producing files that the JS-side parser couldn't actually re-parse.
      *
      * @param  array<int, array<string, mixed>>  $doc
      */
     public static function print(array $doc, int $depth = 0): string
     {
-        return implode("\n", array_map(fn (array $n) => self::printNode($n, $depth), $doc));
+        return implode("\n", array_map(fn (array $n) => self::printNode($n, $depth).';', $doc));
     }
 
     /** @param  array<string, mixed>  $node */

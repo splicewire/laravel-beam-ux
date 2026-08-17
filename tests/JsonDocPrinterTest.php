@@ -52,7 +52,7 @@ class JsonDocPrinterTest extends TestCase
             ],
         ]);
 
-        $this->assertSame('<h2>Title</h2>', $out);
+        $this->assertSame('<h2>Title</h2>;', $out);
     }
 
     public function test_a_childless_element_prints_self_closing(): void
@@ -61,7 +61,7 @@ class JsonDocPrinterTest extends TestCase
             ['kind' => 'block', 'name' => 'br', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []],
         ]);
 
-        $this->assertSame('<br />', $out);
+        $this->assertSame('<br />;', $out);
     }
 
     public function test_a_fragment_root_has_no_tag_name(): void
@@ -70,7 +70,7 @@ class JsonDocPrinterTest extends TestCase
             ['kind' => 'block', 'name' => null, 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []],
         ]);
 
-        $this->assertSame('<></>', $out);
+        $this->assertSame('<></>;', $out);
     }
 
     public function test_nested_block_children_print_indented_on_their_own_lines(): void
@@ -87,7 +87,7 @@ class JsonDocPrinterTest extends TestCase
             ],
         ]);
 
-        $this->assertSame("<section>\n  <h1>Heading</h1>\n  <p>Body</p>\n</section>", $out);
+        $this->assertSame("<section>\n  <h1>Heading</h1>\n  <p>Body</p>\n</section>;", $out);
     }
 
     public function test_an_opaque_node_re_emits_its_source_verbatim(): void
@@ -96,7 +96,7 @@ class JsonDocPrinterTest extends TestCase
             ['kind' => 'opaque', 'reason' => 'map', 'source' => '{items.map(i => <li key={i}>{i}</li>)}'],
         ]);
 
-        $this->assertSame('{items.map(i => <li key={i}>{i}</li>)}', $out);
+        $this->assertSame('{items.map(i => <li key={i}>{i}</li>)};', $out);
     }
 
     public function test_a_string_prop_does_not_escape_forward_slashes(): void
@@ -111,6 +111,21 @@ class JsonDocPrinterTest extends TestCase
         ]);
 
         $this->assertStringContainsString('href="https://example.test/docs"', $out);
+    }
+
+    public function test_multiple_top_level_roots_are_separated_by_statement_terminators(): void
+    {
+        // A real page is never single-root — bare adjacent JSX with no separator is a parse error on
+        // the JS side ("Adjacent JSX elements must be wrapped..."). Mirrors the identical JS-side
+        // regression test in blockdoc/json.test.ts.
+        $out = JsonDocPrinter::print([
+            ['kind' => 'block', 'name' => 'section', 'isComponent' => false, 'dynamic' => false, 'props' => [],
+                'children' => [['kind' => 'text', 'value' => 'first']]],
+            ['kind' => 'block', 'name' => 'section', 'isComponent' => false, 'dynamic' => false, 'props' => [],
+                'children' => [['kind' => 'text', 'value' => 'second']]],
+        ]);
+
+        $this->assertSame("<section>first</section>;\n<section>second</section>;", $out);
     }
 
     public function test_an_expression_prop_re_wraps_its_stripped_source(): void
