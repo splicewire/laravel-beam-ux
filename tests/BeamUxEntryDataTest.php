@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
-use Splicewire\Beam\Beam;
+use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Ux\Data\BeamUxEntryData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryInputData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;

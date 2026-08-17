@@ -5,7 +5,7 @@ namespace Splicewire\Beam\Ux\Tests;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Schemastud\DataSchemas\Lifecycle\FilesystemSchemaRegistry;
-use Splicewire\Beam\Beam;
+use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Schema\BeamSchemaRegistry;
 use Splicewire\Beam\Schema\DatabaseSchemaRegistry;
 use Splicewire\Beam\Ux\Schema\ThemeSchemas;

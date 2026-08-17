@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Rushing\PermissionCascade\Contracts\EntitlementResolver;
-use Splicewire\Beam\Beam;
+use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Revisions\RevisionRecorder;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
