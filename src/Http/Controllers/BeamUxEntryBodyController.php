@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Schemastud\DataSchemas\Migration\AcceptanceGate;
 use Splicewire\Beam\Schema\Contracts\SchemaTargetResolver;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
+use Splicewire\Beam\Ux\Canvas\ViewGateFilter;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
@@ -29,15 +30,26 @@ use Splicewire\Beam\Write\PolicyWriteGate;
  * auth-guarded group.
  *
  *  - `show`   loads an entry's body through the resolved free-core StorageDriver (particle-primary by
- *             default) and returns the `{ slug, type, schema, body }` editing envelope.
+ *             default) and returns the `{ slug, type, schema, body }` editing envelope. Per-node
+ *             `data-view-gate` entitlement keys are enforced HERE ({@see ViewGateFilter}) — the ONE
+ *             place a body reaches a client, so it's the ONE place that has to strip what an
+ *             unentitled viewer must never receive.
  *  - `update` writes an edited body back through the SAME driver — the write lands through beam-core's
- *             shared {@see ParticleWriter}, versioned + migrate-on-read intact.
+ *             shared {@see ParticleWriter}, versioned + migrate-on-read intact. NOT view-gate-filtered:
+ *             it echoes back exactly what this request's caller just submitted, not a fresh read.
  *
  * **Host owns the wire and the policy (ADR-0116).** The route is mounted behind the host's auth/tenant
  * middleware, so this is an authenticated editor write, NOT a deny-by-default anonymous submission — it
  * therefore binds a {@see PolicyWriteGate} (permits when no per-entry policy is declared — the route
  * middleware IS the gate) for the write path. Vendor seam (ADR-0092): this surface + controller = paid
  * `splicewire/*`; the particle body it round-trips through the StorageDriver = free-tier beam-core.
+ *
+ * **Known limitation (view-gate + concurrent editors).** An editor who can't view a gated subtree never
+ * receives it from `show`, so THEIR OWN local copy of the doc is missing it — if they then `update()`,
+ * their submitted body genuinely doesn't contain that subtree, and it is lost. There is no merge step
+ * reconciling "what this editor never saw" against the previous persisted body; the JsonDoc schema has
+ * no stable per-node identity to merge by (paths shift under insert/delete elsewhere in the tree). Not
+ * solved here — a real fix needs stable node ids, a larger change than this pass.
  */
 class BeamUxEntryBodyController
 {
@@ -46,6 +58,7 @@ class BeamUxEntryBodyController
         private Gate $gate,
         private PlacementResolver $placements,
         private PlacedDiskMirror $mirror,
+        private ViewGateFilter $viewGateFilter,
     ) {}
 
     /** Load an entry's body + schema for seeding the inspector SchemaForm, or 404 when absent. */
@@ -62,7 +75,7 @@ class BeamUxEntryBodyController
             id: (string) $entry->id,
             type: $this->typeValue($entry),
             schema: $this->resolveSchema($entry),
-            body: $item?->body ?? [],
+            body: $this->viewGateFilter->filter($item?->body ?? []),
         )]);
     }
 
