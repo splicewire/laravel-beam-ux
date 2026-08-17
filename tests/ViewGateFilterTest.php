@@ -108,6 +108,19 @@ class ViewGateFilterTest extends TestCase
         $this->assertSame(['p', 'p'], $childNames);
     }
 
+    public function test_a_literal_null_string_gate_value_is_treated_as_no_gate_not_a_real_key(): void
+    {
+        // Found live: an entitlement <select> with no selection can serialize as the STRING "null"
+        // rather than an empty string or an absent key. Nobody holds an entitlement literally named
+        // "null" — treating it as a real gate silently stripped the node for every viewer.
+        $doc = [$this->block(['name' => 'h1', 'props' => $this->gateProp('null'), 'children' => [$this->text('Heading')]])];
+
+        $out = $this->filter()->filter($doc);
+
+        $this->assertCount(1, $out);
+        $this->assertSame('h1', $out[0]['name']);
+    }
+
     public function test_a_non_jsondoc_body_passes_through_unchanged_a_theme_entrys_keyed_token_object(): void
     {
         $themeBody = ['canvas' => ['accent' => '#fff'], 'site' => ['bg' => '#000']];

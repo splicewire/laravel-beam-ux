@@ -74,14 +74,22 @@ class ViewGateFilter
         return $node;
     }
 
-    /** @param  array<string, mixed>  $block */
+    /**
+     * A gate value is "unset" (no gate) as either an absent prop, an empty string, OR the literal
+     * string `"null"` — found live: an entitlement `<select>` with no selection can serialize its empty
+     * option as the STRING "null" (JS `String(null)`/a stringified-JSON round-trip artifact) rather
+     * than an actual empty string or absent key. Treating "null" as a real entitlement requirement
+     * silently strips the node for EVERY viewer (nobody holds an entitlement literally named "null").
+     *
+     * @param  array<string, mixed>  $block
+     */
     private function gateKeyOf(array $block): ?string
     {
         foreach ((array) ($block['props'] ?? []) as $prop) {
             if (is_array($prop) && ($prop['name'] ?? null) === self::ATTR) {
                 $value = $prop['value'] ?? null;
 
-                return is_string($value) && $value !== '' ? $value : null;
+                return is_string($value) && $value !== '' && $value !== 'null' ? $value : null;
             }
         }
 
