@@ -30,6 +30,9 @@ class BeamUxEntryBodyData extends Data
 {
     /**
      * @param  string  $slug  the entry's authoring-envelope slug (the body endpoint's addressing key)
+     * @param  string  $id  the entry's uuid — the `Route::recordVersions()` addressing key
+     *                      (`/beam-ux/entries/{id}/versions`); distinct from `slug`, which addresses
+     *                      this body endpoint. A client wires the version-history panel off this.
      * @param  string  $type  the UxType (layout|template|page|component|theme) — kind-driven placement input
      * @param  array<string, mixed>|null  $schema  the resolved JSON-Schema for the SchemaForm, or null when
      *                                             the entry declares no inline schema (permissive fallback)
@@ -37,6 +40,7 @@ class BeamUxEntryBodyData extends Data
      */
     public function __construct(
         public string $slug,
+        public string $id,
         public string $type,
         public ?array $schema,
         public array $body,

@@ -59,6 +59,7 @@ class BeamUxEntryBodyController
 
         return response()->json(['data' => new BeamUxEntryBodyData(
             slug: (string) $entry->slug,
+            id: (string) $entry->id,
             type: $this->typeValue($entry),
             schema: $this->resolveSchema($entry),
             body: $item?->body ?? [],
@@ -103,6 +104,7 @@ class BeamUxEntryBodyController
 
         return response()->json(['data' => new BeamUxEntryBodyData(
             slug: (string) $entry->slug,
+            id: (string) $entry->id,
             type: $this->typeValue($entry),
             schema: $this->resolveSchema($entry),
             body: $reloaded?->body ?? $body,

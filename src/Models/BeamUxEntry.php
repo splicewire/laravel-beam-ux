@@ -256,6 +256,19 @@ class BeamUxEntry extends Model implements WorkflowManaged
         return $this->belongsTo(BeamParticle::class, 'particle_id');
     }
 
+    /**
+     * The {@see Versionable} target for `Route::recordVersions()`'s `via:` resolution
+     * (`splicewire/laravel-beam-versioning`). The entry itself is a plain envelope row — its
+     * {@see BeamParticle} body is what actually carries the durable named-snapshot history
+     * ({@see BeamParticle} already `implements Versionable`, ADR-0138). An entry with no particle
+     * yet (never saved) returns null; the versions controller surfaces that as "not Versionable" —
+     * there is nothing to version until the first save mints one.
+     */
+    public function versionable(): ?BeamParticle
+    {
+        return $this->particle;
+    }
+
     /** The containing entry node (adjacency parent; the strict single home). Null = top-level. */
     public function parent(): BelongsTo
     {
