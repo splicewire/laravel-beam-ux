@@ -190,7 +190,7 @@ class EntryLifecycleTest extends TestCase
 
         $entry = $this->makeEntry(['slug' => 'hero', 'namespace' => 'kit', 'realm' => 'site']);
         $this->writeBody($entry, ['heading' => 'Promoted']);
-        $this->app->make(FakeEntitlementResolver::class)->keys = ['author-ux-site'];
+        $this->app->make(FakeEntitlementResolver::class)->keys = ['ux.site.author'];
 
         $central = $this->app->make(EntryPromoter::class)->promote($entry->fresh(), actor: (object) []);
 
@@ -210,7 +210,7 @@ class EntryLifecycleTest extends TestCase
 
         $entry = $this->makeEntry(['slug' => 'hero', 'namespace' => 'kit']);
         $this->writeBody($entry, ['heading' => 'First']);
-        $this->app->make(FakeEntitlementResolver::class)->keys = ['author-ux-site'];
+        $this->app->make(FakeEntitlementResolver::class)->keys = ['ux.site.author'];
         $promoter = $this->app->make(EntryPromoter::class);
 
         $first = $promoter->promote($entry->fresh(), actor: (object) []);
@@ -231,7 +231,7 @@ class EntryLifecycleTest extends TestCase
 
         $entry = $this->makeEntry(['slug' => 'hero', 'namespace' => 'kit']);
         $this->writeBody($entry, ['heading' => 'Live']);
-        $this->app->make(FakeEntitlementResolver::class)->keys = ['author-ux-site'];
+        $this->app->make(FakeEntitlementResolver::class)->keys = ['ux.site.author'];
 
         $central = $this->app->make(EntryPromoter::class)
             ->promote($entry->fresh(), actor: (object) [], payload: ['heading' => 'From a past revision']);

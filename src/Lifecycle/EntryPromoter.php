@@ -19,7 +19,7 @@ use Splicewire\Beam\Write\ParticleWriter;
  *
  * Gated directly against `rushing/laravel-permission-cascade`'s `EntitlementResolver` kernel contract
  * — the mechanism `laravel-beam-accounts`' `DefaultEntitlementResolver` implements (ACC-01) — rather
- * than a host's `author-ux-{realm}` Gate ability, since at least one host's (`laravel-beam-starter`)
+ * than a host's `ux.{realm}.author` Gate ability, since at least one host's (`laravel-beam-starter`)
  * gate still hardcodes `is_staff` directly and has not yet been rewired to consume ACC-01 (a
  * discovered gap, documented in the GOAL's Notes — out of this ticket's `laravel-beam-ux`-only scope
  * to fix). Going straight to the resolver is correct either way: it is the actual source of truth.
@@ -92,6 +92,6 @@ class EntryPromoter
      */
     private function authorized(mixed $actor, string $realm): bool
     {
-        return in_array("author-ux-{$realm}", $this->entitlements->entitlementsFor($actor), true);
+        return in_array("ux.{$realm}.author", $this->entitlements->entitlementsFor($actor), true);
     }
 }

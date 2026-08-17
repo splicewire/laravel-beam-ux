@@ -16,7 +16,7 @@ use Spatie\LaravelData\Data;
  * **User-supplied**: `type` (page/component/theme only — `layout`/`template` are rejected, zero
  * active consumers, no composition mechanism exists yet), `title`, `slug` (client auto-slugifies from
  * `title`, human-editable before submit — this DTO just validates the final value), `realm`
- * (entitlement-gated against `Gate::allows("author-ux-{$realm}")`, never trusted as free text —
+ * (entitlement-gated against `Gate::allows("ux.{$realm}.author")`, never trusted as free text —
  * see {@see rules()}), `parent_id` (an existing entry's id, the placement picker).
  *
  * **Auto-derived**: `namespace` always `''` (disk-only build-grouping — irrelevant to an
@@ -51,7 +51,7 @@ class BeamUxEntryInputData extends Data
             // [namespace, slug] composite unique index (create_beam_ux_entries_table).
             'slug' => ['required', 'string', 'max:255', Rule::unique('beam_ux_entries')->where('namespace', '')],
             'realm' => ['required', 'string', function (string $attribute, mixed $value, Closure $fail): void {
-                if (! Gate::allows("author-ux-{$value}")) {
+                if (! Gate::allows("ux.{$value}.author")) {
                     $fail('You are not entitled to author entries in this realm.');
                 }
             }],

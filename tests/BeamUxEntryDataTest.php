@@ -56,8 +56,8 @@ class BeamUxEntryDataTest extends TestCase
             $table->timestamps();
         });
 
-        Gate::define('author-ux-site', fn ($user = null) => true);
-        Gate::define('author-ux-operator', fn ($user = null) => false);
+        Gate::define('ux.site.author', fn ($user = null) => true);
+        Gate::define('ux.operator.author', fn ($user = null) => false);
 
         // The default WriteGate delegates to the Laravel gate; grant create so afterWrite()'s body
         // write passes (same precedent as BeamUxEntryTest).
