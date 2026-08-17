@@ -54,8 +54,17 @@ class TsxBodyCodec implements BodyCodec
 
     public function decode(array $body): string
     {
-        // Round-trips to the author's original source — the preamble is a derived artifact of `full`,
-        // never part of what the author typed.
+        // Two DISTINCT body shapes carry the `tsx` format: `{source: '…', body_style, preamble}` — an
+        // entry registered from a raw .tsx FILE (RegisterEntriesFromDisk) — round-trips through its own
+        // `source` key untouched (the preamble is a derived artifact of `full`, never part of what the
+        // author typed). A canvas/blockdoc-AUTHORED entry's body is instead a plain JsonNode[] LIST
+        // (`[{kind:'block',…}, …]`, no `source` key at all — the two are mutually exclusive shapes for
+        // the same format, so `array_is_list()` cleanly discriminates) — that prints through
+        // {@see JsonDocPrinter}, the server-side port of the canvas's own client-side "Source" printer.
+        if (array_is_list($body)) {
+            return JsonDocPrinter::print($body);
+        }
+
         return (string) ($body[self::SOURCE_KEY] ?? '');
     }
 }

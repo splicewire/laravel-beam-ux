@@ -124,10 +124,21 @@ class BeamUxEntryBodyController
         )]);
     }
 
-    /** Resolve the entry by slug (the body endpoint's addressing key), 404 when absent. */
+    /**
+     * Resolve the entry by slug (the body endpoint's addressing key), 404 when absent. `slug` alone is
+     * NOT globally unique — a `namespace`-scoped entry (a theme, a kit component) and a bare page entry
+     * can legitimately share one (e.g. both a `theme`-namespaced "beam" and the page-kind "beam" that
+     * a host's `/beam` route serves existed side by side, found live: the ambiguous `first()` this used
+     * to run picked whichever row's uuid sorted first, silently serving/saving to the WRONG entry with
+     * no error). A null-namespace entry — the addressing convention a page-kind entry conventionally
+     * uses (mirrors how a host's own page seeder disambiguates, e.g. splicewire's BeamPageSeeder) — wins
+     * ties; entries that are unambiguous (no null-namespace sibling sharing the slug) resolve exactly as
+     * before.
+     */
     private function resolveEntry(string $slug): BeamUxEntry
     {
-        return BeamUxEntry::query()->where('slug', $slug)->firstOrFail();
+        return BeamUxEntry::query()->where('slug', $slug)->whereNull('namespace')->first()
+            ?? BeamUxEntry::query()->where('slug', $slug)->firstOrFail();
     }
 
     /**
