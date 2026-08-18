@@ -5,6 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Schema\ConvergentTable;
 use Splicewire\Beam\Ux\Format\UxFormat;
 
 /**
@@ -17,9 +18,9 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  * rationale if it's ever needed again.
  *
  * SHARED (central + every tenant): published to the single `database/migrations/shared/` destination.
- * The `Schema::hasTable()` dup-guard below is there so a host that migrates BOTH passes into ONE schema
- * (the shared-test-DB harness) doesn't re-create the table; production separates schemas, so the guard
- * is false.
+ * The CONVERGENT guard below (`docs/agents/convergent-migration-guards.convention.md` in laravel-beam)
+ * covers the host that migrates BOTH passes into ONE schema (the shared-test-DB harness); production
+ * separates schemas, so the table is simply absent there.
  *
  * Shipped as a publish-only spatie/laravel-package-tools stub (`runsMigrations` FALSE): the package
  * publishes this timestamp-less `.php.stub` via `configurePackage()`'s `->hasMigrations([...])`
@@ -50,86 +51,87 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // SHARED-table dup-guard: the shared-test-DB harness may migrate the same shared/ file via
-        // BOTH the central and tenant passes into ONE `public` schema, so it may already have created
-        // this table. Production targets separate schemas, so this guard is simply false there.
-        if (Schema::hasTable('beam_ux_entries')) {
-            return;
-        }
+        // The shared-test-DB harness may migrate the same shared/ file via BOTH the central and tenant
+        // passes into ONE `public` schema, so this table may already exist — the convergent guard finds
+        // it matching and writes nothing. Production targets separate schemas, so the table is absent.
+        ConvergentTable::named('beam_ux_entries')
+            ->define(function (Blueprint $table) {
+                $table->uuid('id')->primary();
 
-        Schema::create('beam_ux_entries', function (Blueprint $table) {
-            $table->uuid('id')->primary();
+                // The has-a body: an FK to the generic beam_particles row (beam-core). Not a DB-level
+                // constrained FK — the particle table name rides beam-core's prefix seam and may vary per
+                // host — so it is a plain indexed uuid the `particle()` relation resolves.
+                $table->uuid('particle_id')->nullable()->index();
 
-            // The has-a body: an FK to the generic beam_particles row (beam-core). Not a DB-level
-            // constrained FK — the particle table name rides beam-core's prefix seam and may vary per
-            // host — so it is a plain indexed uuid the `particle()` relation resolves.
-            $table->uuid('particle_id')->nullable()->index();
+                // Authoring envelope. schema_ref is the declared schema binding of the body; schema_is_draft
+                // marks it an INFERRED draft (vs. an author's deliberate spec) — the ONLY writer that sets it
+                // true is the inference action; graduation clears it. facade_ref is nullable (single-rendering
+                // entries carry none; a multi-rendered canonical resolves its facade lens invisibly, ADR-0155).
+                $table->string('slug')->index();
+                $table->string('title')->nullable();
+                $table->string('schema_ref')->nullable()->index();
+                $table->boolean('schema_is_draft')->default(false)->index();
+                $table->string('facade_ref')->nullable();
 
-            // Authoring envelope. schema_ref is the declared schema binding of the body; schema_is_draft
-            // marks it an INFERRED draft (vs. an author's deliberate spec) — the ONLY writer that sets it
-            // true is the inference action; graduation clears it. facade_ref is nullable (single-rendering
-            // entries carry none; a multi-rendered canonical resolves its facade lens invisibly, ADR-0155).
-            $table->string('slug')->index();
-            $table->string('title')->nullable();
-            $table->string('schema_ref')->nullable()->index();
-            $table->boolean('schema_is_draft')->default(false)->index();
-            $table->string('facade_ref')->nullable();
+                // type ∈ {layout, template, page, component, theme}. format is the sibling body-language/
+                // codec axis (ADR-0164) — which codec compiles/renders the body and which extension it
+                // materializes to. body_style is a tsx-codec-local flavor, meaningless for other formats.
+                // The former `composable` flag (editability tier) is retired (theme-entries-and-authoring
+                // ticket 04) — fully subsumed by ADR-0016's per-node opacity overlay, computed per node in
+                // the canvas, not a coarser entry-level gate.
+                $table->string('type')->index();
+                $table->string('format')->default(UxFormat::Tsx->value)->index();
+                $table->string('body_style')->nullable();
 
-            // type ∈ {layout, template, page, component, theme}. format is the sibling body-language/
-            // codec axis (ADR-0164) — which codec compiles/renders the body and which extension it
-            // materializes to. body_style is a tsx-codec-local flavor, meaningless for other formats.
-            // The former `composable` flag (editability tier) is retired (theme-entries-and-authoring
-            // ticket 04) — fully subsumed by ADR-0016's per-node opacity overlay, computed per node in
-            // the canvas, not a coarser entry-level gate.
-            $table->string('type')->index();
-            $table->string('format')->default(UxFormat::Tsx->value)->index();
-            $table->string('body_style')->nullable();
+                // namespace is the dot-nestable BUILD grouping (disk placement only, NOT URL/taxonomy).
+                // placement_ref/driver_ref are the S2 per-entry storage precedence refs (fall through to the
+                // namespace map, then the default `Stacked(Particle, Disk)`).
+                $table->string('namespace')->nullable()->index();
+                $table->string('placement_ref')->nullable();
+                $table->string('driver_ref')->nullable();
 
-            // namespace is the dot-nestable BUILD grouping (disk placement only, NOT URL/taxonomy).
-            // placement_ref/driver_ref are the S2 per-entry storage precedence refs (fall through to the
-            // namespace map, then the default `Stacked(Particle, Disk)`).
-            $table->string('namespace')->nullable()->index();
-            $table->string('placement_ref')->nullable();
-            $table->string('driver_ref')->nullable();
+                // Residency: context-following by default — the entry lives wherever authored.
+                $table->string('residency_mode')->default('context-following')->index();
 
-            // Residency: context-following by default — the entry lives wherever authored.
-            $table->string('residency_mode')->default('context-following')->index();
+                // Containment: the organization spine deriving the entry's PUBLIC URL — decoupled from
+                // `namespace` (the "two trees"). realm is the public route root (defaults to `site`) and
+                // stays the primary/first realm; realms is the full ordered fallback stack an entry is
+                // reachable under (theme-entries-and-authoring ticket 03). parent_id is a plain indexed
+                // uuid (not a DB-constrained FK, portable central + tenant) resolved via its model relation.
+                // segment composes DOWN the tree (bare/`./` is parent-relative, `/` resets to the realm
+                // root). nav_order is an optional sibling sort key the NavProjector orders by when present,
+                // falling back to slug otherwise.
+                $table->string('realm')->default('site')->index();
+                $table->json('realms')->nullable();
+                $table->uuid('parent_id')->nullable()->index();
+                $table->string('segment')->nullable();
+                $table->integer('nav_order')->nullable();
 
-            // Containment: the organization spine deriving the entry's PUBLIC URL — decoupled from
-            // `namespace` (the "two trees"). realm is the public route root (defaults to `site`) and
-            // stays the primary/first realm; realms is the full ordered fallback stack an entry is
-            // reachable under (theme-entries-and-authoring ticket 03). parent_id is a plain indexed
-            // uuid (not a DB-constrained FK, portable central + tenant) resolved via its model relation.
-            // segment composes DOWN the tree (bare/`./` is parent-relative, `/` resets to the realm
-            // root). nav_order is an optional sibling sort key the NavProjector orders by when present,
-            // falling back to slug otherwise.
-            $table->string('realm')->default('site')->index();
-            $table->json('realms')->nullable();
-            $table->uuid('parent_id')->nullable()->index();
-            $table->string('segment')->nullable();
-            $table->integer('nav_order')->nullable();
+                // Workflow: an OPTIONAL subject of the free-tier laravel-beam-workflows engine. NULL marking
+                // = unmanaged / at-initial; the published-marking gate reads it so an unmanaged entry stays
+                // public by default. workflow_version pins the definition version on first transition.
+                $table->string('workflow_marking')->nullable()->index();
+                $table->string('workflow_version')->nullable();
 
-            // Workflow: an OPTIONAL subject of the free-tier laravel-beam-workflows engine. NULL marking
-            // = unmanaged / at-initial; the published-marking gate reads it so an unmanaged entry stays
-            // public by default. workflow_version pins the definition version on first transition.
-            $table->string('workflow_marking')->nullable()->index();
-            $table->string('workflow_version')->nullable();
-
-            $table->timestamps();
-            $table->softDeletes();
-        });
+                $table->timestamps();
+                $table->softDeletes();
+            })
+            ->assert();
 
         // One entry per slug within a build namespace — but a soft-deleted row must not block
         // reusing its slug (ticket 06). Partial unique index on the drivers that support one;
         // plain unique constraint elsewhere (deleted slugs stay reserved there).
+        // Both branches are written idempotently: index DDL beside a convergent create is NOT covered
+        // by the guard (convention: "raw DB::statement"), and the guard is what makes this block
+        // reachable on an existing table — before it, a repeat run died in `Schema::create`.
         $driver = Schema::getConnection()->getDriverName();
 
         if (in_array($driver, ['sqlite', 'pgsql'], true)) {
             DB::statement(
-                'create unique index beam_ux_entries_namespace_slug_active_unique '
+                'create unique index if not exists beam_ux_entries_namespace_slug_active_unique '
                 .'on beam_ux_entries (namespace, slug) where deleted_at is null'
             );
-        } else {
+        } elseif (! $this->hasNamespaceSlugIndex()) {
             Schema::table('beam_ux_entries', function (Blueprint $table) {
                 $table->unique(['namespace', 'slug']);
             });
@@ -139,5 +141,20 @@ return new class extends Migration
     public function down(): void
     {
         Schema::dropIfExists('beam_ux_entries');
+    }
+
+    /**
+     * Whether the plain (namespace, slug) unique index is already present — the non-partial branch's
+     * own idempotency check, since `$table->unique()` has no IF NOT EXISTS.
+     */
+    private function hasNamespaceSlugIndex(): bool
+    {
+        foreach (Schema::getIndexes('beam_ux_entries') as $index) {
+            if ($index['columns'] === ['namespace', 'slug']) {
+                return true;
+            }
+        }
+
+        return false;
     }
 };
