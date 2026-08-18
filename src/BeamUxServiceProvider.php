@@ -10,6 +10,10 @@ use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
+use Splicewire\Beam\Manifest\ManifestArity;
+use Splicewire\Beam\Manifest\ManifestDescriptor;
+use Splicewire\Beam\Manifest\ManifestIndex;
+use Splicewire\Beam\Manifest\ManifestSeam;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Schema\SchemaSources;
 use Splicewire\Beam\Seed\BeamSeedManifest;
@@ -19,6 +23,7 @@ use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Storage\StackedStorageDriver;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
+use Splicewire\Beam\Ux\Codec\CssBodyCodec;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
 use Splicewire\Beam\Ux\Console\EnrichPageSchemasCommand;
@@ -145,6 +150,48 @@ class BeamUxServiceProvider extends PackageServiceProvider
                 configGate: 'beam.ux.seed_nav',
             );
         }
+
+        // Self-describes this package's own registry-shaped singletons into beam-core's ManifestIndex
+        // (`splicewire:beam:manifests`) — found live: laravel-beam-ux had never described anything, so
+        // UndescribedRegistryAudit's membership-scoped ratchet had never scanned it at all (a package
+        // that has never described anything is not scanned; one that has is held to describing ALL of
+        // them). Describing CodecRegistry alone would have opted the package INTO that gate while
+        // leaving PlacementResolver/StorageDriverResolver — both registry-shaped by the exact same
+        // register()+resolve() test, both already documented as "the same shape as CodecRegistry" in
+        // their own class docblocks — silently undescribed, immediately failing the build. All three or
+        // none. Guarded on the index being bound (a host predating it still boots beam-ux fine).
+        if ($this->app->bound(ManifestIndex::class)) {
+            $index = $this->app->make(ManifestIndex::class);
+            $pkg = 'splicewire/laravel-beam-ux';
+
+            $index->describe(new ManifestDescriptor(
+                name: 'CodecRegistry',
+                of: 'BodyCodec implementations by UxFormat — how a BeamUxEntry body compiles to/from its raw source',
+                seam: ManifestSeam::SingletonAccumulator,
+                arity: ManifestArity::PickOne,
+                registerHint: 'app(CodecRegistry::class)->register(new YourBodyCodec) from your provider',
+                where: CodecRegistry::class,
+                package: $pkg,
+            ));
+            $index->describe(new ManifestDescriptor(
+                name: 'PlacementResolver',
+                of: 'FilePlacement strategies by name — the disk mirror path an entry materializes to',
+                seam: ManifestSeam::SingletonAccumulator,
+                arity: ManifestArity::PickOne,
+                registerHint: "app(PlacementResolver::class)->register('name', \$filePlacement) from your provider",
+                where: PlacementResolver::class,
+                package: $pkg,
+            ));
+            $index->describe(new ManifestDescriptor(
+                name: 'StorageDriverResolver',
+                of: 'StorageDriver implementations by name — where a BeamUxEntry particle body is read/written',
+                seam: ManifestSeam::SingletonAccumulator,
+                arity: ManifestArity::PickOne,
+                registerHint: "app(StorageDriverResolver::class)->register('name', \$storageDriver) from your provider",
+                where: StorageDriverResolver::class,
+                package: $pkg,
+            ));
+        }
     }
 
     /**
@@ -257,16 +304,19 @@ class BeamUxServiceProvider extends PackageServiceProvider
 
     /**
      * The {@see CodecRegistry} — the format→codec dispatch seam (ADR-0164). Bound as a singleton
-     * seeded with the TSX + MDX codecs. The dispatch is paid `splicewire/*`; the MDX codec's engine is
-     * the free-tier `laravel-beam-mdx` arm, folded in (not deleted) via {@see MdxBodyCodec}. A host can
-     * `register()` further codecs on the same singleton for formats beyond the tsx/mdx seed set.
+     * seeded with the TSX + MDX + CSS codecs. The dispatch is paid `splicewire/*`; the MDX codec's
+     * engine is the free-tier `laravel-beam-mdx` arm, folded in (not deleted) via {@see MdxBodyCodec}.
+     * {@see CssBodyCodec} is the `UxType::Theme` entry's default (`BeamUxEntry::defaultFormatFor()`) —
+     * OTB, not a per-host add-on, since `Theme` is itself a package-level structural type. A host can
+     * still `register()` further codecs on the same singleton for formats beyond this seed set.
      */
     protected function registerCodecs(): void
     {
         $this->app->singleton(CodecRegistry::class, function () {
             return (new CodecRegistry)
                 ->register(new TsxBodyCodec)
-                ->register(new MdxBodyCodec);
+                ->register(new MdxBodyCodec)
+                ->register(new CssBodyCodec);
         });
     }
 

@@ -161,7 +161,6 @@ class BeamUxEntry extends Model implements WorkflowManaged
 
     protected $attributes = [
         'residency_mode' => self::RESIDENCY_CONTEXT_FOLLOWING,
-        'format' => UxFormat::Tsx->value,
         'realm' => self::REALM_SITE,
     ];
 
@@ -197,6 +196,13 @@ class BeamUxEntry extends Model implements WorkflowManaged
     protected static function booted(): void
     {
         static::creating(function (BeamUxEntry $entry): void {
+            // `format` defaults by `type`, not a single fleet-wide constant (found live: a `theme`
+            // entry left at the old flat `tsx` default silently resolved TsxBodyCodec, which returns
+            // an empty string for a `{canvas, site}` body — every theme save was writing a blank
+            // `.tsx` file to the disk mirror with no error). A host that sets `format` explicitly is
+            // never overridden.
+            $entry->format ??= self::defaultFormatFor($entry->type);
+
             if (($entry->realms === null || $entry->realms === []) && $entry->realm !== null) {
                 $entry->realms = [$entry->realm];
             }
@@ -316,7 +322,14 @@ class BeamUxEntry extends Model implements WorkflowManaged
      */
     public function codec(): BodyCodec
     {
-        return app(CodecRegistry::class)->for($this->format ?? UxFormat::Tsx);
+        return app(CodecRegistry::class)->for($this->format ?? self::defaultFormatFor($this->type));
+    }
+
+    /** `format`'s type-aware default (`creating()` stamps this in; `codec()` mirrors it as a fallback
+     * for a row that predates this default, or one written by a raw insert bypassing Eloquent). */
+    private static function defaultFormatFor(?UxType $type): UxFormat
+    {
+        return $type === UxType::Theme ? UxFormat::Css : UxFormat::Tsx;
     }
 
     /**

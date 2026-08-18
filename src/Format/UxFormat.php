@@ -24,6 +24,10 @@ enum UxFormat: string
     /** MDX — folded in from the free-tier `laravel-beam-mdx` arm; `body_style` is meaningless here. */
     case Mdx = 'mdx';
 
+    /** CSS custom properties — a {@see \Splicewire\Beam\Ux\Type\UxType::Theme} entry's body materializes
+     * as a `:root { --token: value; }` block. `body_style` is meaningless here (tsx-only). */
+    case Css = 'css';
+
     // NOTE: there is intentionally NO `json` format. A structural page's body was briefly mirrored to
     // disk as verbatim `.json` — the category error ADR-0164's "NEXT" slice retired: json is a
     // serialization, not a SOURCE language. A structural page stays `format: tsx`, the same extension a
