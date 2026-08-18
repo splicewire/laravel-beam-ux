@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Data;
 use Closure;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\LaravelData\Data;
 
 /**
@@ -28,16 +29,22 @@ use Spatie\LaravelData\Data;
  * inference), matching `ScaffoldCommand`'s own minimal-entry precedent; there is no static
  * `type → refs` map anywhere in this package to reproduce here.
  */
+#[Title('New Entry')]
 class BeamUxEntryInputData extends Data
 {
     /** @var list<string> */
     public const CREATABLE_TYPES = ['page', 'component', 'theme'];
 
     public function __construct(
+        #[Title('Type')]
         public string $type,
+        #[Title('Title')]
         public string $title,
+        #[Title('Slug')]
         public string $slug,
+        #[Title('Realm')]
         public string $realm,
+        #[Title('Parent')]
         public ?string $parent_id = null,
     ) {}
 

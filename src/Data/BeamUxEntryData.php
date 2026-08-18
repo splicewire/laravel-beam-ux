@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Data;
 
 use Illuminate\Database\Eloquent\Model;
+use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\Column;
 use Schemastud\Frame\Attributes\RowActions;
 use Spatie\LaravelData\Data;
@@ -44,6 +45,11 @@ use Splicewire\Beam\Ux\Type\UxType;
 // only when the viewer holds the required central-root grant; see EntryPromoter::authorized()), not
 // filtered out of this static list, which just declares the action VOCABULARY.
 #[RowActions(['edit', 'duplicate', 'delete', 'promote-to-central'])]
+// #[Column] (below) drives the Entries LIST's table headers only — JsonSchemaGenerator (the edit
+// FORM's source) never reads it, a separate seam entirely (found live: the edit panel read "UxType"
+// for the type field and the bare class name "BeamUxEntryData" for its own heading, both from
+// JsonSchemaGenerator falling back to raw PHP names with no #[Title] on this class to override).
+#[Title('Entry')]
 class BeamUxEntryData extends Data
 {
     public function __construct(
@@ -53,19 +59,21 @@ class BeamUxEntryData extends Data
         // attribute (DataFromArrayResolver, not the raw DB column). spatie/laravel-data serializes
         // a native enum property to its ->value on the wire, so JSON consumers see the same plain
         // string either way — this only fixes the PHP-side type mismatch.
-        #[Column(label: 'Type', sort: 0)]
+        #[Column(label: 'Type', sort: 0), Title('Type')]
         public UxType $type,
-        #[Column(label: 'Title', sort: 1)]
+        #[Column(label: 'Title', sort: 1), Title('Title')]
         public ?string $title,
-        #[Column(label: 'Slug', sort: 2)]
+        #[Column(label: 'Slug', sort: 2), Title('Slug')]
         public string $slug,
-        #[Column(label: 'Realm', sort: 3)]
+        #[Column(label: 'Realm', sort: 3), Title('Realm')]
         public string $realm,
+        #[Title('Parent')]
         public ?string $parent_id,
         // No #[Column] — not a table column, just carried on the wire so a client (the theme editor,
         // found live: a namespaced `theme` entry and a null-namespace `page` entry sharing one slug
         // resolved to the WRONG one server-side with no way for the client to disambiguate) can pass
         // it back to `beam.ux.entries.body.*` as the `?namespace=` qualifier.
+        #[Title('Namespace')]
         public ?string $namespace = null,
     ) {}
 
