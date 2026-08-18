@@ -40,6 +40,7 @@ use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Entitlements\BeamUxRealmGrantable;
 use Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController;
+use Splicewire\Beam\Ux\Http\Controllers\BeamUxMirrorStatusController;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
@@ -50,6 +51,7 @@ use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 use Splicewire\Beam\Ux\Sitemap\EntrySitemapSource;
 use Splicewire\Beam\Ux\Sitemap\PublicEntitlementGate;
 use Splicewire\Beam\Ux\Sitemap\WorkflowMarkingPublishGate;
+use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
 use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -216,6 +218,11 @@ class BeamUxServiceProvider extends PackageServiceProvider
      *
      *   Route::beamUxEntries()  →  GET  beam/ux/entries/{slug}/body → show   (beam.ux.entries.body.show)
      *                              PUT  beam/ux/entries/{slug}/body → update (beam.ux.entries.body.update)
+     *                              GET  beam/ux/mirror-status       → show   (beam.ux.mirror-status.show)
+     *
+     * The mirror-status route rides the SAME macro/prefix (not a separate one) — it's the read half of
+     * the same "what did the disk mirror do" question the entry-body routes' `update()` already answers
+     * per-save; a host mounting one wants both.
      *
      * The uri prefix + name stem default from config (`beam.ux.api_root` / `beam.ux.route_name`,
      * env-overridable — ADR-0124), NOT hardcoded, so a host relocates the mount per-deploy without a code
@@ -241,6 +248,8 @@ class BeamUxServiceProvider extends PackageServiceProvider
                 ->name("{$routeName}entries.body.show");
             $this->put("{$apiRoot}/entries/{slug}/body", [BeamUxEntryBodyController::class, 'update'])
                 ->name("{$routeName}entries.body.update");
+            $this->get("{$apiRoot}/mirror-status", [BeamUxMirrorStatusController::class, 'show'])
+                ->name("{$routeName}mirror-status.show");
         });
     }
 
@@ -383,6 +392,15 @@ class BeamUxServiceProvider extends PackageServiceProvider
             $disk = ($name === null || $name === '') ? null : Storage::disk($name);
 
             return new PlacedDiskMirror($disk);
+        });
+
+        // Same disk, same degrade-not-fabricate null-when-unconfigured shape as PlacedDiskMirror
+        // above — the git-state READ half of what that class WRITES.
+        $this->app->singleton(MirrorGitStatus::class, function ($app) {
+            $name = config('beam.ux.storage.mirror_disk');
+            $disk = ($name === null || $name === '') ? null : Storage::disk($name);
+
+            return new MirrorGitStatus($disk);
         });
     }
 
