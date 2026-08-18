@@ -64,7 +64,7 @@ class BeamUxEntryBodyController
     /** Load an entry's body + schema for seeding the inspector SchemaForm, or 404 when absent. */
     public function show(Request $request, string $slug): JsonResponse
     {
-        $entry = $this->resolveEntry($slug);
+        $entry = $this->resolveEntry($request, $slug);
 
         $item = $entry->particle_id !== null
             ? $this->drivers->resolve($entry)->read((string) $entry->particle_id)
@@ -86,7 +86,7 @@ class BeamUxEntryBodyController
      */
     public function update(Request $request, string $slug): JsonResponse
     {
-        $entry = $this->resolveEntry($slug);
+        $entry = $this->resolveEntry($request, $slug);
 
         /** @var array<string, mixed> $body */
         $body = (array) $request->input('body', []);
@@ -130,13 +130,29 @@ class BeamUxEntryBodyController
      * can legitimately share one (e.g. both a `theme`-namespaced "beam" and the page-kind "beam" that
      * a host's `/beam` route serves existed side by side, found live: the ambiguous `first()` this used
      * to run picked whichever row's uuid sorted first, silently serving/saving to the WRONG entry with
-     * no error). A null-namespace entry — the addressing convention a page-kind entry conventionally
-     * uses (mirrors how a host's own page seeder disambiguates, e.g. splicewire's BeamPageSeeder) — wins
-     * ties; entries that are unambiguous (no null-namespace sibling sharing the slug) resolve exactly as
-     * before.
+     * no error).
+     *
+     * A caller that KNOWS which entry it means (it already has the row — `BeamUxEntryData::$namespace`
+     * — from a list/manifest fetch, e.g. the theme editor) passes `?namespace=` explicitly: an EXACT
+     * match, empty string meaning "the null-namespace one." Found live: the theme editor has no way to
+     * pass this today, so a namespaced `theme` entry sharing a slug with a null-namespace page silently
+     * resolved to the WRONG one — this is the fix, not just documentation of the old tiebreak.
+     *
+     * A caller with no opinion (the in-page canvas editor only ever addresses null-namespace page
+     * entries by bare slug) omits `namespace` entirely and gets the OLD tiebreak: a null-namespace
+     * entry wins ties; an unambiguous slug (no null-namespace sibling) resolves exactly as before.
      */
-    private function resolveEntry(string $slug): BeamUxEntry
+    private function resolveEntry(Request $request, string $slug): BeamUxEntry
     {
+        if ($request->has('namespace')) {
+            $namespace = $request->query('namespace');
+
+            return BeamUxEntry::query()
+                ->where('slug', $slug)
+                ->where('namespace', $namespace === '' ? null : $namespace)
+                ->firstOrFail();
+        }
+
         return BeamUxEntry::query()->where('slug', $slug)->whereNull('namespace')->first()
             ?? BeamUxEntry::query()->where('slug', $slug)->firstOrFail();
     }

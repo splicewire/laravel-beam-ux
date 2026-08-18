@@ -62,6 +62,11 @@ class BeamUxEntryData extends Data
         #[Column(label: 'Realm', sort: 3)]
         public string $realm,
         public ?string $parent_id,
+        // No #[Column] — not a table column, just carried on the wire so a client (the theme editor,
+        // found live: a namespaced `theme` entry and a null-namespace `page` entry sharing one slug
+        // resolved to the WRONG one server-side with no way for the client to disambiguate) can pass
+        // it back to `beam.ux.entries.body.*` as the `?namespace=` qualifier.
+        public ?string $namespace = null,
     ) {}
 
     /**

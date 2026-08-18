@@ -51,6 +51,43 @@ class BeamUxEntryBodyControllerTest extends TestCase
         $this->assertSame((string) $entry->id, $data['id']);
     }
 
+    public function test_an_explicit_namespace_query_param_picks_the_namespaced_sibling_over_the_null_one(): void
+    {
+        // The exact live bug: a theme editor knows the entry it means (it has the row already, from a
+        // list/manifest fetch) but had no way to say so — the old tiebreak always won with the page.
+        $theme = BeamUxEntry::create(['slug' => 'beam', 'type' => 'theme', 'namespace' => 'theme']);
+        BeamUxEntry::create(['slug' => 'beam', 'type' => 'page', 'namespace' => null]);
+
+        $controller = $this->app->make(BeamUxEntryBodyController::class);
+        $response = $controller->show(Request::create('/?namespace=theme'), 'beam');
+        $data = json_decode($response->getContent(), true)['data'];
+
+        $this->assertSame((string) $theme->id, $data['id']);
+        $this->assertSame('theme', $data['type']);
+    }
+
+    public function test_an_explicit_empty_namespace_query_param_picks_the_null_namespace_sibling(): void
+    {
+        BeamUxEntry::create(['slug' => 'beam', 'type' => 'theme', 'namespace' => 'theme']);
+        $page = BeamUxEntry::create(['slug' => 'beam', 'type' => 'page', 'namespace' => null]);
+
+        $controller = $this->app->make(BeamUxEntryBodyController::class);
+        $response = $controller->show(Request::create('/?namespace='), 'beam');
+        $data = json_decode($response->getContent(), true)['data'];
+
+        $this->assertSame((string) $page->id, $data['id']);
+    }
+
+    public function test_an_explicit_namespace_with_no_matching_entry_404s_rather_than_guessing(): void
+    {
+        BeamUxEntry::create(['slug' => 'beam', 'type' => 'page', 'namespace' => null]);
+
+        $controller = $this->app->make(BeamUxEntryBodyController::class);
+
+        $this->expectException(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
+        $controller->show(Request::create('/?namespace=does-not-exist'), 'beam');
+    }
+
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {
