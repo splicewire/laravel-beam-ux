@@ -6,6 +6,8 @@ use Closure;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Schemastud\DataSchemas\Attributes\Title;
+use Schemastud\Frame\Attributes\ResourceRef;
+use Schemastud\Frame\Attributes\Widget;
 use Spatie\LaravelData\Data;
 
 /**
@@ -42,9 +44,9 @@ class BeamUxEntryInputData extends Data
         public string $title,
         #[Title('Slug')]
         public string $slug,
-        #[Title('Realm')]
+        #[Title('Realm'), Widget('combobox', options: ['suggestions' => ['site', 'operator', 'tenant', 'user']])]
         public string $realm,
-        #[Title('Parent')]
+        #[Title('Parent'), ResourceRef('beam-ux-entry', value: 'id', label: 'title')]
         public ?string $parent_id = null,
     ) {}
 

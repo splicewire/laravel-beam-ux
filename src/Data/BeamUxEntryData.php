@@ -5,7 +5,9 @@ namespace Splicewire\Beam\Ux\Data;
 use Illuminate\Database\Eloquent\Model;
 use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\Column;
+use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\RowActions;
+use Schemastud\Frame\Attributes\Widget;
 use Spatie\LaravelData\Data;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -49,7 +51,7 @@ use Splicewire\Beam\Ux\Type\UxType;
 // FORM's source) never reads it, a separate seam entirely (found live: the edit panel read "UxType"
 // for the type field and the bare class name "BeamUxEntryData" for its own heading, both from
 // JsonSchemaGenerator falling back to raw PHP names with no #[Title] on this class to override).
-#[Title('Entry')]
+#[Title('UX Entry')]
 class BeamUxEntryData extends Data
 {
     public function __construct(
@@ -65,15 +67,24 @@ class BeamUxEntryData extends Data
         public ?string $title,
         #[Column(label: 'Slug', sort: 2), Title('Slug')]
         public string $slug,
-        #[Column(label: 'Realm', sort: 3), Title('Realm')]
+        // A dropdown suggesting the realms actually in use, but not hard-restricted to them (a new
+        // realm has to start as free text SOMEWHERE) — #[Widget('combobox')] renders a <datalist>-
+        // backed input, not an enum <select>. Static list, not queried from RealmRegistry: a PHP
+        // attribute's arguments must be compile-time literals, so this can drift from the registry —
+        // acceptable for a suggestion list, worth reconsidering if it does.
+        #[Column(label: 'Realm', sort: 3), Title('Realm'), Widget('combobox', options: ['suggestions' => ['site', 'operator', 'tenant', 'user']])]
         public string $realm,
-        #[Title('Parent')]
+        // A picker over OTHER beam-ux-entry rows (self-referential — the containment tree), not a
+        // raw UUID paste. #[ResourceRef] fetches beam-ux-entry's own index for the option list.
+        #[Title('Parent'), ResourceRef('beam-ux-entry', value: 'id', label: 'title')]
         public ?string $parent_id,
         // No #[Column] — not a table column, just carried on the wire so a client (the theme editor,
         // found live: a namespaced `theme` entry and a null-namespace `page` entry sharing one slug
         // resolved to the WRONG one server-side with no way for the client to disambiguate) can pass
-        // it back to `beam.ux.entries.body.*` as the `?namespace=` qualifier.
-        #[Title('Namespace')]
+        // it back to `beam.ux.entries.body.*` as the `?namespace=` qualifier. Suggests the two
+        // reserved namespaces BeamUxEntry::rootFor()/ThemeResolver use (see this class's own
+        // afterWrite) plus blank (no namespace) — same combobox-not-enum reasoning as realm above.
+        #[Title('Namespace'), Widget('combobox', options: ['suggestions' => ['', 'realms', 'theme']])]
         public ?string $namespace = null,
     ) {}
 
