@@ -132,6 +132,18 @@ class BeamUxMirrorStatusControllerTest extends TestCase
             $table->string('source_tier')->default('local')->index();
             $table->timestamps();
         });
+
+        Schema::create('git_repos', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->string('root_path')->unique();
+            $table->string('branch')->nullable();
+            $table->string('head_sha')->nullable();
+            $table->json('dirty_paths');
+            $table->json('untracked_paths');
+            $table->json('tracked_paths');
+            $table->timestamp('checked_at')->nullable();
+            $table->timestamps();
+        });
     }
 
     private function rrmdir(string $dir): void

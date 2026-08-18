@@ -3,23 +3,26 @@
 namespace Splicewire\Beam\Ux\Storage;
 
 use Illuminate\Contracts\Filesystem\Filesystem;
-use Illuminate\Support\Facades\Process;
+use Splicewire\Beam\Ux\Models\GitRepo;
 
 /**
  * The git-state half of "what did the disk mirror actually do" — {@see PlacedDiskMirror} writes a
- * file; this reads back whether it exists, when it last changed, and its git state, WITHOUT assuming
- * the mirror disk's own root IS a git repo root (`beam.ux.storage.mirror_disk`'s root, e.g.
- * `resources/js/content`, is typically a SUBDIRECTORY of the app's real repo root) — walks up from the
- * file looking for `.git` instead.
+ * file; this reads back whether it exists, when it last changed, and its git state.
  *
  * **Degrade-not-fabricate**, same as `PlacedDiskMirror`: no mirror disk configured → every call
  * short-circuits to `mirror-disabled` with no filesystem/process work attempted at all. A file that
  * exists but has no discoverable `.git` above it reports `no-git-repo` honestly rather than silently
  * omitting git state or guessing.
+ *
+ * The actual git work — walking up for `.git`, running `git status`/`git ls-files` — lives in
+ * {@see GitRepoRegistrar} now (mirror-status-ui ticket 02): this class resolves the file's
+ * {@see GitRepo} and looks its relative path up in that repo's cached dirty/untracked/tracked sets,
+ * instead of shelling a process per file itself. Public contract (this method's signature and every
+ * state name) is UNCHANGED from before that split — no caller needed to change.
  */
 class MirrorGitStatus
 {
-    public function __construct(private ?Filesystem $disk) {}
+    public function __construct(private ?Filesystem $disk, private GitRepoRegistrar $repos) {}
 
     /** Is a mirror disk configured? Mirrors {@see PlacedDiskMirror::enabled()}. */
     public function enabled(): bool
@@ -46,56 +49,38 @@ class MirrorGitStatus
             : null;
 
         $absolute = $this->disk->path($relativePath);
-        $repoRoot = $this->findGitRoot(dirname($absolute));
+        $repo = $this->repos->forFile($absolute);
 
-        if ($repoRoot === null) {
+        if ($repo === null) {
             return $this->result($relativePath, true, $lastModifiedIso, 'no-git-repo');
         }
 
-        return $this->result($relativePath, true, $lastModifiedIso, $this->gitState($repoRoot, $absolute));
+        return $this->result($relativePath, true, $lastModifiedIso, $this->stateFor($repo, $absolute));
     }
 
-    /** Walk up from `$dir` looking for a `.git` directory; `null` when none is found before the
-     * filesystem root. */
-    private function findGitRoot(string $dir): ?string
+    /** `modified` (in the repo's dirty set) / `untracked` (in its untracked set) / `clean` (in
+     * neither, but IS in the tracked set) / `untracked-ignored` (in neither, and NOT tracked — e.g.
+     * gitignored). */
+    private function stateFor(GitRepo $repo, string $absolutePath): string
     {
-        while ($dir !== '' && $dir !== DIRECTORY_SEPARATOR) {
-            if (is_dir($dir.DIRECTORY_SEPARATOR.'.git')) {
-                return $dir;
-            }
+        $relative = $this->relativeToRoot($repo->root_path, $absolutePath);
 
-            $parent = dirname($dir);
-            if ($parent === $dir) {
-                break;
-            }
-            $dir = $parent;
+        if (in_array($relative, $repo->untracked_paths, true)) {
+            return 'untracked';
         }
 
-        return null;
+        if (in_array($relative, $repo->dirty_paths, true)) {
+            return 'modified';
+        }
+
+        return in_array($relative, $repo->tracked_paths, true) ? 'clean' : 'untracked-ignored';
     }
 
-    /** `modified` (tracked, uncommitted changes) / `untracked` (porcelain says new) / `clean`
-     * (nothing in the porcelain output, and `git ls-files` confirms it's actually tracked) /
-     * `untracked-ignored` (nothing in the porcelain output, but NOT tracked — e.g. gitignored). A
-     * `git` invocation that fails outright (binary missing, not actually a repo despite `.git`
-     * existing) degrades to `no-git-repo` rather than throwing. */
-    private function gitState(string $repoRoot, string $absolutePath): string
+    private function relativeToRoot(string $root, string $absolutePath): string
     {
-        $status = Process::path($repoRoot)->run(['git', 'status', '--porcelain', '--', $absolutePath]);
+        $root = rtrim($root, DIRECTORY_SEPARATOR);
 
-        if ($status->failed()) {
-            return 'no-git-repo';
-        }
-
-        $output = trim($status->output());
-
-        if ($output === '') {
-            $tracked = Process::path($repoRoot)->run(['git', 'ls-files', '--error-unmatch', '--', $absolutePath]);
-
-            return $tracked->successful() ? 'clean' : 'untracked-ignored';
-        }
-
-        return str_starts_with($output, '??') ? 'untracked' : 'modified';
+        return ltrim(substr($absolutePath, strlen($root)), DIRECTORY_SEPARATOR);
     }
 
     /** @return array{path: string, exists: bool, lastModifiedAt: ?string, state: string} */
