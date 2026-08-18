@@ -8,7 +8,8 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
-use Splicewire\Beam\Ux\Storage\GitRepoRegistrar;
+use Splicewire\Beam\Facades\Beam;
+use Splicewire\Beam\Storage\GitRepoRegistrar;
 use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
 
 /**
@@ -16,9 +17,9 @@ use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
  * against its root gives every state below a genuine `git` verdict, not a hand-simulated one — the
  * one thing this class exists to get right honestly (a repo root that isn't the mirror disk's own
  * root, a file with no repo at all, tracked-vs-ignored). `MirrorGitStatus` now resolves that verdict
- * through {@see GitRepoRegistrar} (mirror-status-ui ticket 02) instead of shelling per file itself —
- * see {@see GitRepoRegistrarTest} for the batching behavior itself; this file stays about the STATE
- * VOCABULARY, unchanged by that split.
+ * through {@see GitRepoRegistrar} (mirror-status-ui ticket 02, now beam-core) instead of shelling per
+ * file itself — see beam-core's own `GitRepoRegistrarTest` for the batching behavior itself; this
+ * file stays about the STATE VOCABULARY, unchanged by that split.
  */
 class MirrorGitStatusTest extends TestCase
 {
@@ -26,7 +27,7 @@ class MirrorGitStatusTest extends TestCase
     {
         parent::setUp();
 
-        Schema::create('git_repos', function (Blueprint $table) {
+        Schema::create(Beam::table('git_repos'), function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('root_path')->unique();
             $table->string('branch')->nullable();

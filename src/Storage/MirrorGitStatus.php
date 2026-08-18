@@ -3,7 +3,8 @@
 namespace Splicewire\Beam\Ux\Storage;
 
 use Illuminate\Contracts\Filesystem\Filesystem;
-use Splicewire\Beam\Ux\Models\GitRepo;
+use Splicewire\Beam\Models\GitRepo;
+use Splicewire\Beam\Storage\GitRepoRegistrar;
 
 /**
  * The git-state half of "what did the disk mirror actually do" — {@see PlacedDiskMirror} writes a

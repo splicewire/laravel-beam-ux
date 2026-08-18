@@ -19,6 +19,7 @@ use Splicewire\Beam\Schema\SchemaSources;
 use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Sitemap\SitemapSourceRegistry;
 use Splicewire\Beam\Storage\DiskStorageDriver;
+use Splicewire\Beam\Storage\GitRepoRegistrar;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Storage\StackedStorageDriver;
 use Splicewire\Beam\Storage\StorageDriver;
@@ -51,7 +52,6 @@ use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 use Splicewire\Beam\Ux\Sitemap\EntrySitemapSource;
 use Splicewire\Beam\Ux\Sitemap\PublicEntitlementGate;
 use Splicewire\Beam\Ux\Sitemap\WorkflowMarkingPublishGate;
-use Splicewire\Beam\Ux\Storage\GitRepoRegistrar;
 use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
 use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -91,10 +91,6 @@ class BeamUxServiceProvider extends PackageServiceProvider
             // of the `realms` fallback stack directly on `beam_ux_entries`.
             ->hasMigrations([
                 'shared/create_beam_ux_entries_table',
-                // The GitRepo cache table (mirror-status-ui ticket 02) — same publish-only stub
-                // convention, doctor/install manifest coverage inherited for free (both audit the
-                // package's migrations generically via the publish tag, not per file).
-                'shared/create_git_repos_table',
             ]);
     }
 
@@ -401,8 +397,8 @@ class BeamUxServiceProvider extends PackageServiceProvider
 
         // Same disk, same degrade-not-fabricate null-when-unconfigured shape as PlacedDiskMirror
         // above — the git-state READ half of what that class WRITES. The actual git shelling is
-        // GitRepoRegistrar's (mirror-status-ui ticket 02) — batched by repo root, not spawned per file.
-        $this->app->singleton(GitRepoRegistrar::class);
+        // GitRepoRegistrar's (mirror-status-ui ticket 02, now beam-core — its own singleton binding
+        // lives there since any beam-core consumer wants the shared in-process cache, not just ux).
         $this->app->singleton(MirrorGitStatus::class, function ($app) {
             $name = config('beam.ux.storage.mirror_disk');
             $disk = ($name === null || $name === '') ? null : Storage::disk($name);

@@ -133,7 +133,7 @@ class BeamUxMirrorStatusControllerTest extends TestCase
             $table->timestamps();
         });
 
-        Schema::create('git_repos', function (Blueprint $table) {
+        Schema::create(Beam::table('git_repos'), function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('root_path')->unique();
             $table->string('branch')->nullable();
