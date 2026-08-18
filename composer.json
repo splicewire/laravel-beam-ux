@@ -35,7 +35,11 @@
         "orchestra/testbench": "^9.0|^10.0|^11.0",
         "phpunit/phpunit": "^11.0|^12.0",
         "laravel/pint": "^1.0",
+        "rushing/laravel-codegen": "*",
         "wikimedia/composer-merge-plugin": "^2.1"
+    },
+    "suggest": {
+        "rushing/laravel-codegen": "Generate a real backed PHP enum reflecting CodecRegistry's live registered formats — see Splicewire\\Beam\\Ux\\Codegen\\CodecRegistryModelSource."
     },
     "autoload": {
         "psr-4": {
