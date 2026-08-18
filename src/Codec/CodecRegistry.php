@@ -4,14 +4,15 @@ namespace Splicewire\Beam\Ux\Codec;
 
 use InvalidArgumentException;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
-use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
- * Dispatches a {@see BodyCodec} on a {@see UxFormat} (ADR-0164) — the "one codec per format" seam. A
- * host registers a codec per format it supports; the {@see BeamUxEntry}
- * resolves its codec by its own `format`. Because the registry keys on the string value, a host can
- * register a codec for a format the enum does not yet name (the "`tsx | mdx | …`" open set).
+ * Dispatches a {@see BodyCodec} on a {@see UxFormatCase} (ADR-0164) — the "one codec per format" seam.
+ * A host registers a codec per format it supports; the {@see BeamUxEntry}
+ * resolves its codec by its own `format`. Genuinely open (not just documented as open, see
+ * {@see UxFormatCase}): a host's own bespoke enum implementing `UxFormatCase` registers here exactly
+ * like {@see \Splicewire\Beam\Ux\Format\UxFormat}'s own cases do — the registry keys on the plain
+ * string value, never the concrete enum class.
  *
  * The default binding (registered by {@see BeamUxServiceProvider}) seeds the TSX
  * and MDX codecs.
@@ -29,9 +30,9 @@ class CodecRegistry
     }
 
     /** Resolve the codec for a format, or throw when none is registered. */
-    public function for(UxFormat|string $format): BodyCodec
+    public function for(UxFormatCase|string $format): BodyCodec
     {
-        $key = $format instanceof UxFormat ? $format->value : $format;
+        $key = $format instanceof UxFormatCase ? $format->value : $format;
 
         if (! isset($this->codecs[$key])) {
             throw new InvalidArgumentException("No BodyCodec registered for format [{$key}].");
@@ -40,9 +41,9 @@ class CodecRegistry
         return $this->codecs[$key];
     }
 
-    public function has(UxFormat|string $format): bool
+    public function has(UxFormatCase|string $format): bool
     {
-        $key = $format instanceof UxFormat ? $format->value : $format;
+        $key = $format instanceof UxFormatCase ? $format->value : $format;
 
         return isset($this->codecs[$key]);
     }

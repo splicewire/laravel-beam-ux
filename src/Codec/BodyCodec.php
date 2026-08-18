@@ -6,19 +6,24 @@ use Splicewire\Beam\Ux\Format\BodyStyle;
 use Splicewire\Beam\Ux\Format\UxFormat;
 
 /**
- * The **body codec port** — dispatched on {@see UxFormat} (ADR-0164). A codec is the translation seam
- * between the **raw source text** an author writes (a `.tsx` / `.mdx` file body) and the **structured
- * particle body** (the `array` payload beam-core's `ParticleWriter` versions and stores). It is the
- * paid `splicewire/*` side of the vendor seam: the *dispatch* on the entry is paid; a codec MAY delegate
- * its actual machinery to a free-tier arm (the MDX codec folds in `laravel-beam-mdx`).
+ * The **body codec port** — dispatched on a {@see UxFormatCase} (ADR-0164). A codec is the translation
+ * seam between the **raw source text** an author writes (a `.tsx` / `.mdx` file body) and the
+ * **structured particle body** (the `array` payload beam-core's `ParticleWriter` versions and stores).
+ * It is the paid `splicewire/*` side of the vendor seam: the *dispatch* on the entry is paid; a codec
+ * MAY delegate its actual machinery to a free-tier arm (the MDX codec folds in `laravel-beam-mdx`).
  *
  * `encode` + `decode` are inverses: a raw body encoded then decoded round-trips, which is how an entry
  * of any format rides the same particle/version/storage treatment.
  */
 interface BodyCodec
 {
-    /** The format this codec handles — the registry keys on `format()->value`. */
-    public function format(): UxFormat;
+    /**
+     * The format this codec handles — the registry keys on `format()->value`. Typed to the INTERFACE,
+     * not the concrete {@see UxFormat} enum (return-type covariance still lets an implementer narrow
+     * this to `UxFormat` directly, as every codec in this package does) — see {@see UxFormatCase}'s
+     * docblock for why that's load-bearing, not decoration.
+     */
+    public function format(): UxFormatCase;
 
     /** The file extension bodies of this format materialize to (derives from the format, S2). */
     public function extension(): string;

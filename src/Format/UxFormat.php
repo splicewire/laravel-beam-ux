@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Format;
 
 use Splicewire\Beam\Ux\Codec\BodyCodec;
+use Splicewire\Beam\Ux\Codec\UxFormatCase;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Type\UxType;
 
@@ -12,11 +13,12 @@ use Splicewire\Beam\Ux\Type\UxType;
  * extension it materializes to (ADR-0164). A **sibling axis to** {@see UxType},
  * NOT a fifth `type` value: `{type, format}` composes as a matrix (an mdx page vs. an mdx component).
  *
- * The set is open-ended by intent ("`tsx | mdx | …`") — the codec registry dispatches on the string
- * value, so a host can register a codec for a format this enum does not yet name. These two are the
- * S1 seed set.
+ * The set is open-ended by intent ("`tsx | mdx | …`") — `implements` {@see UxFormatCase} is what
+ * actually makes that true (see its own docblock): `BodyCodec::format()` is typed to the INTERFACE, so
+ * a host's own bespoke enum can satisfy it without ever touching this class. This enum is the
+ * generated (or hand-curated, today) "known so far" set, not a ceiling — Tsx/Mdx/Css are the S1 seed.
  */
-enum UxFormat: string
+enum UxFormat: string implements UxFormatCase
 {
     /** TSX/JSX — the default. Its codec honors `body_style` (auto-import preamble). */
     case Tsx = 'tsx';
