@@ -41,7 +41,6 @@ use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Entitlements\BeamUxRealmGrantable;
 use Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController;
-use Splicewire\Beam\Ux\Http\Controllers\BeamUxMirrorStatusController;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
@@ -219,11 +218,14 @@ class BeamUxServiceProvider extends PackageServiceProvider
      *
      *   Route::beamUxEntries()  →  GET  beam/ux/entries/{slug}/body → show   (beam.ux.entries.body.show)
      *                              PUT  beam/ux/entries/{slug}/body → update (beam.ux.entries.body.update)
-     *                              GET  beam/ux/mirror-status       → show   (beam.ux.mirror-status.show)
      *
-     * The mirror-status route rides the SAME macro/prefix (not a separate one) — it's the read half of
-     * the same "what did the disk mirror do" question the entry-body routes' `update()` already answers
-     * per-save; a host mounting one wants both.
+     * The "what did the disk mirror do" READ question (mirror-status-ui ticket 01) used to ride a third
+     * route here too; it's now the generic `beam-ux-mirror-status` `#[ParticleResource]`
+     * ({@see \Splicewire\Beam\Ux\Data\MirrorStatusRowData}) instead — no bespoke route, controller, or
+     * envelope, per the particle doctrine (`docs/agents/particle-doctrine.md` in `laravel-beam`): a host
+     * mounts it like any other resource, `Route::particleResource('beam/ux/mirror-status',
+     * 'beam-ux-mirror-status', ['only' => ['index']])`, or leaves it REST-unmounted and lets Frame's
+     * resource-blind Admin browser serve it off the registry alone.
      *
      * The uri prefix + name stem default from config (`beam.ux.api_root` / `beam.ux.route_name`,
      * env-overridable — ADR-0124), NOT hardcoded, so a host relocates the mount per-deploy without a code
@@ -249,8 +251,6 @@ class BeamUxServiceProvider extends PackageServiceProvider
                 ->name("{$routeName}entries.body.show");
             $this->put("{$apiRoot}/entries/{slug}/body", [BeamUxEntryBodyController::class, 'update'])
                 ->name("{$routeName}entries.body.update");
-            $this->get("{$apiRoot}/mirror-status", [BeamUxMirrorStatusController::class, 'show'])
-                ->name("{$routeName}mirror-status.show");
         });
     }
 

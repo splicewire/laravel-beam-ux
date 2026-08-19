@@ -5,17 +5,23 @@ namespace Splicewire\Beam\Ux\Tests;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Splicewire\Beam\Facades\Beam;
-use Splicewire\Beam\Ux\Http\Controllers\BeamUxMirrorStatusController;
+use Splicewire\Beam\Ux\Data\MirrorStatusRowData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
- * The `beam.ux.mirror-status.show` endpoint end to end: a real `BeamUxEntry` row, a real placement
- * path resolved through the same `PlacementResolver` the mirror write path uses, and a real file on
- * disk — proving the controller wires `PlacementResolver` + `MirrorGitStatus` correctly, not just that
- * each collaborator works in isolation (already covered by {@see MirrorGitStatusTest}).
+ * `MirrorStatusRowData::project()` end to end (mirror-status-ui ticket 01, retrofitted to
+ * `#[ParticleResource]` per the particle doctrine) — a real `BeamUxEntry` row, a real placement path
+ * resolved through the same `PlacementResolver` the mirror write path uses, and a real file on disk,
+ * proving the projection wires `PlacementResolver` + `MirrorGitStatus` correctly, not just that each
+ * collaborator works in isolation (already covered by {@see MirrorGitStatusTest}). This class used to
+ * be exercised through a bespoke `BeamUxMirrorStatusController`; that controller and its
+ * `#[ResponseFromData]` envelope are gone — the annotated Data class itself IS the resource now, served
+ * by the generic `ParticleController`/`FrameResourceController`, so this test calls `project()` directly
+ * rather than a route.
  */
-class BeamUxMirrorStatusControllerTest extends TestCase
+class MirrorStatusRowDataTest extends TestCase
 {
     private string $root;
 
@@ -34,31 +40,16 @@ class BeamUxMirrorStatusControllerTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_degrades_to_disabled_with_no_entries_when_no_mirror_disk_configured(): void
-    {
-        BeamUxEntry::create(['slug' => 'beam', 'type' => 'page', 'namespace' => null, 'particle_id' => (string) \Illuminate\Support\Str::uuid()]);
-
-        $controller = $this->app->make(BeamUxMirrorStatusController::class);
-        $data = json_decode($controller->show()->getContent(), true)['data'];
-
-        $this->assertFalse($data['enabled']);
-        $this->assertSame([], $data['entries']);
-    }
-
     public function test_an_entry_with_no_particle_id_reports_not_yet_saved_without_touching_the_disk(): void
     {
         $this->configureMirrorDisk();
 
-        BeamUxEntry::create(['slug' => 'draft', 'type' => 'page', 'namespace' => null]);
+        $entry = BeamUxEntry::create(['slug' => 'draft', 'type' => 'page', 'namespace' => null]);
 
-        $controller = $this->app->make(BeamUxMirrorStatusController::class);
-        $data = json_decode($controller->show()->getContent(), true)['data'];
+        $row = MirrorStatusRowData::project($entry);
 
-        $this->assertTrue($data['enabled']);
-        $this->assertCount(1, $data['entries']);
-        $row = $data['entries'][0];
-        $this->assertSame('not-yet-saved', $row['state']);
-        $this->assertNull($row['path']);
+        $this->assertSame('not-yet-saved', $row->state);
+        $this->assertNull($row->path);
     }
 
     public function test_a_saved_entry_resolves_the_same_path_the_mirror_writer_would_use_and_reports_its_git_state(): void
@@ -69,23 +60,35 @@ class BeamUxMirrorStatusControllerTest extends TestCase
             'slug' => 'beam',
             'type' => 'page',
             'namespace' => null,
-            'particle_id' => (string) \Illuminate\Support\Str::uuid(),
+            'particle_id' => (string) Str::uuid(),
         ]);
 
         mkdir($this->root.'/page', 0777, true);
         file_put_contents($this->root.'/page/beam.tsx', 'export default () => null;');
 
-        $controller = $this->app->make(BeamUxMirrorStatusController::class);
-        $data = json_decode($controller->show()->getContent(), true)['data'];
+        $row = MirrorStatusRowData::project($entry);
 
-        $this->assertTrue($data['enabled']);
-        $row = $data['entries'][0];
-        $this->assertSame((string) $entry->id, $row['id']);
-        $this->assertSame('page/beam.tsx', $row['path']);
-        $this->assertTrue($row['exists']);
+        $this->assertSame((string) $entry->id, $row->id);
+        $this->assertSame('page/beam.tsx', $row->path);
+        $this->assertTrue($row->exists);
         // No .git above the isolated temp root, so this is the honest verdict — the point of this
-        // assertion is that the CONTROLLER reached MirrorGitStatus at all, not which state it landed on.
-        $this->assertSame('no-git-repo', $row['state']);
+        // assertion is that `project()` reached MirrorGitStatus at all, not which state it landed on.
+        $this->assertSame('no-git-repo', $row->state);
+    }
+
+    public function test_a_saved_entry_degrades_to_mirror_disabled_when_no_mirror_disk_configured(): void
+    {
+        $entry = BeamUxEntry::create([
+            'slug' => 'beam',
+            'type' => 'page',
+            'namespace' => null,
+            'particle_id' => (string) Str::uuid(),
+        ]);
+
+        $row = MirrorStatusRowData::project($entry);
+
+        $this->assertSame('mirror-disabled', $row->state);
+        $this->assertFalse($row->exists);
     }
 
     private function configureMirrorDisk(): void
