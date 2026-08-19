@@ -5,7 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Models\BeamParticle;
-use Splicewire\Beam\Schema\ConvergentTable;
+use Rushing\SchemaConvergence\ConvergentTable;
 use Splicewire\Beam\Ux\Format\UxFormat;
 
 /**
@@ -18,7 +18,7 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  * rationale if it's ever needed again.
  *
  * SHARED (central + every tenant): published to the single `database/migrations/shared/` destination.
- * The CONVERGENT guard below (`docs/agents/convergent-migration-guards.convention.md` in laravel-beam)
+ * The CONVERGENT guard below (`docs/agents/convergent-migration-guards.convention.md` in rushing/laravel-schema-convergence)
  * covers the host that migrates BOTH passes into ONE schema (the shared-test-DB harness); production
  * separates schemas, so the table is simply absent there.
  *
