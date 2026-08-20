@@ -138,6 +138,18 @@ most of what the ux↔mdx line was ever about. What remains — `Docs/Regenerate
 doctor — is docs knowledge inside a package named for a **format**. It is audited and moved or deleted
 during extraction. After that, `beam-mdx` means the format and nothing else.
 
+## Amendment (beam-docs-satellite ticket 06 — the build): one step per PACKAGE
+
+§1 says a contributing package "registers a seed step whose seeder inserts its page entry." The build
+found the constraint that phrasing hides: `BeamSeedManifest::register()` is idempotent **per package
+name** — re-registering *replaces* — so a package gets exactly one step, and a second registration
+silently deletes the first.
+
+beam-ux had three things to seed (the realm root, the docs subtree, the content nav) and had to compose
+them into one seeder, moving their config gates from the registration to inside the run. That is the
+rule for any contributor with more than one thing to seed, and it is worth knowing before writing one:
+**compose within your step; never register twice.**
+
 ## Consequences
 
 - The MCP reference page becomes: one seed row (beam-mcp), one JSON route (beam-mcp), one generic

@@ -199,6 +199,43 @@ in this ADR removes the macros.
 - **Re-rooting a subtree is a data edit**, which was the point: setting one row's `segment` moves it
   and every descendant, and §1's absolute-segment phase is what makes those rows still resolvable.
 
+## Amendments (beam-docs-satellite ticket 06 — the build)
+
+Three things the implementation settled that this ADR left open or got slightly wrong.
+
+### A. A save-time compile failure is REPORTED, not fatal (refines §7)
+
+§7's "a public entry with no artifact fails loudly" is about the READ path, and it holds there: the page
+404s, the artifact route 404s, and the doctor names the entry. It cannot also mean the WRITE path
+refuses the save. An author saving half-written MDX is the normal case, and a CMS that rejects the write
+because the draft does not compile is a worse editor than one that stores it and says so.
+
+So `BeamUxEntryBodyController::update()` returns the compiler's own diagnostic on the save envelope
+(`compileError`) and the save lands. Nothing degrades — there is still no path anywhere that compiles in
+the reader's browser, which is the thing §7 actually forbids. The disk batch makes the same trade for
+the same reason at a different granularity: it collects per-file failures, reports them, and exits
+non-zero, so one broken body does not abort four hundred good ones.
+
+### B. Cacheability is decided by "does anything in the chain declare access?" (refines §8)
+
+§8 requires `no-store` on post-gate output. Applying that to *every* entry would make a public
+documentation site uncacheable to buy an invariant it never needed. The renderer therefore asks whether
+any node in the resolved chain declares an ADR-0212 token list: if none does, the entry is public by
+construction and its artifact is `immutable` (safe, because the artifact's address *is* its version); if
+any does, the response is `no-store, private` and a revoked grant bites on the next request.
+
+The check is over the chain, not the target — a public-looking leaf under a gated ancestor is reachable
+only through the gate and must not be cached.
+
+### C. The artifact route re-checks realm membership (refines §3)
+
+§3 keeps the renderer inside one realm because a public URL resolving into a guarded realm's tree is a
+leak shaped like a feature. The page route gets that for free: the walk only ever traverses rows in the
+mounted realm. The artifact route does not — it is addressed by entry **id**, because a compiled module
+is not a page and has no segment of its own, and an id is guessable in a way a path is not. It therefore
+re-asserts membership explicitly. Without that, the artifact route would be the one door into a realm
+this mount does not serve.
+
 ## Alternatives rejected
 
 - **A materialized `resolved_path` column** — one indexed lookup instead of a walk, but a second source
