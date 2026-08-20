@@ -276,6 +276,57 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         @rmdir($dir);
     }
 
+    /**
+     * **The round trip is the invariant, and its absence is what let a live bug survive as long as it
+     * did** (beam-docs-satellite ticket 06).
+     *
+     * The importer used to write `['source' => $raw]` for every format. That is exactly the shape
+     * `TsxBodyCodec` round-trips, so the tsx cases passed and nothing else ever looked — but
+     * `MdxBodyCodec` stores `{frontmatter, content}`, so an imported `.mdx` decoded to an **empty
+     * string**, and `PlacedDiskMirror` (which decodes through the codec) would project a blank `.mdx`
+     * straight back over the author's file with no error.
+     *
+     * A write path with no reader is unverified however green the suite is. So this guard is written
+     * over **every** registered format rather than the two that happen to exist today: a third codec
+     * whose body shape is not `{source}` fails here on the day it is registered, instead of on the day
+     * someone finally reads one of its entries.
+     */
+    public function test_every_registered_format_round_trips_from_disk_through_the_body_and_back(): void
+    {
+        $sources = [
+            'tsx' => "export default function Widget() { return <div>hi</div> }\n",
+            'mdx' => "---\ntitle: Intro\nsegment: intro\n---\n\n# Intro\n\nBody copy.\n",
+        ];
+
+        $this->writeFile('kit/widget/component/widget.tsx', $sources['tsx']);
+        $this->writeFile('guides/page/intro.mdx', $sources['mdx']);
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $seen = [];
+
+        foreach (BeamUxEntry::query()->get() as $entry) {
+            $format = (string) $entry->format?->value;
+            $seen[] = $format;
+
+            $body = $this->app->make(StorageDriverResolver::class)
+                ->resolve($entry)
+                ->read((string) $entry->particle_id)
+                ?->body ?? [];
+
+            $this->assertSame(
+                $sources[$format],
+                $entry->codec()->decode($body),
+                "a [{$format}] body must decode back to the source it was imported from",
+            );
+        }
+
+        // Both shipped body formats are genuinely exercised — a guard that silently covered only one
+        // of them is how the original bug survived.
+        sort($seen);
+        $this->assertSame(['mdx', 'tsx'], $seen);
+    }
+
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {
