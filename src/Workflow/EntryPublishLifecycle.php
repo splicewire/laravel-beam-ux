@@ -8,7 +8,7 @@ use Splicewire\Beam\Workflows\Blueprint\WorkflowBlueprint;
 
 /**
  * The default publish lifecycle beam-ux ships for entries that a host opts INTO a publish workflow (S6).
- * It is a plain {@see WorkflowBlueprint} the free-tier `laravel-beam-workflows` engine drives — beam-ux
+ * It is a plain {@see WorkflowBlueprint} the sibling `laravel-beam-workflows` engine drives — beam-ux
  * builds NO new state machine; it merely names one shape and lets a host bind it (or bind its own).
  *
  *     draft ──publish──▶ published ──unpublish──▶ draft   (published ⇄ draft)

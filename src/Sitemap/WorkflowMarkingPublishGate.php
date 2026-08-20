@@ -11,7 +11,7 @@ use Splicewire\Beam\Workflows\Control\LifecycleService;
  * {@see AlwaysPublishedGate} stub by reading the entry's persisted workflow marking (S6, ADR-0166 §4).
  * "Published-marking is EXACTLY what the sitemap / routing read for visibility."
  *
- * Two honest cases, both driven by the free-tier `laravel-beam-workflows` engine:
+ * Two honest cases, both driven by the sibling `laravel-beam-workflows` engine:
  *
  *  1. **Unmanaged entry (no resolved binding).** A workflow is OPTIONAL: an entry whose `type` has no
  *     `Binding` on the {@see WorkflowBindingRegistry} has no state
@@ -25,8 +25,8 @@ use Splicewire\Beam\Workflows\Control\LifecycleService;
  * wants richer visibility logic) re-binds {@see EntryPublishGate} to its own implementation and every
  * consumer — {@see EntrySitemapSource}, routing — follows with no source-side change.
  *
- * **Vendor seam (ADR-0092):** the persisted marking + this gate are paid `splicewire/*` (beam-ux); the
- * `LifecycleService::manages()` resolution it consults is the free-tier engine.
+ * **Composition seam (ADR-0092):** the persisted marking + this gate are beam-ux's; the
+ * `LifecycleService::manages()` resolution it consults is the composed-down beam-workflows engine.
  */
 class WorkflowMarkingPublishGate implements EntryPublishGate
 {

@@ -18,9 +18,9 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * Round-trip contract:
  *  - `show` returns `{ slug, type, schema, body }` — `body` seeds the SchemaForm's `formData`, `schema`
  *    its JSON-Schema; the builder never sees the residency/facade seam (both resolve below the surface).
- *  - `update` accepts `{ body }` and writes it through the free-core StorageDriver / ParticleWriter (the
- *    entry's body rides beam-core's versioned particle — ADR-0092 vendor seam: the surface is paid
- *    `splicewire/*`, the particle body it round-trips is free beam-core).
+ *  - `update` accepts `{ body }` and writes it through the beam-core StorageDriver / ParticleWriter (the
+ *    entry's body rides beam-core's versioned particle — ADR-0092 vendor seam: the surface is beam-ux's,
+ *    the particle body it round-trips is beam-core's).
  *
  * No `#[TypeScript]` here (unlike the app-local original): typed-client codegen is a HOST concern — a host
  * that wants the generated hook re-exposes/subclasses this, so the package never forces a

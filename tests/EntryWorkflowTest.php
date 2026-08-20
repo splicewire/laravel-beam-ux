@@ -28,8 +28,8 @@ use Splicewire\Beam\Workflows\Control\LifecycleService;
  *  2. An unbound component (type=`component`, no binding) has NO workflow — the engine reports it
  *     unmanaged, no state machine is forced, and it stays published by default (unmanaged ⇒ visible).
  *
- * The engine (guards, versioned definitions, activitylog Display) is the free-tier package; this test
- * only wires the paid arm: the entry subject + the binding + the persisted marking.
+ * The engine (guards, versioned definitions, activitylog Display) is the sibling package's; this test
+ * only wires beam-ux's side: the entry subject + the binding + the persisted marking.
  */
 class EntryWorkflowTest extends TestCase
 {

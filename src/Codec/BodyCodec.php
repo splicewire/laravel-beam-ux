@@ -9,8 +9,8 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  * The **body codec port** — dispatched on a {@see UxFormatCase} (ADR-0164). A codec is the translation
  * seam between the **raw source text** an author writes (a `.tsx` / `.mdx` file body) and the
  * **structured particle body** (the `array` payload beam-core's `ParticleWriter` versions and stores).
- * It is the paid `splicewire/*` side of the vendor seam: the *dispatch* on the entry is paid; a codec
- * MAY delegate its actual machinery to a free-tier arm (the MDX codec folds in `laravel-beam-mdx`).
+ * It is beam-ux's side of the composition seam: beam-ux owns the *dispatch* on the entry; a codec
+ * MAY delegate its actual machinery to a sibling arm (the MDX codec folds in `laravel-beam-mdx`).
  *
  * `encode` + `decode` are inverses: a raw body encoded then decoded round-trips, which is how an entry
  * of any format rides the same particle/version/storage treatment.

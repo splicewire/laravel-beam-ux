@@ -14,7 +14,7 @@ use Splicewire\Beam\Ux\Type\UxType;
 
 /**
  * beamux-entry-charter S5 (ADR-0166) — EntrySitemapSource yields URLs for entries where
- * route × published-marking × entitlement ALL hold, and registers onto the free-tier arm's registry.
+ * route × published-marking × entitlement ALL hold, and registers onto the sibling arm's registry.
  *
  * These tests exercise the gate SEAM by re-binding the two ports to fake predicates, proving the source
  * filters end-to-end. The production marking read is `WorkflowMarkingPublishGate` (charter S6); this test

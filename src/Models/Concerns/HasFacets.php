@@ -8,7 +8,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
  * The **classification facet** surface for a {@see BeamUxEntry} (charter S7,
- * ADR-0165). Attaches the free-tier `laravel-beam-taxonomy` `BeamSilo` (hierarchical) + `BeamTag` (flat)
+ * ADR-0165). Attaches the sibling `laravel-beam-taxonomy` `BeamSilo` (hierarchical) + `BeamTag` (flat)
  * to the entry as **OPTIONAL polymorphic** relations — null for fragments, filled for content.
  *
  * **Classification, NOT the spine.** These facets drive filtering / related / secondary-nav, and a
@@ -30,8 +30,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * against was different: reusing the *compliance* `App\Models\Silo` for a *component's structural
  * namespace*. Namespace is disk grouping (S2); silo-classification is a content facet (S7). Distinct axes.
  *
- * Vendor seam (ADR-0092): the facet attachment on the entry is paid `splicewire/*` (this concern);
- * `BeamSilo`/`BeamTag` themselves are the free-tier beam-taxonomy family.
+ * Composition seam (ADR-0092): the facet attachment on the entry is beam-ux's (this concern);
+ * `BeamSilo`/`BeamTag` themselves are the sibling beam-taxonomy family's.
  */
 trait HasFacets
 {

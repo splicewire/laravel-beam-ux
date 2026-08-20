@@ -5,7 +5,7 @@ namespace Splicewire\Beam\Ux\Inference;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
- * The **draft-schema authoring action** (paid `splicewire/*`, charter S9). The clean service seam S8's
+ * The **draft-schema authoring action** (beam-ux, charter S9). The clean service seam S8's
  * `register-from-disk` batch invokes at import: given an entry and its component `.tsx` source, it runs
  * {@see TsxPropInference}, stores the inferred JSON-Schema as the entry's `schema_ref`, and marks the
  * record **DRAFT** (`schema_is_draft = true`).
@@ -22,8 +22,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *
  * The inferred schema BODY is what {@see BeamUxEntry::$schema_ref} carries — beam-ux stores the draft
  * schema on the entry's flat authoring envelope; the versioned particle BODY (written through beam-core's
- * shared `ParticleWriter`) is untouched. Inference is the paid arm; the particle it rides is free
- * beam-core (ADR-0092 vendor seam).
+ * shared `ParticleWriter`) is untouched. Inference is beam-ux's; the particle it rides is
+ * beam-core's (ADR-0092 vendor seam).
  */
 class InferDraftSchema
 {

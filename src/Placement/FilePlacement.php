@@ -6,11 +6,11 @@ use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
- * The **file-placement port** (charter S2; ADR-0165) — the PAID `splicewire/*` policy that derives a
+ * The **file-placement port** (charter S2; ADR-0165) — the beam-ux policy that derives a
  * {@see BeamUxEntry}'s **disk path** from its authoring envelope, replacing the pre-format world's
- * hardcoded `type/namespace/component.tsx`. It is the paid half of the storage seam: the generic
- * {@see StorageDriver} port is FREE beam-core; only this format-aware
- * *placement policy* stays paid.
+ * hardcoded `type/namespace/component.tsx`. It is beam-ux's half of the storage seam: the generic
+ * {@see StorageDriver} port is beam-core's; only this format-aware
+ * *placement policy* is beam-ux's.
  *
  * It honors the **two trees** (ADR-0165): `namespace` is the **disk-grouping coordinate ONLY** — it
  * derives *placement*, NEVER the URL (the URL is S3's containment tree). The default strategy composes

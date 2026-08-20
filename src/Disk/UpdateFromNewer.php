@@ -24,8 +24,8 @@ use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
  * Either way the batch acts only when the chosen source is strictly newer (`staleness` sign); an equal
  * or already-current pair is left untouched.
  *
- * **Vendor seam (ADR-0092).** The batch + direction policy are paid; the particle/disk drivers it moves
- * bodies between are free beam-core.
+ * **Composition seam (ADR-0092).** The batch + direction policy are beam-ux's; the particle/disk drivers
+ * it moves bodies between are beam-core's.
  */
 class UpdateFromNewer
 {

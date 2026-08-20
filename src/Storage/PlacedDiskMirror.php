@@ -14,7 +14,7 @@ use Splicewire\Beam\Ux\Placement\FilePlacement;
  *
  * Why this is distinct from the default `Stacked(Particle, Disk)` driver: that stack mirrors to disk
  * under the **particle id** key (a uuid), which is the source-of-record's address — NOT a path a human
- * or git wants. The paid `FilePlacement` policy derives the *human* path, but it needs the ENTRY (a
+ * or git wants. The `FilePlacement` policy derives the *human* path, but it needs the ENTRY (a
  * `StorageDriver::write` only gets a bare key). So the controller, which holds the entry, resolves the
  * placement path and hands it here — keeping the particle write source-of-record and this a pure,
  * additive projection (materialize-on-save, charter S2 / ADR-0165).

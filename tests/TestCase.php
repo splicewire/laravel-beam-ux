@@ -16,7 +16,7 @@ use Splicewire\Beam\Workflows\BeamWorkflowsServiceProvider;
 abstract class TestCase extends Orchestra
 {
     /**
-     * beam-ux boots on beam-core (its one required rung, ADR-0092 paid tier composing the free body).
+     * beam-ux boots on beam-core (its one required rung, ADR-0092 vendor seam).
      * The beam-core deps below are the same set beam-core's own TestCase declares — they are declared
      * dependencies DOWN, not rungs above beam-ux.
      *
@@ -26,10 +26,10 @@ abstract class TestCase extends Orchestra
     {
         return [
             BeamUxServiceProvider::class,
-            // The free-tier sitemap arm (ADR-0166): beam-ux registers EntrySitemapSource
+            // The sibling sitemap arm (ADR-0166): beam-ux registers EntrySitemapSource
             // onto its registry and reads its SitemapBaseUrlResolver port.
             BeamSitemapServiceProvider::class,
-            // The free-tier workflows engine (S6): the entry is an OPTIONAL MarkingSubject of it;
+            // The sibling workflows engine (S6): the entry is an OPTIONAL MarkingSubject of it;
             // beam-ux registers its publish lifecycle blueprint and reads the LifecycleService.
             BeamWorkflowsServiceProvider::class,
             BeamServiceProvider::class,

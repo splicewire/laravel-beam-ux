@@ -8,7 +8,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
 
 /**
- * Resolves the {@see StorageDriver} (the FREE beam-core port) for a {@see BeamUxEntry} by the charter S2
+ * Resolves the {@see StorageDriver} (the beam-core port) for a {@see BeamUxEntry} by the charter S2
  * **precedence**, the same shape as {@see PlacementResolver}:
  *
  *   1. **per-entry `driver`** — the entry's own `driver_ref` (the S2 additive column) names a registered
@@ -17,7 +17,7 @@ use Splicewire\Beam\Ux\Placement\PlacementResolver;
  *   3. **default** — the `Stacked(Particle-primary, Disk-mirror)` the host binds under {@see self::DEFAULT}.
  *
  * beam-ux is the SECOND consumer of the generalized-from-BeamSchemaRegistry storage seam (the schema
- * registry is the first); this resolver is where the paid engine selects a free-tier driver per entry.
+ * registry is the first); this resolver is where beam-ux selects a storage driver per entry.
  */
 class StorageDriverResolver
 {

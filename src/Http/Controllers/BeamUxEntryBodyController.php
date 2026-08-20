@@ -41,8 +41,8 @@ use Splicewire\Beam\Write\PolicyWriteGate;
  * **Host owns the wire and the policy (ADR-0116).** The route is mounted behind the host's auth/tenant
  * middleware, so this is an authenticated editor write, NOT a deny-by-default anonymous submission — it
  * therefore binds a {@see PolicyWriteGate} (permits when no per-entry policy is declared — the route
- * middleware IS the gate) for the write path. Vendor seam (ADR-0092): this surface + controller = paid
- * `splicewire/*`; the particle body it round-trips through the StorageDriver = free-tier beam-core.
+ * middleware IS the gate) for the write path. Composition seam (ADR-0092): this surface + controller are
+ * beam-ux's; the particle body it round-trips through the StorageDriver is beam-core's.
  *
  * **Known limitation (view-gate + concurrent editors).** An editor who can't view a gated subtree never
  * receives it from `show`, so THEIR OWN local copy of the doc is missing it — if they then `update()`,

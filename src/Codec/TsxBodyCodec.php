@@ -6,7 +6,7 @@ use Splicewire\Beam\Ux\Format\BodyStyle;
 use Splicewire\Beam\Ux\Format\UxFormat;
 
 /**
- * The **TSX codec** (paid `splicewire/*`). Encodes JSX/TSX source into a structured particle body and
+ * The **TSX codec** (beam-ux-owned, no arm folded in). Encodes JSX/TSX source into a structured particle body and
  * owns the one place {@see BodyStyle} lives (ADR-0164): a `body_style: full` entry gets the auto-import
  * **preamble** injected (a self-contained component with ceremony); a `body_style: inline` entry — the
  * old "node" — is left bare. `body_style` is a tsx-codec-local flavor; it exists nowhere else.

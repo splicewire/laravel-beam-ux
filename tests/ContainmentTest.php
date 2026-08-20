@@ -17,7 +17,7 @@ use Splicewire\Beam\Ux\Type\UxType;
  *  - the `realms` fallback stack defaults to `[realm]` and an entry resolves in every listed realm;
  *  - URL inheritance — `./segment` resolves against the PARENT, `/segment` against the realm ROOT;
  *  - the route is decoupled from `namespace` (disk grouping does not touch the URL);
- *  - the free-tier `NavTree` projection of the containment tree.
+ *  - the composed-down `NavTree` projection of the containment tree.
  */
 class ContainmentTest extends TestCase
 {

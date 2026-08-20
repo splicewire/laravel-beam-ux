@@ -18,7 +18,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * The resolver walks `parent_id` up to the root; a host that has the ancestor chain in hand can pass it
  * to {@see resolveChain()} to avoid per-node queries.
  *
- * Paid `splicewire/*` (ADR-0092): URL inheritance is the engine, not the free-tier nav projection.
+ * Composition seam (ADR-0092): URL inheritance is beam-ux's own engine, not the composed-down nav
+ * projection.
  */
 class UrlResolver
 {

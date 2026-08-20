@@ -16,7 +16,7 @@ use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
- * beamux-entry-charter S2 — the paid `FilePlacement` policy (ADR-0165 two trees: namespace→disk) and
+ * beamux-entry-charter S2 — the `FilePlacement` policy (ADR-0165 two trees: namespace→disk) and
  * beam-ux's consumption of the free-beam-core {@see StorageDriver} seam via its resolvers' precedence.
  *
  * Asserts: default path derivation (`namespace/type/slug.ext`, extension from `format` — NOT hardcoded

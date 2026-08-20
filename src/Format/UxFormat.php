@@ -23,7 +23,7 @@ enum UxFormat: string implements UxFormatCase
     /** TSX/JSX — the default. Its codec honors `body_style` (auto-import preamble). */
     case Tsx = 'tsx';
 
-    /** MDX — folded in from the free-tier `laravel-beam-mdx` arm; `body_style` is meaningless here. */
+    /** MDX — folded in from the sibling `laravel-beam-mdx` arm; `body_style` is meaningless here. */
     case Mdx = 'mdx';
 
     /** CSS custom properties — a {@see \Splicewire\Beam\Ux\Type\UxType::Theme} entry's body materializes

@@ -1,6 +1,6 @@
 # splicewire/laravel-beam-ux
 
-The beam-ux authoring package (`Splicewire\Beam\Ux\*`) — the free-body / paid-orchestration UX layer over beam-core.
+The beam-ux authoring package (`Splicewire\Beam\Ux\*`) — the beam-tier authoring/orchestration UX layer over beam-core.
 
 ## Raw-MDX reader (`Splicewire\Beam\Ux\Disk\RawMdxReader`)
 

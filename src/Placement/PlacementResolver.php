@@ -17,8 +17,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *   3. **default** — the {@see DefaultPlacement} (`namespace/type/slug.ext`).
  *
  * Strategies are registered by NAME (like the {@see CodecRegistry}), so a host
- * adds a placement without editing this class. The resolver is domain-paid; the disk it derives a path
- * *for* is the free {@see StorageDriver}.
+ * adds a placement without editing this class. The resolver is beam-ux's; the disk it derives a path
+ * *for* is beam-core's {@see StorageDriver}.
  */
 class PlacementResolver
 {

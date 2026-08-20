@@ -5,7 +5,7 @@ namespace Splicewire\Beam\Ux\Inference;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
- * The **deterministic prop→draft-schema inference engine** (paid `splicewire/*`, charter S9,
+ * The **deterministic prop→draft-schema inference engine** (beam-ux, charter S9,
  * `beamux-build/issues/06`). Given a `.tsx` component's source it parses the props declaration into a
  * JSON-Schema object body so a freshly-registered `component`/`node` is **editable immediately** — the
  * author does not have to hand-write a schema before the record has an editing surface.

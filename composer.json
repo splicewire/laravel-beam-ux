@@ -1,6 +1,6 @@
 {
     "name": "splicewire/laravel-beam-ux",
-    "description": "The BeamUx authoring engine (paid splicewire/* tier, ADR-0092): the BeamUxEntry model + beam_ux_entries table — the generic authoring entry that has-a versioned BeamParticle body ridden through beam-core's shared ParticleWriter. The base spans content AND components (a layout is not a component), so it is BeamUxEntry, never BeamUxComponent. Residency is context-following (default central); the table shape is ubiquitous from day one via a shared migration dir run in both the central and tenant passes.",
+    "description": "The BeamUx authoring engine (beam tier — free, ADR-0092/ADR-0159): the BeamUxEntry model + beam_ux_entries table — the generic authoring entry that has-a versioned BeamParticle body ridden through beam-core's shared ParticleWriter. The base spans content AND components (a layout is not a component), so it is BeamUxEntry, never BeamUxComponent. Residency is context-following (default central); the table shape is ubiquitous from day one via a shared migration dir run in both the central and tenant passes.",
     "keywords": [
         "laravel",
         "splicewire",
@@ -10,7 +10,7 @@
         "authoring"
     ],
     "type": "library",
-    "license": "proprietary",
+    "license": "MIT",
     "authors": [
         {
             "name": "Stephen Rushing",
@@ -63,7 +63,7 @@
             ]
         },
         "package-topology": {
-            "because": "beam-ux is the paid splicewire/* authoring engine; it composes free-tier beam-family arms DOWN (beam-core, mdx, sitemap, workflows, and — S7 — beam-taxonomy for the BeamSilo/BeamTag classification facets) and must NEVER reach UP into satellite / tower / the host App tier.",
+            "because": "beam-ux is the beam-tier authoring engine; it composes sibling beam-family arms DOWN (beam-core, mdx, sitemap, workflows, and — S7 — beam-taxonomy for the BeamSilo/BeamTag classification facets) and must NEVER reach UP into satellite / tower / the host App tier.",
             "mustRequire": [
                 "splicewire/laravel-beam-taxonomy"
             ],
