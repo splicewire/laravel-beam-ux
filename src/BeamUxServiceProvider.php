@@ -23,6 +23,9 @@ use Splicewire\Beam\Storage\GitRepoRegistrar;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Storage\StackedStorageDriver;
 use Splicewire\Beam\Storage\StorageDriver;
+use Splicewire\Beam\Ux\Access\EntryAccessGate;
+use Splicewire\Beam\Ux\Access\EntryAccessResolver;
+use Splicewire\Beam\Ux\Access\TokenAccessGate;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Codec\CssBodyCodec;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
@@ -38,6 +41,7 @@ use Splicewire\Beam\Ux\Database\Seeders\NavSeeder;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Disk\RegisterFromDisk;
 use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
+use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Entitlements\BeamUxRealmGrantable;
 use Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController;
@@ -62,7 +66,7 @@ use Splicewire\Beam\Workflows\Type\WorkflowTypeRegistry;
 use Splicewire\Beam\Write\ParticleWriter;
 
 /**
- * The BeamUx authoring engine's provider (charter S0). Paid `splicewire/*` tier (ADR-0092): it homes
+ * The BeamUx authoring engine's provider (charter S0). Beam tier (ADR-0092/ADR-0159): it homes
  * the {@see BeamUxEntry} model + `beam_ux_entries` table. The versioned
  * body it rides is a beam-core {@see BeamParticle}, written through beam-core's
  * shared {@see ParticleWriter} — this package forks neither.
@@ -103,6 +107,7 @@ class BeamUxServiceProvider extends PackageServiceProvider
         $this->registerInference();
         $this->registerPlacement();
         $this->registerStorage();
+        $this->registerAccess();
         $this->registerContainment();
         $this->registerSitemap();
         $this->registerDisk();
@@ -124,6 +129,15 @@ class BeamUxServiceProvider extends PackageServiceProvider
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxMigrationsAudit::class,
+            );
+
+            // The standing check on ADR-0212's two rights: rows carrying a token the bound gate does
+            // not know (a silent lockout), and INERT declarations — a child granting wider access than
+            // its inherited constraint, which conjunction discards. §3 chose to accept-and-report those
+            // rather than reject them; this is the reporting half of that bargain.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxAccessAudit::class,
             );
         }
 
@@ -259,8 +273,8 @@ class BeamUxServiceProvider extends PackageServiceProvider
      * format-aware {@see RegisterFromDisk} recognizer/path-envelope deriver + the two batch operations —
      * {@see RegisterEntriesFromDisk} (scan → create → S9-infer-at-import) and {@see UpdateFromNewer}
      * (config-gated, OFF by default). There is deliberately NO ambient filesystem watcher: every inbound
-     * disk→DB flow is one of these operator-run batches. Paid `splicewire/*` (ADR-0092): the batch
-     * orchestration over the storage port is paid; the particle records the body rides are free beam-core.
+     * disk→DB flow is one of these operator-run batches. Composition seam (ADR-0092): the batch
+     * orchestration over the storage port is beam-ux's; the particle records the body rides are beam-core's.
      */
     protected function registerDisk(): void
     {
@@ -302,9 +316,9 @@ class BeamUxServiceProvider extends PackageServiceProvider
      * The prop→draft-schema inference seam (charter S9, `beamux-build/issues/06`). Binds the
      * deterministic {@see TsxPropInference} parser + the {@see InferDraftSchema} authoring action as
      * singletons — the clean service port S8's `register-from-disk` batch resolves to infer a DRAFT
-     * schema for a freshly-registered `component` at import. Paid `splicewire/*` (ADR-0092): the
-     * inference engine + the draft schema-ref it writes are the paid arm; the particle body is free
-     * beam-core.
+     * schema for a freshly-registered `component` at import. Composition seam (ADR-0092): the
+     * inference engine + the draft schema-ref it writes are beam-ux's; the particle body is
+     * beam-core's.
      */
     protected function registerInference(): void
     {
@@ -314,8 +328,8 @@ class BeamUxServiceProvider extends PackageServiceProvider
 
     /**
      * The {@see CodecRegistry} — the format→codec dispatch seam (ADR-0164). Bound as a singleton
-     * seeded with the TSX + MDX + CSS codecs. The dispatch is paid `splicewire/*`; the MDX codec's
-     * engine is the free-tier `laravel-beam-mdx` arm, folded in (not deleted) via {@see MdxBodyCodec}.
+     * seeded with the TSX + MDX + CSS codecs. beam-ux owns the dispatch; the MDX codec's
+     * engine is the sibling `laravel-beam-mdx` arm, folded in (not deleted) via {@see MdxBodyCodec}.
      * {@see CssBodyCodec} is the `UxType::Theme` entry's default (`BeamUxEntry::defaultFormatFor()`) —
      * OTB, not a per-host add-on, since `Theme` is itself a package-level structural type. A host can
      * still `register()` further codecs on the same singleton for formats beyond this seed set.
@@ -331,7 +345,7 @@ class BeamUxServiceProvider extends PackageServiceProvider
     }
 
     /**
-     * The {@see PlacementResolver} — the paid `FilePlacement` selection seam (charter S2, ADR-0165).
+     * The {@see PlacementResolver} — the `FilePlacement` selection seam (charter S2, ADR-0165).
      * Seeded with the default (`namespace/type/slug.ext`, extension from `format`) + the
      * date-partitioned strategy, plus any `namespace → strategy` map from config. A host registers
      * further strategies on the same singleton. `namespace` derives DISK only, never the URL (two trees).
@@ -411,20 +425,53 @@ class BeamUxServiceProvider extends PackageServiceProvider
      * The **containment** seam (charter S3, ADR-0165 — the "two trees": containment → URL/nav). Binds the
      * {@see UrlResolver} (composes `segment` DOWN the realm-rooted tree into the public URL,
      * decoupled from `namespace`) and the {@see NavProjector} (projects a realm's tree into a
-     * free-tier `rushing/laravel-data-nav` `NavTree`). Both singletons — the resolver is stateless; the
+     * composed-down `rushing/laravel-data-nav` `NavTree`). Both singletons — the resolver is stateless; the
      * `BeamUxEntry::url()` accessor resolves the bound instance. Multiplicity IS built (ticket 03): an
      * entry's `realms` fallback stack means it can be reachable in several realms at once.
      */
     protected function registerContainment(): void
     {
         $this->app->singleton(UrlResolver::class, fn () => new UrlResolver);
-        $this->app->singleton(NavProjector::class, fn ($app) => new NavProjector($app->make(UrlResolver::class)));
+        $this->app->singleton(NavProjector::class, fn ($app) => new NavProjector(
+            $app->make(UrlResolver::class),
+            $app->make(EntryAccessResolver::class),
+            $app->make(EntryPublishGate::class),
+        ));
+    }
+
+    /**
+     * The **access** seam (ADR-0212) — the actor-aware third gate that supplies the semantics ADR-0209
+     * §5 deferred. It joins the two sitemap gates rather than replacing either: those take no actor and
+     * answer *anonymous crawlability*, this one takes an actor and answers *this reader's
+     * authorization*, so no re-binding can make one do the other's job.
+     *
+     * The default binding is {@see TokenAccessGate} — `Splicewire\Tower\Navigation\Gates\AccessGate`
+     * descended (ADR-0212 §6), with its two host-specific values (the root role name, and any host
+     * tokens beyond ADR-0118's `alias.verb` shape) now config rather than hardcoded. It degrades
+     * headless: with no RBAC package present `root` and permission tokens simply deny instead of
+     * fataling, so beam-ux stays installable on its own.
+     *
+     * {@see EntryAccessResolver} is the conjunctive ancestor walk over that gate, bound separately so
+     * the renderer and {@see NavProjector} share ONE inheritance rule — a host re-binding the gate
+     * never has to reimplement composition.
+     */
+    protected function registerAccess(): void
+    {
+        $this->app->singleton(EntryAccessGate::class, fn () => new TokenAccessGate(
+            (string) config('beam.ux.access.root_role', TokenAccessGate::DEFAULT_ROOT_ROLE),
+            (array) config('beam.ux.access.extra_tokens', []),
+        ));
+
+        $this->app->singleton(
+            EntryAccessResolver::class,
+            fn ($app) => new EntryAccessResolver($app->make(EntryAccessGate::class)),
+        );
     }
 
     /**
      * The **sitemap** seam (charter S5, ADR-0166). beam-ux is the arm's first-class
      * consumer: it binds the two gate ports the {@see EntrySitemapSource} composes,
-     * then registers that source onto the free-tier `laravel-beam-sitemap`
+     * then registers that source onto the sibling `laravel-beam-sitemap`
      * registry at boot. The arm owns the plumbing (contract, registry, controller,
      * command, RouteSitemapSource); beam-ux owns the ENTRY data source.
      *
@@ -448,7 +495,7 @@ class BeamUxServiceProvider extends PackageServiceProvider
      * ({@see EntryPublishLifecycle}) so a host can bind a type into it, and enumerates the entry
      * type keys for the workflows admin. It registers NO binding — the optional-workflow rule: an
      * entry is unmanaged (no state machine) until a host binds its `type` on the
-     * {@see WorkflowBindingRegistry}. Guarded on the free-tier
+     * {@see WorkflowBindingRegistry}. Guarded on the sibling
      * `laravel-beam-workflows` engine being installed, so beam-ux still boots without it (the
      * publish gate then simply reports every entry unmanaged ⇒ published).
      */

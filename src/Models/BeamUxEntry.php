@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Rushing\PermissionCascade\Concerns\HasVisibility;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Revisions\RevisionRecorder;
+use Splicewire\Beam\Ux\Access\EntryAccessGate;
+use Splicewire\Beam\Ux\Access\Right;
 use Splicewire\Beam\Ux\Codec\BodyCodec;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
@@ -25,8 +27,8 @@ use Splicewire\Beam\Workflows\Type\Contracts\WorkflowManaged;
 use Splicewire\Beam\Write\ParticleWriter;
 
 /**
- * The BeamUx authoring **entry** — the paid `splicewire/*` engine's central model (ADR-0092 vendor
- * seam). It is `BeamUxEntry`, never `BeamUxComponent`: the base spans authored **content** AND reusable
+ * The BeamUx authoring **entry** — the beam-tier authoring engine's central model (ADR-0092 vendor
+ * seam; ADR-0159 tier placement). It is `BeamUxEntry`, never `BeamUxComponent`: the base spans authored **content** AND reusable
  * **components** (a `layout` is not a component), so a "component"-named base was a category error
  * (charter PRD §Q1, `beamux-entry-charter/issues/01`).
  *
@@ -73,7 +75,7 @@ use Splicewire\Beam\Write\ParticleWriter;
  * `beam_ux_entries` exists identically in central and every tenant. Only the central path is exercised for
  * now; tenant-resident BeamUx needs no rework later because the shape is already committed.
  *
- * **Workflow subject (S6 — OPTIONAL, ADR-0092 vendor seam).** The entry implements the free-tier
+ * **Workflow subject (S6 — OPTIONAL, ADR-0092 vendor seam).** The entry implements the sibling
  * `laravel-beam-workflows` {@see WorkflowManaged} contract, so it is a subject the generic workflow
  * engine can govern — but only when a `Binding` is registered for its `type` (`page`, `component`, …)
  * on the package's `WorkflowBindingRegistry`. NO binding ⇒ NO workflow: the entry is unmanaged, exactly
@@ -83,11 +85,11 @@ use Splicewire\Beam\Write\ParticleWriter;
  * entry's structural `type` axis, so a host binding on `page` governs every page while `component`
  * entries stay unmanaged unless separately bound. The persisted marking is EXACTLY what the sitemap /
  * routing publish gate reads for visibility (S6 replaces S4's `AlwaysPublishedGate` stub). The engine
- * (guards, versioned definitions, activitylog Display projection) comes for free from the package; this
- * model owns only the subject shape (the paid arm).
+ * (guards, versioned definitions, activitylog Display projection) comes wholesale from that package; this
+ * model owns only the subject shape.
  *
  * **Classification facets (S7 — OPTIONAL, ADR-0165 §2).** Via {@see HasFacets} the entry attaches the
- * free-tier beam-taxonomy `BeamSilo` (`silos()`, hierarchical, `siloable` morph) + `BeamTag` (`tags()`,
+ * sibling beam-taxonomy `BeamSilo` (`silos()`, hierarchical, `siloable` morph) + `BeamTag` (`tags()`,
  * flat, `taggable` morph) as OPTIONAL polymorphic classification — null for fragments, filled for content.
  * These are FACETS, not the spine: they drive filtering / related / secondary-nav and a silo's visibility
  * MAY gate the sitemap.xml feed (see {@see SiloVisibilityEntitlementGate}), but they
@@ -95,7 +97,18 @@ use Splicewire\Beam\Write\ParticleWriter;
  * Both morphs are pivot-based (`taggables`/`siloables` from beam-taxonomy's tables), so S7 adds NO column
  * to `beam_ux_entries`. Classifying a *content* entry with `BeamSilo` is correct (the issue-03 refinement);
  * only reusing the *compliance* silo for a component's structural *namespace* was the category error. The
- * facet attachment on the entry is paid `splicewire/*`; `BeamSilo`/`BeamTag` are free-tier (ADR-0092).
+ * facet attachment on the entry is beam-ux's; `BeamSilo`/`BeamTag` are beam-taxonomy's (ADR-0092).
+ *
+ * **Access aspect (ADR-0212 — two conjunctive rights).** `traverse` + `access` are nullable any-of
+ * token-list columns mirroring Unix's `x`/`r` split: `access` governs reading THIS entry's body,
+ * `traverse` governs reaching THROUGH it to descendants (and being listed in nav). They compose
+ * conjunctively up the containment chain, so inheritance falls out of conjunction rather than a second
+ * lookup, and a subtree can only ever NARROW. The tokens are OPAQUE here (ADR-0092 — no host RBAC
+ * vocabulary in a foundation package); the bound {@see EntryAccessGate} evaluates them, and
+ * {@see self::tokensFor()} is the read seam that keeps `null` (no declaration ⇒ inherit) distinct from
+ * `[]` (declared-but-empty ⇒ deny). Note the permission could NOT live on the has-a particle: ADR-0209
+ * §5 requires the gate to fire BEFORE the body is read, so a permission in the body would have to be
+ * read to decide whether the body may be read.
  *
  * **Draft schema inference (S9 — DRAFT, never final, ADR-0138).** A freshly-registered `component` is
  * editable immediately because {@see InferDraftSchema} deterministically
@@ -105,8 +118,8 @@ use Splicewire\Beam\Write\ParticleWriter;
  * JSDoc→`title`/`description`) and NEVER fabricates widgets, validation, or `$ref`s — those stay explicit
  * authoring acts. Graduation (clearing `schema_is_draft`) is a separate deliberate step, never a side
  * effect of inference. `page`/`layout`/`template` are EXCLUDED: their schemas come from the composition
- * model (slots/regions), not props. The inference engine + draft schema-ref = paid `splicewire/*`; the
- * particle body it rides = free beam-core (ADR-0092 vendor seam).
+ * model (slots/regions), not props. The inference engine + draft schema-ref = beam-ux's; the
+ * particle body it rides = beam-core's (ADR-0092 vendor seam).
  */
 class BeamUxEntry extends Model implements WorkflowManaged
 {
@@ -154,6 +167,10 @@ class BeamUxEntry extends Model implements WorkflowManaged
         'segment',
         // Sibling nav order (host-provided; nullable — projector orders by it when the column is present).
         'nav_order',
+        // Access aspect (ADR-0212): the two conjunctive rights, any-of lists of tokens opaque to
+        // beam-ux. NULL = no declaration = no constraint (inherit); `[]` = declared-but-empty = deny.
+        'traverse',
+        'access',
         // Workflow aspect (S6): the optional beam-workflows subject envelope.
         'workflow_marking',
         'workflow_version',
@@ -183,7 +200,32 @@ class BeamUxEntry extends Model implements WorkflowManaged
             // The ordered realm fallback stack (ticket 03) — a list<string>, same shape as
             // RealmRegistry::$stack.
             'realms' => 'array',
+            // The two access rights (ADR-0212) — any-of `list<string>` token lists. Cast to array so a
+            // NULL column stays null (no declaration) and an empty JSON array stays `[]` (an explicit
+            // deny); the two are NOT interchangeable and `tokensFor()` preserves the difference.
+            'traverse' => 'array',
+            'access' => 'array',
         ];
+    }
+
+    /**
+     * This row's own any-of token list for one right (ADR-0212 §2) — `null` when the entry declares
+     * nothing, so the caller can tell *no constraint* (inherit transparently) from a declared-but-empty
+     * `[]` (deny). The two rights live on identically-named columns, so there is no mapping to keep in
+     * agreement; a consumer that has not migrated the columns yet reads `null` and is unconstrained,
+     * following the same `Schema::hasColumn` tolerance the rest of the aspect columns get.
+     *
+     * @return list<string>|null
+     */
+    public function tokensFor(Right $right): ?array
+    {
+        $tokens = $this->getAttribute($right->column());
+
+        if ($tokens === null) {
+            return null;
+        }
+
+        return array_values(array_map(strval(...), (array) $tokens));
     }
 
     /**

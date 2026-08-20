@@ -133,7 +133,7 @@ return [
     |                  driver mirrors to, keyed by particle id. Null ⇒ the
     |                  framework default disk.
     | `mirror_disk`  — the filesystem disk the placement-keyed PlacedDiskMirror
-    |                  projects to on Publish, keyed by the paid FilePlacement
+    |                  projects to on Publish, keyed by the FilePlacement
     |                  path (`{namespace}/{type}/{slug}.{ext}`). This is the
     |                  human/git-facing projection — point it at a git-tracked
     |                  dev dir to version-control entry bodies as source files.
@@ -144,6 +144,31 @@ return [
     'storage' => [
         'disk' => env('BEAM_UX_STORAGE_DISK'),
         'mirror_disk' => env('BEAM_UX_STORAGE_MIRROR_DISK'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Access (ADR-0212 — the two conjunctive rights)
+    |--------------------------------------------------------------------------
+    |
+    | The `traverse`/`access` token lists on an entry are OPAQUE to beam-ux
+    | (ADR-0092 — host RBAC vocabulary stays host-side); the bound
+    | `EntryAccessGate` evaluates them. These two keys are the host-specific
+    | values the default `TokenAccessGate` carried down from tower's AccessGate
+    | as hardcoded constants.
+    |
+    | `root_role`     — the role the reserved `root` token resolves against.
+    |                   With no RBAC package present the token simply denies.
+    | `extra_tokens`  — host tokens `knows()` should recognise beyond `root`,
+    |                   `auth`, and ADR-0118's `alias.verb` permission shape.
+    |                   `knows()` is what makes a typo'd token a loud import
+    |                   error instead of a silent lockout, so widen this list
+    |                   rather than loosening validation.
+    |
+    */
+    'access' => [
+        'root_role' => env('BEAM_UX_ACCESS_ROOT_ROLE', 'Root'),
+        'extra_tokens' => [],
     ],
 
 ];

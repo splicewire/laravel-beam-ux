@@ -36,8 +36,9 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  * is reachable under — `realm` stays the primary/first entry, `realms` the full ordered membership.
  * `format`/`body_style` are the body-language axis (sibling to `type`). `placement_ref`/
  * `driver_ref` are the S2 storage precedence refs. `workflow_marking`/`workflow_version` make the entry
- * an OPTIONAL subject of the free-tier `laravel-beam-workflows` engine. `schema_is_draft` marks an
- * inferred (vs. authored) `schema_ref`.
+ * an OPTIONAL subject of the sibling `laravel-beam-workflows` engine. `schema_is_draft` marks an
+ * inferred (vs. authored) `schema_ref`. `traverse`/`access` are ADR-0212's two conjunctive rights —
+ * nullable any-of token lists composed UP the containment chain.
  *
  * `deleted_at` (theme-entries-and-authoring ticket 06): `SoftDeletes` — a delete is reversible (Frame's
  * RowActions "delete" is a confirm-guarded soft-delete, never a hard one) and independent of workflow
@@ -107,7 +108,17 @@ return new class extends Migration
                 $table->string('segment')->nullable();
                 $table->integer('nav_order')->nullable();
 
-                // Workflow: an OPTIONAL subject of the free-tier laravel-beam-workflows engine. NULL marking
+                // Access (ADR-0212): the two conjunctive rights, each an any-of list of tokens OPAQUE
+                // to beam-ux (host RBAC vocabulary stays host-side, ADR-0092). `access` gates reading
+                // THIS row's body; `traverse` gates reaching THROUGH it to descendants and being listed
+                // in nav. NULL is the load-bearing value — no declaration ⇒ no constraint ⇒ the row
+                // transparently inherits its ancestors' (inheritance falls out of conjunction, not a
+                // second lookup), whereas a declared-but-empty `[]` denies. Not indexed: they are
+                // evaluated in memory over a chain the caller already holds, never queried against.
+                $table->json('traverse')->nullable();
+                $table->json('access')->nullable();
+
+                // Workflow: an OPTIONAL subject of the sibling laravel-beam-workflows engine. NULL marking
                 // = unmanaged / at-initial; the published-marking gate reads it so an unmanaged entry stays
                 // public by default. workflow_version pins the definition version on first transition.
                 $table->string('workflow_marking')->nullable()->index();

@@ -3,16 +3,20 @@
 namespace Splicewire\Beam\Ux\Disk;
 
 use FilesystemIterator;
+use Illuminate\Support\Facades\Schema;
+use InvalidArgumentException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Splicewire\Beam\Storage\StorageDriver;
+use Splicewire\Beam\Ux\Access\EntryAccessGate;
+use Splicewire\Beam\Ux\Access\Right;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 
 /**
- * The **`register-from-disk` batch** (charter S8, `beamux-build/issues/05`) — the PAID `splicewire/*`
+ * The **`register-from-disk` batch** (charter S8, `beamux-build/issues/05`) — the beam-tier
  * operator-run operation that bootstraps a BeamUx tree from an existing on-disk one. It scans a target
  * directory for **every registered body format's** file (format-aware, ADR-0164 — NO LONGER tsx-only:
  * an `.mdx` file registers exactly as a `.tsx` one), skips files already in the DB, materializes a
@@ -28,8 +32,8 @@ use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
  * **Idempotent.** A file whose derived envelope (`namespace` + `slug`) already resolves to a record is
  * SKIPPED — re-running the batch registers only what is new, never duplicating or clobbering.
  *
- * **Vendor seam (ADR-0092).** The batch orchestration over the storage port is paid `splicewire/*`; the
- * particle + `ParticleWriter` records the body rides are free beam-core, untouched.
+ * **Composition seam (ADR-0092).** The batch orchestration over the storage port is beam-ux's; the
+ * particle + `ParticleWriter` records the body rides are beam-core's, untouched.
  */
 class RegisterEntriesFromDisk
 {
@@ -37,6 +41,7 @@ class RegisterEntriesFromDisk
         protected RegisterFromDisk $disk,
         protected StorageDriverResolver $drivers,
         protected InferDraftSchema $inference,
+        protected ?EntryAccessGate $gate = null,
     ) {}
 
     /**
@@ -108,8 +113,8 @@ class RegisterEntriesFromDisk
             'format' => $envelope['format'],
         ], $this->containmentFor($source, $relative)));
 
-        // The body rides the free-beam-core StorageDriver (ParticleWriter under the default Stacked
-        // driver) — the paid batch selects the driver, beam-core does the versioned write. Every
+        // The body rides the beam-core StorageDriver (ParticleWriter under the default Stacked
+        // driver) — the batch selects the driver, beam-core does the versioned write. Every
         // disk-registered file keeps its raw source as the body (the former Puck-bridge structural
         // parse for `page` `.tsx` files is retired, ADR-0016 — body format is
         // `@splicewire/beam-ux/blockdoc`'s `JsonNode[]` tree, not Puck; no PHP-callable blockdoc parser
@@ -167,7 +172,83 @@ class RegisterEntriesFromDisk
             $out['title'] = $fm['title'];
         }
 
+        // ADR-0212's two rights mirror row↔disk like every other field — particle-primary, import never
+        // overwrites (a file whose envelope already resolves is SKIPPED before we get here), no special
+        // case and no divergence-resolution rule, because there is no second authority.
+        foreach (Right::cases() as $right) {
+            // Guarded on the column, like every other aspect field: a consumer that has not migrated
+            // ADR-0212 yet imports the file without its rights rather than dying on a missing column.
+            if (! Schema::hasColumn('beam_ux_entries', $right->column())) {
+                continue;
+            }
+
+            $tokens = $this->tokenList($fm[$right->value] ?? null);
+
+            if ($tokens !== null) {
+                $this->assertKnownTokens($tokens, $right, $relative);
+                $out[$right->column()] = $tokens;
+            }
+        }
+
         return $out;
+    }
+
+    /**
+     * Parse one frontmatter value into an any-of token list. The local {@see frontmatter()} reader is
+     * deliberately flat `key: value` (it takes no dependency on a YAML parser), so both the inline-list
+     * and bare-list spellings a hand author reaches for are accepted:
+     *
+     *   access: root, docs.view      →  ['root', 'docs.view']
+     *   access: [root, docs.view]    →  ['root', 'docs.view']
+     *   access:                      →  []  (declared-but-empty ⇒ DENIES, secure-by-omission)
+     *
+     * An absent key returns `null` — no declaration, so the entry inherits its ancestors' constraint.
+     * That `null` vs `[]` distinction is the load-bearing one; it survives all the way to the column.
+     *
+     * @return list<string>|null
+     */
+    protected function tokenList(?string $raw): ?array
+    {
+        if ($raw === null) {
+            return null;
+        }
+
+        $raw = trim($raw);
+
+        if (str_starts_with($raw, '[') && str_ends_with($raw, ']')) {
+            $raw = substr($raw, 1, -1);
+        }
+
+        return array_values(array_filter(
+            array_map(fn (string $token) => trim($token, " \t\"'"), explode(',', $raw)),
+            fn (string $token) => $token !== '',
+        ));
+    }
+
+    /**
+     * Hard-error on a token the bound gate does not `know()` (ADR-0212 §5), naming the entry and the
+     * token. An unknown token already fails closed at runtime, so this never prevents a leak — it
+     * prevents a **silent lockout**: a typo'd `athu` would otherwise import cleanly and 404 the page
+     * for everyone, including its author, with nothing to point at. A host binding an exotic gate
+     * returns `true` from `knows()` and skips validation entirely.
+     *
+     * @param  list<string>  $tokens
+     */
+    protected function assertKnownTokens(array $tokens, Right $right, string $relative): void
+    {
+        if ($this->gate === null) {
+            return;
+        }
+
+        foreach ($tokens as $token) {
+            if (! $this->gate->knows($token)) {
+                throw new InvalidArgumentException(
+                    "[{$relative}] declares `{$right->value}: {$token}`, a token the bound ".
+                    $this->gate::class.' does not recognise. It would fail closed and lock the entry out. '.
+                    'Fix the token, or add it to `beam.ux.access.extra_tokens`.'
+                );
+            }
+        }
     }
 
     /**

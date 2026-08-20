@@ -2,12 +2,17 @@
 
 namespace Splicewire\Beam\Ux\Containment;
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavTree;
+use Splicewire\Beam\Ux\Access\EntryAccessResolver;
+use Splicewire\Beam\Ux\Access\TokenAccessGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
+use Splicewire\Beam\Ux\Sitemap\WorkflowMarkingPublishGate;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
@@ -17,17 +22,50 @@ use Splicewire\Beam\Ux\Type\UxType;
  * from {@see UrlResolver}, so the nav rides the SAME containment tree that derives the route (never
  * `namespace`).
  *
- * **Vendor seam (ADR-0092):** this projection is FREE-TIER — it reuses `laravel-data-nav`'s `NavTree`
- * rather than rebuilding a nav primitive. The paid engine is the `site` realm + containment + URL
- * inheritance it projects FROM.
+ * **Composition seam (ADR-0092):** this projection composes DOWN — it reuses `laravel-data-nav`'s
+ * `NavTree` rather than rebuilding a nav primitive. What beam-ux owns is the `site` realm + containment
+ * + URL inheritance it projects FROM.
  *
  * **Multiplicity IS built (ticket 03):** an entry's `realms` fallback stack means it can be reachable in
  * several realms at once — the projector takes ONE realm at a time; a host renders several realms' navs
  * by calling `project()` once per realm.
+ *
+ * **This projection GATES (ADR-0212 §4) — it previously gated nothing at all.** It filtered on realm,
+ * `type = page`, and non-null `segment`, and not even {@see EntryPublishGate}. Converting docs to
+ * entries on top of that would leak every draft and gated title into the sidebar, defeating outright
+ * the server-authoritative index app ADR-0122 named as a hard requirement. Two passes now run:
+ *
+ *  - **publish**, cheap-filtered into the query where the bound gate is the default marking one (it is
+ *    a column, so the filter is free) and always re-asserted in memory through the bound port;
+ *  - **access**, in memory after the single adjacency load — so no N+1 is introduced — where a node
+ *    appears only if the reader clears the `traverse` chain to it AND its own `access`, and a denied
+ *    node prunes its **entire subtree** (lifting orphans to the grandparent is incoherent, since a
+ *    child's URL is composed from its parent's segment chain).
+ *
+ * ADR-0122's caching split is preserved verbatim: the **user-independent** enumerated tree is what a
+ * host may cache, and the **gate pass runs live on every request**, so a revoked grant bites on the
+ * next request with no stale-authorization window. That is why the actor is a per-call argument and
+ * never constructor state.
  */
 class NavProjector
 {
-    public function __construct(private UrlResolver $urls = new UrlResolver) {}
+    private EntryAccessResolver $access;
+
+    /**
+     * The access resolver defaults to the OOTB {@see TokenAccessGate} rather than to null-means-open:
+     * a hand-constructed projector must still gate, or the leak this class was fixed for returns
+     * through the back door. The publish gate stays nullable because its default binding needs the
+     * composed-down beam-workflows `LifecycleService`; unset, every entry counts as published —
+     * exactly what {@see WorkflowMarkingPublishGate} itself reports for an unmanaged entry, so the
+     * degrade is the same answer rather than a second policy.
+     */
+    public function __construct(
+        private UrlResolver $urls = new UrlResolver,
+        ?EntryAccessResolver $access = null,
+        private ?EntryPublishGate $publish = null,
+    ) {
+        $this->access = $access ?? new EntryAccessResolver(new TokenAccessGate);
+    }
 
     /**
      * Build a {@see NavTree} for a realm's public containment tree. Loads every entry whose `realms`
@@ -39,12 +77,28 @@ class NavProjector
      * has no route (charter §Q1), so it never becomes a nav destination even if it incidentally shares
      * the realm (e.g. a template minted with the default `realm`/`realms`). Filtering by the `page`
      * type keeps those structural authoring artifacts out of the public nav without touching their rows.
+     *
+     * `$actor` is the reader the access pass runs for — `null` is the anonymous visitor, not a bypass.
+     * It is an argument rather than constructor state precisely so the gate pass can run live per
+     * request over a tree a host is free to cache (ADR-0212 §4).
      */
-    public function project(string $realm): NavTree
+    public function project(string $realm, ?Authenticatable $actor = null): NavTree
     {
         $query = BeamUxEntry::query()
             ->whereJsonContains('realms', $realm)
             ->where('type', UxType::Page->value);
+
+        // The publish filter, pushed into the query where it is provably free and provably safe: the
+        // marking is a column, and the DEFAULT binding's answer is a pure function of it (null/unmanaged
+        // or the published marking). A host that re-bound the port may publish on some other basis and
+        // could be MORE permissive than this predicate, so the prefilter is applied only for the default
+        // binding — the in-memory pass below asks the bound gate either way and is the real authority.
+        if ($this->publish instanceof WorkflowMarkingPublishGate
+            && Schema::hasColumn('beam_ux_entries', 'workflow_marking')) {
+            $query->where(fn ($q) => $q
+                ->whereNull('workflow_marking')
+                ->orWhere('workflow_marking', BeamUxEntry::MARKING_PUBLISHED));
+        }
 
         // Only PLACED entries are nav items. An entry can exist (e.g. auto-provisioned on an author's first
         // visit so the page is editable) without being placed in the nav — those carry a null `segment`.
@@ -61,30 +115,37 @@ class NavProjector
             $query->orderBy('nav_order');
         }
 
+        // ONE adjacency load; both gate passes then run in memory over it, so gating adds no query.
         $entries = $query->orderBy('slug')->get();
 
-        return NavTree::make($this->nodesFor($entries, null, []));
+        return NavTree::make($this->nodesFor($entries, null, [], $actor));
     }
 
     /**
      * Recursively build the nav nodes for one parent level. `$trail` is the root-first ancestor chain so
-     * each node's URL is composed via {@see UrlResolver::resolveChain()} without re-walking parents.
+     * each node's URL is composed via {@see UrlResolver::resolveChain()} without re-walking parents —
+     * and so the access pass evaluates the conjunction over a chain it already holds.
+     *
+     * A node that fails either gate is dropped **with its whole subtree**: it is not recursed into, so
+     * nothing beneath a denied ancestor can surface. This is the one place the prune happens.
      *
      * @param  Collection<int, BeamUxEntry>  $all
      * @param  array<int, BeamUxEntry>  $trail
      * @return array<int, NavLink>
      */
-    private function nodesFor(Collection $all, ?string $parentId, array $trail): array
+    private function nodesFor(Collection $all, ?string $parentId, array $trail, ?Authenticatable $actor): array
     {
         return $all
             ->where('parent_id', $parentId)
-            ->map(function (BeamUxEntry $entry) use ($all, $trail) {
+            ->reject(fn (BeamUxEntry $entry) => $this->publish !== null && ! $this->publish->isPublished($entry))
+            ->reject(fn (BeamUxEntry $entry) => ! $this->access->canList($actor, [...$trail, $entry]))
+            ->map(function (BeamUxEntry $entry) use ($all, $trail, $actor) {
                 $chain = [...$trail, $entry];
 
                 return NavLink::make(
                     title: $entry->title ?? Str::headline((string) $entry->slug),
                     href: $this->urls->resolveChain($chain),
-                    children: $this->nodesFor($all, $entry->getKey(), $chain),
+                    children: $this->nodesFor($all, $entry->getKey(), $chain, $actor),
                 );
             })
             ->values()
