@@ -123,7 +123,9 @@ class UpdateFromNewer
             return false;
         }
 
-        $item = $driver->write($key, ['source' => $diskSource], $entry->namespace);
+        // Encoded through the entry's codec, not hardcoded — see RegisterEntriesFromDisk::register()
+        // for the mdx round-trip bug the hardcoded shape caused.
+        $item = $driver->write($key, $entry->codec()->encode($diskSource, $entry->body_style), $entry->namespace);
 
         if ($entry->particle_id === null && $item->key !== '') {
             $entry->particle_id = $item->key;

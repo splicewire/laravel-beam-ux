@@ -142,9 +142,36 @@ return new class extends Migration
                 'create unique index if not exists beam_ux_entries_namespace_slug_active_unique '
                 .'on beam_ux_entries (namespace, slug) where deleted_at is null'
             );
-        } elseif (! $this->hasNamespaceSlugIndex()) {
+        } elseif (! $this->hasIndexOn(['namespace', 'slug'])) {
             Schema::table('beam_ux_entries', function (Blueprint $table) {
                 $table->unique(['namespace', 'slug']);
+            });
+        }
+
+        // ONE public URL per (parent, segment) — ADR-0209 §10. Nothing previously stopped two children of
+        // one parent from sharing a segment, so two entries could resolve to the same URL and the
+        // renderer's walk would pick whichever row the driver returned first: the same silent-wrong-row
+        // class of bug `BeamUxEntryBodyController` documents finding live on slug ambiguity. Soft-deleted
+        // rows are excluded the same way, or a deleted page would reserve its URL permanently.
+        //
+        // The composite is also the INDEX the reverse walk needs: resolution is one `(parent_id, segment)`
+        // lookup per path piece, and `segment` carried no index at all.
+        if (in_array($driver, ['sqlite', 'pgsql'], true)) {
+            DB::statement(
+                'create unique index if not exists beam_ux_entries_parent_segment_active_unique '
+                .'on beam_ux_entries (parent_id, segment) where deleted_at is null'
+            );
+        } elseif (! $this->hasIndexOn(['parent_id', 'segment'])) {
+            Schema::table('beam_ux_entries', function (Blueprint $table) {
+                $table->unique(['parent_id', 'segment']);
+            });
+        }
+
+        // The phase-1 lookup of ADR-0209 §1: a direct query for a root-absolute `segment`, which is not
+        // parent-scoped and so is not served by the composite above.
+        if (! $this->hasIndexOn(['segment'])) {
+            Schema::table('beam_ux_entries', function (Blueprint $table) {
+                $table->index('segment');
             });
         }
     }
@@ -155,13 +182,15 @@ return new class extends Migration
     }
 
     /**
-     * Whether the plain (namespace, slug) unique index is already present — the non-partial branch's
-     * own idempotency check, since `$table->unique()` has no IF NOT EXISTS.
+     * Whether an index on exactly these columns is already present — the non-partial branches' own
+     * idempotency check, since neither `$table->unique()` nor `$table->index()` has an IF NOT EXISTS.
+     *
+     * @param  array<int, string>  $columns
      */
-    private function hasNamespaceSlugIndex(): bool
+    private function hasIndexOn(array $columns): bool
     {
         foreach (Schema::getIndexes('beam_ux_entries') as $index) {
-            if ($index['columns'] === ['namespace', 'slug']) {
+            if ($index['columns'] === $columns) {
                 return true;
             }
         }

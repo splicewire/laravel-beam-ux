@@ -10,6 +10,8 @@ use Schemastud\DataSchemas\Migration\AcceptanceGate;
 use Splicewire\Beam\Schema\Contracts\SchemaTargetResolver;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Ux\Canvas\ViewGateFilter;
+use Splicewire\Beam\Ux\Compile\CompilationFailed;
+use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
@@ -113,6 +115,12 @@ class BeamUxEntryBodyController
             $written->body,
         );
 
+        // Compile-on-save (ADR-0209 §7): this is the FIRST of the three producers, and the one that
+        // matters most — it is where content actually changes in production. The compile runs against
+        // the source we just persisted, so the artifact and the particle version it is keyed by cannot
+        // disagree.
+        $compileError = $this->compileAfterSave($entry);
+
         $reloaded = $this->drivers->resolve($entry)->read($written->key);
 
         return response()->json(['data' => new BeamUxEntryBodyData(
@@ -121,7 +129,32 @@ class BeamUxEntryBodyController
             type: $this->typeValue($entry),
             schema: $this->resolveSchema($entry),
             body: $reloaded?->body ?? $body,
+            compileError: $compileError,
         )]);
+    }
+
+    /**
+     * Compile the just-saved body to its artifact, returning the diagnostic instead of throwing.
+     *
+     * The save has already landed by the time this runs, and it must stay landed: an author saving
+     * half-written MDX is the normal case, and a CMS that refuses the write because the draft does not
+     * compile is a worse editor than one that stores it and says so. What §7 forbids is a SILENT
+     * degrade — compiling in the reader's browser instead — and nothing here does that: with no
+     * artifact the public page 404s and {@see \Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit} names the
+     * entry, while the editor gets the compiler's own message back in the same response.
+     *
+     * The action is resolved lazily rather than constructor-injected so the body endpoint still mounts
+     * on a host that has bound no compiler at all.
+     */
+    private function compileAfterSave(BeamUxEntry $entry): ?string
+    {
+        try {
+            app(CompileEntryBody::class)->forEntry($entry->refresh(), force: true);
+
+            return null;
+        } catch (CompilationFailed $e) {
+            return $e->getMessage();
+        }
     }
 
     /**

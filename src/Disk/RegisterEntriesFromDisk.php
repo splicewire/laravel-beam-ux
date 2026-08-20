@@ -10,6 +10,8 @@ use RecursiveIteratorIterator;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Access\EntryAccessGate;
 use Splicewire\Beam\Ux\Access\Right;
+use Splicewire\Beam\Ux\Compile\CompilationFailed;
+use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
@@ -42,25 +44,42 @@ class RegisterEntriesFromDisk
         protected StorageDriverResolver $drivers,
         protected InferDraftSchema $inference,
         protected ?EntryAccessGate $gate = null,
+        protected ?CompileEntryBody $compile = null,
     ) {}
+
+    /**
+     * Compile failures from the current {@see scan()}, keyed by disk-relative path. Per-run state rather
+     * than a return value threaded through {@see register()}, which several hosts already override.
+     *
+     * @var array<string, string>
+     */
+    protected array $failures = [];
 
     /**
      * Scan `$root` and register every recognized-format file not yet in the DB. Returns the outcome:
      * the entries created, the disk-relative paths skipped as already-present, and the paths ignored as
      * an unrecognized (non-body) format.
      *
-     * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, ignored: array<int, string>}
+     * `failed` carries the compile diagnostics for files that registered but whose bodies would not
+     * compile (ADR-0209 §7) — they are IN the database and absent from disk-served output, which is the
+     * loud-but-not-fatal shape a batch needs.
+     *
+     * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, ignored: array<int, string>, failed: array<string, string>}
      */
     public function scan(string $root): array
     {
         $root = rtrim($root, '/');
+
+        $this->failures = [];
 
         $created = [];
         $skipped = [];
         $ignored = [];
 
         if (! is_dir($root)) {
-            return compact('created', 'skipped', 'ignored');
+            $failed = $this->failures;
+
+            return compact('created', 'skipped', 'ignored', 'failed');
         }
 
         foreach ($this->files($root) as $absolute) {
@@ -88,7 +107,9 @@ class RegisterEntriesFromDisk
             $created[] = $this->register($envelope, (string) file_get_contents($absolute), $relative);
         }
 
-        return compact('created', 'skipped', 'ignored');
+        $failed = $this->failures;
+
+        return compact('created', 'skipped', 'ignored', 'failed');
     }
 
     /**
@@ -121,7 +142,14 @@ class RegisterEntriesFromDisk
         // exists yet to replace it, so a disk-registered `page` arrives as raw source pending a future
         // structural-import mechanism, same degrade this method already applied when the Puck bridge
         // was merely unavailable).
-        $body = ['source' => $source];
+        //
+        // The body is encoded THROUGH THE ENTRY'S CODEC (ADR-0164), not hardcoded to `['source' => …]`.
+        // Found live while wiring the renderer: the hardcoded shape happens to be what `TsxBodyCodec`
+        // round-trips, but `MdxBodyCodec` stores `{frontmatter, content}` — so every disk-registered
+        // `.mdx` entry decoded to an EMPTY STRING, and `PlacedDiskMirror` (which decodes through the
+        // codec) wrote a blank `.mdx` back out with no error. Exactly the failure the model's own
+        // `format` default docblock records finding for themes, in a second place.
+        $body = $entry->codec()->encode($source, $entry->body_style);
 
         $driver = $this->drivers->resolve($entry);
         $item = $driver->write('', $body, $entry->namespace);
@@ -134,7 +162,26 @@ class RegisterEntriesFromDisk
         // S9 at import: a fresh `component` arrives editable; page/layout/template are left untouched.
         $this->inference->forEntry($entry, $source, persist: true);
 
-        return $entry->refresh();
+        $entry = $entry->refresh();
+
+        // Compile-on-save (ADR-0209 §7), second producer: an operator batch, on a console where Node is
+        // trivially available. Without this an import would register a hundred pages that all 404 until
+        // someone ran the backfill — the "invisible failure months later" shape §7 exists to refuse.
+        // We already hold the source, so nothing is read back out of the store it was just written to.
+        //
+        // A failure is COLLECTED, not thrown: the batch's contract is to import everything importable
+        // and report what it could not, and one page with a syntax error must not abort the other four
+        // hundred. Loudness is preserved by {@see scan()} returning the failures and the command
+        // reporting them — plus the page 404ing and the doctor naming it, exactly as at save time.
+        if ($this->compile !== null) {
+            try {
+                $this->compile->forEntry($entry, $source, force: true);
+            } catch (CompilationFailed $e) {
+                $this->failures[$relative] = $e->getMessage();
+            }
+        }
+
+        return $entry;
     }
 
     /**

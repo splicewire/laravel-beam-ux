@@ -6,12 +6,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Control\TransitionResult;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
 use Splicewire\Beam\Workflows\Data\WorkflowTransitionAttemptData;
 use Splicewire\Beam\Workflows\Data\WorkflowTransitionRequestData;
-use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
  * `POST /beam-ux-entry/{id}/op/transition` — the entry-sheet Workflow tab's transition button, the

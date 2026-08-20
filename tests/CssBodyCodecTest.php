@@ -63,7 +63,7 @@ class CssBodyCodecTest extends TestCase
     {
         // Round-trip fidelity matters here specifically because a generated theme.css is meant to be
         // human-inspectable (git diffs) — a value tweaked by hand should still parse.
-        $css = <<<CSS
+        $css = <<<'CSS'
             /* some header comment, possibly hand-added, with an apostrophe like "don't touch" */
             :root {
                 --theme-site-background: #000000;

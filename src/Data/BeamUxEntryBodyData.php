@@ -37,6 +37,14 @@ class BeamUxEntryBodyData extends Data
      * @param  array<string, mixed>|null  $schema  the resolved JSON-Schema for the SchemaForm, or null when
      *                                             the entry declares no inline schema (permissive fallback)
      * @param  array<string, mixed>  $body  the current particle body — seeds the SchemaForm's formData
+     * @param  string|null  $compileError  why compile-on-save (ADR-0209 §7) could not produce this
+     *                                     entry's artifact, or null when it did. The save itself still
+     *                                     LANDS — refusing to store a draft with a syntax error in it
+     *                                     would be a worse editor than one that tells you — but the
+     *                                     page has no artifact until the body compiles, so it 404s
+     *                                     publicly and `beam:doctor` names it. Absence is reported in
+     *                                     three places and degrades in none, which is what §7's
+     *                                     no-silent-fallback rule actually asks for.
      */
     public function __construct(
         public string $slug,
@@ -44,5 +52,6 @@ class BeamUxEntryBodyData extends Data
         public string $type,
         public ?array $schema,
         public array $body,
+        public ?string $compileError = null,
     ) {}
 }

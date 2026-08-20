@@ -30,21 +30,33 @@ use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Codec\CssBodyCodec;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
+use Splicewire\Beam\Ux\Compile\CompileEntryBody;
+use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
+use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
+use Splicewire\Beam\Ux\Compile\NodeEntryBodyCompiler;
+use Splicewire\Beam\Ux\Console\CompileEntriesCommand;
 use Splicewire\Beam\Ux\Console\EnrichPageSchemasCommand;
 use Splicewire\Beam\Ux\Console\RegisterFromDiskCommand;
 use Splicewire\Beam\Ux\Console\ScaffoldCommand;
 use Splicewire\Beam\Ux\Console\SeedNavCommand;
 use Splicewire\Beam\Ux\Console\UpdateFromNewerCommand;
+use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Containment\NavProjector;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
-use Splicewire\Beam\Ux\Database\Seeders\NavSeeder;
+use Splicewire\Beam\Ux\Database\Seeders\BeamUxSeeder;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Disk\RegisterFromDisk;
 use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Entitlements\BeamUxRealmGrantable;
 use Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController;
+use Splicewire\Beam\Ux\Http\Controllers\EntryArtifactController;
+use Splicewire\Beam\Ux\Http\Controllers\PublicEntryController;
+use Splicewire\Beam\Ux\Http\EntryRenderer;
+use Splicewire\Beam\Ux\Http\InertiaEntryRenderer;
+use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
@@ -95,6 +107,16 @@ class BeamUxServiceProvider extends PackageServiceProvider
             ->hasMigrations([
                 'shared/create_beam_ux_entries_table',
             ]);
+
+        // The docs seed stubs (ticket 02 §4, ADR-0210). Optionally published — publishing is how a host
+        // customises what a fresh install seeds; not publishing is how it gets the default. Following
+        // beam-core's own `beam-stubs` tag and beam-client-runtime's `resource_path('js/lib/')` publish:
+        // a stub is established precedent, and it is not a RENDERED page, which is the thing no beam
+        // package ships.
+        $this->publishes(
+            [__DIR__.'/../stubs/docs' => resource_path('beam-ux/docs')],
+            'beam-ux-docs',
+        );
     }
 
     public function packageRegistered(): void
@@ -104,6 +126,8 @@ class BeamUxServiceProvider extends PackageServiceProvider
         $this->mergeConfigFrom(__DIR__.'/../config/beam/ux.php', 'beam.ux');
 
         $this->registerCodecs();
+        $this->registerCompile();
+        $this->registerPublic();
         $this->registerInference();
         $this->registerPlacement();
         $this->registerStorage();
@@ -120,6 +144,7 @@ class BeamUxServiceProvider extends PackageServiceProvider
         $this->registerEntryWorkflow();
         $this->bootCommands();
         $this->bootRouteMacro();
+        $this->bootPublicRouteMacro();
         $this->registerThemeSchemas();
 
         // beam-ux is an "operator" of the estate-wide publish-only stub migrations convention — self
@@ -139,6 +164,16 @@ class BeamUxServiceProvider extends PackageServiceProvider
                 'splicewire/laravel-beam-ux',
                 BeamUxAccessAudit::class,
             );
+
+            // ADR-0209 §7's reporting seam: entries whose compiled artifact is missing or stale. It is
+            // load-bearing rather than housekeeping — with no client-compile fallback, an uncompiled
+            // page is a hard failure at read time, and this is what names it before a reader does.
+            // ADR-0210 §6's orphan check rides the same audit: a page whose contributor was uninstalled
+            // still 200s by design, so nothing else would ever mention it.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxArtifactAudit::class,
+            );
         }
 
         // Self-registers its own install step (config merge is automatic; migrations publish tag +
@@ -154,16 +189,19 @@ class BeamUxServiceProvider extends PackageServiceProvider
             );
         }
 
-        // Self-registers its NavSeeder (a thin db:seed adapter over splicewire:beam:ux:seed-nav) DOWN into
-        // beam-core's seed manifest, so one `splicewire:beam:seed` restamps the content nav alongside every
-        // other package's seeders after a migrate:fresh. Gated by `beam.ux.seed_nav` (default true); order 20
-        // so it runs after the accounts substrate. Guarded on the manifest being bound.
+        // Self-registers its seeder DOWN into beam-core's seed manifest, so one `splicewire:beam:seed`
+        // provisions the realm root (ADR-0209 §9 — the renderer never writes, so something has to), the
+        // docs subtree (ADR-0210), and the content nav, alongside every other package's seeders after a
+        // migrate:fresh. Order 20, after the accounts substrate; guarded on the manifest being bound.
+        //
+        // Registration is UNGATED and the three gates moved inside {@see BeamUxSeeder}, because
+        // `register()` is idempotent per PACKAGE name — a second registration would silently replace the
+        // first, so one package gets one step and composes within it.
         if ($this->app->bound(BeamSeedManifest::class)) {
             $this->app->make(BeamSeedManifest::class)->register(
                 package: 'splicewire/laravel-beam-ux',
-                seederClass: NavSeeder::class,
+                seederClass: BeamUxSeeder::class,
                 order: 20,
-                configGate: 'beam.ux.seed_nav',
             );
         }
 
@@ -269,6 +307,129 @@ class BeamUxServiceProvider extends PackageServiceProvider
     }
 
     /**
+     * The **compile-on-save** seam (ADR-0209 §7). Three producers — the editor save, the disk batch, the
+     * `splicewire:beam:ux:compile` backfill — invoke ONE {@see CompileEntryBody} action over a swappable
+     * {@see EntryBodyCompiler}, so "what counts as compilable, and as already-current" has exactly one
+     * definition for the doctor check to hold everyone to.
+     *
+     * The default compiler shells out to Node against the HOST's `node_modules`. That is a real
+     * deploy-topology commitment and it is made deliberately: every beam-ux host already needs Node to
+     * build assets, and paying the compile where content CHANGES beats paying an MDX-compiler download
+     * on every page view. A host with a warm build service binds its own compiler and keeps everything
+     * above it.
+     */
+    protected function registerCompile(): void
+    {
+        $this->app->singleton(EntryArtifactStore::class, fn () => new EntryArtifactStore(
+            Storage::disk(config('beam.ux.compile.disk')),
+            (string) config('beam.ux.compile.root', 'beam-ux/artifacts'),
+        ));
+
+        $this->app->singleton(EntryBodyCompiler::class, fn () => new NodeEntryBodyCompiler(
+            binary: (string) config('beam.ux.compile.binary', 'node'),
+            script: config('beam.ux.compile.script'),
+            workingDirectory: base_path(),
+            timeout: (float) config('beam.ux.compile.timeout', 60),
+        ));
+
+        $this->app->singleton(CompileEntryBody::class, fn ($app) => new CompileEntryBody(
+            $app->make(EntryBodyCompiler::class),
+            $app->make(EntryArtifactStore::class),
+            $app->make(StorageDriverResolver::class),
+        ));
+    }
+
+    /**
+     * The **public serving** seam (ADR-0209) — resolution, the uniform-404 gate triple, and the response
+     * port. Bound here rather than in the macro so a host can resolve any of them directly (a sitemap
+     * warmer, a preview route of its own) without mounting the renderer, and so a headless install pays
+     * nothing: nothing in this method touches the router.
+     *
+     * {@see EntryRenderer} is a port because beam-ux does not require Inertia (§6, and it is not in
+     * `composer.json`); the shipped binding is the Inertia one, and a non-Inertia host rebinds it.
+     */
+    protected function registerPublic(): void
+    {
+        $this->app->singleton(EntryPathResolver::class, fn () => new EntryPathResolver);
+
+        $this->app->singleton(PublicEntryGate::class, fn ($app) => new PublicEntryGate(
+            $app->make(EntryPathResolver::class),
+            $app->make(EntryAccessResolver::class),
+            $app->make(EntryPublishGate::class),
+        ));
+
+        $this->app->bind(EntryRenderer::class, InertiaEntryRenderer::class);
+    }
+
+    /**
+     * Register the `Route::beamUxSite()` macro — the **host-mounted** public renderer (ADR-0209 §2).
+     *
+     *   Route::beamUxSite('site/entry')  →  GET {artifactRoot}/{entry} → artifact  (beam.ux.site.artifact)
+     *                                       GET {path}                 → show      (beam.ux.site.show)
+     *
+     * The host calls this as the LAST line of its `web.php`. Laravel matches in registration order, so a
+     * catch-all registered last shadows nothing the host already claimed — but only the host can
+     * guarantee that ordering, and a package silently claiming every unmatched URL in an application is
+     * a day of debugging. A host that never calls the macro gets no public surface at all, which is what
+     * keeps beam-ux headless-installable without inventing a package boundary to protect it.
+     *
+     * `$claimRoot` is **off by default**: the direction of travel is a whole site served from entries,
+     * but installing beam-ux must never take a host's homepage. `$page` is required and un-defaulted
+     * because no beam package ships a rendered page (§6) — the component name is the host's.
+     *
+     * Middleware stays the host's: a private site mounts this inside its own `auth` group and every
+     * entry inherits it (§4). The artifact route is registered FIRST so the catch-all cannot swallow it.
+     */
+    protected function bootPublicRouteMacro(): void
+    {
+        if (Route::hasMacro('beamUxSite')) {
+            return;
+        }
+
+        Route::macro('beamUxSite', function (
+            string $page,
+            string $realm = BeamUxEntry::REALM_SITE,
+            bool $claimRoot = false,
+            bool $withNav = true,
+            ?string $artifactRoot = null,
+            ?string $routeName = null,
+        ): void {
+            /** @var Router $this */
+            $artifactRoot ??= config('beam.ux.site.artifact_root', 'beam/ux/artifacts');
+            $routeName ??= config('beam.ux.route_name', 'beam.ux.');
+
+            $artifactName = "{$routeName}site.artifact";
+
+            $defaults = [
+                'beamUxRealm' => $realm,
+                'beamUxPage' => $page,
+                'beamUxNav' => $withNav,
+                'beamUxArtifactRoute' => $artifactName,
+            ];
+
+            $apply = function ($route) use ($defaults) {
+                foreach ($defaults as $key => $value) {
+                    $route->defaults($key, $value);
+                }
+
+                return $route;
+            };
+
+            $apply($this->get("{$artifactRoot}/{entry}", EntryArtifactController::class)
+                ->name($artifactName));
+
+            if ($claimRoot) {
+                $apply($this->get('/', PublicEntryController::class)
+                    ->name("{$routeName}site.root"));
+            }
+
+            $apply($this->get('{path}', PublicEntryController::class)
+                ->where('path', '.*')
+                ->name("{$routeName}site.show"));
+        });
+    }
+
+    /**
      * The **explicit-operator-batch** disk seam (charter S8, `beamux-build/issues/05`). Binds the
      * format-aware {@see RegisterFromDisk} recognizer/path-envelope deriver + the two batch operations —
      * {@see RegisterEntriesFromDisk} (scan → create → S9-infer-at-import) and {@see UpdateFromNewer}
@@ -279,7 +440,17 @@ class BeamUxServiceProvider extends PackageServiceProvider
     protected function registerDisk(): void
     {
         $this->app->singleton(RegisterFromDisk::class);
-        $this->app->singleton(RegisterEntriesFromDisk::class);
+
+        // The importer takes the compile action explicitly (ADR-0209 §7's second producer) — a batch
+        // that registers pages without compiling them would leave every one of them 404ing until
+        // someone ran the backfill.
+        $this->app->singleton(RegisterEntriesFromDisk::class, fn ($app) => new RegisterEntriesFromDisk(
+            $app->make(RegisterFromDisk::class),
+            $app->make(StorageDriverResolver::class),
+            $app->make(Inference\InferDraftSchema::class),
+            $app->make(EntryAccessGate::class),
+            $app->make(CompileEntryBody::class),
+        ));
         $this->app->singleton(UpdateFromNewer::class);
 
         // The frontmatter-stripped raw-`.mdx` reader — seeds an mdxeditor buffer with the existing copy
@@ -307,6 +478,7 @@ class BeamUxServiceProvider extends PackageServiceProvider
             UpdateFromNewerCommand::class,
             ScaffoldCommand::class,
             SeedNavCommand::class,
+            CompileEntriesCommand::class,
             EnrichPageSchemasCommand::class,
             Console\PnpmOverridesCommand::class,
         ]);

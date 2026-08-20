@@ -6,9 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
 use Splicewire\Beam\Workflows\Data\WorkflowProjectionData;
-use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
  * `POST /beam-ux-entry/{id}/op/workflow` — the entry-sheet Workflow tab's initial read: current

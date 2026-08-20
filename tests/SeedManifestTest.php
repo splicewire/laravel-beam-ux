@@ -3,23 +3,29 @@
 namespace Splicewire\Beam\Ux\Tests;
 
 use Splicewire\Beam\Seed\BeamSeedManifest;
-use Splicewire\Beam\Ux\Database\Seeders\NavSeeder;
+use Splicewire\Beam\Ux\Database\Seeders\BeamUxSeeder;
 
 /**
- * beam-ux self-registers its NavSeeder — a thin `db:seed` adapter over `splicewire:beam:ux:seed-nav` — into
- * beam-core's package-registered seed manifest (`splicewire:beam:seed`), gated by `beam.ux.seed_nav` so one
- * aggregate run restamps the content nav alongside every other package after a migrate:fresh.
+ * beam-ux self-registers ONE seeder into beam-core's package-registered seed manifest
+ * (`splicewire:beam:seed`), so an aggregate run provisions the realm root (ADR-0209 §9), the docs subtree
+ * (ADR-0210) and the content nav after a migrate:fresh.
+ *
+ * The registration is deliberately UNGATED and the gates moved inside the seeder:
+ * `BeamSeedManifest::register()` is idempotent per PACKAGE name, so a second registration would silently
+ * replace the first — one package gets one step and composes within it.
  */
 class SeedManifestTest extends TestCase
 {
-    public function test_it_registers_the_nav_seeder_into_the_beam_seed_manifest_gated(): void
+    public function test_it_registers_one_ungated_seeder_into_the_beam_seed_manifest(): void
     {
-        $step = collect($this->app->make(BeamSeedManifest::class)->steps())
-            ->first(fn ($s) => $s->seeder === NavSeeder::class);
+        $steps = collect($this->app->make(BeamSeedManifest::class)->steps())
+            ->filter(fn ($s) => $s->package === 'splicewire/laravel-beam-ux');
 
-        $this->assertNotNull($step);
-        $this->assertSame('splicewire/laravel-beam-ux', $step->package);
-        $this->assertSame('beam.ux.seed_nav', $step->configGate);
+        $this->assertCount(1, $steps, 'one step per package — a second register() would replace the first.');
+
+        $step = $steps->first();
+        $this->assertSame(BeamUxSeeder::class, $step->seeder);
+        $this->assertNull($step->configGate);
     }
 
     public function test_the_seed_nav_gate_defaults_on(): void

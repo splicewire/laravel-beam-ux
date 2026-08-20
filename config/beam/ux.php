@@ -148,6 +148,85 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Public site renderer (ADR-0209 — the host-mounted mount)
+    |--------------------------------------------------------------------------
+    |
+    | The renderer itself is mounted by the HOST (`Route::beamUxSite($page)`) as
+    | the last line of its `web.php` — a package that silently claims every
+    | unmatched URL in an application is a day of debugging, and only the host
+    | can guarantee the registration ordering that makes a catch-all safe. So
+    | there is deliberately no `enabled` key here: not calling the macro IS the
+    | off switch, and a host that never calls it has no public surface at all.
+    |
+    | `artifact_root` — the URI prefix the compiled-body stream mounts under
+    |                   (`GET {artifact_root}/{entry}`). Registered BEFORE the
+    |                   catch-all by the macro, so the catch-all cannot swallow
+    |                   it. Relocatable per-deploy like the authoring root above.
+    |
+    */
+    'site' => [
+        'artifact_root' => env('BEAM_UX_ARTIFACT_ROOT', 'beam/ux/artifacts'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Compile on save (ADR-0209 §7)
+    |--------------------------------------------------------------------------
+    |
+    | Entry bodies are compiled to an ES module when they CHANGE, never when they
+    | are read, and there is NO silent client-compile fallback — degrading to
+    | shipping an MDX compiler to the browser is an invisible regression that
+    | surfaces months later in someone's performance audit. A page with no
+    | artifact 404s and `beam:doctor` names it.
+    |
+    | `disk`     — the filesystem disk artifacts are written to. Null ⇒ the
+    |              framework default disk. Artifacts are addressed by entry id +
+    |              particle version, so a stale one is a DIFFERENT address rather
+    |              than an out-of-date file: there is no invalidation to get wrong.
+    | `root`     — the directory prefix on that disk.
+    | `binary`   — the Node binary the default compiler shells out to. Dependencies
+    |              (`@mdx-js/mdx`, `esbuild`) resolve from the HOST's node_modules;
+    |              beam-ux vendors no toolchain.
+    | `script`   — override the compile script (a host with a warm build service or
+    |              a bespoke pipeline). Null ⇒ the package's own `resources/compile`.
+    | `timeout`  — seconds before one compile is abandoned.
+    |
+    | A host that wants none of this binds its own `Compile\EntryBodyCompiler`;
+    | everything above that port (the shared action, the backfill command, the
+    | doctor check) is unchanged by the swap.
+    |
+    */
+    'compile' => [
+        'disk' => env('BEAM_UX_COMPILE_DISK'),
+        'root' => env('BEAM_UX_COMPILE_ROOT', 'beam-ux/artifacts'),
+        'binary' => env('BEAM_UX_NODE_BINARY', 'node'),
+        'script' => env('BEAM_UX_COMPILE_SCRIPT'),
+        'timeout' => env('BEAM_UX_COMPILE_TIMEOUT', 60),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Docs subtree seed (ADR-0210 — the OTB docs surface)
+    |--------------------------------------------------------------------------
+    |
+    | `splicewire:beam:seed` seeds the `site` realm root (ADR-0209 §9 — the
+    | renderer never writes, so SOMETHING has to make the root exist) and, under
+    | the gate below, the docs subtree beneath it: a docs root plus the API
+    | reference page beam-ux contributes.
+    |
+    | `segment` is the docs root's own URL segment and it is seeded as DATA the
+    | site owns from creation — re-rooting to `/beam/docs` is an edit to one row,
+    | not a config change and not a realm. This key is the seed's INITIAL value
+    | only; it is never read again, and editing it later moves nothing.
+    |
+    */
+    'docs' => [
+        'seed' => env('BEAM_UX_SEED_DOCS', true),
+        'segment' => env('BEAM_UX_DOCS_SEGMENT', '/docs'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Access (ADR-0212 — the two conjunctive rights)
     |--------------------------------------------------------------------------
     |

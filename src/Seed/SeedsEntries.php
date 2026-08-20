@@ -1,0 +1,96 @@
+<?php
+
+namespace Splicewire\Beam\Ux\Seed;
+
+use Splicewire\Beam\Ux\Compile\CompilationFailed;
+use Splicewire\Beam\Ux\Compile\CompileEntryBody;
+use Splicewire\Beam\Ux\Format\UxFormat;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
+use Splicewire\Beam\Ux\Type\UxType;
+
+/**
+ * The shared "seed one page entry, with a body" step — what ADR-0210 §1 means by *a contribution is a
+ * seed row*. Used by beam-ux's own docs seeder and available to any contributing package's, so a
+ * contributor writes a seeder, not an entry-creation-and-particle-write pipeline.
+ *
+ * **Create, never update** (ADR-0209 §11, ADR-0210 §6). The row is site-owned from the moment it exists
+ * — that is the entire point of rooting the docs path in data rather than config — so a re-seed after
+ * someone has re-worded the page, moved it, or re-rooted the whole subtree must leave every one of those
+ * edits alone. Per-package idempotence here means "already present ⇒ nothing to do", not `updateOrCreate`.
+ *
+ * **Absent beam-ux is a reported skip, not a crash** ({@see canSeed()}). `BeamSeedManifest` takes a
+ * class-string, so a contributor's seeder does not load until the seeder runs; when it does run on a
+ * headless host with no `beam_ux_entries` table, it no-ops. This follows `BeamMarketServiceProvider`,
+ * which depends on beam-ux traits while deliberately not force-booting beam-ux's provider.
+ */
+trait SeedsEntries
+{
+    /**
+     * Whether entries can be seeded here at all — beam-ux installed AND migrated. A contributing package
+     * calls this first and returns quietly when it is false: a headless MCP host running
+     * `splicewire:beam:seed` should get a reported skip, never a missing-table exception.
+     */
+    protected function canSeed(): bool
+    {
+        return class_exists(BeamUxEntry::class)
+            && \Illuminate\Support\Facades\Schema::hasTable('beam_ux_entries');
+    }
+
+    /**
+     * Create a `page` entry with a body if nothing is registered at `(namespace, slug)` yet, and return
+     * it (or the untouched existing row).
+     *
+     * The body is written through the resolved StorageDriver — the same particle-primary path an editor
+     * save takes — and then compiled, so a freshly-seeded page is servable on first boot rather than
+     * 404ing until someone runs the backfill. A compile failure is swallowed **here specifically**: a
+     * seed runs on hosts with no Node (CI, a container build stage), and taking down `beam:seed` because
+     * a page could not be compiled yet would be worse than the doctor reporting an uncompiled page.
+     *
+     * @param  array<string, mixed>  $attributes  extra columns (parent_id, segment, title, nav_order, …)
+     */
+    protected function seedPage(
+        string $slug,
+        string $source,
+        array $attributes = [],
+        UxFormat $format = UxFormat::Mdx,
+        ?string $namespace = null,
+    ): ?BeamUxEntry {
+        if (! $this->canSeed()) {
+            return null;
+        }
+
+        $existing = BeamUxEntry::query()
+            ->where('namespace', $namespace)
+            ->where('slug', $slug)
+            ->first();
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $entry = BeamUxEntry::create(array_merge([
+            'slug' => $slug,
+            'type' => UxType::Page,
+            'format' => $format,
+            'namespace' => $namespace,
+        ], $attributes));
+
+        $written = app(StorageDriverResolver::class)
+            ->resolve($entry)
+            ->write('', $entry->codec()->encode($source), $entry->namespace);
+
+        if ($written->key !== '') {
+            $entry->particle_id = $written->key;
+            $entry->save();
+        }
+
+        try {
+            app(CompileEntryBody::class)->forEntry($entry->refresh(), $source, force: true);
+        } catch (CompilationFailed) {
+            // Reported by BeamUxArtifactAudit; see the docblock above for why this one is not fatal.
+        }
+
+        return $entry->refresh();
+    }
+}

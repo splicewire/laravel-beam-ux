@@ -40,13 +40,21 @@ class RegisterFromDiskCommand extends Command
             $this->components->info("Registered [{$entry->namespace}].{$entry->slug} as {$entry->type?->value}{$draft}");
         }
 
+        // Compile failures (ADR-0209 §7). The entries ARE registered — the batch imports everything
+        // importable — but their pages have no artifact and will 404 until the body is fixed, so this is
+        // reported per file and the command exits non-zero rather than claiming a clean import.
+        foreach ($result['failed'] ?? [] as $relative => $reason) {
+            $this->components->error("{$relative}: {$reason}");
+        }
+
         $this->components->info(sprintf(
-            '%d registered · %d skipped (already present) · %d ignored (not a body format).',
+            '%d registered · %d skipped (already present) · %d ignored (not a body format) · %d failed to compile.',
             count($result['created']),
             count($result['skipped']),
             count($result['ignored']),
+            count($result['failed'] ?? []),
         ));
 
-        return self::SUCCESS;
+        return ($result['failed'] ?? []) === [] ? self::SUCCESS : self::FAILURE;
     }
 }

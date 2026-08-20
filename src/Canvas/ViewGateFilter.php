@@ -47,7 +47,7 @@ class ViewGateFilter
 
     /**
      * @param  array<string, mixed>  $node
-     * @return array<string, mixed>|null  null drops the node (and its whole subtree)
+     * @return array<string, mixed>|null null drops the node (and its whole subtree)
      */
     private function filterNode(array $node): ?array
     {
