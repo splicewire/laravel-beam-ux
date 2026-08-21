@@ -138,6 +138,36 @@ most of what the ux↔mdx line was ever about. What remains — `Docs/Regenerate
 doctor — is docs knowledge inside a package named for a **format**. It is audited and moved or deleted
 during extraction. After that, `beam-mdx` means the format and nothing else.
 
+## Amendment (beam-docs-satellite ticket 07): `/site` also owns the typographic SCALE
+
+§5 lists what `@splicewire/beam-ux/site` contributes and stops at the components a contributed body
+*names*. Installing the surface on `splicewire/www` showed the gap that leaves: a correctly seeded,
+published, compiled docs page rendered with headings and body copy at the same weight, because nothing
+in the package governed how a rendered body **reads**. A fresh starter is meant to self-document on
+first boot, and prose nobody can skim documents nothing — so this is the same class of problem as
+shipping a contribution with no page, one layer down.
+
+**`<Prose>` joins the list**, and it ships the scale ONLY — rhythm, measure, heading hierarchy, code,
+tables, blockquotes — with every value a `--beam-*` custom property. It names no colour and no font, so
+§5's theme-neutrality holds exactly as it does for `SiteLayout` and `ApiReference`: the package picks
+relative sizes and treatment, the host picks the palette. A test enforces that rather than a comment —
+it strips the `var()` wrappers and fails if anything colour- or font-shaped survives, which is how the
+one grey chosen on a host's behalf got caught and replaced with a `color-mix` off `currentColor`.
+
+Two shape decisions worth carrying to the next `/site` surface:
+
+- **CSS is a string the component injects, not a stylesheet.** `@splicewire/beam-ux` ships no `.css` and
+  is `sideEffects: false`, so a `.css` import is exactly what a bundler is entitled to drop.
+  `ApiReference`'s `customCss` had already set the convention. Nothing changes in `files`, there is no
+  import order to get wrong, and a host's build needs no configuration.
+- **Scoped to `[data-beam-prose]`, not `.prose`**, so it cannot collide with Tailwind Typography and the
+  two can coexist on one page. A `[data-beam-full-bleed]` child escapes the measure, which is what lets a
+  body mix prose with an embedded reference surface — `<ApiReference>` is a whole application and must not
+  be boxed inside an article's column.
+
+Overriding, in increasing force: redefine the tokens on any ancestor; pass `className` to add rules
+after; pass `css` to replace the stylesheet outright; or do not render `<Prose>` at all.
+
 ## Amendment (beam-docs-satellite ticket 06 — the build): one step per PACKAGE
 
 §1 says a contributing package "registers a seed step whose seeder inserts its page entry." The build

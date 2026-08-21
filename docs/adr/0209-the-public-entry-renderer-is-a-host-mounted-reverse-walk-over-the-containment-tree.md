@@ -199,6 +199,86 @@ in this ADR removes the macros.
 - **Re-rooting a subtree is a data edit**, which was the point: setting one row's `segment` moves it
   and every descendant, and §1's absolute-segment phase is what makes those rows still resolvable.
 
+## Amendments (beam-docs-satellite ticket 07 — the first host that is not the app)
+
+`splicewire/www` installed this surface off the packages alone. Four things §7 said were wrong on
+contact with a browser, and one of them was wrong for every host that had ever run this code.
+
+### A. The artifact must import NOTHING — it is a module that takes its runtime (supersedes §7's shape)
+
+§7 calls the artifact "the ES module the page shell imports" without saying what is inside it. The
+build compiled it with MDX's `outputFormat: 'program'`, which emits:
+
+```js
+import {Fragment as _Fragment, jsx as _jsx} from "react/jsx-runtime";
+```
+
+That is a **bare specifier**. A bundler resolves it; a browser refuses it outright:
+
+> `TypeError: Failed to resolve module specifier "react/jsx-runtime".`
+
+So the module the page shell imports could not be imported by the page shell — on every host, since the
+day it shipped. Nothing caught it because the artifact was only ever verified as **compiler output**
+(does `compile()` return code?) and never as a **module something loaded the way production does**.
+
+The artifact is now emitted from `outputFormat: 'function-body'` — which has no imports at all and reads
+its runtime from `arguments[0]` — wrapped as a real module:
+
+```js
+export default function (runtime) { /* … reads Fragment/jsx/jsxs from arguments[0] … */ }
+```
+
+The host calls it with its own React: `const { default: Body } = (await import(url)).default(runtime)`.
+One shape buys four properties that the alternatives each only partly deliver:
+
+| | import map | `new Function` | **runtime-injected module** |
+|---|---|---|---|
+| static `import()` | ✅ | ❌ | ✅ |
+| no CSP `unsafe-eval` | ✅ | ❌ | ✅ |
+| exactly one React | ⚠️ only if mapped to the host's own chunk | ✅ | ✅ |
+| no per-host build wiring | ❌ three moving parts | ✅ | ✅ |
+
+**tsx reaches the same contract by a different road**: esbuild's `automatic` jsx emits the identical
+bare import, so tsx uses the classic transform against factory names the wrapper binds off the runtime,
+with `format: 'cjs'` so the body's own `export default` becomes an assignment legal inside a function.
+`module.default(runtime)` returns `{ default: Component }` for every format, so a page shell has one code
+path. A tsx body that imports another module fails with a sentence naming the cause — it was equally
+unresolvable before, just as a `ReferenceError` at read time.
+
+### B. The artifact's address must include a COMPILER generation, not just the body version (refines §7)
+
+§7 keys the artifact by particle version so that "a stale artifact is not an old file at the same address
+but a different address that is simply not there". That reasoning is why the URL can be treated as
+effectively immutable — and it has a blind spot: the key hashes the **body**, so changing the **compiler**
+moves nothing. Amendment A changed the emitted shape without touching a single body, so every artifact
+kept its address and browsers went on serving the previous file from cache. `EntryArtifactStore::GENERATION`
+now participates in the hash. Bump it on any change to the emitted shape; it costs one recompile.
+
+### C. Frontmatter is stripped before compiling (refines §7)
+
+`MdxBody::decode()` re-emits the `---` block, deliberately, so an entry round-trips losslessly back to
+disk. Plain MDX has no frontmatter concept, so it parsed the block as a thematic break and the keys as
+paragraph text — `/beam/docs` rendered "title: Documentation nav_order: 0" above its heading. The
+compiler now strips it. The values are already lifted onto the entry's own columns at seed/import time,
+so the artifact — which is rendered output — has no use for them.
+
+### D. An unmigrated host resolves NOTHING; it does not fatal (refines §5)
+
+§5's uniform 404 is a property of the triple, but the resolver queried `beam_ux_entries` unguarded. A host
+with beam-ux installed and not yet migrated therefore turned **every unmatched URL** into a
+`no such table` stack trace, because the host mounts this renderer as a catch-all. `EntryPathResolver`
+now returns null when the table is absent — the same `Schema::hasTable` guard, and the same
+degrade-don't-fabricate reasoning, as `SeedsEntries::canSeed()`.
+
+### E. A realm root is born published (refines §9)
+
+§9 assigns the realm root to install. It is a `page` row with no segment and no body that no author will
+ever transition — but a host binding a `page` workflow makes it workflow-**managed**, and a managed entry
+with a null marking is unpublished. Every gate that prunes an unpublished node's subtree then prunes the
+entire realm beneath it: `NavProjector` returned `{"items": []}` on a correctly seeded host. `rootFor()`
+and the seeders now stamp the published marking, through a helper that no-ops where the optional column
+is absent.
+
 ## Amendments (beam-docs-satellite ticket 06 — the build)
 
 Three things the implementation settled that this ADR left open or got slightly wrong.
