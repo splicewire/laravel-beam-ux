@@ -355,6 +355,34 @@ Three consequences worth stating:
 A named parent that does not resolve — a file nested under a directory with no file of its own — falls
 back to `--under` rather than erroring. A gap in the chain is a flatter tree, not a failed import.
 
+### B. The version must be IN the artifact's URL, and `immutable` is what it buys (refines §7, and 07's amendment B)
+
+§7 serves a public artifact `immutable, max-age=31536000` on one stated ground: *"a body edit mints a
+new version and therefore a new URL, so it can be cached hard without an invalidation story."* The route
+was `{artifactRoot}/{entry}`. **The version never entered the address.** It rode alongside as a sibling
+Inertia prop, where the page shell used it as a `useEffect` dependency — which re-runs the `import()`
+and gets the browser's cached module back, because a browser caches by URL and `immutable` tells it not
+to revalidate even against the ETag that was right there.
+
+So every edit to any entry body was invisible, for a year, to any reader who had already loaded that
+page once. Ticket 07 amended this same section to add a compiler `GENERATION` to "the address" — a real
+fix to a real bug, applied to a key that was never in the URL either.
+
+Now `{artifactRoot}/{entry}/{version?}`:
+
+- **Pinned and current** ⇒ `immutable, max-age=1y`. §7's argument is true of this address.
+- **Un-pinned, or pinned to a stale version** ⇒ `public, max-age=0, must-revalidate` plus the ETag. The
+  un-pinned URL is a moving target and is kept servable rather than 404'd, because it is the honest
+  address for a caller that does not know the version yet.
+- **Restricted** ⇒ `no-store, private`, unchanged.
+
+The guard that was missing is the one that would have caught it: *the URL the shell is handed contains
+the version*. Asserting the header on a hand-built URL passed throughout.
+
+This is ticket 07's rule at one more remove. That ticket found the artifact was verified as compiler
+output but never as a module something loaded; here it was verified as a response but never as a
+response a **returning** browser asks for.
+
 ## Alternatives rejected
 
 - **A materialized `resolved_path` column** — one indexed lookup instead of a walk, but a second source

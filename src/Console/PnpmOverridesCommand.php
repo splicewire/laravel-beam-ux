@@ -73,9 +73,26 @@ class PnpmOverridesCommand extends Command
         $needed = $this->transitiveScopedDeps($linked, $index);
         $overrides = [];
         foreach ($needed as $name) {
-            if (isset($directDeps[$name]) || ! isset($index[$name])) {
+            if (! isset($index[$name])) {
                 continue;
             }
+
+            // A DIRECT `file:` link does NOT exempt a name from needing an override, and assuming it did
+            // is how `splicewire/www` sat with a `pnpm install` that could not complete
+            // (beam-docs-satellite ticket 08). pnpm resolves a nested package's own semver range
+            // independently of what the host links: `@schemastud/frame` asking for
+            // `@schemastud/facets: ^0.1.0` goes to the registry and 404s, even though the host links
+            // that exact package from disk one line above. The override is what makes the nested range
+            // resolve to the same local copy — for a name the host already links it is a no-op, and for
+            // every nested consumer it is the fix.
+            //
+            // A direct REGISTRY spec is still exempt: the host has deliberately asked for a published
+            // version, and pinning it to a local path would silently overrule that.
+            $direct = $directDeps[$name] ?? null;
+            if (is_string($direct) && ! str_starts_with($direct, 'file:') && ! str_starts_with($direct, 'link:')) {
+                continue;
+            }
+
             $overrides[$name] = 'file:'.$this->relativePath($root, $index[$name]);
         }
         ksort($overrides);

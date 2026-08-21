@@ -160,6 +160,28 @@ class PublicEntryRendererTest extends TestCase
         $this->get('/private/leaf')->assertOk();
     }
 
+    /**
+     * The prop URL must PIN the version, because that is the only thing making §7's immutable-cache
+     * argument true. It used to hand the shell a version-less address plus the version as a sibling
+     * prop, which reads correct and is not: the browser caches by URL, and the URL never moved.
+     */
+    public function test_the_artifact_url_handed_to_the_shell_carries_the_version(): void
+    {
+        $root = BeamUxEntry::rootFor();
+        $entry = $this->page('open', ['segment' => 'open', 'parent_id' => $root->getKey()]);
+
+        $artifacts = $this->app->make(EntryArtifactStore::class);
+        $artifacts->put($entry, 'export default () => null');
+        $version = $artifacts->version($entry);
+
+        $response = $this->withHeader('X-Inertia', 'true')->get('/open');
+        $response->assertOk();
+
+        $url = data_get($response->json(), 'props.artifact.url');
+
+        $this->assertStringContainsString((string) $version, (string) $url);
+    }
+
     public function test_a_guarded_artifact_is_no_store_and_a_public_one_is_cacheable(): void
     {
         $root = BeamUxEntry::rootFor();
@@ -175,10 +197,31 @@ class PublicEntryRendererTest extends TestCase
         $artifacts->put($public, 'export default () => null');
         $artifacts->put($guarded, 'export default () => null');
 
+        // Immutable is earned by the VERSION-PINNED address and nothing else. The version-less URL used
+        // to be served `immutable, max-age=1y` on the strength of an argument about a URL that moves —
+        // and it never moved, so a returning reader kept a stale module for a year without revalidating
+        // (beam-docs-satellite ticket 08).
+        $pinned = $this->get(route('beam.ux.site.artifact', [
+            'entry' => $public->getKey(),
+            'version' => $artifacts->version($public),
+        ]));
+        $pinned->assertOk();
+        $this->assertStringContainsString('immutable', (string) $pinned->headers->get('Cache-Control'));
+        $this->assertSame('"'.$artifacts->version($public).'"', $pinned->headers->get('ETag'));
+
         $open = $this->get(route('beam.ux.site.artifact', ['entry' => $public->getKey()]));
         $open->assertOk();
-        $this->assertStringContainsString('immutable', (string) $open->headers->get('Cache-Control'));
-        $this->assertSame('"'.$artifacts->version($public).'"', $open->headers->get('ETag'));
+        $this->assertStringNotContainsString('immutable', (string) $open->headers->get('Cache-Control'));
+        $this->assertStringContainsString('must-revalidate', (string) $open->headers->get('Cache-Control'));
+
+        // A STALE pin is a moving target too — the version in the URL no longer names what is served, so
+        // it must not be cached hard under someone else's key.
+        $stale = $this->get(route('beam.ux.site.artifact', [
+            'entry' => $public->getKey(),
+            'version' => 'deadbeefdeadbeef',
+        ]));
+        $stale->assertOk();
+        $this->assertStringNotContainsString('immutable', (string) $stale->headers->get('Cache-Control'));
 
         // Anonymous: the guarded artifact is the same 404 the page is — the artifact route must not be
         // the oracle the page route refuses to be.

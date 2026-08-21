@@ -426,7 +426,10 @@ class BeamUxServiceProvider extends PackageServiceProvider
                 return $route;
             };
 
-            $apply($this->get("{$artifactRoot}/{entry}", EntryArtifactController::class)
+            // `{version?}` is what earns the immutable cache header (ADR-0209 §7). Without it the
+            // artifact sat at a FIXED address served `immutable, max-age=1y`, so a browser that had
+            // loaded a page once never asked again and no body edit ever reached a returning reader.
+            $apply($this->get("{$artifactRoot}/{entry}/{version?}", EntryArtifactController::class)
                 ->name($artifactName));
 
             if ($claimRoot) {

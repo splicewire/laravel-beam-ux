@@ -96,13 +96,27 @@ class PublicEntryController
      * The URL of the entry's compiled artifact, on the artifact route the same macro mounted. Resolved
      * by name off the route's own default so a host that relocated the mount does not have to tell the
      * renderer twice.
+     *
+     * **The version is IN the address**, and it has to be. ADR-0209 §7 justifies serving the artifact
+     * `immutable, max-age=1y` on the grounds that "a body edit mints a new version and therefore a new
+     * URL" — but the version rode alongside the URL as a sibling prop and never entered it, so the
+     * address never moved. A reader who had loaded a page once got that artifact back from cache for a
+     * year, with `immutable` telling the browser not even to revalidate against the ETag. Every
+     * subsequent edit to that entry was invisible to them. Found on `splicewire/www` while re-authoring
+     * the docs index (beam-docs-satellite ticket 08): the server served the new module correctly, and
+     * the browser never asked for it.
      */
     private function artifactUrl(Request $request, BeamUxEntry $entry): string
     {
         $name = (string) ($request->route()?->defaults['beamUxArtifactRoute'] ?? '');
 
-        return $name !== '' && app('router')->has($name)
-            ? route($name, ['entry' => $entry->getKey()])
-            : '';
+        if ($name === '' || ! app('router')->has($name)) {
+            return '';
+        }
+
+        return route($name, array_filter([
+            'entry' => $entry->getKey(),
+            'version' => $this->artifacts->version($entry),
+        ]));
     }
 }

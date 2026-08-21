@@ -56,7 +56,18 @@ class PnpmOverridesCommandTest extends TestCase
         return $host;
     }
 
-    public function test_pins_unpublished_transitive_deps_but_not_direct_ones(): void
+    /**
+     * A direct `file:` link does NOT exempt a name from needing an override — this test asserted the
+     * opposite, and `splicewire/www` sat with a `pnpm install` that could not complete because of it
+     * (beam-docs-satellite ticket 08). pnpm resolves a nested package's own semver range independently of
+     * what the host links, so `@schemastud/frame` asking for `@schemastud/facets: ^0.1.0` went to the
+     * registry and 404'd while the host linked that exact package from disk one line above.
+     *
+     * A direct REGISTRY spec is still exempt, and that is the distinction the old assertion was reaching
+     * for: pinning one to a local path would silently overrule a host that deliberately asked for a
+     * published version.
+     */
+    public function test_pins_unpublished_transitive_deps_including_ones_the_host_links_directly(): void
     {
         $host = $this->scaffold();
 
@@ -69,10 +80,29 @@ class PnpmOverridesCommandTest extends TestCase
         $this->assertArrayHasKey('@schemastud/frame-remote', $overrides);
         $this->assertArrayHasKey('@schemastud/seam', $overrides);
         $this->assertStringStartsWith('file:', $overrides['@schemastud/seam']);
-        // mainframe + ui are already DIRECT deps → NOT re-pinned; react is out of scope.
-        $this->assertArrayNotHasKey('@schemastud/mainframe', $overrides);
-        $this->assertArrayNotHasKey('@schemastud/ui', $overrides);
+
+        // mainframe + ui are direct `file:` links AND transitively required — pinned anyway, so the
+        // nested range resolves to the same local copy instead of the registry.
+        $this->assertArrayHasKey('@schemastud/mainframe', $overrides);
+        $this->assertStringStartsWith('file:', $overrides['@schemastud/mainframe']);
+
         $this->assertArrayNotHasKey('react', $overrides);
+    }
+
+    /** A name the host asks for by published version is the host's call, and an override would overrule it. */
+    public function test_a_direct_registry_spec_is_never_overridden_to_a_local_path(): void
+    {
+        $host = $this->scaffold();
+
+        $pkg = json_decode((string) file_get_contents("{$host}/package.json"), true);
+        $pkg['dependencies']['@schemastud/mainframe'] = '^2.0.0';
+        file_put_contents("{$host}/package.json", json_encode($pkg, JSON_PRETTY_PRINT));
+
+        $this->artisan('splicewire:beam:ux:pnpm-overrides', ['--path' => $host])->assertSuccessful();
+
+        $pkg = json_decode((string) file_get_contents("{$host}/package.json"), true);
+
+        $this->assertArrayNotHasKey('@schemastud/mainframe', $pkg['pnpm']['overrides']);
     }
 
     public function test_is_a_noop_on_a_non_pnpm_host(): void

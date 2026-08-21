@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Write\AsSystemWriter;
 
 /**
  * `php artisan splicewire:beam:ux:register-from-disk {path}` — the operator-run **`register-from-disk`**
@@ -25,13 +26,15 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  */
 class RegisterFromDiskCommand extends Command
 {
+    use AsSystemWriter;
+
     protected $signature = 'splicewire:beam:ux:register-from-disk
         {path : The directory to scan for un-registered body files}
         {--under= : Public path or entry id of the entry scan-root files hang from (default: the realm root)}';
 
     protected $description = 'Register on-disk BeamUx bodies (every format) not yet in the DB; infer type+namespace+containment from path; run S9 draft inference at import.';
 
-    public function handle(RegisterEntriesFromDisk $batch, EntryPathResolver $paths): int
+    public function handle(EntryPathResolver $paths): int
     {
         $path = (string) $this->argument('path');
 
@@ -55,7 +58,20 @@ class RegisterFromDiskCommand extends Command
             $this->components->info("Importing beneath [{$under->title}] ({$under->slug}).");
         }
 
-        $result = $batch->scan($path, $under);
+        // The batch writes every imported body through the ParticleWriter, whose default gate is
+        // deny-by-default over an authorization gate a console command has no actor for — so without this
+        // an import is refused outright on any host that has not hand-bound something permissive. Same
+        // refusal `splicewire:beam:seed` hit on `splicewire/www` (beam-docs-satellite ticket 07); the
+        // argument was never about seeding, so the seam is shared rather than restated here.
+        //
+        // The batch is RESOLVED INSIDE the swap, and that is load-bearing rather than stylistic. Taking it
+        // as a `handle()` parameter builds it — and, transitively, the `ParticleWriter` holding a
+        // constructor-injected `WriteGate` — before the rebind happens, so the permissive binding lands
+        // behind an object graph that already closed over the old gate and the import is refused anyway.
+        // A container rebind only reaches what has not been constructed yet.
+        $result = $this->asSystemWriter(
+            fn () => $this->laravel->make(RegisterEntriesFromDisk::class)->scan($path, $under),
+        );
 
         foreach ($result['created'] as $entry) {
             $draft = $entry->schema_is_draft ? ' (draft schema)' : '';

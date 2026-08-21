@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Disk;
 
 use FilesystemIterator;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use RecursiveDirectoryIterator;
@@ -165,39 +166,57 @@ class RegisterEntriesFromDisk
      */
     protected function register(array $envelope, string $source, string $relative = ''): BeamUxEntry
     {
-        $entry = BeamUxEntry::create(array_merge([
-            'slug' => $envelope['slug'],
-            'type' => $envelope['type'],
-            'namespace' => $envelope['namespace'],
-            'format' => $envelope['format'],
-        ], $this->containmentFor($source, $relative, $envelope)));
+        // ATOMIC, for the reason `SeedsEntries::seedPage()` states and this method had to relearn: the row
+        // and its body are two writes, and the skip-if-present check at the top of {@see scan()} makes
+        // anything the first of them leaves behind PERMANENT. Observed on `splicewire/www`
+        // (beam-docs-satellite ticket 08): an import refused by the write gate left two bodyless rows, and
+        // the re-run — with the gate fixed — reported "2 skipped (already present)" and imported the other
+        // thirteen. A failure that makes the retry a silent no-op is worse than one that leaves nothing.
+        //
+        // BORN PUBLISHED, for the same reason a seeded page is. `WorkflowMarkingPublishGate` treats a
+        // workflow-managed entry as public only at the published marking, and a fresh row's marking is
+        // NULL — so on any host binding a `page` workflow, every imported page resolved, compiled, and
+        // then 404'd, with the subtree beneath the topmost one pruned from nav entirely. An operator
+        // placing files on disk and explicitly running this batch is asking for content that is live;
+        // arriving invisible is the import not happening. Overridable from frontmatter, so importing
+        // genuine drafts stays possible.
+        $entry = DB::transaction(function () use ($envelope, $source, $relative): BeamUxEntry {
+            $entry = BeamUxEntry::create(array_merge([
+                'slug' => $envelope['slug'],
+                'type' => $envelope['type'],
+                'namespace' => $envelope['namespace'],
+                'format' => $envelope['format'],
+            ], BeamUxEntry::publishedMarkingAttributes(), $this->containmentFor($source, $relative, $envelope)));
+
+            // The body rides the beam-core StorageDriver (ParticleWriter under the default Stacked
+            // driver) — the batch selects the driver, beam-core does the versioned write. Every
+            // disk-registered file keeps its raw source as the body (the former Puck-bridge structural
+            // parse for `page` `.tsx` files is retired, ADR-0016 — body format is
+            // `@splicewire/beam-ux/blockdoc`'s `JsonNode[]` tree, not Puck; no PHP-callable blockdoc parser
+            // exists yet to replace it, so a disk-registered `page` arrives as raw source pending a future
+            // structural-import mechanism, same degrade this method already applied when the Puck bridge
+            // was merely unavailable).
+            //
+            // The body is encoded THROUGH THE ENTRY'S CODEC (ADR-0164), not hardcoded to `['source' => …]`.
+            // Found live while wiring the renderer: the hardcoded shape happens to be what `TsxBodyCodec`
+            // round-trips, but `MdxBodyCodec` stores `{frontmatter, content}` — so every disk-registered
+            // `.mdx` entry decoded to an EMPTY STRING, and `PlacedDiskMirror` (which decodes through the
+            // codec) wrote a blank `.mdx` back out with no error. Exactly the failure the model's own
+            // `format` default docblock records finding for themes, in a second place.
+            $body = $entry->codec()->encode($source, $entry->body_style);
+
+            $driver = $this->drivers->resolve($entry);
+            $item = $driver->write('', $body, $entry->namespace);
+
+            if ($entry->particle_id === null && $item->key !== '') {
+                $entry->particle_id = $item->key;
+                $entry->save();
+            }
+
+            return $entry;
+        });
 
         $this->seen[$this->key($envelope['namespace'], $envelope['slug'])] = $entry;
-
-        // The body rides the beam-core StorageDriver (ParticleWriter under the default Stacked
-        // driver) — the batch selects the driver, beam-core does the versioned write. Every
-        // disk-registered file keeps its raw source as the body (the former Puck-bridge structural
-        // parse for `page` `.tsx` files is retired, ADR-0016 — body format is
-        // `@splicewire/beam-ux/blockdoc`'s `JsonNode[]` tree, not Puck; no PHP-callable blockdoc parser
-        // exists yet to replace it, so a disk-registered `page` arrives as raw source pending a future
-        // structural-import mechanism, same degrade this method already applied when the Puck bridge
-        // was merely unavailable).
-        //
-        // The body is encoded THROUGH THE ENTRY'S CODEC (ADR-0164), not hardcoded to `['source' => …]`.
-        // Found live while wiring the renderer: the hardcoded shape happens to be what `TsxBodyCodec`
-        // round-trips, but `MdxBodyCodec` stores `{frontmatter, content}` — so every disk-registered
-        // `.mdx` entry decoded to an EMPTY STRING, and `PlacedDiskMirror` (which decodes through the
-        // codec) wrote a blank `.mdx` back out with no error. Exactly the failure the model's own
-        // `format` default docblock records finding for themes, in a second place.
-        $body = $entry->codec()->encode($source, $entry->body_style);
-
-        $driver = $this->drivers->resolve($entry);
-        $item = $driver->write('', $body, $entry->namespace);
-
-        if ($entry->particle_id === null && $item->key !== '') {
-            $entry->particle_id = $item->key;
-            $entry->save();
-        }
 
         // S9 at import: a fresh `component` arrives editable; page/layout/template are left untouched.
         $this->inference->forEntry($entry, $source, persist: true);
@@ -268,6 +287,12 @@ class RegisterEntriesFromDisk
 
         if (isset($fm['title']) && $fm['title'] !== '') {
             $out['title'] = $fm['title'];
+        }
+
+        // The escape hatch on born-published: a file declaring its own marking imports at that marking.
+        // Guarded on the column so a host that has not migrated workflows imports without it.
+        if (isset($fm['workflow_marking']) && $fm['workflow_marking'] !== '' && Schema::hasColumn('beam_ux_entries', 'workflow_marking')) {
+            $out['workflow_marking'] = $fm['workflow_marking'];
         }
 
         // ADR-0212's two rights mirror row↔disk like every other field — particle-primary, import never

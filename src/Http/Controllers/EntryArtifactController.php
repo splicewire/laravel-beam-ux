@@ -36,7 +36,7 @@ class EntryArtifactController
         private CompileEntryBody $compile,
     ) {}
 
-    public function __invoke(Request $request, string $entry): Response
+    public function __invoke(Request $request, string $entry, ?string $version = null): Response
     {
         $defaults = $request->route()?->defaults ?? [];
         $realm = (string) ($defaults['beamUxRealm'] ?? BeamUxEntry::REALM_SITE);
@@ -54,19 +54,26 @@ class EntryArtifactController
 
         abort_if($code === null, Response::HTTP_NOT_FOUND);
 
-        $version = $this->artifacts->version($model);
+        $current = $this->artifacts->version($model);
         $response = response($code, Response::HTTP_OK, [
             'Content-Type' => 'text/javascript; charset=utf-8',
             // The version key IS the artifact's address, so it is a free strong validator (§7).
-            'ETag' => '"'.$version.'"',
+            'ETag' => '"'.$current.'"',
         ]);
 
         if ($this->gate->isRestricted($chain)) {
             $response->headers->set('Cache-Control', 'no-store, private');
-        } else {
-            // A public artifact is immutable at this address by construction: a body edit mints a new
-            // version and therefore a new URL, so it can be cached hard without an invalidation story.
+        } elseif ($version !== null && $version === $current) {
+            // Immutable is earned ONLY by an address that pins the version. §7's argument — "a body edit
+            // mints a new version and therefore a new URL" — is true of THIS url and was false of the
+            // version-less one it used to be served at, where `immutable` meant a returning reader kept
+            // the stale module for a year without revalidating (beam-docs-satellite ticket 08).
             $response->headers->set('Cache-Control', 'public, max-age=31536000, immutable');
+        } else {
+            // The un-pinned address ("whatever is current") is a moving target, so it gets a validator
+            // and nothing more. Kept servable rather than 404'd because it is the honest address for a
+            // caller that does not know the version yet.
+            $response->headers->set('Cache-Control', 'public, max-age=0, must-revalidate');
         }
 
         return $response;
