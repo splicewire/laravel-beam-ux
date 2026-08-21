@@ -13,6 +13,10 @@
  * exactly the silent regression ADR-0209 §7 rules out.
  */
 
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
 const read = (stream) =>
   new Promise((resolve, reject) => {
     let buffer = ''
@@ -27,19 +31,37 @@ const fail = (message) => {
   process.exit(1)
 }
 
-const load = async (specifier) => {
+/**
+ * Resolve a dependency from the HOST's node_modules, explicitly.
+ *
+ * A bare `import('@mdx-js/mdx')` here does NOT do that, which is the trap this function exists to
+ * close. Node resolves bare specifiers by walking up from the importing module's **real** path, and
+ * this script lives inside the beam-ux package. That happens to reach the host when the package sits
+ * at `<host>/vendor/splicewire/laravel-beam-ux/...` — the host root is an ancestor — and reaches
+ * nothing at all when it does not: a Composer *path* repository (every co-dev overlay in this estate)
+ * symlinks the package to somewhere like `~/Workspaces/php/packages/...`, whose ancestors have never
+ * heard of the host. The old error even reported `from ${process.cwd()}`, which was misleading twice
+ * over: cwd is not what resolution used, and the package the message told you to install was already
+ * installed exactly where it belonged.
+ *
+ * `createRequire` against the host's own `package.json` makes resolution start where the docblock
+ * always claimed it did. PHP passes the root because PHP is the only side that knows it.
+ */
+const load = async (specifier, root) => {
   try {
-    return await import(specifier)
-  } catch {
+    const require = createRequire(join(root, 'package.json'))
+
+    return await import(pathToFileURL(require.resolve(specifier)).href)
+  } catch (error) {
     fail(
-      `beam-ux compile: cannot resolve [${specifier}] from ${process.cwd()}. ` +
+      `beam-ux compile: cannot resolve [${specifier}] from the host at ${root} (${error.message}). ` +
         `Install it in the host (npm i -D ${specifier}) — beam-ux compiles with the host's toolchain.`,
     )
   }
 }
 
-const compileMdx = async (source, slug) => {
-  const { compile } = await load('@mdx-js/mdx')
+const compileMdx = async (source, slug, root) => {
+  const { compile } = await load('@mdx-js/mdx', root)
 
   // `outputFormat: 'program'` emits a standalone ES module exporting the MDX component as default, and
   // the automatic runtime keeps `react/jsx-runtime` the only import the artifact needs — so the page
@@ -56,8 +78,8 @@ const compileMdx = async (source, slug) => {
   return String(compiled)
 }
 
-const compileTsx = async (source, slug) => {
-  const esbuild = await load('esbuild')
+const compileTsx = async (source, slug, root) => {
+  const esbuild = await load('esbuild', root)
 
   const result = await esbuild.transform(source, {
     loader: 'tsx',
@@ -78,7 +100,7 @@ const main = async () => {
     fail(`beam-ux compile: unreadable input (${error.message})`)
   }
 
-  const { format, source, slug = 'entry' } = input
+  const { format, source, slug = 'entry', root = process.cwd() } = input
 
   if (typeof source !== 'string') {
     fail('beam-ux compile: input carried no `source` string.')
@@ -87,9 +109,9 @@ const main = async () => {
   let code
   try {
     if (format === 'mdx') {
-      code = await compileMdx(source, slug)
+      code = await compileMdx(source, slug, root)
     } else if (format === 'tsx') {
-      code = await compileTsx(source, slug)
+      code = await compileTsx(source, slug, root)
     } else {
       fail(`beam-ux compile: unsupported format [${format}].`)
     }

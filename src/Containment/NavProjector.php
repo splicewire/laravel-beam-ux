@@ -100,13 +100,21 @@ class NavProjector
                 ->orWhere('workflow_marking', BeamUxEntry::MARKING_PUBLISHED));
         }
 
-        // Only PLACED entries are nav items. An entry can exist (e.g. auto-provisioned on an author's first
-        // visit so the page is editable) without being placed in the nav — those carry a null `segment`.
-        // Excluding them keeps such entries out of the projected nav (and avoids colliding hrefs when
-        // several unplaced entries would all resolve to the root URL). Guarded on the column's presence.
-        if (Schema::hasColumn('beam_ux_entries', 'segment')) {
-            $query->whereNotNull('segment');
-        }
+        // NOTE: segment-less entries are LOADED here and dropped in `nodesFor()` instead, because the two
+        // things "is not a nav destination" and "has no descendants worth showing" are not the same
+        // statement — and filtering in the query conflated them with total effect.
+        //
+        // The realm root (ADR-0209 §9) is a `page` row with a null `segment`, and it is the parent of
+        // everything in the realm. Excluding it from the load meant the recursion's top level — which
+        // looks for `parent_id === null` — matched nothing at all, so `project()` returned an EMPTY tree
+        // on every correctly-seeded host. Found on `splicewire/www` (beam-docs-satellite ticket 07): the
+        // docs subtree resolved, gated, compiled and served, and arrived with `nav: {"items": []}`.
+        //
+        // The original reason for the filter is preserved exactly where it belongs: an unplaced entry
+        // (auto-provisioned on an author's first visit) still never becomes a nav item, and colliding
+        // root-URL hrefs still cannot happen, because such a node emits no `NavLink`. What changes is
+        // that its CHILDREN are no longer discarded with it — the projector now steps through a
+        // segment-less node the same way `EntryPathResolver` steps through a pass-through node.
 
         // Order siblings by an optional host-provided `nav_order` (like `title`, this column is
         // host-supplied — guard on its presence so a consumer without it isn't broken by an orderBy on a
@@ -129,26 +137,42 @@ class NavProjector
      * A node that fails either gate is dropped **with its whole subtree**: it is not recursed into, so
      * nothing beneath a denied ancestor can surface. This is the one place the prune happens.
      *
+     * A node with **no segment** is a pass-through: it is not a destination (no URL resolves to it), so
+     * it emits no link, but its children are spliced into THIS level with the trail extended by it — so
+     * their hrefs still compose through it. Both gates run on it first, which is what keeps "a denied
+     * ancestor hides its subtree" true for structural nodes as well as addressable ones.
+     *
      * @param  Collection<int, BeamUxEntry>  $all
      * @param  array<int, BeamUxEntry>  $trail
      * @return array<int, NavLink>
      */
     private function nodesFor(Collection $all, ?string $parentId, array $trail, ?Authenticatable $actor): array
     {
-        return $all
+        $nodes = [];
+
+        $visible = $all
             ->where('parent_id', $parentId)
             ->reject(fn (BeamUxEntry $entry) => $this->publish !== null && ! $this->publish->isPublished($entry))
-            ->reject(fn (BeamUxEntry $entry) => ! $this->access->canList($actor, [...$trail, $entry]))
-            ->map(function (BeamUxEntry $entry) use ($all, $trail, $actor) {
-                $chain = [...$trail, $entry];
+            ->reject(fn (BeamUxEntry $entry) => ! $this->access->canList($actor, [...$trail, $entry]));
 
-                return NavLink::make(
-                    title: $entry->title ?? Str::headline((string) $entry->slug),
-                    href: $this->urls->resolveChain($chain),
-                    children: $this->nodesFor($all, $entry->getKey(), $chain, $actor),
-                );
-            })
-            ->values()
-            ->all();
+        foreach ($visible as $entry) {
+            $chain = [...$trail, $entry];
+            $children = $this->nodesFor($all, $entry->getKey(), $chain, $actor);
+
+            if ($entry->segment === null || $entry->segment === '') {
+                // Pass-through: lift the children, emit nothing for the node itself.
+                $nodes = [...$nodes, ...$children];
+
+                continue;
+            }
+
+            $nodes[] = NavLink::make(
+                title: $entry->title ?? Str::headline((string) $entry->slug),
+                href: $this->urls->resolveChain($chain),
+                children: $children,
+            );
+        }
+
+        return $nodes;
     }
 }

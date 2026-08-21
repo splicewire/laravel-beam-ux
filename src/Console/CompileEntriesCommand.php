@@ -64,6 +64,19 @@ class CompileEntriesCommand extends Command
                 $this->components->info("{$entry->slug} → {$compile->artifacts()->path($entry)}");
                 $compiled++;
             } catch (CompilationFailed $e) {
+                // A STRUCTURAL node with no body is not a failure. A realm root (ADR-0209 §9) is a
+                // `page` row with no `segment`: it heads a containment subtree and is never addressed
+                // directly, so it has nothing to compile and never will. Counting those as failures
+                // meant this command reported `failed 4` on a correctly-seeded fresh install — every
+                // install, forever — which is exactly the kind of standing red that teaches people to
+                // ignore the output. A bodyless page that IS addressable stays an error, because that
+                // one really does 404 at read time.
+                if ($this->isStructural($entry)) {
+                    $skipped++;
+
+                    continue;
+                }
+
                 $this->components->error($e->getMessage());
                 $failed++;
             }
@@ -72,6 +85,15 @@ class CompileEntriesCommand extends Command
         $this->components->info("compiled {$compiled}, already current {$skipped}, failed {$failed}.");
 
         return $failed === 0 ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
+     * A containment node that exists to be walked THROUGH, not served: no `segment`, so no URL resolves
+     * to it and no reader can ask for its body. `EntryPathResolver` steps transparently through these.
+     */
+    private function isStructural(BeamUxEntry $entry): bool
+    {
+        return $entry->segment === null || $entry->segment === '';
     }
 
     /** @return iterable<int, BeamUxEntry> */

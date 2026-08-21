@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Seed;
 
+use Illuminate\Support\Facades\DB;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Format\UxFormat;
@@ -69,21 +70,46 @@ trait SeedsEntries
             return $existing;
         }
 
-        $entry = BeamUxEntry::create(array_merge([
-            'slug' => $slug,
-            'type' => UxType::Page,
-            'format' => $format,
-            'namespace' => $namespace,
-        ], $attributes));
+        // ATOMIC, and the create-never-update rule above is exactly why. The row and its body are two
+        // writes; without a transaction, anything that throws between them (the write gate refusing, a
+        // storage disk unavailable, a schema rejection) leaves a BODYLESS entry row — and then the
+        // "already present ⇒ nothing to do" check at the top of this method makes that row permanent. A
+        // re-seed sees it, returns it untouched, and the page 404s forever with no error anywhere.
+        //
+        // Observed exactly this way on `splicewire/www` (beam-docs-satellite ticket 07): the first
+        // `splicewire:beam:seed` was refused by the write gate, and the second — with the gate fixed —
+        // reported success while quietly skipping the two rows the first run had stranded. A failure that
+        // makes the retry a no-op is worse than a failure that leaves nothing behind.
+        $entry = DB::transaction(function () use ($slug, $format, $namespace, $attributes, $source): BeamUxEntry {
+            // BORN PUBLISHED, and this is what makes the OTB promise true rather than nearly true.
+            // `WorkflowMarkingPublishGate` treats a workflow-managed entry as public only at the
+            // published marking, and a freshly-created row's `workflow_marking` is NULL — so on any host
+            // with a `page` workflow binding (beam-workflows is a default install), every seeded docs
+            // page resolved correctly, compiled correctly, and then 404'd behind the publish gate.
+            // Package-seeded content exists precisely to be live on first boot; a contribution that
+            // arrives as an invisible draft is ADR-0210 §1 not happening.
+            //
+            // Overridable, because it sits in the DEFAULTS that `$attributes` merges over: a contributor
+            // seeding genuinely draft content passes its own marking, and create-only means a host that
+            // later unpublishes the row is never overwritten by a re-seed.
+            $entry = BeamUxEntry::create(array_merge([
+                'slug' => $slug,
+                'type' => UxType::Page,
+                'format' => $format,
+                'namespace' => $namespace,
+            ], BeamUxEntry::publishedMarkingAttributes(), $attributes));
 
-        $written = app(StorageDriverResolver::class)
-            ->resolve($entry)
-            ->write('', $entry->codec()->encode($source), $entry->namespace);
+            $written = app(StorageDriverResolver::class)
+                ->resolve($entry)
+                ->write('', $entry->codec()->encode($source), $entry->namespace);
 
-        if ($written->key !== '') {
-            $entry->particle_id = $written->key;
-            $entry->save();
-        }
+            if ($written->key !== '') {
+                $entry->particle_id = $written->key;
+                $entry->save();
+            }
+
+            return $entry;
+        });
 
         try {
             app(CompileEntryBody::class)->forEntry($entry->refresh(), $source, force: true);

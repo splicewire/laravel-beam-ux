@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Schema;
 use Rushing\PermissionCascade\Concerns\HasVisibility;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Revisions\RevisionRecorder;
@@ -290,8 +291,40 @@ class BeamUxEntry extends Model implements WorkflowManaged
     {
         return static::query()->firstOrCreate(
             ['namespace' => 'realms', 'slug' => $realm],
-            ['type' => UxType::Page, 'title' => 'Realm root', 'realm' => $realm, 'realms' => [$realm]],
+            array_merge([
+                'type' => UxType::Page,
+                'title' => 'Realm root',
+                'realm' => $realm,
+                'realms' => [$realm],
+            ], static::publishedMarkingAttributes()),
         );
+    }
+
+    /**
+     * `['workflow_marking' => 'published']`, or nothing at all where the column is absent.
+     *
+     * **A realm root is born published**, and the reason is worth keeping. A root is infrastructure,
+     * not content: it has no segment, no body, and no author who would ever transition it — but it IS a
+     * `page`, so a host that binds a `page` workflow makes it workflow-MANAGED, and a managed entry
+     * with a null marking is unpublished. Every gate that prunes an unpublished node's subtree then
+     * prunes the whole realm from that node down. {@see \Splicewire\Beam\Ux\Containment\NavProjector}
+     * did exactly that on `splicewire/www` (beam-docs-satellite ticket 07): a correctly seeded,
+     * published, compiled and served docs subtree projected to `{"items": []}`, because the one row
+     * above it had never been through a workflow nobody intends it to enter.
+     *
+     * The column itself is OPTIONAL — every consumer in this package guards on
+     * `Schema::hasColumn('beam_ux_entries', 'workflow_marking')` before touching it, and a host that
+     * has not run the workflow migration must not get an insert naming a column it does not have.
+     *
+     * @return array<string, string>
+     */
+    public static function publishedMarkingAttributes(): array
+    {
+        if (! Schema::hasColumn('beam_ux_entries', 'workflow_marking')) {
+            return [];
+        }
+
+        return ['workflow_marking' => self::MARKING_PUBLISHED];
     }
 
     /**
