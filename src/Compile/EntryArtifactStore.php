@@ -27,8 +27,23 @@ class EntryArtifactStore
     ) {}
 
     /**
-     * The version key an artifact is stamped with. Short, opaque, and stable for an unchanged body —
-     * callers treat it as a token, never parse it.
+     * The **compiler generation** — bumped whenever `compile.mjs` changes the SHAPE of what it emits.
+     *
+     * The version below hashes the BODY, which is the right key for "has the author edited this?" and
+     * the wrong one for "was this produced by the current compiler?". Ticket 07 changed the artifact
+     * from an ES module with a bare `react/jsx-runtime` import into a runtime-injected module
+     * (ADR-0209 §7, amended) — the bodies were untouched, so every artifact kept its address, and a
+     * browser holding the previous file under that address went on using it. The URL is treated as
+     * effectively immutable precisely BECAUSE the version is supposed to move when the content does;
+     * a compiler change is a content change the body hash cannot see.
+     *
+     * Bump this on any change to the emitted shape. It costs one recompile and nothing else.
+     */
+    private const GENERATION = '3';
+
+    /**
+     * The version key an artifact is stamped with. Short, opaque, and stable for an unchanged body
+     * compiled by an unchanged compiler — callers treat it as a token, never parse it.
      */
     public function version(BeamUxEntry $entry): string
     {
@@ -51,7 +66,7 @@ class EntryArtifactStore
             $source = $source->format('U.u');
         }
 
-        return substr(hash('xxh128', (string) $source), 0, 16);
+        return substr(hash('xxh128', self::GENERATION.':'.$source), 0, 16);
     }
 
     /** The disk path of an entry's artifact at a given version (its CURRENT version by default). */

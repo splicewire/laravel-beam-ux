@@ -60,36 +60,99 @@ const load = async (specifier, root) => {
   }
 }
 
+/**
+ * Wrap runtime-injected compiler output as a real ES module (ADR-0209 §7, amended at ticket 07).
+ *
+ * The artifact used to be `outputFormat: 'program'`, which emits `import {jsx} from "react/jsx-runtime"`
+ * — a BARE SPECIFIER. A bundler resolves that; a browser refuses it outright:
+ *
+ *     TypeError: Failed to resolve module specifier "react/jsx-runtime".
+ *
+ * So the artifact the ADR calls "the ES module the page shell imports" was, for every host, not
+ * importable by the thing that had to import it. Nothing caught it because no test ever loaded an
+ * artifact in a browser — it was verified as a compile output, not as a module.
+ *
+ * `function-body` output has NO imports at all and reads its runtime from `arguments[0]`. Wrapping it in
+ * a plain `function` (not an arrow — `arguments` is the whole point) makes the artifact a genuine ES
+ * module that imports nothing and takes its jsx runtime from the caller. That is what buys all four
+ * properties at once: a static `import()` with no import map, no `new Function` and so no CSP
+ * `unsafe-eval`, exactly ONE React instance because the host injects its own, and the same code path
+ * server-side for SSR. The artifact's version-keyed address and free ETag are unaffected — only the
+ * shape inside changes.
+ */
+const asModule = (functionBody) => `export default function (runtime) {\n${functionBody}\n}\n`
+
+/**
+ * Drop a leading `---` frontmatter block before compiling.
+ *
+ * The particle body stores frontmatter and content separately, and `MdxBody::decode()` deliberately
+ * re-emits the `---` block so an entry round-trips losslessly back to disk. That is right for STORAGE
+ * and wrong for the RENDERER: plain MDX has no frontmatter concept, so it parses `---` as a thematic
+ * break and the keys as paragraph text — which is exactly what `/beam/docs` rendered at ticket 07,
+ * "title: Documentation nav_order: 0" printed above the heading.
+ *
+ * Stripped here rather than fixed with `remark-frontmatter` because the artifact has no use for the
+ * values: they were already lifted onto the entry's own columns (title, segment, nav_order) when it was
+ * seeded or imported. Doing it here also covers disk-registered `.mdx` files, which carry frontmatter
+ * for the same reason, and adds no host dependency that could be missing on a bare install.
+ */
+const stripFrontmatter = (source) => source.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
+
 const compileMdx = async (source, slug, root) => {
   const { compile } = await load('@mdx-js/mdx', root)
 
-  // `outputFormat: 'program'` emits a standalone ES module exporting the MDX component as default, and
-  // the automatic runtime keeps `react/jsx-runtime` the only import the artifact needs — so the page
-  // shell supplies components via the `components` prop rather than the module importing them itself.
-  const compiled = await compile(source, {
+  const compiled = await compile(stripFrontmatter(source), {
     jsx: false,
     jsxRuntime: 'automatic',
     jsxImportSource: 'react',
-    outputFormat: 'program',
+    outputFormat: 'function-body',
     development: false,
     filepath: `${slug}.mdx`,
   })
 
-  return String(compiled)
+  return asModule(String(compiled))
 }
 
+/**
+ * tsx reaches the same contract by a different road. esbuild's `automatic` jsx emits the same bare
+ * `react/jsx-runtime` import the mdx path just stopped emitting, so this uses the CLASSIC transform
+ * against factory names the wrapper binds off the injected runtime, and `format: 'cjs'` so the body's
+ * own `export default` becomes an assignment that is legal inside a function body.
+ *
+ * The result is the SAME callable contract as mdx — `module.default(runtime)` returns an object whose
+ * `default` is the component — so the page shell has one code path for every format.
+ */
 const compileTsx = async (source, slug, root) => {
   const esbuild = await load('esbuild', root)
 
   const result = await esbuild.transform(source, {
     loader: 'tsx',
-    format: 'esm',
-    jsx: 'automatic',
-    jsxImportSource: 'react',
+    format: 'cjs',
+    jsx: 'transform',
+    jsxFactory: '__beamJsx',
+    jsxFragment: '__beamFragment',
     sourcefile: `${slug}.tsx`,
   })
 
-  return result.code
+  // A tsx body that imports something becomes a `require()` here, which nothing defines. That was
+  // equally unresolvable before (a bare specifier no browser could resolve), so this is not a new
+  // limit — but it now fails with a sentence naming the cause rather than a ReferenceError at read time.
+  if (/\brequire\s*\(/.test(result.code)) {
+    fail(
+      `beam-ux compile: ${slug} imports another module. An entry body compiles to a standalone artifact ` +
+        `with no module graph of its own — pass what it needs through the components map instead ` +
+        `(ADR-0209 §7).`,
+    )
+  }
+
+  return asModule(
+    [
+      'const __beamJsx = runtime.createElement, __beamFragment = runtime.Fragment;',
+      'const exports = {}, module = { exports };',
+      result.code,
+      'return module.exports;',
+    ].join('\n'),
+  )
 }
 
 const main = async () => {

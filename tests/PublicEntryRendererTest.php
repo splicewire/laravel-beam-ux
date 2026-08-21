@@ -320,4 +320,22 @@ class FakeCompiler implements EntryBodyCompiler
 
         return '/* compiled */ export default () => '.json_encode($source);
     }
+
+    /**
+     * An unmigrated host has NOTHING TO SERVE, and that is a 404 — never a 500 (ADR-0209 §5).
+     *
+     * The host mounts this renderer as a catch-all, so before the guard the FIRST request to any
+     * unmatched URL on a host with beam-ux installed but not migrated raised
+     * "no such table: beam_ux_entries" and turned the uniform-404 promise into a stack trace on every
+     * unknown path. Found by `splicewire/www`'s own "an unknown path 404s" test the moment the
+     * catch-all was mounted (beam-docs-satellite ticket 07).
+     */
+    public function test_an_unmigrated_host_resolves_nothing_rather_than_fataling(): void
+    {
+        Schema::dropIfExists('beam_ux_entries');
+
+        $this->assertNull(
+            app(EntryPathResolver::class)->resolve('/no-such-page'),
+        );
+    }
 }

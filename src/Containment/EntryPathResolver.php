@@ -49,6 +49,19 @@ class EntryPathResolver
      */
     public function resolve(string $path, string $realm = BeamUxEntry::REALM_SITE): ?array
     {
+        // An unmigrated host has NOTHING TO SERVE, which is a 404 — not a 500. The host mounts this
+        // renderer as a catch-all, so without this guard the first request to any unmatched URL on a
+        // host that has beam-ux installed but not migrated raises a "no such table: beam_ux_entries"
+        // PDOException and the uniform-404 promise (ADR-0209 §5) becomes a stack trace on every
+        // unknown path. Caught by `splicewire/www`'s own "an unknown path 404s" test the moment the
+        // catch-all was mounted (beam-docs-satellite ticket 07).
+        //
+        // Same guard style, and the same reasoning, as `SeedsEntries::canSeed()`: absent table ⇒
+        // degrade quietly, never fabricate and never fatal.
+        if (! Schema::hasTable('beam_ux_entries')) {
+            return null;
+        }
+
         $pieces = $this->pieces($path);
 
         // Phase 1, longest-prefix-first: the most specific root-absolute declaration wins, so a docs
