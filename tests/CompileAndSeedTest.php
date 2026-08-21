@@ -129,6 +129,24 @@ class CompileAndSeedTest extends TestCase
         $this->assertSame(DoctorStatus::Pass, $this->audit()[1]->status);
     }
 
+    /**
+     * A realm root has no body and never will (ADR-0209 §9), so it is not a missing artifact. The
+     * compile command learned this at ticket 07; this audit reads the same table for the same property
+     * and did not, so `splicewire:beam:doctor` reported a BLOCKING error naming all four realm roots on
+     * every correctly-seeded host — observed on `splicewire/www` at ticket 08.
+     */
+    public function test_the_doctor_does_not_count_bodyless_structural_nodes_as_missing_artifacts(): void
+    {
+        BeamUxEntry::rootFor(BeamUxEntry::REALM_SITE);
+
+        $this->assertSame(DoctorStatus::Pass, $this->audit()[0]->status);
+
+        // An ADDRESSABLE page with no artifact is still a failure — that one really does 404.
+        $this->page('guide', '# Guide');
+
+        $this->assertSame(DoctorStatus::Fail, $this->audit()[0]->status);
+    }
+
     public function test_the_seeder_provisions_the_realm_root_and_the_docs_subtree(): void
     {
         $this->seed(BeamUxSeeder::class);

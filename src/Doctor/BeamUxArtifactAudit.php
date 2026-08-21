@@ -64,7 +64,20 @@ class BeamUxArtifactAudit implements DoctorAudit
                 continue;
             }
 
+            // A STRUCTURAL node has no artifact and never will, and that is not a finding. A realm root
+            // (ADR-0209 §9) is a `page` row with no `segment`: it heads a containment subtree, no URL
+            // resolves to it, and no reader can ask for its body. `CompileEntriesCommand` learned this
+            // at beam-docs-satellite ticket 07 — and this audit, reading the same table for the same
+            // property, did not. So `splicewire:beam:doctor` reported a BLOCKING error naming the four
+            // realm roots on every correctly-seeded host, forever, which is the standing red that
+            // teaches people to stop reading the doctor. Second reader, same blind spot.
+            //
+            // A bodyless page that IS addressable stays an error, because that one really does 404.
             if (! $this->compile->artifacts()->has($entry)) {
+                if ($entry->segment === null || $entry->segment === '') {
+                    continue;
+                }
+
                 $stale[] = (string) $entry->slug;
 
                 continue;
