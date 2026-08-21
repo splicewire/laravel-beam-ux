@@ -316,6 +316,45 @@ is not a page and has no segment of its own, and an id is guessable in a way a p
 re-asserts membership explicitly. Without that, the artifact route would be the one door into a realm
 this mount does not serve.
 
+## Amendments (beam-docs-satellite ticket 08 — moving a real docs tree onto a host)
+
+### A. The directory chain carries CONTAINMENT, not only the disk-grouping namespace (refines §11)
+
+§11 gave the mirror a direction but described only the *body*. It turns out the inbound leg was carrying
+less than the outbound one: `RegisterEntriesFromDisk` derived `namespace`, `slug`, `type`, `format`,
+`realm`, `segment`, `title` and both access rights — and left **`parent_id` null on every row**. An
+imported tree therefore landed FLAT. Since containment is what decides both the URL (§1, §3) and the nav
+(ADR-0165), a host importing a sixteen-page docs tree got sixteen orphans and had to rebuild the tree by
+hand afterwards — with nothing in git recording it. The directory chain said the whole structure and none
+of it crossed.
+
+**A file is contained by the file named for the directory it sits in.** Stated on the coordinate both
+directions of the mirror agree on: an entry at namespace `a.b.c` is parented by the entry at
+`(namespace: a.b, slug: c)`; at namespace `a` by `(namespace: null, slug: a)`; at the scan root by the
+batch's `--under` (default: the realm root). Because `DefaultPlacement` writes back out as
+`{namespace}/{type}/{slug}.{ext}`, reading the parent off the namespace rather than the raw path makes
+import and mirror agree **by construction** — a tree the mirror exports re-imports with the same parents,
+type segment and all.
+
+Three consequences worth stating:
+
+- **`parent_id` is the one containment field the disk owns, and frontmatter does not.** Every other field
+  is frontmatter-only on the stated ground that *a URL is never guessed*. A parent cannot follow that rule
+  because it is a foreign key: frontmatter could only name it by inventing a second address space for
+  something the directory tree already states unambiguously. Segment stays frontmatter-only, so the disk
+  says *what contains what* and the file says *what it is called in a URL* — and the two cannot disagree.
+- **Shallowest-first.** The parent must exist before a child names it, and the directory iterator's order
+  is a filesystem detail that differs by platform. The batch sorts by namespace depth. (Written the
+  obvious way, the guard for this passed with the sort deleted, because this machine's iterator happened
+  to yield a workable order — the test now forces the walk deepest-first.)
+- **A missing realm root is looked up, never created.** §9 gave root provisioning to install on the
+  ground that a row nothing declared should not appear as a side effect of another operation. That
+  argument was made about a GET and holds for a batch too: a host that has not installed imports flat,
+  exactly as before, and its missing root is already a doctor finding.
+
+A named parent that does not resolve — a file nested under a directory with no file of its own — falls
+back to `--under` rather than erroring. A gap in the chain is a flatter tree, not a failed import.
+
 ## Alternatives rejected
 
 - **A materialized `resolved_path` column** — one indexed lookup instead of a walk, but a second source

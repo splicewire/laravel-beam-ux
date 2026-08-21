@@ -56,6 +56,20 @@ class RegisterEntriesFromDisk
     protected array $failures = [];
 
     /**
+     * Every entry this run has seen — created OR skipped-as-already-present — keyed `{namespace}|{slug}`.
+     * The parent lookup ({@see parentFor}) reads it first, so a subtree imports in one pass without
+     * re-querying for a row it just wrote.
+     *
+     * @var array<string, BeamUxEntry>
+     */
+    protected array $seen = [];
+
+    /**
+     * The entry a scan-root file hangs from, for the current run. Null ⇒ the file's own realm root.
+     */
+    protected ?BeamUxEntry $under = null;
+
+    /**
      * Scan `$root` and register every recognized-format file not yet in the DB. Returns the outcome:
      * the entries created, the disk-relative paths skipped as already-present, and the paths ignored as
      * an unrecognized (non-body) format.
@@ -64,13 +78,19 @@ class RegisterEntriesFromDisk
      * compile (ADR-0209 §7) — they are IN the database and absent from disk-served output, which is the
      * loud-but-not-fatal shape a batch needs.
      *
+     * `$under` is the entry a scan-root file is contained by — how a host imports a subtree *beneath*
+     * something that already exists (a seeded docs root) rather than at the top of the realm. Omitted,
+     * a scan-root file hangs from its own realm's root, which is the same thing one level up.
+     *
      * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, ignored: array<int, string>, failed: array<string, string>}
      */
-    public function scan(string $root): array
+    public function scan(string $root, ?BeamUxEntry $under = null): array
     {
         $root = rtrim($root, '/');
 
         $this->failures = [];
+        $this->seen = [];
+        $this->under = $under;
 
         $created = [];
         $skipped = [];
@@ -81,6 +101,8 @@ class RegisterEntriesFromDisk
 
             return compact('created', 'skipped', 'ignored', 'failed');
         }
+
+        $recognized = [];
 
         foreach ($this->files($root) as $absolute) {
             $relative = ltrim(substr($absolute, strlen($root)), '/');
@@ -98,7 +120,23 @@ class RegisterEntriesFromDisk
                 continue;
             }
 
-            if ($this->existing($envelope) !== null) {
+            $recognized[] = [$absolute, $relative, $envelope];
+        }
+
+        // SHALLOWEST FIRST, and this ordering is what lets `parent_id` be stamped at CREATE time rather
+        // than patched in a second pass. A file's parent is the file named for its containing directory
+        // ({@see parentFor}), which is always one namespace segment shallower — so sorting by namespace
+        // depth guarantees a parent is registered before the children that name it. The directory
+        // iterator's own order is filesystem-dependent and offers no such guarantee.
+        usort($recognized, fn (array $a, array $b) => $this->depth($a[2]) <=> $this->depth($b[2]));
+
+        foreach ($recognized as [$absolute, $relative, $envelope]) {
+            $existing = $this->existing($envelope);
+
+            if ($existing !== null) {
+                // Remembered even though nothing is written: a re-run over a partially-imported tree must
+                // still resolve children onto the parent that is already there.
+                $this->seen[$this->key($envelope['namespace'], $envelope['slug'])] = $existing;
                 $skipped[] = $relative;
 
                 continue;
@@ -132,7 +170,9 @@ class RegisterEntriesFromDisk
             'type' => $envelope['type'],
             'namespace' => $envelope['namespace'],
             'format' => $envelope['format'],
-        ], $this->containmentFor($source, $relative)));
+        ], $this->containmentFor($source, $relative, $envelope)));
+
+        $this->seen[$this->key($envelope['namespace'], $envelope['slug'])] = $entry;
 
         // The body rides the beam-core StorageDriver (ParticleWriter under the default Stacked
         // driver) — the batch selects the driver, beam-core does the versioned write. Every
@@ -195,12 +235,23 @@ class RegisterEntriesFromDisk
      * once it declares its `segment` (co-located in the page file, not a separate registry). The explicit
      * `beam.ux.nav` override and an authored `nav.yml` still outrank all of this at the NavSource seam.
      *
+     * `parent_id` is the exception, and it comes from the DISK — see {@see parentFor} for why the one
+     * containment field a frontmatter block cannot honestly carry is the one the directory tree already
+     * states.
+     *
+     * @param  array{slug: string, type: ?string, namespace: ?string, format: string}  $envelope
      * @return array<string, mixed>
      */
-    protected function containmentFor(string $source, string $relative): array
+    protected function containmentFor(string $source, string $relative, array $envelope = ['slug' => '', 'type' => null, 'namespace' => null, 'format' => '']): array
     {
         $fm = $this->frontmatter($source);
         $out = [];
+
+        $parent = $this->parentFor($envelope, $fm['realm'] ?? $this->realmByConvention($relative));
+
+        if ($parent !== null) {
+            $out['parent_id'] = $parent->getKey();
+        }
 
         $realm = $fm['realm'] ?? $this->realmByConvention($relative);
         if ($realm !== null && $realm !== '') {
@@ -342,6 +393,89 @@ class RegisterEntriesFromDisk
         }
 
         return null;
+    }
+
+    /**
+     * The entry a file is **contained by**, derived from its own directory chain: the file named for the
+     * directory it sits in. In envelope terms — the coordinate both directions of the mirror agree on —
+     * a file at namespace `a.b.c` is parented by the entry at `(namespace: a.b, slug: c)`; one at
+     * namespace `a` by `(namespace: null, slug: a)`; and one at the scan root by {@see $under} (default:
+     * its own realm's root).
+     *
+     * **Why the disk and not frontmatter.** Every other containment field is frontmatter-only on the
+     * stated ground that a URL is never guessed. `parent_id` cannot follow that rule, because it is a
+     * *foreign key* — a frontmatter block can only name a parent by some other coordinate, which means
+     * inventing a second address space for a thing the directory tree already says unambiguously. Before
+     * this, an imported tree landed FLAT: `namespace` was derived from the dir chain and `parent_id` was
+     * left null, so every file arrived an orphan and the containment tree — which decides both the URL
+     * (ADR-0209 §3) and the nav (ADR-0165) — had to be rebuilt by hand afterwards. The directory chain
+     * was right there, and carried none of its meaning across.
+     *
+     * Expressed on `namespace` rather than the raw path deliberately: {@see DefaultPlacement} writes an
+     * entry back out as `{namespace}/{type}/{slug}.{ext}`, so the type segment sits between a file and
+     * its children on disk. Reading the parent off the namespace makes import and mirror agree by
+     * construction — a tree exported by the mirror re-imports with the same parents.
+     *
+     * A named parent that does not resolve (a file nested under a directory with no file of its own)
+     * falls back to `$under` rather than erroring: a gap in the chain is a flatter tree, not a failed
+     * import, and the batch's contract is to import everything importable.
+     *
+     * **The realm root is looked up, never created.** ADR-0209 §9 gave root provisioning to install, on
+     * the ground that a row nothing declared should not appear as a side effect of some other operation —
+     * the argument was made about a GET, but it holds for a batch too. A host that has not installed
+     * imports flat, exactly as it did before this method existed, and its missing root is already a
+     * doctor finding rather than something an import quietly papers over.
+     *
+     * @param  array{slug: string, type: ?string, namespace: ?string, format: string}  $envelope
+     */
+    protected function parentFor(array $envelope, ?string $realm): ?BeamUxEntry
+    {
+        $namespace = $envelope['namespace'];
+
+        if (is_string($namespace) && $namespace !== '') {
+            $segments = explode('.', $namespace);
+            $slug = array_pop($segments);
+            $parentNamespace = $segments === [] ? null : implode('.', $segments);
+
+            $parent = $this->seen[$this->key($parentNamespace, $slug)] ?? BeamUxEntry::query()
+                ->where('namespace', $parentNamespace)
+                ->where('slug', $slug)
+                ->first();
+
+            if ($parent !== null) {
+                return $parent;
+            }
+        }
+
+        return $this->under ?? BeamUxEntry::query()
+            ->where('namespace', 'realms')
+            ->where('slug', $realm ?: BeamUxEntry::REALM_SITE)
+            ->first();
+    }
+
+    /**
+     * The run index's key for one `(namespace, slug)` coordinate. A null and an empty namespace are the
+     * same address — `envelopeForPath` returns null, the column may hold either — so they normalize here
+     * rather than at every call site.
+     */
+    protected function key(?string $namespace, string $slug): string
+    {
+        return ($namespace ?? '').'|'.$slug;
+    }
+
+    /**
+     * How deep in the containment tree an envelope sits — its namespace segment count. The sort key that
+     * guarantees parents register before their children.
+     *
+     * @param  array{slug: string, type: ?string, namespace: ?string, format: string}  $envelope
+     */
+    protected function depth(array $envelope): int
+    {
+        $namespace = $envelope['namespace'];
+
+        return is_string($namespace) && $namespace !== ''
+            ? substr_count($namespace, '.') + 1
+            : 0;
     }
 
     /**

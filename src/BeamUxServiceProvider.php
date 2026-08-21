@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux;
 
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -140,6 +141,16 @@ class BeamUxServiceProvider extends PackageServiceProvider
 
     public function packageBooted(): void
     {
+        // BeamUxEntry implements WorkflowManaged, so EloquentAwaitingStore writes
+        // `beam_workflow_awaiting.subject_type = $subject->getMorphClass()`. Unaliased it was
+        // storing the raw FQCN in that column, and the alias is also the permission-token prefix
+        // (ADR-0118). The package that owns the model owns its alias — a host should only have to
+        // declare aliases for its OWN models.
+        //
+        // ADDITIVE (`Relation::morphMap`), NEVER `enforceMorphMap`: a beam-composing host has many
+        // models on class-string morphs. Mirrors {@see \Splicewire\Beam\BeamServiceProvider}.
+        Relation::morphMap(['beam_ux_entry' => BeamUxEntry::class]);
+
         $this->bootSitemap();
         $this->registerEntryWorkflow();
         $this->bootCommands();

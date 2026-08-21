@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Console;
 
 use Illuminate\Console\Command;
+use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
@@ -14,16 +15,23 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * draft-schema inference at import so a freshly-registered `component` arrives editable. Idempotent —
  * a file already registered is skipped.
  *
+ * The directory chain also carries **containment**: a file is parented by the file named for its
+ * containing directory, so a docs tree imports as a tree rather than as a flat pile of orphans. `--under`
+ * names what the scan root itself hangs from, which is how a host imports a subtree beneath a docs root
+ * it already seeded.
+ *
  * The command name mirrors the package tree (ADR-0167): vendor `splicewire` · tier `beam` ·
  * package-path `ux` · verb `register-from-disk`.
  */
 class RegisterFromDiskCommand extends Command
 {
-    protected $signature = 'splicewire:beam:ux:register-from-disk {path : The directory to scan for un-registered body files}';
+    protected $signature = 'splicewire:beam:ux:register-from-disk
+        {path : The directory to scan for un-registered body files}
+        {--under= : Public path or entry id of the entry scan-root files hang from (default: the realm root)}';
 
-    protected $description = 'Register on-disk BeamUx bodies (every format) not yet in the DB; infer type+namespace from path; run S9 draft inference at import.';
+    protected $description = 'Register on-disk BeamUx bodies (every format) not yet in the DB; infer type+namespace+containment from path; run S9 draft inference at import.';
 
-    public function handle(RegisterEntriesFromDisk $batch): int
+    public function handle(RegisterEntriesFromDisk $batch, EntryPathResolver $paths): int
     {
         $path = (string) $this->argument('path');
 
@@ -33,7 +41,21 @@ class RegisterFromDiskCommand extends Command
             return self::FAILURE;
         }
 
-        $result = $batch->scan($path);
+        $under = null;
+
+        if (($reference = (string) $this->option('under')) !== '') {
+            $under = $this->resolveUnder($paths, $reference);
+
+            if ($under === null) {
+                $this->components->error("No entry at [{$reference}] to import beneath.");
+
+                return self::FAILURE;
+            }
+
+            $this->components->info("Importing beneath [{$under->title}] ({$under->slug}).");
+        }
+
+        $result = $batch->scan($path, $under);
 
         foreach ($result['created'] as $entry) {
             $draft = $entry->schema_is_draft ? ' (draft schema)' : '';
@@ -56,5 +78,21 @@ class RegisterFromDiskCommand extends Command
         ));
 
         return ($result['failed'] ?? []) === [] ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
+     * Resolve `--under` to the entry the scan root hangs from. A **public path** is the spelling an
+     * operator has in front of them (`--under=/beam/docs`); an **entry id** is the unambiguous fallback
+     * for a subtree root with no addressable path of its own (a pass-through node).
+     */
+    private function resolveUnder(EntryPathResolver $paths, string $reference): ?BeamUxEntry
+    {
+        if (str_starts_with($reference, '/')) {
+            $chain = $paths->resolve($reference);
+
+            return $chain === null || $chain === [] ? null : end($chain);
+        }
+
+        return BeamUxEntry::query()->whereKey($reference)->first();
     }
 }

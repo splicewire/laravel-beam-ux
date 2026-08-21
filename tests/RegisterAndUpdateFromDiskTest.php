@@ -254,6 +254,111 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         }
     }
 
+    /**
+     * The directory chain carries CONTAINMENT, not just the disk-grouping namespace
+     * (beam-docs-satellite ticket 08). Before this, an imported tree landed flat — every file an orphan
+     * — and the containment tree that decides both the URL (ADR-0209 §3) and the nav (ADR-0165) had to
+     * be rebuilt by hand after every import.
+     */
+    public function test_register_from_disk_derives_containment_from_the_directory_chain(): void
+    {
+        $root = BeamUxEntry::rootFor(BeamUxEntry::REALM_SITE);
+
+        $this->writeFile('guides/page/laravel.mdx', $this->page('Beam on Laravel', 'laravel'));
+        $this->writeFile('guides/laravel/page/setup.mdx', $this->page('Set up', 'setup'));
+        $this->writeFile('guides/laravel/setup/page/config.mdx', $this->page('Configure', 'config'));
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $laravel = BeamUxEntry::query()->where('slug', 'laravel')->firstOrFail();
+        $setup = BeamUxEntry::query()->where('slug', 'setup')->firstOrFail();
+        $config = BeamUxEntry::query()->where('slug', 'config')->firstOrFail();
+
+        // A scan-root file hangs from the realm root; each nested file from the file named for its dir.
+        $this->assertSame($root->getKey(), $laravel->parent_id);
+        $this->assertSame($laravel->getKey(), $setup->parent_id);
+        $this->assertSame($setup->getKey(), $config->parent_id);
+    }
+
+    /**
+     * The parent must exist before the child names it, and the directory iterator's order is a
+     * filesystem detail — so the batch sorts by namespace depth.
+     *
+     * The walk order is forced DEEPEST-FIRST here rather than left to the iterator, and that is the whole
+     * point of the test: written as three plain `writeFile` calls it passed with the sort deleted,
+     * because this filesystem happened to yield a workable order. A guard that only fails on an unlucky
+     * machine is the "regression test pinned to the same assumption as the code" shape — it has to force
+     * the order the sort exists to survive.
+     */
+    public function test_containment_resolves_regardless_of_the_order_files_are_walked(): void
+    {
+        BeamUxEntry::rootFor(BeamUxEntry::REALM_SITE);
+
+        $this->writeFile('guides/laravel/setup/page/config.mdx', $this->page('Configure', 'config'));
+        $this->writeFile('guides/laravel/page/setup.mdx', $this->page('Set up', 'setup'));
+        $this->writeFile('guides/page/laravel.mdx', $this->page('Beam on Laravel', 'laravel'));
+
+        $batch = new DeepestFirstRegisterBatch(
+            $this->app->make(\Splicewire\Beam\Ux\Disk\RegisterFromDisk::class),
+            $this->app->make(StorageDriverResolver::class),
+            $this->app->make(\Splicewire\Beam\Ux\Inference\InferDraftSchema::class),
+        );
+
+        $batch->scan($this->root);
+
+        $chain = $this->app->make(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)
+            ->resolve('/laravel/setup/config');
+
+        $this->assertNotNull($chain, 'the imported tree must resolve as a path, which is what containment buys');
+        $this->assertSame('config', end($chain)->slug);
+    }
+
+    /**
+     * `--under` is how a host imports a subtree BENEATH something that already exists — the seeded docs
+     * root on `splicewire/www` being the case this was built for.
+     */
+    public function test_under_parents_scan_root_files_to_an_existing_entry(): void
+    {
+        $root = BeamUxEntry::rootFor(BeamUxEntry::REALM_SITE);
+
+        $docs = BeamUxEntry::create([
+            'slug' => 'docs',
+            'type' => UxType::Page,
+            'parent_id' => $root->getKey(),
+            'segment' => '/beam/docs',
+            'title' => 'Documentation',
+        ]);
+
+        $this->writeFile('guides/page/laravel.mdx', $this->page('Beam on Laravel', 'laravel'));
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, $docs);
+
+        $this->assertSame(
+            $docs->getKey(),
+            BeamUxEntry::query()->where('slug', 'laravel')->firstOrFail()->parent_id,
+        );
+    }
+
+    /**
+     * A root is provisioned by install (ADR-0209 §9), never as a side effect of some other operation. A
+     * host that has not installed imports flat — the pre-containment behaviour — rather than having a
+     * realm root silently appear underneath it.
+     */
+    public function test_a_missing_realm_root_is_not_created_by_the_batch(): void
+    {
+        $this->writeFile('guides/page/laravel.mdx', $this->page('Beam on Laravel', 'laravel'));
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $this->assertSame(1, BeamUxEntry::count());
+        $this->assertNull(BeamUxEntry::query()->where('slug', 'laravel')->firstOrFail()->parent_id);
+    }
+
+    private function page(string $title, string $segment): string
+    {
+        return "---\ntitle: {$title}\nsegment: {$segment}\n---\n\n# {$title}\n";
+    }
+
     private function writeFile(string $relative, string $contents): void
     {
         $full = $this->root.'/'.$relative;
@@ -361,6 +466,23 @@ class RegisterAndUpdateFromDiskTest extends TestCase
  * no beam-core particle table, so the batch tests isolate BATCH behavior. `write('')` mints a stable
  * fake key; `staleness` reports disk newer/older per the static flag.
  */
+/**
+ * The batch, walking deepest-first — the adversarial order the depth sort exists to survive. Overriding
+ * the walk is the only way to make the order deterministic; the real iterator's order is the filesystem's
+ * business and differs by platform, which is exactly why the production code may not rely on it.
+ */
+class DeepestFirstRegisterBatch extends RegisterEntriesFromDisk
+{
+    protected function files(string $root): iterable
+    {
+        $files = iterator_to_array(parent::files($root), false);
+
+        usort($files, fn (string $a, string $b) => substr_count($b, '/') <=> substr_count($a, '/'));
+
+        return $files;
+    }
+}
+
 class RecordingDriver implements StorageDriver
 {
     public static bool $diskIsNewer = true;
