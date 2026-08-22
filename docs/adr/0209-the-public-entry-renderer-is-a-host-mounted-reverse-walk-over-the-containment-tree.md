@@ -100,6 +100,17 @@ The renderer returns an Inertia response, mirroring the incumbent `GuardedGuideC
 rendering the body to HTML in PHP was rejected: ADR-0122 requires that guarded content never appear in
 server-rendered HTML, so it would force two divergent render paths.
 
+> **WITHDRAWN by ADR-0213 §2 (beam-docs-satellite ticket 19, 2026-08-22).** The paragraph below
+> prohibits the wrong noun and enforcing it cost five copies of one page (`pages/site/entry.tsx`
+> exists at 84 / 84 / 84 / 262 / 285 lines across the three starters, `www`, and `splicewire-app`).
+> **A beam package MAY ship a rendered page**, contributed through an exported page map the host's
+> Inertia resolver falls back to; a host file at the same name still wins. What survives is the two
+> invariants this rule was standing in for: **a package ships no palette, fonts, or wordmark**, and
+> **a package imports no router**. The rest of §6 — Inertia over server-rendered HTML, the mount-time
+> page name, `page` as the sole routable type — stands unchanged. The `type`→page map stays rejected,
+> for a better reason than "one live row": chrome is inherited from the containment tree instead
+> (ADR-0213 §4), so it is data rather than a line in `web.php`.
+
 No beam package ships a rendered page — no Blade view, no Inertia page. The page name is therefore a
 **mount-time argument**, never a hardcoded `content/show`. `page` remains the sole routable `type`,
 consistent with `EntrySitemapSource`. A `type`→page map was rejected as a dispatch table with one live
