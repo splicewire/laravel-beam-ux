@@ -77,6 +77,29 @@ class CompileEntriesCommand extends Command
                     continue;
                 }
 
+                // A row that has NO PARTICLE has no body and never had one — nothing was written for
+                // it, so there is nothing to compile and no compiler could have succeeded. Two shipped
+                // things create these deliberately: `splicewire:beam:ux:seed-nav`, whose rows are
+                // POINTERS at segments a named Laravel route already serves (`/`, `/dashboard`), and
+                // `splicewire:beam:ux:scaffold`, whose rows are empty on purpose pending authoring.
+                //
+                // The structural-node rule above was written for the realm root and keyed on "no
+                // segment", on the reasoning that a bodyless ADDRESSABLE page 404s at read time. That
+                // premise does not hold on a host which is not served wholly from entries: a fresh
+                // `laravel-beam-starter` seeds five addressable nav pointers whose URLs are claimed by
+                // routes registered ABOVE the renderer's catch-all, so they serve correctly and this
+                // command reported `failed 5` on every correct install — the same standing red the
+                // realm-root fix was written to remove (beam-docs-satellite tickets 07, 11).
+                //
+                // Reported, not silent, because a bodyless page whose segment ISN'T claimed really will
+                // 404 — but a warning, so it cannot fail the exit code of a correct install.
+                if ($entry->particle_id === null) {
+                    $this->components->warn("{$entry->slug}: no body yet — nothing to compile (a nav pointer or an unauthored scaffold).");
+                    $skipped++;
+
+                    continue;
+                }
+
                 $this->components->error($e->getMessage());
                 $failed++;
             }

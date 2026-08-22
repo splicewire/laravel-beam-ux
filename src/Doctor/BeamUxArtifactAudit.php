@@ -78,6 +78,16 @@ class BeamUxArtifactAudit implements DoctorAudit
                     continue;
                 }
 
+                // THIRD reader of this property, same blind spot again. A row with no particle has no
+                // body and never had one, so no artifact can exist for it and its absence is not
+                // staleness. `splicewire:beam:ux:seed-nav` creates exactly these — addressable POINTERS
+                // at segments a named route already serves — so on a fresh `laravel-beam-starter` this
+                // audit blocked on five slugs that are working correctly. The reasoning and the
+                // matching warn live in `CompileEntriesCommand`; see the note there.
+                if ($entry->particle_id === null) {
+                    continue;
+                }
+
                 $stale[] = (string) $entry->slug;
 
                 continue;

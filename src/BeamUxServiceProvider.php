@@ -565,7 +565,12 @@ class BeamUxServiceProvider extends PackageServiceProvider
     protected function registerStorage(): void
     {
         $this->app->singleton(StorageDriverResolver::class, function ($app) {
-            $particle = new ParticleStorageDriver($app->make(ParticleWriter::class));
+            // Resolved PER WRITE, not captured: this resolver is a singleton, and a captured writer
+            // pins whichever WriteGate was bound when it was first resolved. `AsSystemWriter` rebinds
+            // that gate for the duration of a console flow, so a pinned writer made
+            // `splicewire:beam:seed` fail with "the write gate refused a write" on any host that had
+            // touched this singleton earlier in the same process.
+            $particle = new ParticleStorageDriver(fn () => $app->make(ParticleWriter::class));
             $disk = Storage::disk(config('beam.ux.storage.disk'));
 
             $resolver = (new StorageDriverResolver)
