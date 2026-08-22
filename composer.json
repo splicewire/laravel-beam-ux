@@ -75,27 +75,6 @@
     },
     "repositories": [
         {
-            "type": "path",
-            "url": "../*",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../rushing/*",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "../../schemastud/*",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
             "type": "git",
             "url": "https://github.com/stephenr85/laravel-data-nav.git"
         },
@@ -122,6 +101,10 @@
         {
             "type": "git",
             "url": "https://github.com/splicewire/laravel-beam-workflows.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-schema-convergence.git"
         }
     ],
     "minimum-stability": "dev",
