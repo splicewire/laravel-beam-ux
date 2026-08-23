@@ -163,9 +163,30 @@ return [
     |                   catch-all by the macro, so the catch-all cannot swallow
     |                   it. Relocatable per-deploy like the authoring root above.
     |
+    | `reserved_prefixes` — URI prefixes the catch-all refuses to match, as a
+    |                   route CONSTRAINT rather than a controller check: Laravel
+    |                   has no "next route", so a catch-all that resolves and
+    |                   then aborts has already swallowed the URL (ADR-0209 §2).
+    |
+    |                   The default reserves `api` because "last line of web.php"
+    |                   does not mean "registered last" — routes mounted from a
+    |                   `booted()` callback (stancl/tenancy's `routes/tenant.php`)
+    |                   or from later in the host's own route closure register
+    |                   AFTER every line of `web.php`, and lose to this route by
+    |                   construction. `api` is also already beam's fleet-wide API
+    |                   boundary (ADR-0211 §7), so reserving it here invents no
+    |                   new convention.
+    |
+    |                   A host adds its own prefixes here (or passes them to the
+    |                   macro); a host served wholly from entries with no API at
+    |                   all may set it to `[]`. Matching is anchored and
+    |                   segment-aware: `api` reserves `/api` and `/api/...` and
+    |                   nothing else — an entry at `/docs/api` is untouched.
+    |
     */
     'site' => [
         'artifact_root' => env('BEAM_UX_ARTIFACT_ROOT', 'beam/ux/artifacts'),
+        'reserved_prefixes' => ['api'],
     ],
 
     /*

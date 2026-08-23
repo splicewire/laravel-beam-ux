@@ -15,6 +15,7 @@ use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Format\UxFormat;
+use Splicewire\Beam\Ux\Http\Controllers\PublicEntryController;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -268,6 +269,55 @@ class PublicEntryRendererTest extends TestCase
             [$root->getKey(), $shell->getKey(), $docs->getKey()],
             array_map(fn (BeamUxEntry $e) => $e->getKey(), $chain),
         );
+    }
+
+    /**
+     * The regression that motivated `reserved_prefixes` (beam-docs-satellite ticket 28).
+     *
+     * Note the shape: the API route is registered **inside the test body**, i.e. AFTER `setUp()` mounted
+     * the catch-all — which is the real-world shape, not a contrivance. stancl/tenancy groups
+     * `routes/tenant.php` inside `$this->app->booted()`, so on `splicewire-app` every `api/v1/*` route
+     * registered after every line of `web.php` and lost to the catch-all no matter where the host wrote
+     * the macro call. A test that registered the API route first would pass on the unfixed code.
+     */
+    public function test_a_reserved_prefix_survives_a_catch_all_that_was_registered_before_it(): void
+    {
+        Route::get('api/v1/lineage', fn () => response()->json(['ok' => true]));
+
+        $this->get('/api/v1/lineage')
+            ->assertOk()
+            ->assertJson(['ok' => true]);
+    }
+
+    public function test_an_unreserved_prefix_registered_after_the_catch_all_is_still_swallowed(): void
+    {
+        // The guard is a reserved LIST, not a general fix for registration order — a host that mounts
+        // something after the catch-all without reserving its prefix still loses. Asserted so the
+        // reserved list is understood as the whole of the protection.
+        Route::get('reports/monthly', fn () => response()->json(['ok' => true]));
+
+        $this->get('/reports/monthly')->assertNotFound();
+    }
+
+    public function test_a_reserved_prefix_reserves_only_the_leading_segment(): void
+    {
+        $root = BeamUxEntry::rootFor();
+        $docs = $this->page('docs', ['segment' => 'docs', 'parent_id' => $root->getKey()]);
+
+        // `/docs/api` is the OTB API-reference page (ADR-0210 §5). Reserving `api` must not touch it —
+        // the constraint is anchored, so it reserves `/api` and `/api/…` and nothing deeper.
+        $this->page('docs-api', ['segment' => 'api', 'parent_id' => $docs->getKey()]);
+        $this->get('/docs/api')->assertOk();
+
+        // And an entry whose own leading segment IS the reserved word is unreachable, deliberately.
+        $this->page('api-page', ['segment' => 'api', 'parent_id' => $root->getKey()]);
+        $this->get('/api')->assertNotFound();
+    }
+
+    public function test_an_empty_reserved_list_restores_the_unconstrained_catch_all(): void
+    {
+        $this->assertSame('.*', PublicEntryController::pathConstraint([]));
+        $this->assertSame('.*', PublicEntryController::pathConstraint(['', '/']));
     }
 
     /** @param array<string, mixed> $attributes */

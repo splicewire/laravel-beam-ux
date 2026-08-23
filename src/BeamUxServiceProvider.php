@@ -339,6 +339,16 @@ class BeamUxServiceProvider extends PackageServiceProvider
      * a day of debugging. A host that never calls the macro gets no public surface at all, which is what
      * keeps beam-ux headless-installable without inventing a package boundary to protect it.
      *
+     * **Last line of `web.php` is not last registered.** `$reservedPrefixes` exists because that premise
+     * is false on any host with deferred route registration: stancl/tenancy groups `routes/tenant.php`
+     * inside `$this->app->booted()`, and a host's own route closure may mount more groups after
+     * `web.php`. Both register AFTER this catch-all and lose to it by construction. The renderer then
+     * runs, resolves nothing, and returns its uniform 404 — which reads as "the API is broken", not as
+     * "a catch-all shadowed it", because the route IS registered and `route:list` prints it in a
+     * different order than the one that serves requests. Defaults to `['api']` from
+     * `beam.ux.site.reserved_prefixes`; the constraint is on the route, because Laravel has no "next
+     * route" and a controller that aborts has already swallowed the URL.
+     *
      * `$claimRoot` is **off by default**: the direction of travel is a whole site served from entries,
      * but installing beam-ux must never take a host's homepage. `$page` is required and un-defaulted
      * because no beam package ships a rendered page (§6) — the component name is the host's.
@@ -359,10 +369,12 @@ class BeamUxServiceProvider extends PackageServiceProvider
             bool $withNav = true,
             ?string $artifactRoot = null,
             ?string $routeName = null,
+            ?array $reservedPrefixes = null,
         ): void {
             /** @var Router $this */
             $artifactRoot ??= config('beam.ux.site.artifact_root', 'beam/ux/artifacts');
             $routeName ??= config('beam.ux.route_name', 'beam.ux.');
+            $reservedPrefixes ??= config('beam.ux.site.reserved_prefixes', ['api']);
 
             $artifactName = "{$routeName}site.artifact";
 
@@ -393,7 +405,7 @@ class BeamUxServiceProvider extends PackageServiceProvider
             }
 
             $apply($this->get('{path}', PublicEntryController::class)
-                ->where('path', '.*')
+                ->where('path', PublicEntryController::pathConstraint($reservedPrefixes))
                 ->name("{$routeName}site.show"));
         });
     }

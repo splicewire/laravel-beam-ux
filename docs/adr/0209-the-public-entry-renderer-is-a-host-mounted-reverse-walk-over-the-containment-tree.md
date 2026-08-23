@@ -51,7 +51,36 @@ matches in registration order, so a catch-all registered last shadows nothing th
 — but only the host can guarantee that ordering, and a package silently claiming every unmatched URL
 in an application is a day of debugging.
 
-`{path}` is unconstrained. A macro flag, **default off**, additionally claims `/`. The direction of
+~~`{path}` is unconstrained.~~ **Amended 2026-08-23 (beam-docs-satellite ticket 28): `{path}` reserves
+a configurable prefix list, defaulting to `['api']`.** The paragraph above is half right and its second
+half is load-bearingly wrong: **"the last line of `web.php`" is not "registered last."** A host with any
+deferred route registration cannot deliver the ordering the macro asks of it — stancl/tenancy groups
+`routes/tenant.php` inside `$this->app->booted()`, and a host's own route closure may mount more groups
+after `web.php` — and every such route registers *after* the catch-all and loses to it by construction,
+wherever the host writes the call. On `splicewire-app` that silently 404'd every `api/v1/*` and
+`api/_dev/*` GET in the application.
+
+It presented as *"the API is broken"* rather than *"a catch-all shadowed it"*, for two reasons worth
+recording: the renderer's uniform 404 (§5) is a beam-enveloped JSON body, so it reads as a controller
+that ran and found nothing rather than as a route miss; and `route:list` prints the shadowed route
+happily, in a **different order** than the one that serves requests — so the console says the surface is
+healthy while every request disagrees.
+
+The guard is a **route constraint**, not a check in the controller, because Laravel has no "next route":
+a catch-all that matches, resolves nothing and `abort`s has already swallowed the URL. Only a pattern
+that fails to match lets the router keep looking. Matching is anchored and segment-aware, so `api`
+reserves `/api` and `/api/…` and never `/docs/api`.
+
+Rejected: **making it purely the host's exclusion list** (a macro parameter with no default). It keeps
+the package host-agnostic and reproduces the defect on host number six — every host must remember, and
+the five that exist did not. The default plus `beam.ux.site.reserved_prefixes` gives a host the same
+extensibility without making the safe case opt-in. Also rejected: **fixing the registration ordering at
+the host** (moving `mapRoutes()` out of `booted()`). It was argued as the only option that also protects
+the *next* catch-all, and measurement disproved that — it addresses `routes/tenant.php` and leaves
+`routes/dev.php`, mounted after `web.php` in the host's own route closure, still swallowed — while
+carrying tenancy-precedence risk this ticket has no reason to take.
+
+A macro flag, **default off**, additionally claims `/`. The direction of
 travel is a whole site served from entries; the default is that installing beam-ux never takes a
 host's homepage. A host that never calls the macro gets no public surface, which is what keeps beam-ux
 headless-installable without inventing a package boundary to protect it.

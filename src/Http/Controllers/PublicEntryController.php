@@ -44,6 +44,47 @@ class PublicEntryController
         private EntryRenderer $renderer,
     ) {}
 
+    /**
+     * The `{path}` route constraint, reserving the given URI prefixes out of the catch-all.
+     *
+     * **This has to be a constraint, not a check inside `__invoke`.** Laravel has no "next route": a
+     * catch-all that matches, resolves nothing and `abort`s has already swallowed the URL, and the
+     * route it shadowed never runs. Only a pattern that fails to match lets the router keep looking —
+     * the same reason beam-docs-satellite ticket 09 had to put the app's `/docs/{slug}` exclusion in
+     * the pattern rather than the closure.
+     *
+     * **Why a package reserves prefixes at all.** ADR-0209 §2 mounts this last on the reasoning that a
+     * catch-all registered last shadows nothing — but "last line of `web.php`" is not "registered
+     * last". Routes mounted from a `booted()` callback (stancl/tenancy's `routes/tenant.php`) or from
+     * later in the host's own route closure register after every line of `web.php` and lose to this
+     * route by construction, no matter where the host writes the macro call. The host cannot fix that
+     * by ordering, so the guard belongs where the catch-all is declared.
+     *
+     * Matching is anchored and segment-aware: `api` reserves `/api` and `/api/…` and nothing deeper —
+     * an entry at `/docs/api` still resolves. An empty list restores the unconstrained `.*` for a host
+     * served wholly from entries.
+     *
+     * @param  list<string>  $reservedPrefixes  slash-trimmed URI prefixes, e.g. `['api', 'webhooks']`
+     */
+    public static function pathConstraint(array $reservedPrefixes = ['api']): string
+    {
+        $prefixes = array_values(array_filter(array_map(
+            fn ($prefix) => trim((string) $prefix, '/'),
+            $reservedPrefixes,
+        ), fn (string $prefix) => $prefix !== ''));
+
+        if ($prefixes === []) {
+            return '.*';
+        }
+
+        $alternation = implode('|', array_map(
+            fn (string $prefix) => preg_quote($prefix, '/'),
+            $prefixes,
+        ));
+
+        return '^(?!(?:'.$alternation.')(?:\/|$)).*$';
+    }
+
     public function __invoke(Request $request, string $path = ''): Response
     {
         $defaults = $request->route()?->defaults ?? [];
