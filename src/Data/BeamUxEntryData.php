@@ -35,7 +35,7 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 #[ParticleResource(
     key: 'beam-ux-entry',
-    model: BeamUxEntry::class,
+    backing: BeamUxEntry::class,
     input: BeamUxEntryInputData::class,
     label: 'Entries',
     group: 'Content',

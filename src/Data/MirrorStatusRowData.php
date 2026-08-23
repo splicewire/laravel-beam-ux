@@ -36,7 +36,7 @@ use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
  */
 #[ParticleResource(
     key: 'beam-ux-mirror-status',
-    model: BeamUxEntry::class,
+    backing: BeamUxEntry::class,
     label: 'Files',
     group: 'Ops',
     icon: 'git-branch',
