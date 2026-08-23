@@ -2,6 +2,10 @@
 
 namespace Splicewire\Beam\Ux\Placement;
 
+use Rushing\Popcorn\Registries\IsRegistry;
+use Rushing\Popcorn\Registries\OnDuplicate;
+use Rushing\Popcorn\Registries\RegistryArity;
+
 use InvalidArgumentException;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
@@ -20,6 +24,13 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * adds a placement without editing this class. The resolver is beam-ux's; the disk it derives a path
  * *for* is beam-core's {@see StorageDriver}.
  */
+#[IsRegistry(
+    root: 'beam.ux.placements',
+    of: 'FilePlacement strategies by name — the disk mirror path an entry materializes to',
+    arity: RegistryArity::PickOne,
+    onDuplicate: OnDuplicate::Supersede,
+    order: 46,
+)]
 class PlacementResolver
 {
     public const DEFAULT = 'default';

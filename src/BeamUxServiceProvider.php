@@ -11,10 +11,6 @@ use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
-use Splicewire\Beam\Manifest\ManifestArity;
-use Splicewire\Beam\Manifest\ManifestDescriptor;
-use Splicewire\Beam\Manifest\ManifestIndex;
-use Splicewire\Beam\Manifest\ManifestSeam;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Schema\SchemaSources;
 use Splicewire\Beam\Seed\BeamSeedManifest;
@@ -216,47 +212,6 @@ class BeamUxServiceProvider extends PackageServiceProvider
             );
         }
 
-        // Self-describes this package's own registry-shaped singletons into beam-core's ManifestIndex
-        // (`splicewire:beam:manifests`) — found live: laravel-beam-ux had never described anything, so
-        // UndescribedRegistryAudit's membership-scoped ratchet had never scanned it at all (a package
-        // that has never described anything is not scanned; one that has is held to describing ALL of
-        // them). Describing CodecRegistry alone would have opted the package INTO that gate while
-        // leaving PlacementResolver/StorageDriverResolver — both registry-shaped by the exact same
-        // register()+resolve() test, both already documented as "the same shape as CodecRegistry" in
-        // their own class docblocks — silently undescribed, immediately failing the build. All three or
-        // none. Guarded on the index being bound (a host predating it still boots beam-ux fine).
-        if ($this->app->bound(ManifestIndex::class)) {
-            $index = $this->app->make(ManifestIndex::class);
-            $pkg = 'splicewire/laravel-beam-ux';
-
-            $index->describe(new ManifestDescriptor(
-                name: 'CodecRegistry',
-                of: 'BodyCodec implementations by UxFormat — how a BeamUxEntry body compiles to/from its raw source',
-                seam: ManifestSeam::SingletonAccumulator,
-                arity: ManifestArity::PickOne,
-                registerHint: 'app(CodecRegistry::class)->register(new YourBodyCodec) from your provider',
-                where: CodecRegistry::class,
-                package: $pkg,
-            ));
-            $index->describe(new ManifestDescriptor(
-                name: 'PlacementResolver',
-                of: 'FilePlacement strategies by name — the disk mirror path an entry materializes to',
-                seam: ManifestSeam::SingletonAccumulator,
-                arity: ManifestArity::PickOne,
-                registerHint: "app(PlacementResolver::class)->register('name', \$filePlacement) from your provider",
-                where: PlacementResolver::class,
-                package: $pkg,
-            ));
-            $index->describe(new ManifestDescriptor(
-                name: 'StorageDriverResolver',
-                of: 'StorageDriver implementations by name — where a BeamUxEntry particle body is read/written',
-                seam: ManifestSeam::SingletonAccumulator,
-                arity: ManifestArity::PickOne,
-                registerHint: "app(StorageDriverResolver::class)->register('name', \$storageDriver) from your provider",
-                where: StorageDriverResolver::class,
-                package: $pkg,
-            ));
-        }
     }
 
     /**

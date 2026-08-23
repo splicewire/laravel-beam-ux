@@ -2,6 +2,10 @@
 
 namespace Splicewire\Beam\Ux\Codec;
 
+use Rushing\Popcorn\Registries\IsRegistry;
+use Rushing\Popcorn\Registries\OnDuplicate;
+use Rushing\Popcorn\Registries\RegistryArity;
+
 use InvalidArgumentException;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -17,6 +21,13 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * The default binding (registered by {@see BeamUxServiceProvider}) seeds the TSX
  * and MDX codecs.
  */
+#[IsRegistry(
+    root: 'beam.ux.codecs',
+    of: 'BodyCodec implementations by UxFormat — how a BeamUxEntry body compiles to/from its raw source',
+    arity: RegistryArity::PickOne,
+    onDuplicate: OnDuplicate::Supersede,
+    order: 45,
+)]
 class CodecRegistry
 {
     /** @var array<string, BodyCodec> keyed by format value */

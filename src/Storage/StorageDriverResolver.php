@@ -2,6 +2,10 @@
 
 namespace Splicewire\Beam\Ux\Storage;
 
+use Rushing\Popcorn\Registries\IsRegistry;
+use Rushing\Popcorn\Registries\OnDuplicate;
+use Rushing\Popcorn\Registries\RegistryArity;
+
 use InvalidArgumentException;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -19,6 +23,13 @@ use Splicewire\Beam\Ux\Placement\PlacementResolver;
  * beam-ux is the SECOND consumer of the generalized-from-BeamSchemaRegistry storage seam (the schema
  * registry is the first); this resolver is where beam-ux selects a storage driver per entry.
  */
+#[IsRegistry(
+    root: 'beam.ux.storage-drivers',
+    of: 'StorageDriver implementations by name — where a BeamUxEntry particle body is read/written',
+    arity: RegistryArity::PickOne,
+    onDuplicate: OnDuplicate::Supersede,
+    order: 47,
+)]
 class StorageDriverResolver
 {
     public const DEFAULT = 'default';

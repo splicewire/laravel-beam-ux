@@ -1,6 +1,6 @@
 {
     "name": "splicewire/laravel-beam-ux",
-    "description": "The BeamUx authoring engine (beam tier — free, ADR-0092/ADR-0159): the BeamUxEntry model + beam_ux_entries table — the generic authoring entry that has-a versioned BeamParticle body ridden through beam-core's shared ParticleWriter. The base spans content AND components (a layout is not a component), so it is BeamUxEntry, never BeamUxComponent. Residency is context-following (default central); the table shape is ubiquitous from day one via a shared migration dir run in both the central and tenant passes.",
+    "description": "The BeamUx authoring engine (beam tier \u2014 free, ADR-0092/ADR-0159): the BeamUxEntry model + beam_ux_entries table \u2014 the generic authoring entry that has-a versioned BeamParticle body ridden through beam-core's shared ParticleWriter. The base spans content AND components (a layout is not a component), so it is BeamUxEntry, never BeamUxComponent. Residency is context-following (default central); the table shape is ubiquitous from day one via a shared migration dir run in both the central and tenant passes.",
     "keywords": [
         "laravel",
         "splicewire",
@@ -30,7 +30,8 @@
         "splicewire/laravel-beam-taxonomy": "*",
         "splicewire/laravel-beam-workflows": "*",
         "symfony/process": "^6.4|^7.0",
-        "rushing/laravel-schema-convergence": "*"
+        "rushing/laravel-schema-convergence": "*",
+        "rushing/php-popcorn": "dev-main"
     },
     "require-dev": {
         "orchestra/testbench": "^9.0|^10.0|^11.0",
@@ -63,7 +64,7 @@
             ]
         },
         "package-topology": {
-            "because": "beam-ux is the beam-tier authoring engine; it composes sibling beam-family arms DOWN (beam-core, mdx, sitemap, workflows, and — S7 — beam-taxonomy for the BeamSilo/BeamTag classification facets) and must NEVER reach UP into satellite / tower / the host App tier.",
+            "because": "beam-ux is the beam-tier authoring engine; it composes sibling beam-family arms DOWN (beam-core, mdx, sitemap, workflows, and \u2014 S7 \u2014 beam-taxonomy for the BeamSilo/BeamTag classification facets) and must NEVER reach UP into satellite / tower / the host App tier.",
             "mustRequire": [
                 "splicewire/laravel-beam-taxonomy"
             ],
@@ -105,6 +106,10 @@
         {
             "type": "git",
             "url": "https://github.com/stephenr85/laravel-schema-convergence.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/php-popcorn.git"
         }
     ],
     "minimum-stability": "dev",
