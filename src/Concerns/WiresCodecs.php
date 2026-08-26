@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Concerns;
 
 use Rushing\Popcorn\Concerns\Chained;
+use Rushing\Popcorn\Registries\RegistryIndex;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Codec\CssBodyCodec;
@@ -37,5 +38,22 @@ trait WiresCodecs
                 ->register(new MdxBodyCodec)
                 ->register(new CssBodyCodec);
         });
+    }
+
+    /**
+     * Describe `beam.ux.codecs` into the shared {@see RegistryIndex} (registry-kernel ticket 38).
+     *
+     * In BOOT and in the trait that owns the fill, not in a hand-written provider block: declaring and
+     * indexing are two acts (21 D1), and beam-ux's entire binding surface lives in these traits — the
+     * fact that made these three rows structurally invisible to the conformance detector until ticket 54
+     * widened it. The describe belongs where the fill finishes, which is here.
+     */
+    #[Chained('boot', order: 70)]
+    protected function describeCodecs(): void
+    {
+        $this->app->make(RegistryIndex::class)->describe(
+            $this->app->make(CodecRegistry::class),
+            by: self::class,
+        );
     }
 }

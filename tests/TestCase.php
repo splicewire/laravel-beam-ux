@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Tests;
 
 use Orchestra\Testbench\TestCase as Orchestra;
 use Rushing\DataNav\ServiceProvider as DataNavServiceProvider;
+use Rushing\Popcorn\Laravel\PopcornServiceProvider;
 use Rushing\Versioning\VersioningServiceProvider;
 use Schemastud\DataSchemas\LaravelDataSchemasServiceProvider;
 use Spatie\Activitylog\ActivitylogServiceProvider;
@@ -40,6 +41,11 @@ abstract class TestCase extends Orchestra
             // Free-tier nav primitive (ADR-0092): beam-ux's containment NavProjector projects a realm's
             // tree into this package's NavTree rather than rebuilding one (S3, ADR-0165).
             DataNavServiceProvider::class,
+            // The registry kernel's Laravel arm (registry-kernel ticket 38 / 27 D3). Testbench does not
+            // auto-discover, and WITHOUT it `RegistryIndex` is still auto-resolvable but UNSHARED — every
+            // `describe()` lands on a throwaway and the suite stays green over an empty index. The
+            // tripwire in `RegistryConformanceTest` is what keeps this line honest.
+            PopcornServiceProvider::class,
         ];
     }
 }

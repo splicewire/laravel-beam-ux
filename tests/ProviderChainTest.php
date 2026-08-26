@@ -57,6 +57,12 @@ class ProviderChainTest extends TestCase
         'bootRouteMacro',
         'bootPublicRouteMacro',
         'registerThemeSchemas',
+        // Added by registry-kernel ticket 38 — the three describes are boot links, and they sit in the
+        // trait that owns each fill rather than in a provider block, because beam-ux's whole binding
+        // surface is these traits (ticket 54's finding).
+        'describeCodecs',
+        'describePlacements',
+        'describeStorageDrivers',
     ];
 
     private function chain(string $chain): array
@@ -101,7 +107,7 @@ class ProviderChainTest extends TestCase
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
         $this->assertCount(11, $this->chain('register'));
-        $this->assertCount(7, $this->chain('boot'));
+        $this->assertCount(10, $this->chain('boot'));
     }
 
     public function test_the_provider_declares_the_contract_so_a_detector_can_find_it(): void

@@ -2,11 +2,14 @@
 
 namespace Splicewire\Beam\Ux\Codec;
 
+use Rushing\Popcorn\Registries\Authorizer;
+use Rushing\Popcorn\Registries\BasicRegistry;
+use Rushing\Popcorn\Registries\Gated;
 use Rushing\Popcorn\Registries\IsRegistry;
 use Rushing\Popcorn\Registries\OnDuplicate;
+use Rushing\Popcorn\Registries\Registry;
 use Rushing\Popcorn\Registries\RegistryArity;
-
-use InvalidArgumentException;
+use Rushing\Popcorn\Registries\RegistryKey;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
@@ -20,48 +23,112 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *
  * The default binding (registered by {@see BeamUxServiceProvider}) seeds the TSX
  * and MDX codecs.
+ *
+ * ## On the Popcorn kernel (registry-kernel ticket 38)
+ *
+ * The store is a composed {@see BasicRegistry}, never a base class, and `beam.ux.codecs` is described
+ * into the {@see \Rushing\Popcorn\Registries\RegistryIndex} from {@see BeamUxServiceProvider}'s boot
+ * chain — beam-ux's whole binding surface lives in `Concerns\Wires*` traits, so the describe sits in
+ * the trait that owns the fill ({@see \Splicewire\Beam\Ux\Concerns\WiresCodecs}), not in a hand-written
+ * provider block. {@see for()} and {@see formats()} stay as the vocabulary consumers already speak.
+ *
+ * @implements Registry<BodyCodec>
  */
 #[IsRegistry(
     root: 'beam.ux.codecs',
     of: 'BodyCodec implementations by UxFormat — how a BeamUxEntry body compiles to/from its raw source',
     arity: RegistryArity::PickOne,
+    entryType: BodyCodec::class,
     onDuplicate: OnDuplicate::Supersede,
     order: 45,
 )]
-class CodecRegistry
+class CodecRegistry implements Gated, Registry
 {
-    /** @var array<string, BodyCodec> keyed by format value */
-    protected array $codecs = [];
+    /** @var BasicRegistry<BodyCodec> */
+    protected BasicRegistry $entries;
 
-    public function register(BodyCodec $codec): static
+    public function __construct()
     {
-        $this->codecs[$codec->format()->value] = $codec;
+        $this->entries = BasicRegistry::for($this);
+    }
+
+    /**
+     * Register a codec under its own format value.
+     *
+     * WIDENED from the contract rather than shadowing it — contravariance, the same self-keying
+     * one-argument door {@see \Rushing\Codegen\GeneratorRegistry::register()} opens, so every historical
+     * `register(new TsxBodyCodec)` caller keeps working alongside a contract `register($key, $entry)`.
+     */
+    public function register(RegistryKey|string|BodyCodec $key, mixed $entry = null, ?string $by = null, ?string $ability = null): static
+    {
+        if ($key instanceof BodyCodec) {
+            $entry = $key;
+            $key = $key->format()->value;
+        }
+
+        $this->entries->register($key, $entry, $by, $ability);
 
         return $this;
     }
 
-    /** Resolve the codec for a format, or throw when none is registered. */
+    /**
+     * Resolve the codec for a format, or throw when none is registered.
+     *
+     * Sugar over {@see resolve()}, kept because it is what every call site in this package says. The
+     * miss is now the kernel's `RegistryMiss` (a `RuntimeException`) rather than a package-local
+     * `InvalidArgumentException`.
+     */
     public function for(UxFormatCase|string $format): BodyCodec
     {
-        $key = $format instanceof UxFormatCase ? $format->value : $format;
-
-        if (! isset($this->codecs[$key])) {
-            throw new InvalidArgumentException("No BodyCodec registered for format [{$key}].");
-        }
-
-        return $this->codecs[$key];
+        /** @var BodyCodec */
+        return $this->resolve($format instanceof UxFormatCase ? $format->value : $format);
     }
 
-    public function has(UxFormatCase|string $format): bool
+    public function has(RegistryKey|string|UxFormatCase $key): bool
     {
-        $key = $format instanceof UxFormatCase ? $format->value : $format;
-
-        return isset($this->codecs[$key]);
+        return $this->entries->has($key instanceof UxFormatCase ? $key->value : $key);
     }
 
-    /** @return array<int, string> the registered format values */
+    public function resolve(RegistryKey|string $key): mixed
+    {
+        return $this->entries->resolve($key);
+    }
+
+    public function tryResolve(RegistryKey|string $key): mixed
+    {
+        return $this->entries->tryResolve($key);
+    }
+
+    public function matches(RegistryKey|string $key): array
+    {
+        return $this->entries->matches($key);
+    }
+
+    public function keys(): array
+    {
+        return $this->entries->keys();
+    }
+
+    public function unfiltered(): Registry
+    {
+        return $this->entries->unfiltered();
+    }
+
+    public function authorizeWith(?Authorizer $authorizer): static
+    {
+        $this->entries->authorizeWith($authorizer);
+
+        return $this;
+    }
+
+    /**
+     * The registered format values, as callers spelled them — {@see keys()} with the declared root
+     * stripped back off, because keys go relative in and absolute out (ticket 20 D2).
+     *
+     * @return array<int, string> the registered format values
+     */
     public function formats(): array
     {
-        return array_keys($this->codecs);
+        return $this->entries->relativeKeys();
     }
 }

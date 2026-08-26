@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Concerns;
 
 use Rushing\Popcorn\Concerns\Chained;
+use Rushing\Popcorn\Registries\RegistryIndex;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Placement\DatePartitionedPlacement;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
@@ -40,5 +41,18 @@ trait WiresPlacement
 
             return $resolver;
         });
+    }
+
+    /**
+     * Describe `beam.ux.placements` into the shared {@see RegistryIndex} (registry-kernel ticket 38).
+     * In boot, in the trait that owns the fill — see {@see WiresCodecs::describeCodecs()}.
+     */
+    #[Chained('boot', order: 80)]
+    protected function describePlacements(): void
+    {
+        $this->app->make(RegistryIndex::class)->describe(
+            $this->app->make(PlacementResolver::class),
+            by: self::class,
+        );
     }
 }

@@ -2,11 +2,14 @@
 
 namespace Splicewire\Beam\Ux\Placement;
 
+use Rushing\Popcorn\Registries\Authorizer;
+use Rushing\Popcorn\Registries\BasicRegistry;
+use Rushing\Popcorn\Registries\Gated;
 use Rushing\Popcorn\Registries\IsRegistry;
 use Rushing\Popcorn\Registries\OnDuplicate;
+use Rushing\Popcorn\Registries\Registry;
 use Rushing\Popcorn\Registries\RegistryArity;
-
-use InvalidArgumentException;
+use Rushing\Popcorn\Registries\RegistryKey;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -23,27 +26,46 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * Strategies are registered by NAME (like the {@see CodecRegistry}), so a host
  * adds a placement without editing this class. The resolver is beam-ux's; the disk it derives a path
  * *for* is beam-core's {@see StorageDriver}.
+ *
+ * ## Registry AND resolver, and the two are not the same array (registry-kernel ticket 38)
+ *
+ * `beam.ux.placements` is the keyspace: `$this->entries`, registrant-supplied at boot, addressable by
+ * name. `$namespaceMap` is **not** a second array over that keyspace and is deliberately left out of
+ * it — it is a `namespace-prefix → strategy-name` indirection table pointing INTO the keyspace, host
+ * config rather than registry entries, and the precedence rule that reads it lives in
+ * {@see resolve()}. Collapsing it into the registry would erase the rule.
+ *
+ * {@see resolve()} therefore answers two questions through one contravariantly widened signature: given
+ * a {@see BeamUxEntry} it runs the precedence above; given a key it is the kernel's lookup.
+ *
+ * @implements Registry<FilePlacement>
  */
 #[IsRegistry(
     root: 'beam.ux.placements',
     of: 'FilePlacement strategies by name — the disk mirror path an entry materializes to',
     arity: RegistryArity::PickOne,
+    entryType: FilePlacement::class,
     onDuplicate: OnDuplicate::Supersede,
     order: 46,
 )]
-class PlacementResolver
+class PlacementResolver implements Gated, Registry
 {
     public const DEFAULT = 'default';
 
-    /** @var array<string, FilePlacement> registered strategies by name */
-    protected array $strategies = [];
+    /** @var BasicRegistry<FilePlacement> registered strategies by name */
+    protected BasicRegistry $entries;
 
     /** @var array<string, string> namespace(-prefix) → strategy name */
     protected array $namespaceMap = [];
 
-    public function register(string $name, FilePlacement $strategy): static
+    public function __construct()
     {
-        $this->strategies[$name] = $strategy;
+        $this->entries = BasicRegistry::for($this);
+    }
+
+    public function register(RegistryKey|string $key, mixed $entry = null, ?string $by = null, ?string $ability = null): static
+    {
+        $this->entries->register($key, $entry, $by, $ability);
 
         return $this;
     }
@@ -56,22 +78,79 @@ class PlacementResolver
         return $this;
     }
 
-    public function resolve(BeamUxEntry $entry): FilePlacement
+    /**
+     * The charter S2 precedence when handed an entry; the kernel's keyed lookup otherwise.
+     *
+     * The `BeamUxEntry` branch is WIDENED into the contract rather than living beside it under another
+     * name: `resolve($entry)` is what every call site in this package (and its ADR-0165 prose) already
+     * says, and the contract's `resolve($key)` answers the same question about the same keyspace one
+     * step lower down.
+     *
+     * @return FilePlacement
+     */
+    public function resolve(RegistryKey|string|BeamUxEntry $key): mixed
     {
+        if (! $key instanceof BeamUxEntry) {
+            /** @var FilePlacement */
+            return $this->entries->resolve($key);
+        }
+
         // 1. per-entry ref — the most specific.
-        $ref = $entry->getAttribute('placement_ref');
+        $ref = $key->getAttribute('placement_ref');
         if (is_string($ref) && $ref !== '') {
             return $this->strategy($ref);
         }
 
         // 2. per-namespace map — longest matching prefix wins.
-        $matched = $this->matchNamespace(is_string($entry->namespace) ? $entry->namespace : null);
+        $matched = $this->matchNamespace(is_string($key->namespace) ? $key->namespace : null);
         if ($matched !== null) {
             return $this->strategy($matched);
         }
 
         // 3. default.
         return $this->strategy(self::DEFAULT);
+    }
+
+    public function has(RegistryKey|string $key): bool
+    {
+        return $this->entries->has($key);
+    }
+
+    public function tryResolve(RegistryKey|string $key): mixed
+    {
+        return $this->entries->tryResolve($key);
+    }
+
+    public function matches(RegistryKey|string $key): array
+    {
+        return $this->entries->matches($key);
+    }
+
+    public function keys(): array
+    {
+        return $this->entries->keys();
+    }
+
+    public function unfiltered(): Registry
+    {
+        return $this->entries->unfiltered();
+    }
+
+    public function authorizeWith(?Authorizer $authorizer): static
+    {
+        $this->entries->authorizeWith($authorizer);
+
+        return $this;
+    }
+
+    /**
+     * The registered strategy names, as callers spelled them (keys relative in, absolute out).
+     *
+     * @return array<int, string>
+     */
+    public function strategies(): array
+    {
+        return $this->entries->relativeKeys();
     }
 
     protected function matchNamespace(?string $namespace): ?string
@@ -94,10 +173,7 @@ class PlacementResolver
 
     protected function strategy(string $name): FilePlacement
     {
-        if (! isset($this->strategies[$name])) {
-            throw new InvalidArgumentException("No FilePlacement strategy registered as [{$name}].");
-        }
-
-        return $this->strategies[$name];
+        /** @var FilePlacement */
+        return $this->entries->resolve($name);
     }
 }

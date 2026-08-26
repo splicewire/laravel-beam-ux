@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Concerns;
 
 use Illuminate\Support\Facades\Storage;
 use Rushing\Popcorn\Concerns\Chained;
+use Rushing\Popcorn\Registries\RegistryIndex;
 use Splicewire\Beam\Storage\DiskStorageDriver;
 use Splicewire\Beam\Storage\GitRepoRegistrar;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
@@ -81,5 +82,23 @@ trait WiresStorage
 
             return new MirrorGitStatus($disk, $app->make(GitRepoRegistrar::class));
         });
+    }
+
+    /**
+     * Describe `beam.ux.storage-drivers` into the shared {@see RegistryIndex} (registry-kernel ticket 38).
+     * In boot, in the trait that owns the fill — see {@see WiresCodecs::describeCodecs()}.
+     *
+     * ⚠️ `describe()` FORCES the singleton to construct, so the closure above now runs at boot rather
+     * than at first read. That is deliberate and safe here because the closure defers everything
+     * request-scoped: the `ParticleWriter` is a `fn ()` the driver calls per write (see the note in
+     * {@see registerStorage()}), and only the mirror disk handle is eager.
+     */
+    #[Chained('boot', order: 90)]
+    protected function describeStorageDrivers(): void
+    {
+        $this->app->make(RegistryIndex::class)->describe(
+            $this->app->make(StorageDriverResolver::class),
+            by: self::class,
+        );
     }
 }
