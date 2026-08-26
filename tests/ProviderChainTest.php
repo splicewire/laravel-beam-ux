@@ -54,7 +54,9 @@ class ProviderChainTest extends TestCase
         'bootSitemap',
         'registerEntryWorkflow',
         'bootCommands',
-        'bootRouteMacro',
+        // `bootRouteMacro` (the `Route::beamUxEntries()` registration) was here until ADR-0214 §6 was
+        // executed by beam-docs-satellite ticket 40. `WiresEntryRoutes` is deleted, so the link is gone
+        // — not renamed, not unhooked. The count assertion below moved 10 → 9 with it.
         'bootPublicRouteMacro',
         'registerThemeSchemas',
         // Added by registry-kernel ticket 38 — the three describes are boot links, and they sit in the
@@ -107,7 +109,7 @@ class ProviderChainTest extends TestCase
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
         $this->assertCount(11, $this->chain('register'));
-        $this->assertCount(10, $this->chain('boot'));
+        $this->assertCount(9, $this->chain('boot'));
     }
 
     public function test_the_provider_declares_the_contract_so_a_detector_can_find_it(): void

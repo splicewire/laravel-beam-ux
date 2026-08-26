@@ -4,20 +4,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Entry-body authoring API root (ADR-0124 owner-tier seam)
+    | beam-ux's owner-tier URI prefix + route-name stem (ADR-0124 owner-tier seam)
     |--------------------------------------------------------------------------
     |
-    | The owner-tier URI prefix + route-name stem the HOST mounts the entry-body
-    | authoring endpoints at via `Route::beamUxEntries()`, resolved client-side by
-    | the `beam.ux.entries.body.*` route names. beam-ux is a `Splicewire\Beam\*`
-    | package → the free `/beam` tier, domain `ux`, so the defaults are `beam/ux`
-    | (→ `GET|PUT beam/ux/entries/{slug}/body`) and the `beam.ux.` name stem.
+    | beam-ux is a `Splicewire\Beam\*` package → the free `/beam` tier, domain
+    | `ux`, so the defaults are `beam/ux` and the `beam.ux.` name stem.
     |
-    | Config-driven (not hardcoded in the macro) so a host can relocate the mount
-    | per-deploy via env — or by passing explicit args to the macro — without a
-    | code change. The package ships the default + the (policy-free) controller;
-    | the host owns the mount, the auth middleware (which IS the write gate), and
-    | the wire.
+    | BOTH KEYS OUTLIVED WHAT INTRODUCED THEM. They were added for the entry-body
+    | authoring mount `Route::beamUxEntries()`, which is retired (ADR-0214 §6 —
+    | the transport is now two id-addressed particle OPERATIONS on the
+    | `beam-ux-entry` resource, mounted by the host with `Route::particleOp()`).
+    | ADR-0214 originally deleted these keys with the macro; that was amended
+    | after measuring who else reads them, and neither is a mount prefix now:
+    |
+    |  - `api_root` is read by beam core's PUBLISHED Scribe stub
+    |    (`splicewire/laravel-beam/stubs/scribe/scribe.php`) to derive the OpenAPI
+    |    extraction include-list — asserted by `ScribeOutputContractAudit`, pinned
+    |    by `PublishedScribeStubTest`, documented in ADR-0211. Three hosts carry
+    |    the published copy. Deleting it silently drops `beam/ux/*` from the spec.
+    |  - `route_name` is read by `Concerns\WiresPublicSurface` to name the
+    |    public-entry ARTIFACT route, the one ADR-0209 §7 hangs its immutable
+    |    cache header on. Deleting it renames that route.
+    |
+    | Env-overridable so a deploy can move either without a code change.
     |
     */
     'api_root' => env('BEAM_UX_API_ROOT', 'beam/ux'),

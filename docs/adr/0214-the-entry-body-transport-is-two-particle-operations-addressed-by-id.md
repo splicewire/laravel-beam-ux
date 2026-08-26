@@ -379,3 +379,51 @@ end to end.
 That is why `Region.record` was renamed to `Region.recordId` rather than merely redocumented: it is
 the one field every host constructs by hand, and renaming it is the only mechanism available that
 turns a silent 404-on-every-editor-open into a compile error.
+
+---
+
+## §6 EXECUTED — 2026-08-26 (beam-docs-satellite ticket 40)
+
+`Route::beamUxEntries()`, `Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController`, the
+`WiresEntryRoutes` concern that registered the macro, and `BeamUxEntryBodyControllerTest` are deleted.
+Both config keys stay, per this ADR's own amendment; their docblocks in `config/beam/ux.php` are
+rewritten away from the macro to name what actually reads them now.
+
+The gate this section carried was never "the last site" — it was **every caller**, and the count was
+wrong four times running, each time because the enumeration grepped the layer the consumer was
+expected to be at rather than the symbol being retired. The final enumeration was done over the real
+directories (`~/Workspaces/php/packages/*`, `~/Workspaces/js/packages/*`,
+`~/Workspaces/laravel/starters/*`, `~/Herd/*` on disk, `~/Workspaces/splicewire-beam-runbook`), never
+through the ecosystem repo's symlink view, because `grep -r` does not follow symlinks and returns a
+silent zero there — including for the package that DEFINED the macro.
+
+Callers of `Route::beamUxEntries()` at the moment of deletion: **zero**. Every remaining hit of the
+identifier anywhere in the family is prose — this ADR, four ported code comments explaining what the
+call site replaced, and `laravel-satellite-starter/storage/logs/laravel.log`'s 2026-08-21 stack trace.
+
+| holder | came off at | verified |
+|---|---|---|
+| `splicewire/www` | ticket 37 | — |
+| `rushing/audiostud` | ticket 36 | — |
+| `splicewire/laravel-beam-starter` | ticket 40 (`80aa286`) | `route:list` shows the two ops; `EntryBodyTransportTest` 6/6 |
+| `splicewire/laravel-satellite-starter` | ticket 40 (`a42add5`, lineage merge) | same, 6/6 |
+| `splicewire/laravel-tower-starter` | ticket 40 (`b8e8577`, lineage merge) | same, 6/6 (pgsql) |
+
+`splicewire/splicewire-app` is **not** on this list and never was: it runs its own
+`App\Http\Controllers\Api\V1\BeamUxEntryBodyController` fork mounted by `TierRoutes::mount()`, which
+this deletion does not touch. That fork is beam-docs-satellite ticket 35 and is independent of §6.
+
+**The boot question this ADR raised is answered.** The 2026-08-21 satellite log recorded
+`Attribute [beamUxEntries] does not exist` because the macro was not registered in that install at
+that moment — not because the starter was structurally unbootable. Measured 2026-08-26 before any
+change: all three starters ran `artisan route:list` to completion at Laravel 13.26.1, exit 0, with the
+macro mounting `GET|PUT beam/ux/entries/{slug}/body`. The hazard the log recorded is real and is
+exactly what made §6 dangerous — an unregistered macro and a deleted one throw the identical exception
+from the identical line, before any route is served — but it was a transient install state, not a
+standing one.
+
+**What now proves it.** `tests/Feature/EntryBodyTransportTest` exists in all three starters and asserts
+the macro's two route names are ABSENT (a boot assertion, not a routing one), that both ops mount with
+the right verbs, that an author round-trips a body by id, and that a query string on the read is a 422.
+There was no such test anywhere in the family before ticket 40, which is how four undercounts happened
+against a green suite every time.

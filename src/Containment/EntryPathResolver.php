@@ -103,8 +103,8 @@ class EntryPathResolver
      * unique: two nodes under different parents may both declare `/docs`. That is a genuine authoring
      * ambiguity rather than something to resolve by policy, so the tie is broken deterministically
      * (shallowest parent first, then by id) instead of by whichever row the driver happened to return —
-     * the silent-wrong-row class of bug `BeamUxEntryBodyController` documents finding live on slug
-     * ambiguity.
+     * the silent-wrong-row class of bug the retired `BeamUxEntryBodyController` recorded finding live on
+     * slug ambiguity (ADR-0214 §6 deleted it; the transport is id-addressed now).
      *
      * @param  array<int, string>  $pieces
      */

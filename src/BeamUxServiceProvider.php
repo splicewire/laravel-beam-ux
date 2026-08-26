@@ -19,7 +19,6 @@ use Splicewire\Beam\Ux\Concerns\WiresCompile;
 use Splicewire\Beam\Ux\Concerns\WiresContainment;
 use Splicewire\Beam\Ux\Concerns\WiresDisk;
 use Splicewire\Beam\Ux\Concerns\WiresEntitlements;
-use Splicewire\Beam\Ux\Concerns\WiresEntryRoutes;
 use Splicewire\Beam\Ux\Concerns\WiresEntryWorkflow;
 use Splicewire\Beam\Ux\Concerns\WiresInference;
 use Splicewire\Beam\Ux\Concerns\WiresParticleDeclarations;
@@ -63,7 +62,6 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
     use WiresContainment;
     use WiresDisk;
     use WiresEntitlements;
-    use WiresEntryRoutes;
     use WiresEntryWorkflow;
     use WiresInference;
     use WiresParticleDeclarations;
@@ -99,8 +97,10 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
     public function packageRegistered(): void
     {
-        // Merge the entry-body route config (api_root / route_name) as `config('beam.ux.*')`, so the
-        // beamUxEntries() macro reads a config-driven, env-overridable prefix instead of a hardcoded one.
+        // Merge `config('beam.ux.*')`. Both keys OUTLIVED the retired `Route::beamUxEntries()` macro
+        // they were introduced for (ADR-0214 §6, as amended): `api_root` positions beam core's Scribe
+        // OpenAPI extraction window, `route_name` names the public-entry artifact route
+        // ({@see Concerns\WiresPublicSurface}). Neither is a mount prefix any more.
         $this->mergeConfigFrom(__DIR__.'/../config/beam/ux.php', 'beam.ux');
 
         // Every container binding this package makes, contributed by the trait that OWNS the concern

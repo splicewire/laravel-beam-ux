@@ -4,7 +4,6 @@ namespace Splicewire\Beam\Ux\Compile;
 
 use Splicewire\Beam\Ux\Console\CompileEntriesCommand;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
-use Splicewire\Beam\Ux\Http\Controllers\BeamUxEntryBodyController;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -12,8 +11,9 @@ use Splicewire\Beam\Ux\Type\UxType;
 /**
  * **The one shared compile action** ADR-0209 §7 specifies, invoked by all three producers:
  *
- *  - {@see BeamUxEntryBodyController::update()} — the editor save path, which already mirrors to disk
- *    and is therefore the natural hook;
+ *  - {@see \Splicewire\Beam\Ux\Particle\EntryBodySaveOp} — the editor save path, which already mirrors
+ *    to disk and is therefore the natural hook (it was `BeamUxEntryBodyController::update()` until
+ *    ADR-0214 §6 retired that controller);
  *  - {@see RegisterEntriesFromDisk} — the operator batch, where Node is trivially available;
  *  - {@see CompileEntriesCommand} — the `splicewire:beam:ux:compile` backfill.
  *
