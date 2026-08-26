@@ -33,6 +33,7 @@ use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxRouteShadowAudit;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Write\ParticleWriter;
 
@@ -160,6 +161,16 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxArtifactAudit::class,
+            );
+
+            // ADR-0209 §2's inverse, measured at beam-docs-satellite ticket 38: the renderer's catch-all
+            // is mounted LAST so it shadows nothing — which means everything registered before it wins,
+            // including a route the host never wrote. Scribe's unpublished defaults mount an HTML docs UI
+            // at `/docs`, the exact URL beam's install seeds the docs subtree at, and the starter 500'd
+            // there with a correct entry sitting behind it. Every other check in this package passed.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxRouteShadowAudit::class,
             );
         }
 
