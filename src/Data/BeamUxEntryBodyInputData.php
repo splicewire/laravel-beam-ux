@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Description;
 use Spatie\LaravelData\Data;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
@@ -29,12 +30,18 @@ use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
 class BeamUxEntryBodyInputData extends Data
 {
     /**
-     * @param  array<string, mixed>  $body  the particle body to persist — the JsonDoc the inspector
-     *                                      SchemaForm edited, written through beam-core's versioned
-     *                                      `ParticleWriter` (ADR-0092: the surface is beam-ux's, the
-     *                                      particle it rides is beam-core's)
+     * The prose lives on `#[Description]` and NOT only in this `@param`, which is what
+     * api-surface-coherence ticket 96's guard measured: `JsonSchemaGenerator` does not read docblocks,
+     * so a property documented here alone reaches the reference and the generated SDK undescribed.
+     *
+     * @param  array<string, mixed>  $body  see the attribute
      */
     public function __construct(
+        #[Description(
+            'The particle body to persist — the JsonDoc the inspector SchemaForm edited. Send the '.
+            'WHOLE document: this is a replace, not a merge, and `{}` is a legitimate value that '.
+            'clears the entry (which is why the rule is `present` rather than `required`).'
+        )]
         public array $body,
     ) {}
 
