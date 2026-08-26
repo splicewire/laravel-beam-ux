@@ -244,7 +244,7 @@ four operations. Registration is idempotent by key, so a host that has not yet d
 entries registers the same declaration twice and gets the same result; the host lines are therefore
 safe to delete independently.
 
-### The starters mount nothing, so there is nothing to propagate
+### ~~The starters mount nothing, so there is nothing to propagate~~ — WRONG, corrected 2026-08-26
 
 Ticket 30's step 4 has `laravel-beam-starter` land the change and propagate by merge down the
 restored chain. Measured: all three starters `require` `splicewire/laravel-beam-ux`, and **none**
@@ -252,6 +252,32 @@ calls `Route::beamUxEntries()` or names a beam-ux class in config. The starters 
 this transport, so §6's estate sweep does not reach them and the "prove it OTB on a starter"
 acceptance has nothing to prove — the operations are registered by the package, so a starter gets
 them by installing it and mounting nothing.
+
+**Amended (beam-docs-satellite ticket 36, 2026-08-26): every word of that paragraph is false.** All
+three starters call `Route::beamUxEntries()`, on the same line of the same file —
+`routes/web.php:21` in `laravel-beam-starter`, `laravel-satellite-starter` and
+`laravel-tower-starter` alike (they are forks, so the line propagated once and sat in all three).
+Each also ships a `bodyClient` fetching the literal `/beam/ux/entries/{slug}/body` and a generated
+`actions/Splicewire/Beam/Ux/Http/Controllers/BeamUxEntryBodyController.ts`.
+
+Two things follow.
+
+**§6's deletion is not unblocked by the last SITE.** `splicewire/www` (ticket 37) and
+`rushing/audiostud` (ticket 36) are both off the macro, and audiostud was named "the sole remaining
+gate" on the strength of the paragraph above. It was not. The macro has three more callers, and
+deleting it today breaks a fresh starter install at boot, not at first request — a route file that
+calls a missing macro throws before any route is served.
+
+**One of them is already broken that way.** `laravel-satellite-starter/storage/logs/laravel.log`
+records `InvalidArgumentException: Attribute [beamUxEntries] does not exist` thrown from
+`routes/web.php:21` on 2026-08-21 — the macro was not registered in that install at all. So the
+starter chain's mount is not merely a stale consumer of this transport; at least one link of it does
+not boot. That is the starter chain's own ticket, not this ADR's.
+
+This is the fourth time a count on this transport has been wrong, and the third time the miss was
+found by executing a ticket rather than by reading one. The pattern each time: the enumeration
+grepped the layer it expected the consumer to be at (the interface, the sites, the ADR's own host
+list) rather than the symbol being retired.
 
 ### What DID land in this pass
 
@@ -330,6 +356,17 @@ All measured at `www` against a live entry, through the real router:
 
 The published spec agrees with the declarations: `body` carries `parameters: []` and no
 `requestBody`; `save-body` carries one typed `BeamUxEntryBodyInputData`.
+
+**The 422 is the host's, not the operation's** (measured at `rushing/audiostud`, ticket 36). The same
+`?namespace=` read there is a **302 with session errors**, carrying the identical
+``The `body` operation accepts no input.`` message. The operation raises a `ValidationException`
+either way; what differs is whether Laravel renders it as JSON, and that host calls
+`shouldRenderJsonWhen(fn ($r) => $r->is('api/*'))` in `bootstrap/app.php`, which **replaces** the
+default predicate rather than widening it — so `Accept: application/json` stops counting outside
+`api/*`. Worth recording because "it 422s" reads like a property of the transport and is not one: a
+host whose machine surface does not live under `api/*` gets a redirect, and a `fetch()` client sees a
+followed redirect and an HTML body instead of a status it can branch on. `403` is unaffected
+(authorization does not route through that predicate), so §3's ability check reads the same on both.
 
 ### A type-system fact worth recording, because it decided a rename
 
