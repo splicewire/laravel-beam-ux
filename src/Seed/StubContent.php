@@ -98,6 +98,22 @@ class StubContent
             }
         }
 
+        // Chrome + nav grouping (ADR-0213), read from a stub's frontmatter exactly as
+        // `RegisterEntriesFromDisk` reads them from a disk file — one reader shape, two sources, so a
+        // contributed page and an imported one declare their shell the same way. Column-guarded, so a
+        // host that has not migrated 0213 seeds the page without them rather than failing the install.
+        foreach (['layout', 'template', 'nav_group'] as $key) {
+            if (($this->frontmatter[$key] ?? '') === '') {
+                continue;
+            }
+
+            if (! \Illuminate\Support\Facades\Schema::hasColumn('beam_ux_entries', $key)) {
+                continue;
+            }
+
+            $out[$key] = $this->frontmatter[$key];
+        }
+
         if (isset($this->frontmatter['nav_order']) && is_numeric($this->frontmatter['nav_order'])) {
             $out['nav_order'] = (int) $this->frontmatter['nav_order'];
         }
