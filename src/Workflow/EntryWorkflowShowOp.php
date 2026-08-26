@@ -36,6 +36,11 @@ use Splicewire\Beam\Workflows\Data\WorkflowProjectionData;
     // hosts, so the flip changed no answer — it removed the two accidents the right answer rested on.
     abilityModel: false,
     output: WorkflowProjectionData::class,
+    // `input: false` — this operation accepts NO caller payload, declared rather than implied
+    // (api-surface-coherence 68). Measured, not assumed: `handle()` never touches `$request`.
+    // Enforced by `ParticleOperationController::rejectInput()`, so a request that carries one is
+    // a 422 instead of a silent ignore.
+    input: false,
 )]
 class EntryWorkflowShowOp
 {
