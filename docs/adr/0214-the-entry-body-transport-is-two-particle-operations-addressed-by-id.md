@@ -273,3 +273,72 @@ defeated by it.
 
 **Still open, per host:** the controller, the macro, the app's fork + DTO subclass, the host config
 entries, and the six frontend call sites' slug → id migration.
+
+---
+
+## Amendments (2026-08-26, beam-docs-satellite ticket 34, on migrating the first host)
+
+### §2's "the renderer already puts the entry id in its props" is true and insufficient
+
+> *"Three of the six call sites already hold the row and were passing a slug for no reason. The two
+> that genuinely derive one are the in-page canvas editor and `MainframeHost` — and `MainframeHost`
+> derives its slug from the **Inertia component name** … The renderer already puts the entry id in
+> its props."*
+
+Both sentences are correct. Together they imply the `MainframeHost` case is a matter of reading a
+prop that is already there, and it is not.
+
+`MainframeHost` is `createMainframeHost` in **`@splicewire/beam-mainframe`** — a package this ADR
+does not name, and a **seventh** repo on this transport after the six ticket 30 counted. It resolves
+one entry key through a three-branch chain:
+
+```
+overrideEntrySlug()            // ?beam_entry=<slug>
+  ?? propSlug                  // props.entry.slug  — props.entry.id is right beside it, unread
+  ?? entrySlugFor(component, componentToEntry)
+```
+
+The third branch is a **host-authored, compile-time frontend map from Inertia component name to
+entry**. No such map can carry a per-database uuid: it differs in every deployment, including a fresh
+install. So the id exists for the middle branch only, the factory carries one key rather than two,
+and a host cannot hand these operations an id today no matter what it reads off its props.
+
+Measured at `splicewire/www` while landing ticket 34: five consumers of the host body client, three
+of which hold the row and migrated cleanly, and two — `editor/mount.tsx` and
+`layouts/beam-ux/mainframe-host.tsx` — which are mainframe-fed and could not.
+
+**Amended:** the slug → id migration at a mainframe-hosted call site is **not** a call-site edit. It
+needs a decision about where the entry key comes from — a resolver on the wire, a second key through
+the factory, or retiring the component-name fallback entirely — and that decision is filed as
+beam-docs-satellite ticket 37, not taken here. §6's deletion of `Route::beamUxEntries()` is gated on
+it, on top of the per-host gating the 2026-08-26 amendment already added.
+
+### What §1/§4/§5 look like once actually served
+
+All measured at `www` against a live entry, through the real router:
+
+- `GET .../op/body` → 200 `{slug, id, type, schema, body, compileError}`.
+- the same with `?namespace=theme` → **422**. `input: false` on a GET means the retired disambiguator
+  fails loudly rather than being ignored, which is a stronger outcome than §2 claimed for it.
+- `POST .../op/save-body` `{body: …}` → 200, `compileError` null, disk mirror written.
+- the same with `{bodyy: …}` → **422**, where the retired controller silently saved `{}`.
+- either, as a user without `ux.author` → **403**, so §3's declared ability is live on the mount and
+  not inherited from the enclosing group.
+- §5's config deletion changes nothing: the unfiltered registries either side of removing all five
+  host-named FQCNs hold **13 resources and 6 operations, identical in content and registration
+  order**.
+
+The published spec agrees with the declarations: `body` carries `parameters: []` and no
+`requestBody`; `save-body` carries one typed `BeamUxEntryBodyInputData`.
+
+### A type-system fact worth recording, because it decided a rename
+
+`UxBuilderClient` moved to `loadBody(id)` / `saveBody(id, body)` in ticket 33. A host implementation
+still declaring `loadBody(slug: string, namespace?: string | null)` assigns to that signature with
+**zero** TypeScript errors — a function with extra *optional* parameters is assignable to one with
+fewer, and a slug and an id are both `string`. So this ADR's migration is invisible to the compiler
+end to end.
+
+That is why `Region.record` was renamed to `Region.recordId` rather than merely redocumented: it is
+the one field every host constructs by hand, and renaming it is the only mechanism available that
+turns a silent 404-on-every-editor-open into a compile error.
