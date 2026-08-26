@@ -289,6 +289,23 @@ class RegisterEntriesFromDisk
             $out['title'] = $fm['title'];
         }
 
+        // Chrome + nav grouping (ADR-0213), read from frontmatter like every other containment field
+        // and column-guarded like every other aspect field, so a host that has not migrated 0213 imports
+        // the file WITHOUT them rather than dying on a missing column. All three are plain strings; the
+        // inheritance that makes `layout`/`template` useful is resolved at render, not stamped here, so
+        // a guide file declaring nothing is the normal case and inherits its section's shell.
+        foreach (['layout', 'template', 'nav_group'] as $field) {
+            if (! isset($fm[$field]) || $fm[$field] === '') {
+                continue;
+            }
+
+            if (! Schema::hasColumn('beam_ux_entries', $field)) {
+                continue;
+            }
+
+            $out[$field] = $fm[$field];
+        }
+
         // The escape hatch on born-published: a file declaring its own marking imports at that marking.
         // Guarded on the column so a host that has not migrated workflows imports without it.
         if (isset($fm['workflow_marking']) && $fm['workflow_marking'] !== '' && Schema::hasColumn('beam_ux_entries', 'workflow_marking')) {

@@ -271,4 +271,31 @@ return [
         'extra_tokens' => [],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Chrome (ADR-0213 — layout/template inherited down the containment tree)
+    |--------------------------------------------------------------------------
+    |
+    | An entry's `layout`/`template` resolve CLIENT-side: a registered component
+    | name first, then another entry's slug (ADR-0213 §7). The registry itself is
+    | a TypeScript `Record` in the host's bundle, which PHP cannot see — so this
+    | key is how a host TELLS the doctor what its bundle registers, and it is the
+    | only reason the key exists.
+    |
+    | Seeded with the names `@splicewire/beam-ux/docs` ships. A host that adds its
+    | own layout adds one string here; a host that adds none never touches it.
+    | `BeamUxChromeAudit` fails on any declared name that is in neither this list
+    | nor the entries table — a stale list is a false alarm, which is the right
+    | direction, because the alternative is a guide that silently loses its rail
+    | behind a 200.
+    |
+    */
+    'chrome' => [
+        'registered' => [
+            'DocsLayout',
+            'ProseTemplate',
+            'SpreadTemplate',
+        ],
+    ],
+
 ];

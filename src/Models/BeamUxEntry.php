@@ -168,6 +168,13 @@ class BeamUxEntry extends Model implements WorkflowManaged
         'segment',
         // Sibling nav order (host-provided; nullable — projector orders by it when the column is present).
         'nav_order',
+        // Chrome aspect (ADR-0213): the two inherited composition axes. NULL = no declaration =
+        // inherit the nearest ancestor's; a value is a registered component name or another entry's
+        // slug, resolved registered-name-first.
+        'layout',
+        'template',
+        // Nav-only grouping label (ADR-0213 §8) — a heading in the rail, never a URL segment.
+        'nav_group',
         // Access aspect (ADR-0212): the two conjunctive rights, any-of lists of tokens opaque to
         // beam-ux. NULL = no declaration = no constraint (inherit); `[]` = declared-but-empty = deny.
         'traverse',

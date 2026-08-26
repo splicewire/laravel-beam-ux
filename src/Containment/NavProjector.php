@@ -150,6 +150,11 @@ class NavProjector
     {
         $nodes = [];
 
+        // Group headings (ADR-0213 §8), keyed by `nav_group` and holding the INDEX of the heading node
+        // in `$nodes` — so a group lands at the position of its first member and therefore inherits the
+        // `nav_order` its members were already sorted by, with no second sort and no group_order column.
+        $groups = [];
+
         $visible = $all
             ->where('parent_id', $parentId)
             ->reject(fn (BeamUxEntry $entry) => $this->publish !== null && ! $this->publish->isPublished($entry))
@@ -161,18 +166,52 @@ class NavProjector
 
             if ($entry->segment === null || $entry->segment === '') {
                 // Pass-through: lift the children, emit nothing for the node itself.
-                $nodes = [...$nodes, ...$children];
+                $contribution = $children;
+            } else {
+                $contribution = [NavLink::make(
+                    title: $entry->title ?? Str::headline((string) $entry->slug),
+                    href: $this->urls->resolveChain($chain),
+                    children: $children,
+                )];
+            }
+
+            // Ungrouped children stay at the parent's level — the pre-0213 behaviour, unchanged, and
+            // the reason a host that declares no `nav_group` anywhere sees a byte-identical projection.
+            $group = $this->groupOf($entry);
+
+            if ($group === null) {
+                $nodes = [...$nodes, ...$contribution];
 
                 continue;
             }
 
-            $nodes[] = NavLink::make(
-                title: $entry->title ?? Str::headline((string) $entry->slug),
-                href: $this->urls->resolveChain($chain),
-                children: $children,
-            );
+            if (! array_key_exists($group, $groups)) {
+                $groups[$group] = count($nodes);
+                // An href-less heading: visible, ordered, NOT addressable. `NavLink::make()`'s `href`
+                // was already nullable, which is why §8 needed no schema change — the only thing
+                // missing was that this projector never emitted one.
+                $nodes[] = NavLink::make(title: $group, href: null, children: []);
+            }
+
+            $heading = $nodes[$groups[$group]];
+            $heading->children = [...$heading->children, ...$contribution];
         }
 
         return $nodes;
+    }
+
+    /**
+     * An entry's nav-group label, or null when it declares none.
+     *
+     * Guarded on the ATTRIBUTE rather than on `Schema::hasColumn` (the guard `nav_order` uses) because
+     * this is a per-row read on a model already hydrated, not a clause pushed into a query: a host that
+     * has not migrated ADR-0213 simply has no such attribute, and `getAttribute` answers null for it
+     * without a schema round trip per node.
+     */
+    private function groupOf(BeamUxEntry $entry): ?string
+    {
+        $group = $entry->getAttribute('nav_group');
+
+        return is_string($group) && $group !== '' ? $group : null;
     }
 }

@@ -31,6 +31,7 @@ use Splicewire\Beam\Ux\Concerns\WiresThemeSchemas;
 use Splicewire\Beam\Ux\Database\Seeders\BeamUxSeeder;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Write\ParticleWriter;
@@ -141,6 +142,14 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxAccessAudit::class,
+            );
+
+            // ADR-0213's sibling check: an entry naming a layout/template that resolves to neither a
+            // registered component nor another entry. Chrome resolves client-side, so an unresolvable
+            // name renders the fallback shell behind a 200 — a guide silently without its rail.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxChromeAudit::class,
             );
 
             // ADR-0209 §7's reporting seam: entries whose compiled artifact is missing or stale. It is

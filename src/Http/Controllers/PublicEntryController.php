@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
+use Splicewire\Beam\Ux\Containment\ChromeResolver;
 use Splicewire\Beam\Ux\Containment\NavProjector;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
@@ -42,6 +43,7 @@ class PublicEntryController
         private EntryArtifactStore $artifacts,
         private NavProjector $nav,
         private EntryRenderer $renderer,
+        private ChromeResolver $chrome = new ChromeResolver,
     ) {}
 
     /**
@@ -101,6 +103,12 @@ class PublicEntryController
 
         $entry = $chain[array_key_last($chain)];
 
+        // Chrome (ADR-0213 §4), resolved from the chain the gate walk already produced — nearest
+        // declaring ancestor per axis, per-entry override. Names, not components: what a name means is
+        // the client's business (registered component first, then another entry's slug, §7), and the
+        // only reason these travel in the payload at all is that the client cannot walk the tree.
+        $chrome = $this->chrome->resolve($chain);
+
         $response = $this->renderer->render($page, [
             'entry' => [
                 'id' => (string) $entry->getKey(),
@@ -109,6 +117,8 @@ class PublicEntryController
                 'type' => $entry->type?->value,
                 'format' => $entry->format?->value,
                 'url' => $this->urls->resolveChain($chain),
+                'layout' => $chrome['layout'],
+                'template' => $chrome['template'],
             ],
             // The artifact is addressed, not inlined: it is a JS module the shell imports, and keeping
             // it out of the Inertia payload is what lets a public one be cached by its version while

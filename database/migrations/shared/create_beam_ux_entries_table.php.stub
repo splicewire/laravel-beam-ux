@@ -108,6 +108,22 @@ return new class extends Migration
                 $table->string('segment')->nullable();
                 $table->integer('nav_order')->nullable();
 
+                // Chrome (ADR-0213): the two inherited composition axes plus the nav grouping label.
+                // `layout` is the chrome wrapping one hole (header/breadcrumb/rail/on-this-page);
+                // `template` is the slot-bearing scaffold the page's own body fills. Both resolve to a
+                // registered component name FIRST and then to another entry's slug (§7), and both are
+                // inherited from the NEAREST ANCESTOR that declares one, with a per-entry override —
+                // over the same chain ADR-0212's rights already walk, so no second traversal.
+                // NULL is the load-bearing value on both: no declaration ⇒ inherit.
+                //
+                // `nav_group` (§8) is a nav-only label, deliberately NOT a URL segment: `NavProjector`
+                // emits one href-less `NavLink` per distinct group among a parent's children, so a rail
+                // gets headings without every guide's URL moving. Not indexed — grouping happens in
+                // memory over the single adjacency load the projector already performs, never in SQL.
+                $table->string('layout')->nullable();
+                $table->string('template')->nullable();
+                $table->string('nav_group')->nullable();
+
                 // Access (ADR-0212): the two conjunctive rights, each an any-of list of tokens OPAQUE
                 // to beam-ux (host RBAC vocabulary stays host-side, ADR-0092). `access` gates reading
                 // THIS row's body; `traverse` gates reaching THROUGH it to descendants and being listed
