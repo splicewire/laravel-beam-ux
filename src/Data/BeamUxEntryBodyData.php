@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Data;
 
 use Spatie\LaravelData\Data;
+use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
@@ -22,10 +23,22 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *    entry's body rides beam-core's versioned particle — ADR-0092 vendor seam: the surface is beam-ux's,
  *    the particle body it round-trips is beam-core's).
  *
- * No `#[TypeScript]` here (unlike the app-local original): typed-client codegen is a HOST concern — a host
- * that wants the generated hook re-exposes/subclasses this, so the package never forces a
- * typescript-transformer dependency on every consumer.
+ * ## The `#[TypeScript]` omission was wrong on its own terms (ADR-0214 §7)
+ *
+ * This docblock used to argue that typed-client codegen is a host concern and that the attribute would
+ * *"force a typescript-transformer dependency on every consumer."* That was never true of beam-ux,
+ * which hard-requires `splicewire/laravel-beam`, which requires `spatie/typescript-transformer`. It was
+ * also unique to this package: beam core carries the attribute on 7 Data classes, beam-accounts 12,
+ * beam-workflows 13, beam-commerce 24, tower 155 — beam-ux's were the only package Data classes absent
+ * from `splicewire-app`'s generated tree, which already resolves types from eight vendor namespaces.
+ *
+ * The host subclass the omission forced (`App\Data\BeamUxEntryBodyData`, existing solely to carry the
+ * attribute) deletes with it, and its own stated rationale was doubly stale — it claimed to surface the
+ * type as `App.Data.BeamUxEntryBodyData`, and `surgeon-audit-viability` ticket 34 dropped that remap, so
+ * every type now emits at its real PHP namespace. The generated alias name `BeamUxEntryBodyData` is
+ * unchanged, so no consumer moves.
  */
+#[TypeScript]
 class BeamUxEntryBodyData extends Data
 {
     /**

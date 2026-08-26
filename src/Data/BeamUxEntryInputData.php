@@ -9,6 +9,7 @@ use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\Widget;
 use Spatie\LaravelData\Data;
+use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 
 /**
  * The validated create-input for the `BeamUxEntry` Frame resource (theme-entries-and-authoring
@@ -31,6 +32,7 @@ use Spatie\LaravelData\Data;
  * inference), matching `ScaffoldCommand`'s own minimal-entry precedent; there is no static
  * `type → refs` map anywhere in this package to reproduce here.
  */
+#[TypeScript]
 #[Title('New Entry')]
 class BeamUxEntryInputData extends Data
 {

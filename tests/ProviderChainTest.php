@@ -47,6 +47,10 @@ class ProviderChainTest extends TestCase
 
     /** `packageBooted()`'s hand-written block, verbatim — note it mixed `boot*` and `register*` prefixes. */
     private const HISTORICAL_BOOT_ORDER = [
+        // Added by ADR-0214 §5 (beam-docs-satellite 30), not part of the historical hand-written block:
+        // the package registers its own particle declarations FIRST, so every later boot link — the
+        // route macros above all — sees a populated registry rather than one a host had to fill in.
+        'bootParticleDeclarations',
         'bootSitemap',
         'registerEntryWorkflow',
         'bootCommands',
@@ -97,7 +101,7 @@ class ProviderChainTest extends TestCase
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
         $this->assertCount(11, $this->chain('register'));
-        $this->assertCount(6, $this->chain('boot'));
+        $this->assertCount(7, $this->chain('boot'));
     }
 
     public function test_the_provider_declares_the_contract_so_a_detector_can_find_it(): void

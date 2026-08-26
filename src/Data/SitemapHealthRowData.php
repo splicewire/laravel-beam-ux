@@ -7,6 +7,7 @@ use Rushing\DataFilters\Attributes\Sortable;
 use Rushing\DataFilters\Operators\Exact;
 use Schemastud\Frame\Attributes\Column;
 use Spatie\LaravelData\Data;
+use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -39,6 +40,7 @@ use Splicewire\Beam\Ux\Type\UxType;
     section: 'ops',
     readOnly: true,
 )]
+#[TypeScript]
 class SitemapHealthRowData extends Data
 {
     public function __construct(

@@ -9,6 +9,7 @@ use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\RowActions;
 use Schemastud\Frame\Attributes\Widget;
 use Spatie\LaravelData\Data;
+use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -51,6 +52,7 @@ use Splicewire\Beam\Ux\Type\UxType;
 // FORM's source) never reads it, a separate seam entirely (found live: the edit panel read "UxType"
 // for the type field and the bare class name "BeamUxEntryData" for its own heading, both from
 // JsonSchemaGenerator falling back to raw PHP names with no #[Title] on this class to override).
+#[TypeScript]
 #[Title('UX Entry')]
 class BeamUxEntryData extends Data
 {

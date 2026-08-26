@@ -22,6 +22,7 @@ use Splicewire\Beam\Ux\Concerns\WiresEntitlements;
 use Splicewire\Beam\Ux\Concerns\WiresEntryRoutes;
 use Splicewire\Beam\Ux\Concerns\WiresEntryWorkflow;
 use Splicewire\Beam\Ux\Concerns\WiresInference;
+use Splicewire\Beam\Ux\Concerns\WiresParticleDeclarations;
 use Splicewire\Beam\Ux\Concerns\WiresPlacement;
 use Splicewire\Beam\Ux\Concerns\WiresPublicSurface;
 use Splicewire\Beam\Ux\Concerns\WiresSitemap;
@@ -63,6 +64,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
     use WiresEntryRoutes;
     use WiresEntryWorkflow;
     use WiresInference;
+    use WiresParticleDeclarations;
     use WiresPlacement;
     use WiresPublicSurface;
     use WiresSitemap;
