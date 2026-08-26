@@ -27,6 +27,14 @@ use Splicewire\Beam\Workflows\Data\WorkflowProjectionData;
     kind: OperationKind::Read,
     model: BeamUxEntry::class,
     ability: 'ux.author',
+    // `ux.author` is an ENTITLEMENT key, not a policy verb, so the check is declared subject-free
+    // (particle-operation-surface ticket 08). Until this was declared, the resolver was handed the
+    // loaded entry and asked a per-action question with an entitlement token — and it answered
+    // correctly only by accident: `BeamUxEntry` carries no policy in any host, so Laravel's Gate fell
+    // through to the bare `ux.author` alias `beam-accounts` defines as
+    // `fn ($user) => $user->can('entitlement:ux.author')`. Measured identical across 28 users in five
+    // hosts, so the flip changed no answer — it removed the two accidents the right answer rested on.
+    abilityModel: false,
     output: WorkflowProjectionData::class,
 )]
 class EntryWorkflowShowOp

@@ -30,6 +30,11 @@ use Splicewire\Beam\Workflows\Data\WorkflowTransitionRequestData;
     kind: OperationKind::Write,
     model: BeamUxEntry::class,
     ability: 'ux.author',
+    // Entitlement plane, subject-free — same reasoning as {@see EntryWorkflowShowOp}'s own note
+    // (particle-operation-surface ticket 08). The two ops MUST stay on the same plane: a Workflow tab
+    // that can read the projection but not fire the transition it just rendered is worse than either
+    // gate alone.
+    abilityModel: false,
     input: WorkflowTransitionRequestData::class,
     output: WorkflowTransitionAttemptData::class,
 )]
