@@ -10,6 +10,7 @@ use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\Widget;
 use Spatie\LaravelData\Data;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
+use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 
 /**
  * The validated create-input for the `BeamUxEntry` Frame resource (theme-entries-and-authoring
@@ -34,7 +35,7 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
  */
 #[TypeScript]
 #[Title('New Entry')]
-class BeamUxEntryInputData extends Data
+class BeamUxEntryInputData extends Data implements MapsToModelAttributes
 {
     /** @var list<string> */
     public const CREATABLE_TYPES = ['page', 'component', 'theme'];
