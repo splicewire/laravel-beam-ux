@@ -2,8 +2,8 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
-use Spatie\LaravelData\Data;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
+use Splicewire\Beam\Data\Data;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**

@@ -8,8 +8,8 @@ use Illuminate\Validation\Rule;
 use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\Widget;
-use Spatie\LaravelData\Data;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
+use Splicewire\Beam\Data\Data;
 use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 
 /**
