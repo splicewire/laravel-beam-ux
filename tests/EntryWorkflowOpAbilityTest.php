@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use ReflectionClass;
+use Splicewire\Beam\Facades\Particle;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -138,7 +139,7 @@ class EntryWorkflowOpAbilityTest extends TestCase
     {
         $this->app->make(AttributedParticleDiscovery::class)->registerClass(EntryWorkflowShowOp::class);
 
-        Route::particleOp('beam-ux-entry', 'beam-ux-entry', 'workflow');
+        Particle::ops('beam-ux-entry', 'beam-ux-entry', 'workflow');
 
         return $entry;
     }
