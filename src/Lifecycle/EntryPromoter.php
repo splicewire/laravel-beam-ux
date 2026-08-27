@@ -49,6 +49,36 @@ class EntryPromoter
             );
         }
 
+        $existing = $this->centralCounterpart($tenantEntry);
+
+        // ⚠️ Refuse when the "central" row we resolved IS the row we were asked to promote.
+        //
+        // `central` is not a second database in this estate — at the two hosts that declare the
+        // connection it is a byte-for-byte copy of the default, and the tenant split comes from
+        // stancl rewriting the DEFAULT connection's `search_path` at tenant-init. Everywhere else
+        // `BeamServiceProvider::registerCentralConnectionAlias()` fabricates `central` from the
+        // default, so `on('central')` lands on the very table the source lives in. There,
+        // `updateOrCreate` keyed on the source's own namespace+slug matched the SOURCE ROW: promote
+        // overwrote the tenant entry in place, repointed it at a freshly written particle, flipped
+        // its `residency_mode`, and returned it — succeeding, returning a `BeamUxEntry`, throwing
+        // nothing. Measured, not theorised (`EntryPromoterSingleDatabaseTest`).
+        //
+        // The guard is an IDENTITY check rather than a config one, and deliberately: every config
+        // discriminator is wrong here. `is_array(config('database.connections.central'))` — the test
+        // `ThemeResolver::centralEntry()` uses — is ALWAYS true once the alias has run. Comparing
+        // the central block against the default's finds them equal at the flagship, which is a real
+        // multi-tenant host. Comparing resolved database NAMES finds them equal there too, because
+        // the tiers differ by schema. Asking whether tenancy is initialized would drag a stancl
+        // dependency into a package that has none. Whether the two tiers are distinct is a question
+        // about the RESOLVED ROW, so that is what gets asked.
+        if ($existing !== null && $existing->getKey() === $tenantEntry->getKey()) {
+            throw new AuthorizationException(
+                "Cannot promote [{$tenantEntry->namespace}/{$tenantEntry->slug}]: this deployment has "
+                .'no central tier distinct from the entry\'s own — `'.self::CENTRAL_CONNECTION.'` '
+                .'resolves to the table the entry already lives in, so promoting would overwrite it.'
+            );
+        }
+
         $payload ??= $tenantEntry->particle?->payload ?? [];
 
         $particle = $this->writer->write(
@@ -81,6 +111,20 @@ class EntryPromoter
                 // act.
             ],
         );
+    }
+
+    /**
+     * The central row this entry would promote INTO, if one is already there — the same
+     * `(namespace, slug)` key {@see promote()}'s `updateOrCreate` resolves on, read first so the
+     * identity guard can run BEFORE anything is written. Deliberately ordered ahead of the particle
+     * write: a refused promote must leave no orphaned particle behind.
+     */
+    private function centralCounterpart(BeamUxEntry $tenantEntry): ?BeamUxEntry
+    {
+        return BeamUxEntry::on(self::CENTRAL_CONNECTION)
+            ->where('namespace', $tenantEntry->namespace)
+            ->where('slug', $tenantEntry->slug)
+            ->first();
     }
 
     /**
