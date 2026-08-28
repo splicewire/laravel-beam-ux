@@ -37,7 +37,8 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  * `format`/`body_style` are the body-language axis (sibling to `type`). `placement_ref`/
  * `driver_ref` are the S2 storage precedence refs. `workflow_marking`/`workflow_version` make the entry
  * an OPTIONAL subject of the sibling `laravel-beam-workflows` engine. `schema_is_draft` marks an
- * inferred (vs. authored) `schema_ref`. `traverse`/`access` are ADR-0212's two conjunctive rights —
+ * inferred (vs. authored) `schema_ref`. `traverse`/`access` are `splicewire/laravel-beam-ux` ADR-0212's two conjunctive
+ * rights —
  * nullable any-of token lists composed UP the containment chain.
  *
  * `deleted_at` (theme-entries-and-authoring ticket 06): `SoftDeletes` — a delete is reversible (Frame's
@@ -108,12 +109,13 @@ return new class extends Migration
                 $table->string('segment')->nullable();
                 $table->integer('nav_order')->nullable();
 
-                // Chrome (ADR-0213): the two inherited composition axes plus the nav grouping label.
+                // Chrome (`splicewire/laravel-beam-ux` ADR-0213): the two inherited composition axes plus the nav
+                // grouping label.
                 // `layout` is the chrome wrapping one hole (header/breadcrumb/rail/on-this-page);
                 // `template` is the slot-bearing scaffold the page's own body fills. Both resolve to a
                 // registered component name FIRST and then to another entry's slug (§7), and both are
                 // inherited from the NEAREST ANCESTOR that declares one, with a per-entry override —
-                // over the same chain ADR-0212's rights already walk, so no second traversal.
+                // over the same chain `splicewire/laravel-beam-ux` ADR-0212's rights already walk, so no second traversal.
                 // NULL is the load-bearing value on both: no declaration ⇒ inherit.
                 //
                 // `nav_group` (§8) is a nav-only label, deliberately NOT a URL segment: `NavProjector`
@@ -124,7 +126,8 @@ return new class extends Migration
                 $table->string('template')->nullable();
                 $table->string('nav_group')->nullable();
 
-                // Access (ADR-0212): the two conjunctive rights, each an any-of list of tokens OPAQUE
+                // Access (`splicewire/laravel-beam-ux` ADR-0212): the two conjunctive rights, each an any-of list of tokens
+                // OPAQUE
                 // to beam-ux (host RBAC vocabulary stays host-side, ADR-0092). `access` gates reading
                 // THIS row's body; `traverse` gates reaching THROUGH it to descendants and being listed
                 // in nav. NULL is the load-bearing value — no declaration ⇒ no constraint ⇒ the row
@@ -164,11 +167,12 @@ return new class extends Migration
             });
         }
 
-        // ONE public URL per (parent, segment) — ADR-0209 §10. Nothing previously stopped two children of
+        // ONE public URL per (parent, segment) — `splicewire/laravel-beam-ux` ADR-0209 §10. Nothing previously stopped two
+        // children of
         // one parent from sharing a segment, so two entries could resolve to the same URL and the
         // renderer's walk would pick whichever row the driver returned first: the same silent-wrong-row
         // class of bug the retired `BeamUxEntryBodyController` recorded finding live on slug ambiguity (it is
-        // gone as of ADR-0214 §6; the entry-body transport is id-addressed). Soft-deleted
+        // gone as of `splicewire/laravel-beam-ux` ADR-0214 §6; the entry-body transport is id-addressed). Soft-deleted
         // rows are excluded the same way, or a deleted page would reserve its URL permanently.
         //
         // The composite is also the INDEX the reverse walk needs: resolution is one `(parent_id, segment)`
@@ -184,7 +188,8 @@ return new class extends Migration
             });
         }
 
-        // The phase-1 lookup of ADR-0209 §1: a direct query for a root-absolute `segment`, which is not
+        // The phase-1 lookup of `splicewire/laravel-beam-ux` ADR-0209 §1: a direct query for a root-absolute `segment`,
+        // which is not
         // parent-scoped and so is not served by the composite above.
         if (! $this->hasIndexOn(['segment'])) {
             Schema::table('beam_ux_entries', function (Blueprint $table) {
