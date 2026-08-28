@@ -9,7 +9,7 @@ use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\RowActions;
 use Schemastud\Frame\Attributes\Widget;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
-use Splicewire\Beam\Data\Data;
+use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -54,7 +54,7 @@ use Splicewire\Beam\Ux\Type\UxType;
 // JsonSchemaGenerator falling back to raw PHP names with no #[Title] on this class to override).
 #[TypeScript]
 #[Title('UX Entry')]
-class BeamUxEntryData extends Data
+class BeamUxEntryData extends BeamData
 {
     public function __construct(
         public string $id,

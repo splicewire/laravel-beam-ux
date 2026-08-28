@@ -3,7 +3,7 @@
 namespace Splicewire\Beam\Ux\Data;
 
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
-use Splicewire\Beam\Data\Data;
+use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
@@ -39,7 +39,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * unchanged, so no consumer moves.
  */
 #[TypeScript]
-class BeamUxEntryBodyData extends Data
+class BeamUxEntryBodyData extends BeamData
 {
     /**
      * @param  string  $slug  the entry's authoring-envelope slug (the body endpoint's addressing key)

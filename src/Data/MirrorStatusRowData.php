@@ -7,7 +7,7 @@ use Rushing\DataFilters\Attributes\Sortable;
 use Rushing\DataFilters\Operators\Exact;
 use Schemastud\Frame\Attributes\Column;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
-use Splicewire\Beam\Data\Data;
+use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
@@ -45,7 +45,7 @@ use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
     readOnly: true,
 )]
 #[TypeScript]
-class MirrorStatusRowData extends Data
+class MirrorStatusRowData extends BeamData
 {
     public function __construct(
         public string $id,

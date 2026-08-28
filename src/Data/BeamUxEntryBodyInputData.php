@@ -4,7 +4,7 @@ namespace Splicewire\Beam\Ux\Data;
 
 use Schemastud\DataSchemas\Attributes\Description;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
-use Splicewire\Beam\Data\Data;
+use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
 
 /**
@@ -27,7 +27,7 @@ use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
  * write DTO that echoes read-only fields invites a client to believe it can change them.
  */
 #[TypeScript]
-class BeamUxEntryBodyInputData extends Data
+class BeamUxEntryBodyInputData extends BeamData
 {
     /**
      * The prose lives on `#[Description]` and NOT only in this `@param`, which is what

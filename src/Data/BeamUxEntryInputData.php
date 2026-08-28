@@ -9,7 +9,7 @@ use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\Widget;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
-use Splicewire\Beam\Data\Data;
+use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 
 /**
@@ -35,7 +35,7 @@ use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
  */
 #[TypeScript]
 #[Title('New Entry')]
-class BeamUxEntryInputData extends Data implements MapsToModelAttributes
+class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
 {
     /** @var list<string> */
     public const CREATABLE_TYPES = ['page', 'component', 'theme'];
