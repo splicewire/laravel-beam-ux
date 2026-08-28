@@ -359,6 +359,66 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         return "---\ntitle: {$title}\nsegment: {$segment}\n---\n\n# {$title}\n";
     }
 
+    /**
+     * The `type` refusal (beam-docs-satellite ticket 42). A hand-authored docs tree names its directories
+     * for its TRACK (`build`, `using`), never for a {@see UxType} — only the mirror's own
+     * `DefaultPlacement` output is laid out by type — so `envelopeForPath()` returns `type = null` and the
+     * batch used to carry it straight into a NOT NULL column and die on a raw QueryException naming a
+     * database column instead of a path.
+     *
+     * It now refuses the WHOLE scan before its first write, so "nothing was imported" is true by
+     * construction rather than by unwinding a half-imported tree that the idempotent re-run would then
+     * report as "already present".
+     */
+    public function test_a_scan_with_no_inferrable_type_refuses_whole_and_writes_nothing(): void
+    {
+        $this->writeFile('build/schema-grammar.mdx', "---\ntitle: Schema grammar\n---\n\n# Schema grammar\n");
+        $this->writeFile('using/api-keys.mdx', "---\ntitle: API keys\n---\n\n# API keys\n");
+
+        // One file that DOES resolve, to prove the refusal is whole-scan rather than per-file: it is
+        // legal, it sorts first, and it must still not be written.
+        $this->writeFile('page/resolves.mdx', "---\ntitle: Resolves\n---\n\n# Resolves\n");
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $this->assertSame([], $result['created']);
+        $this->assertSame(0, BeamUxEntry::query()->count(), 'the refusal must leave the database untouched');
+
+        $this->assertEqualsCanonicalizing(
+            ['build/schema-grammar.mdx', 'using/api-keys.mdx'],
+            $result['unresolved'],
+        );
+        $this->assertSame(3, $result['recognized'], 'the count the operator is shown is of every recognized body');
+    }
+
+    /**
+     * `--type` supplies the answer the path cannot, and the PATH STILL WINS where it has one — so a tree
+     * mixing a bare `guides/intro.mdx` with a placed `page/hero.mdx` and a `kit/component/widget.tsx`
+     * imports correctly under a single default.
+     */
+    public function test_a_default_type_fills_only_what_the_path_does_not_answer(): void
+    {
+        $this->writeFile('build/schema-grammar.mdx', "---\ntitle: Schema grammar\n---\n\n# Schema grammar\n");
+        $this->writeFile('kit/component/widget.tsx', 'export const Widget = () => null;');
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, null, UxType::Page);
+
+        $this->assertSame([], $result['unresolved']);
+        $this->assertCount(2, $result['created']);
+
+        $this->assertSame(
+            UxType::Page,
+            BeamUxEntry::query()->where('slug', 'schema-grammar')->sole()->type,
+            'the un-typeable file takes the operator default',
+        );
+
+        $this->assertSame(
+            UxType::Component,
+            BeamUxEntry::query()->where('slug', 'widget')->sole()->type,
+            "the path's own answer outranks the operator default",
+        );
+    }
+
     private function writeFile(string $relative, string $contents): void
     {
         $full = $this->root.'/'.$relative;

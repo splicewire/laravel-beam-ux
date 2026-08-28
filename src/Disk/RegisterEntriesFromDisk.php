@@ -17,6 +17,7 @@ use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
+use Splicewire\Beam\Ux\Type\UxType;
 
 /**
  * The **`register-from-disk` batch** (charter S8, `beamux-build/issues/05`) — the beam-tier
@@ -83,9 +84,15 @@ class RegisterEntriesFromDisk
      * something that already exists (a seeded docs root) rather than at the top of the realm. Omitted,
      * a scan-root file hangs from its own realm's root, which is the same thing one level up.
      *
-     * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, ignored: array<int, string>, failed: array<string, string>}
+     * `$default` is the **operator's `type`** for this scan — the resolution {@see RegisterFromDisk::envelopeForPath()}
+     * has always deferred ("a path whose last dir is not a type keeps `type = null`; the operator/host
+     * decides"), which until now nothing supplied. A file whose path DOES name a {@see UxType} keeps the
+     * path's answer, so a mixed tree imports correctly under one default. See {@see unresolved()} for
+     * what happens when neither source answers.
+     *
+     * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, ignored: array<int, string>, failed: array<string, string>, unresolved: array<int, string>, recognized: int}
      */
-    public function scan(string $root, ?BeamUxEntry $under = null): array
+    public function scan(string $root, ?BeamUxEntry $under = null, ?UxType $default = null): array
     {
         $root = rtrim($root, '/');
 
@@ -97,10 +104,13 @@ class RegisterEntriesFromDisk
         $skipped = [];
         $ignored = [];
 
+        $unresolved = [];
+        $recognizedCount = 0;
+
         if (! is_dir($root)) {
             $failed = $this->failures;
 
-            return compact('created', 'skipped', 'ignored', 'failed');
+            return compact('created', 'skipped', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
         }
 
         $recognized = [];
@@ -131,6 +141,47 @@ class RegisterEntriesFromDisk
         // iterator's own order is filesystem-dependent and offers no such guarantee.
         usort($recognized, fn (array $a, array $b) => $this->depth($a[2]) <=> $this->depth($b[2]));
 
+        $recognizedCount = count($recognized);
+
+        // THE `type` GATE, and it refuses the WHOLE SCAN rather than the file (owner ruling,
+        // beam-docs-satellite ticket 42). `envelopeForPath()` sources `type` from the directory segment
+        // before the filename and leaves it null when that segment is not a UxType — which is the shape of
+        // every hand-authored tree in the estate, because a docs directory is named for its TRACK
+        // (`build`, `using`, `legal`, `essays`) and only the mirror's own `DefaultPlacement` output is laid
+        // out by type. Measured 2026-08-28 across ~/Herd/*: 88 of 105 on-disk bodies have no UxType parent
+        // directory. Before this, all 88 reached `create()` with `type = null` and died on the NOT NULL
+        // constraint, one raw QueryException naming a column instead of a path.
+        //
+        // ⚠️ This is deliberately NOT the per-file `failed` treatment ADR-0209 §7 gives a compile failure,
+        // and the difference was argued before it was chosen. A compile failure is a fact about ONE file;
+        // an un-inferrable `type` is almost always a fact about the INVOCATION — the operator pointed a
+        // whole tree at a command that had no way to type it, and importing the 25 files that happened to
+        // sit under a `page/` directory would leave a half-imported tree whose remainder the idempotent
+        // re-run then reports as "skipped (already present)". A refusal that leaves nothing behind is the
+        // one the operator can act on, for the same reason `register()` is atomic.
+        //
+        // The gate sits HERE, after the full enumeration and before the first write, so "nothing was
+        // imported" is true by construction rather than by unwinding.
+        foreach ($recognized as [, $relative, $envelope]) {
+            if ($envelope['type'] === null && $default === null) {
+                $unresolved[] = $relative;
+            }
+        }
+
+        if ($unresolved !== []) {
+            $failed = $this->failures;
+
+            return compact('created', 'skipped', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
+        }
+
+        foreach ($recognized as $index => [$absolute, $relative, $envelope]) {
+            // The path's own answer outranks the operator's, so a tree mixing `page/hero.mdx` with a
+            // bare `guides/intro.mdx` imports both correctly under a single `--type`.
+            if ($envelope['type'] === null) {
+                $recognized[$index][2]['type'] = $default->value;
+            }
+        }
+
         foreach ($recognized as [$absolute, $relative, $envelope]) {
             $existing = $this->existing($envelope);
 
@@ -148,7 +199,7 @@ class RegisterEntriesFromDisk
 
         $failed = $this->failures;
 
-        return compact('created', 'skipped', 'ignored', 'failed');
+        return compact('created', 'skipped', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
     }
 
     /**
