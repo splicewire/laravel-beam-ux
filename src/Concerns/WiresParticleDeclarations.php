@@ -7,13 +7,6 @@ use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
 use Splicewire\Beam\Particle\ParticleOperationRegistry;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
-use Splicewire\Beam\Ux\Data\BeamUxEntryData;
-use Splicewire\Beam\Ux\Data\MirrorStatusRowData;
-use Splicewire\Beam\Ux\Data\SitemapHealthRowData;
-use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
-use Splicewire\Beam\Ux\Particle\EntryBodyShowOp;
-use Splicewire\Beam\Ux\Workflow\EntryWorkflowShowOp;
-use Splicewire\Beam\Ux\Workflow\EntryWorkflowTransitionOp;
 
 /**
  * One concern of {@see BeamUxServiceProvider}: this package registers its OWN particle declarations,
@@ -74,31 +67,30 @@ trait WiresParticleDeclarations
             return;
         }
 
-        $discovery = new AttributedParticleDiscovery(
+        (new AttributedParticleDiscovery(
             $this->app->make(ParticleResourceRegistry::class),
             $this->app->make(ParticleOperationRegistry::class),
-        );
-
-        foreach (self::PARTICLE_DECLARATIONS as $class) {
-            $discovery->registerClass($class);
-        }
+        ))->discover(paths: self::PARTICLE_DECLARATION_PATHS);
     }
 
     /**
-     * Every declaration site in this package, in one list.
+     * Every directory in this package that may hold a particle declaration.
      *
-     * `BeamUxEntryData` is the `beam-ux-entry` resource the four operations hang off;
-     * `MirrorStatusRowData` and `SitemapHealthRowData` are read-only projections over the same model.
+     * `src/Data` holds the `beam-ux-entry` resource plus the two read-only projections over the same
+     * model (`MirrorStatusRowData`, `SitemapHealthRowData`); `src/Particle` and `src/Workflow` hold the
+     * four operations that hang off it. Three files apiece.
      *
-     * @var list<class-string>
+     * ⚠️ **Directories, not a class list.** This was a seven-entry `PARTICLE_DECLARATIONS` const, and
+     * the const was ADR-0214 §5's ruling implemented one level too literally: the ruling is that this
+     * package registers its own declarations, and a directory scan is what makes that true of a
+     * declaration nobody remembered to append. The FQCN door is not closed — `discover()`'s `$classes`
+     * argument is untouched — it is just no longer this package's own way in.
+     *
+     * @var list<string>
      */
-    protected const PARTICLE_DECLARATIONS = [
-        BeamUxEntryData::class,
-        MirrorStatusRowData::class,
-        SitemapHealthRowData::class,
-        EntryWorkflowShowOp::class,
-        EntryWorkflowTransitionOp::class,
-        EntryBodyShowOp::class,
-        EntryBodySaveOp::class,
+    protected const PARTICLE_DECLARATION_PATHS = [
+        __DIR__.'/../Data',
+        __DIR__.'/../Particle',
+        __DIR__.'/../Workflow',
     ];
 }
