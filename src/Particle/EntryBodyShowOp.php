@@ -6,11 +6,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
+use Splicewire\Beam\Routing\HttpMethod;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
- * `GET /beam-ux-entries/{id}/op/body` — an entry's current particle body plus the JSON-Schema that
+ * `GET /beam-ux-entries/{id}/body` — an entry's current particle body plus the JSON-Schema that
  * seeds the inspector SchemaForm. The read half of the entry-body transport (ADR-0214 §1), and the
  * server side of every editor open: the SPA UX-builder, the Mainframe-hosted region editor, and the
  * theme editor all round-trip through it.
@@ -32,11 +33,19 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *
  * ## Two things the mount owes it
  *
- * **It mounts `GET`** (ADR-0214 §4). `Route::particleOp()` defaults to `post` regardless of kind, so
- * a host passes `['method' => 'get']`. The body read is the hot path on every editor open, takes no
- * input, and is idempotent. (`EntryWorkflowShowOp` beside it is also `kind: Read` and mounts POST —
- * that is the older operation being wrong, not a precedent. `Read` ⇒ `GET` as `particleOp`'s DEFAULT
- * is a beam-core doctrine change filed to `particle-contribution-seam`.)
+ * **It mounts `GET`, and it now SAYS SO ITSELF** — `method: HttpMethod::Get` in the declaration below
+ * (ADR-0214 §4; particle-operation-surface 14). The body read is the hot path on every editor open,
+ * takes no input, and is idempotent. (`EntryWorkflowShowOp` beside it is also `kind: Read` and mounts
+ * POST — that is the older operation being wrong, not a precedent. `Read` ⇒ `GET` as the DEFAULT is a
+ * beam-core doctrine change filed to `particle-contribution-seam`.)
+ *
+ * ⚠️ **This paragraph used to read *"`Route::particleOp()` defaults to `post` regardless of kind, so a
+ * host passes `['method' => 'get']`"*, and BOTH halves were false by the time anyone read it.**
+ * api-surface-coherence 93 deleted that macro — `Particle::ops()` is the only door — and the "so a host
+ * passes" clause described the defect ticket 14 exists to remove. This one operation had its verb
+ * restated at **five separate mount sites in five repositories** (`~/Herd/audiostud`,
+ * `~/Herd/splicewire`, and the beam/satellite/tower starters), because five hosts mount it and each one
+ * had to know a fact about a read it does not own. Declared once here, deleted five times there.
  *
  * **The resource segment stays the single hyphenated `beam-ux-entries`.** A `/` in a resource name
  * breaks Wayfinder's generated-helper relative-import depth calculation, which splits the route *name*
@@ -67,6 +76,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
     abilityModel: false,
     input: false,
     output: BeamUxEntryBodyData::class,
+    method: HttpMethod::Get,
 )]
 class EntryBodyShowOp
 {
