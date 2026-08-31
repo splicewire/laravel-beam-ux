@@ -2,6 +2,8 @@
 
 namespace Splicewire\Beam\Ux\Seed;
 
+use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
+
 /**
  * A seed body read from a **stub**, published-copy-first.
  *
@@ -62,21 +64,23 @@ class StubContent
         return self::parse($raw);
     }
 
-    /** Split a leading `---` … `---` block into flat `key: value` pairs, and keep the rest as the body. */
+    /**
+     * Split a leading `---` … `---` block into flat `key: value` pairs, keeping the rest as the body.
+     *
+     * Reads through the shared {@see FrontmatterParser} (frontmatter-declaration-seam ticket 04).
+     *
+     * Unlike `Mdx` and `MdxBody`, which keep the AUTHORED spelling because their output is a public
+     * array contract and a persisted, round-tripped body respectively, this one takes the CANONICAL
+     * fields — because {@see columns()} maps them onto entry columns, which are snake by definition.
+     * A stub a host publishes and edits (`vendor:publish --tag=beam-ux-docs`) authored `navOrder:`
+     * would previously have parsed cleanly and then been dropped on the floor; now it lands.
+     *
+     * The `$raw` source, frontmatter included, still becomes the body verbatim — canonicalization
+     * touches the column projection, never the text an author wrote.
+     */
     public static function parse(string $raw): self
     {
-        if (! preg_match('/^---\r?\n(.*?)\r?\n---\r?\n?/s', $raw, $match)) {
-            return new self([], $raw);
-        }
-
-        $fields = [];
-        foreach (preg_split('/\r?\n/', $match[1]) as $line) {
-            if (preg_match('/^([A-Za-z0-9_-]+):\s*(.*)$/', $line, $kv)) {
-                $fields[$kv[1]] = trim($kv[2], " \t\"'");
-            }
-        }
-
-        return new self($fields, $raw);
+        return new self(app(FrontmatterParser::class)->parse($raw)->fields, $raw);
     }
 
     /**
