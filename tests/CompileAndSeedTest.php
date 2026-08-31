@@ -147,6 +147,45 @@ class CompileAndSeedTest extends TestCase
         $this->assertSame(DoctorStatus::Fail, $this->audit()[0]->status);
     }
 
+    /**
+     * beam-docs-satellite 51 → 53. The two skip rules above are CORRECT and stay correct; what they cost
+     * is that a host where they exclude everything emitted the same unqualified pass as one where they
+     * exclude nothing. Measured 2026-08-31: `~/Herd/audiostud` (0 of 18 covered) and `~/Herd/splicewire`
+     * (26 of 31) both read `INFO ✅ every routable page has an artifact compiled from its current body`.
+     *
+     * ⚠️ The assertion that matters is the LAST one — that the two details differ. Asserting only that a
+     * denominator appears would pass against a finding that states the same denominator in every case,
+     * which is the defect wearing a number.
+     */
+    public function test_the_artifact_finding_states_its_denominator_so_zero_of_n_cannot_read_like_n_of_n(): void
+    {
+        // A structural node (no segment) and a nav pointer (no particle) — both legitimately excluded.
+        BeamUxEntry::rootFor(BeamUxEntry::REALM_SITE);
+        BeamUxEntry::create([
+            'slug' => 'reference-pointer',
+            'type' => UxType::Page,
+            'format' => UxFormat::Mdx,
+            'segment' => 'reference',
+        ]);
+
+        $allExcluded = $this->audit()[0];
+        $this->assertSame(DoctorStatus::Pass, $allExcluded->status);
+        $this->assertStringContainsString('0 of 2', $allExcluded->detail);
+        $this->assertStringContainsString('2 excluded', $allExcluded->detail);
+        $this->assertStringContainsString('no URL resolves to them', $allExcluded->detail);
+        $this->assertStringContainsString('no body was ever written', $allExcluded->detail);
+
+        // One genuinely covered page beside them.
+        $this->app->make(CompileEntryBody::class)->forEntry($this->page('guide', '# Guide'));
+
+        $covered = $this->audit()[0];
+        $this->assertSame(DoctorStatus::Pass, $covered->status);
+        $this->assertStringContainsString('1 of 3', $covered->detail);
+        $this->assertStringContainsString('2 excluded', $covered->detail);
+
+        $this->assertNotSame($allExcluded->detail, $covered->detail);
+    }
+
     public function test_the_seeder_provisions_the_realm_root_and_the_docs_subtree(): void
     {
         $this->seed(BeamUxSeeder::class);

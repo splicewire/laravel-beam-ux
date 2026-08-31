@@ -53,7 +53,19 @@ class BeamUxArtifactAudit implements DoctorAudit
         $unsupported = [];
         $orphaned = [];
 
+        // The audit's own DENOMINATOR (beam-docs-satellite 51 → 53). Both skip rules below are correct
+        // and stay correct — the defect they caused is that a host where they exclude EVERYTHING reads
+        // byte-identically to one where they exclude nothing. Measured 2026-08-31: `~/Herd/audiostud`
+        // (0 of 18 covered, 18 excluded) and `~/Herd/splicewire` (26 of 31, 5 excluded) both emitted the
+        // same unqualified pass. Counting here is what lets the pass text say over how many.
+        $covered = 0;
+        $total = 0;
+        $excludedStructural = 0;
+        $excludedPointer = 0;
+
         foreach (BeamUxEntry::query()->where('type', UxType::Page->value)->cursor() as $entry) {
+            $total++;
+
             if ($this->compile->uncompilable($entry)) {
                 $unsupported[] = "{$entry->slug} ({$entry->format?->value})";
 
@@ -75,6 +87,8 @@ class BeamUxArtifactAudit implements DoctorAudit
             // A bodyless page that IS addressable stays an error, because that one really does 404.
             if (! $this->compile->artifacts()->has($entry)) {
                 if ($entry->segment === null || $entry->segment === '') {
+                    $excludedStructural++;
+
                     continue;
                 }
 
@@ -85,6 +99,8 @@ class BeamUxArtifactAudit implements DoctorAudit
                 // audit blocked on five slugs that are working correctly. The reasoning and the
                 // matching warn live in `CompileEntriesCommand`; see the note there.
                 if ($entry->particle_id === null) {
+                    $excludedPointer++;
+
                     continue;
                 }
 
@@ -92,6 +108,8 @@ class BeamUxArtifactAudit implements DoctorAudit
 
                 continue;
             }
+
+            $covered++;
 
             foreach ($this->endpointsIn($entry) as $endpoint) {
                 if (! $this->mounted($endpoint)) {
@@ -101,7 +119,12 @@ class BeamUxArtifactAudit implements DoctorAudit
         }
 
         return [
-            $this->artifactFinding($artifacts, $stale, $unsupported),
+            $this->artifactFinding(
+                $artifacts,
+                $stale,
+                $unsupported,
+                new ArtifactCoverage($total, $covered, $excludedStructural, $excludedPointer),
+            ),
             $this->orphanFinding($orphans, $orphaned),
         ];
     }
@@ -110,13 +133,13 @@ class BeamUxArtifactAudit implements DoctorAudit
      * @param  list<string>  $stale
      * @param  list<string>  $unsupported
      */
-    private function artifactFinding(string $check, array $stale, array $unsupported): Finding
+    private function artifactFinding(string $check, array $stale, array $unsupported, ArtifactCoverage $coverage): Finding
     {
         if ($stale === [] && $unsupported === []) {
-            return Finding::pass($check, 'every routable page has an artifact compiled from its current body.');
+            return Finding::pass($check, $coverage->sentence());
         }
 
-        $detail = [];
+        $detail = [$coverage->sentence()];
 
         if ($stale !== []) {
             $detail[] = count($stale).' page(s) have no current artifact and will 404: '.
