@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
-use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
 use Splicewire\Beam\Workflows\Data\WorkflowProjectionData;
 
@@ -25,7 +24,6 @@ use Splicewire\Beam\Workflows\Data\WorkflowProjectionData;
     resource: 'beam-ux-entry',
     name: 'workflow',
     kind: OperationKind::Read,
-    model: BeamUxEntry::class,
     ability: 'ux.author',
     // `ux.author` is an ENTITLEMENT key, not a policy verb, so the check is declared subject-free
     // (particle-operation-surface ticket 08). Until this was declared, the resolver was handed the

@@ -80,7 +80,6 @@ use Splicewire\Beam\Write\PolicyWriteGate;
     resource: 'beam-ux-entry',
     name: 'save-body',
     kind: OperationKind::Write,
-    model: BeamUxEntry::class,
     ability: 'ux.author',
     // Entitlement plane, subject-free — the same declaration all three siblings on this resource
     // carry (particle-operation-surface ticket 08); {@see EntryBodyShowOp}'s docblock carries the

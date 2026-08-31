@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
-use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Control\TransitionResult;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
@@ -28,7 +27,6 @@ use Splicewire\Beam\Workflows\Data\WorkflowTransitionRequestData;
     resource: 'beam-ux-entry',
     name: 'transition',
     kind: OperationKind::Write,
-    model: BeamUxEntry::class,
     ability: 'ux.author',
     // Entitlement plane, subject-free — same reasoning as {@see EntryWorkflowShowOp}'s own note
     // (particle-operation-surface ticket 08). The two ops MUST stay on the same plane: a Workflow tab

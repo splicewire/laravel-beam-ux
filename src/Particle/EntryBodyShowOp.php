@@ -71,7 +71,6 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
     resource: 'beam-ux-entry',
     name: 'body',
     kind: OperationKind::Read,
-    model: BeamUxEntry::class,
     ability: 'ux.author',
     abilityModel: false,
     input: false,
