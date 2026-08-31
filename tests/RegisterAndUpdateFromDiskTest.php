@@ -123,6 +123,52 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         $this->assertSame(20, $row['nav_order']);
     }
 
+    /**
+     * frontmatter-declaration-seam 04d/05 — the defect this charter was chartered on.
+     *
+     * The flagship's content authors `navOrder:` and `navGroup:` (23 and 26 files); every reader in
+     * this class looks up `nav_order` and `nav_group`. The key pattern `[A-Za-z0-9_-]+` matches the
+     * camel spelling perfectly well, so the field parsed cleanly, was never looked up, and was
+     * dropped — with no error, no warning, and a SUCCESSFUL import.
+     *
+     * ⚠️ That is why this test asserts the ROW and not the parse. A test asserting "the import
+     * succeeded" passes against the defect; it was passing against it for as long as the defect
+     * existed.
+     */
+    public function test_register_from_disk_lands_camel_authored_frontmatter_in_its_snake_column(): void
+    {
+        $this->writeFile('site/pages/page/camel.mdx', <<<'MDX'
+        ---
+        realm: account
+        segment: /account/camel
+        navOrder: 21
+        title: Camel Authored
+        ---
+        # Camel
+
+        Hello.
+        MDX);
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $entry = BeamUxEntry::where('slug', 'camel')->firstOrFail();
+
+        // The assertion that could not have passed before the collapse.
+        $this->assertSame(21, (int) $entry->nav_order, 'navOrder: must reach the nav_order column');
+        $this->assertSame('Camel Authored', $entry->title);
+        $this->assertSame('/account/camel', $entry->segment);
+    }
+
+    /** The snake spelling keeps working — canonicalization folds toward it, it is not a swap. */
+    public function test_register_from_disk_still_lands_snake_authored_frontmatter(): void
+    {
+        $this->writeFile('site/pages/page/snake.mdx', "---\nsegment: /snake\nnav_order: 22\ntitle: Snake\n---\nHi.\n");
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $this->assertSame(22, (int) BeamUxEntry::where('slug', 'snake')->firstOrFail()->nav_order);
+    }
+
     public function test_register_from_disk_falls_back_to_the_path_realm_convention_when_frontmatter_omits_realm(): void
     {
         // No `realm:` in frontmatter — the disk-path convention supplies it (frontmatter still owns segment).

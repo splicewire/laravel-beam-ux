@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Access\EntryAccessGate;
 use Splicewire\Beam\Ux\Access\Right;
@@ -443,27 +444,29 @@ class RegisterEntriesFromDisk
     }
 
     /**
-     * The scalar frontmatter of a body source — the leading `---` … `---` block parsed as flat
-     * `key: value` pairs (the same shape `MdxBody` stores into the body). A `.tsx` page or any file with
-     * no frontmatter block yields `[]`. Kept local (a tiny reader) so the disk seam takes no hard
-     * dependency on the mdx package.
+     * The scalar frontmatter of a body source, in the CANONICAL (snake_case) spelling.
+     *
+     * Reads through the shared {@see FrontmatterParser} (frontmatter-declaration-seam ticket 04). The
+     * local reader this replaces was one of five copies of the same two regexes; the note that used to
+     * live here — "kept local so the disk seam takes no hard dependency on the mdx package" — had gone
+     * stale, because this package has required `splicewire/laravel-beam-mdx` outright for some time.
+     *
+     * ⚠️ **Canonical, not authored, and that is the bug fix.** Every lookup below is snake
+     * (`nav_order`, `nav_group`, …) while the flagship's content authors `navOrder:` and `navGroup:`.
+     * The key pattern always admitted camelCase, so those fields parsed cleanly and were then never
+     * looked up — dropped with no error, no warning, and a successful import. Canonicalizing here is
+     * what makes an authored spelling reach its column.
+     *
+     * Contrast the sibling readers deliberately: `Mdx::fields()` and `MdxBody::split()` keep the
+     * AUTHORED keys, because one is a public array contract tower reads camelCase and the other is a
+     * persisted body that must round-trip byte-for-byte. The choice is per-reader, on what its output
+     * IS — not a preference.
      *
      * @return array<string, string>
      */
     protected function frontmatter(string $source): array
     {
-        if (! preg_match('/^---\r?\n(.*?)\r?\n---\r?\n?/s', $source, $match)) {
-            return [];
-        }
-
-        $fields = [];
-        foreach (preg_split('/\r?\n/', $match[1]) as $line) {
-            if (preg_match('/^([A-Za-z0-9_-]+):\s*(.*)$/', $line, $kv)) {
-                $fields[$kv[1]] = trim($kv[2], " \t\"'");
-            }
-        }
-
-        return $fields;
+        return app(FrontmatterParser::class)->parse($source)->fields;
     }
 
     /**
