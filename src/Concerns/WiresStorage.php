@@ -96,9 +96,5 @@ trait WiresStorage
     #[Chained('boot', order: 90)]
     protected function describeStorageDrivers(): void
     {
-        $this->app->make(RegistryIndex::class)->describe(
-            $this->app->make(StorageDriverResolver::class),
-            by: self::class,
-        );
     }
 }
