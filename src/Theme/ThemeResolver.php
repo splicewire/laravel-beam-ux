@@ -40,6 +40,25 @@ class ThemeResolver
     /** The theme entry's slug — one canonical row per schema. */
     public const SLUG = 'default';
 
+    /**
+     * ## Uncited central pin — a TIER IN A CASCADE, not a floor (re-measured 2026-08-30)
+     * `realm-and-floor-reconciliation` ticket 05 judged this "not floor" from the docblock. Confirmed
+     * from data at `~/Herd/splicewire-app`, and the measurement separates this pin from every other
+     * uncited one in the estate: `beam_ux_entries` exists in **all 18 schemas** (`public` + 17
+     * `tenant_*`), where the seven uncited `splicewire/tower` pins each sit on a table present in
+     * `public` ALONE. Those are reachability declarations; this one genuinely selects a tier.
+     *
+     * The counterfactual differs in kind, too, and it is the dangerous signature. Unpinning a
+     * tower model raises `relation ... does not exist` inside a tenant frame — loud. Unpinning here
+     * returns **0 rows with no exception**: the tenant's own copy of the table is right there and is
+     * empty (measured: 1 row in `public`, 0 in every `tenant_*`). The central tier would simply stop
+     * contributing to `resolve()`'s deep-merge and the site would render package defaults, silently.
+     *
+     * No closed-list category applies and none is invented. A cascade tier is not `kernel`,
+     * `tenant-isolation`, `query-engine`, `registry-runtime`, `auth` or `billing-wall`, and stretching
+     * one to fit is how a closed list quietly opens. Referred to `realm-and-floor-reconciliation`
+     * ticket 06 along with the *untenanted-by-nature* posture from `Splicewire\Tower\Models\Lead`.
+     */
     private const CENTRAL_CONNECTION = 'central';
 
     /**

@@ -31,6 +31,24 @@ use Splicewire\Beam\Write\ParticleWriter;
  */
 class EntryPromoter
 {
+    /**
+     * ## Uncited central pin — a TIER IN A CASCADE, not a floor (re-measured 2026-08-30)
+     * Same verdict and same evidence as {@see \Splicewire\Beam\Ux\Theme\ThemeResolver::
+     * CENTRAL_CONNECTION}, which carries the full measurement. In short, from
+     * `~/Herd/splicewire-app`: `beam_ux_entries` exists in **all 18 schemas**, so `on('central')`
+     * here names the promotion TARGET tier — it is not making a single-placement table reachable the
+     * way the seven uncited `splicewire/tower` pins are (each of those tables lives in `public`
+     * alone). Promotion is a write ACROSS tiers, which is the clearest possible statement that both
+     * tiers are real; a floor has no second copy to promote into.
+     *
+     * The failure mode of getting this wrong is already guarded rather than theorised — see the
+     * identity check in `promote()` below and `EntryPromoterSingleDatabaseTest`, which cover the
+     * deployment where `central` resolves to the entry's own table.
+     *
+     * Left uncited deliberately: no member of `CentralPinJustificationAudit::FLOOR_CATEGORIES` names
+     * "a tier in a cascade", and inventing one is how a closed list quietly opens. Referred to
+     * `realm-and-floor-reconciliation` ticket 06.
+     */
     public const CENTRAL_CONNECTION = 'central';
 
     public function __construct(
