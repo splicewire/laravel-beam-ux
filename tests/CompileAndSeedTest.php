@@ -186,6 +186,36 @@ class CompileAndSeedTest extends TestCase
         $this->assertNotSame($allExcluded->detail, $covered->detail);
     }
 
+    /**
+     * ⚠️ **The first version of the coverage counters shipped the exact defect they were built to
+     * repair.** `$total` incremented for every page row while the unsupported-format branch
+     * incremented no bucket, so a host with one such page read `N of N+1 …; K excluded` — one entry
+     * counted in the denominator and placed nowhere, with nothing reconciling the arithmetic. Found by
+     * the spec axis of this change's own code review, not by any test.
+     */
+    public function test_an_unsupported_format_is_counted_in_its_own_bucket_and_the_arithmetic_reconciles(): void
+    {
+        $this->app->make(CompileEntryBody::class)->forEntry($this->page('guide', '# Guide'));
+
+        // `css` is a theme body, not a page the bound compiler handles — a routable page in a format
+        // that will fail loudly at read time, which the audit already reports as a FAILURE.
+        BeamUxEntry::create([
+            'slug' => 'theme',
+            'type' => UxType::Page,
+            'format' => UxFormat::Css,
+            'segment' => 'theme',
+        ]);
+
+        $detail = $this->audit()[0]->detail;
+
+        $this->assertStringContainsString('1 of 2', $detail);
+        $this->assertStringContainsString('1 in a format the bound compiler does not handle', $detail);
+
+        // The whole point: nothing falls between the buckets, and the audit says so rather than
+        // leaving a reader to subtract.
+        $this->assertStringNotContainsString('counted in no bucket', $detail);
+    }
+
     public function test_the_seeder_provisions_the_realm_root_and_the_docs_subtree(): void
     {
         $this->seed(BeamUxSeeder::class);

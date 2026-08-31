@@ -70,19 +70,23 @@ class PinNodeCommandTest extends TestCase
 
     public function test_an_operator_set_value_survives_without_force(): void
     {
-        file_put_contents("{$this->root}/.env", "BEAM_UX_NODE_BINARY=/opt/mine/node\n");
+        // ⚠️ The incumbent must be a WORKING absolute path, or this test asserts the wrong thing: a
+        // value that cannot answer `--version` is now replaced without `--force` on purpose, so a
+        // fictional `/opt/mine/node` here would make this test pass for the opposite reason.
+        $mine = $this->fakeNode('mine');
+        file_put_contents("{$this->root}/.env", "BEAM_UX_NODE_BINARY=\"{$mine}\"\n");
 
         $binary = $this->fakeNode();
 
         $this->artisan('splicewire:beam:ux:pin-node', ['--path' => $this->root, '--binary' => $binary])
             ->assertSuccessful();
-        $this->assertStringContainsString('/opt/mine/node', $this->env());
+        $this->assertStringContainsString($mine, $this->env());
         $this->assertStringNotContainsString($binary, $this->env());
 
         $this->artisan('splicewire:beam:ux:pin-node', ['--path' => $this->root, '--binary' => $binary, '--force' => true])
             ->assertSuccessful();
-        $this->assertStringContainsString('BEAM_UX_NODE_BINARY="'.$binary.'"', $this->env());
-        $this->assertStringNotContainsString('/opt/mine/node', $this->env());
+        $this->assertSame($binary, $this->parsedValue());
+        $this->assertStringNotContainsString($mine, $this->env());
     }
 
     /**
@@ -97,6 +101,73 @@ class PinNodeCommandTest extends TestCase
             '--path' => $this->root,
             '--binary' => "{$this->root}/not-a-binary",
         ])->assertFailed();
+
+        $this->assertStringNotContainsString('BEAM_UX_NODE_BINARY', $this->env());
+    }
+
+    /**
+     * ⚠️ A filesystem path is arbitrary text, and `preg_replace` reads `$1` in its REPLACEMENT as a
+     * backreference. The first version of this command spliced the path in with `preg_replace` and
+     * silently wrote a DIFFERENT path — `/opt/n$1ode/bin/node` landed as `/opt/node/bin/node`. It is
+     * the same near-miss as an unquoted space: a value that looks pinned and is wrong.
+     */
+    public function test_a_path_containing_regex_metacharacters_is_written_verbatim(): void
+    {
+        file_put_contents("{$this->root}/.env", "BEAM_UX_NODE_BINARY=stale\n");
+
+        $binary = $this->fakeNode('n$1ode\\dir');
+
+        $this->artisan('splicewire:beam:ux:pin-node', ['--path' => $this->root, '--binary' => $binary, '--force' => true])
+            ->assertSuccessful();
+
+        $this->assertSame($binary, $this->parsedValue());
+        $this->assertStringNotContainsString('stale', $this->env());
+    }
+
+    /**
+     * The install path's whole promise is "a fresh host is born correct". Guarding on the key's mere
+     * PRESENCE broke that at the one host that needed it: a `.env` already carrying the broken bare
+     * `node` this ticket exists to repair was warned about and skipped. An incumbent that cannot answer
+     * `--version` is not a choice an operator made.
+     */
+    public function test_an_incumbent_that_does_not_run_is_replaced_without_force(): void
+    {
+        // The specimen is the literal bare `node` this ticket exists to repair — and it ANSWERS
+        // `--version` from a test process, which is why absoluteness and not runnability is the guard.
+        file_put_contents("{$this->root}/.env", "BEAM_UX_NODE_BINARY=node\n");
+
+        $binary = $this->fakeNode();
+
+        $this->artisan('splicewire:beam:ux:pin-node', ['--path' => $this->root, '--binary' => $binary])
+            ->assertSuccessful();
+
+        $this->assertSame($binary, $this->parsedValue());
+    }
+
+    /**
+     * A RESOLVED binary that does not run is a fact about the host, and this estate's rule is that a
+     * host fact is advisory — `splicewire:beam:install` calls this command and must not be refused by
+     * one machine's broken Node. An operator-NAMED `--binary` stays fatal (the test above), because
+     * that is something its author could have gotten right.
+     */
+    public function test_a_broken_resolved_binary_warns_and_succeeds_rather_than_failing_the_install(): void
+    {
+        file_put_contents("{$this->root}/.env", "APP_ENV=local\n");
+
+        $broken = "{$this->root}/bin/node";
+        @mkdir("{$this->root}/bin", 0777, true);
+        file_put_contents($broken, "#!/bin/sh\nexit 1\n");
+        chmod($broken, 0755);
+
+        // Resolution is stubbed by pointing PATH at the broken stub, so no `--binary` is named.
+        $original = getenv('PATH');
+        putenv("PATH={$this->root}/bin");
+
+        try {
+            $this->artisan('splicewire:beam:ux:pin-node', ['--path' => $this->root])->assertSuccessful();
+        } finally {
+            putenv("PATH={$original}");
+        }
 
         $this->assertStringNotContainsString('BEAM_UX_NODE_BINARY', $this->env());
     }

@@ -62,12 +62,17 @@ class BeamUxArtifactAudit implements DoctorAudit
         $total = 0;
         $excludedStructural = 0;
         $excludedPointer = 0;
+        $unsupportedCount = 0;
 
         foreach (BeamUxEntry::query()->where('type', UxType::Page->value)->cursor() as $entry) {
             $total++;
 
             if ($this->compile->uncompilable($entry)) {
                 $unsupported[] = "{$entry->slug} ({$entry->format?->value})";
+                // Counted, and counted into its OWN bucket rather than left out: this branch used to
+                // increment `$total` alone, so the denominator silently failed to add up on any host
+                // with an unsupported-format page. See ArtifactCoverage::unaccounted().
+                $unsupportedCount++;
 
                 continue;
             }
@@ -123,7 +128,7 @@ class BeamUxArtifactAudit implements DoctorAudit
                 $artifacts,
                 $stale,
                 $unsupported,
-                new ArtifactCoverage($total, $covered, $excludedStructural, $excludedPointer),
+                new ArtifactCoverage($total, $covered, $excludedStructural, $excludedPointer, $unsupportedCount),
             ),
             $this->orphanFinding($orphans, $orphaned),
         ];

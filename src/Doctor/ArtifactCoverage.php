@@ -23,15 +23,33 @@ namespace Splicewire\Beam\Ux\Doctor;
 class ArtifactCoverage
 {
     public function __construct(
-        public int $total = 0,
-        public int $covered = 0,
-        public int $structural = 0,
-        public int $pointer = 0,
+        public int $total,
+        public int $covered,
+        public int $structural,
+        public int $pointer,
+        public int $unsupported,
     ) {}
 
     public function excluded(): int
     {
         return $this->structural + $this->pointer;
+    }
+
+    /**
+     * Rows this class counted in `total` and put in no bucket — which should be none, and is stated
+     * rather than trusted.
+     *
+     * ⚠️ **This counter exists because the first version of this class shipped the exact defect it was
+     * built to repair.** `$total` incremented for every page row while the unsupported-format branch
+     * incremented nothing, so a host with one such page read `26 of 32 …; 5 excluded` — one entry in
+     * no bucket, and nothing reconciling the arithmetic. The estate's rule is that an instrument
+     * enumerating its known blind spots and not its unknown ones reads as thorough exactly where it is
+     * weakest; a bucket added today can drift the same way tomorrow, so the sum is checked, not
+     * assumed.
+     */
+    public function unaccounted(): int
+    {
+        return max(0, $this->total - $this->covered - $this->excluded() - $this->unsupported);
     }
 
     /**
@@ -47,11 +65,23 @@ class ArtifactCoverage
         $sentence = "{$this->covered} of {$this->total} routable page(s) have an artifact compiled from ".
             'their current body';
 
-        if ($this->excluded() === 0) {
-            return "{$sentence}; 0 excluded.";
+        $sentence .= $this->excluded() === 0
+            ? '; 0 excluded'
+            : "; {$this->excluded()} excluded ({$this->reasons()})";
+
+        // Reported separately from `excluded`, because it is not an exclusion: an unsupported-format
+        // page is a FINDING this audit already fails on, and folding it into the excluded count would
+        // read as "legitimately out of reach" for the one bucket that is not.
+        if ($this->unsupported > 0) {
+            $sentence .= "; {$this->unsupported} in a format the bound compiler does not handle";
         }
 
-        return "{$sentence}; {$this->excluded()} excluded ({$this->reasons()}).";
+        if ($this->unaccounted() > 0) {
+            $sentence .= "; ⚠️ {$this->unaccounted()} counted in no bucket — this audit's own arithmetic ".
+                'does not reconcile, so read the coverage as a lower bound';
+        }
+
+        return "{$sentence}.";
     }
 
     /** Why each excluded entry is out of reach — never a count on its own, which reads as a defect. */
