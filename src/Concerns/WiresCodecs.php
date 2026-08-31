@@ -51,9 +51,5 @@ trait WiresCodecs
     #[Chained('boot', order: 70)]
     protected function describeCodecs(): void
     {
-        $this->app->make(RegistryIndex::class)->describe(
-            $this->app->make(CodecRegistry::class),
-            by: self::class,
-        );
     }
 }
