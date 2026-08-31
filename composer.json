@@ -23,15 +23,16 @@
         "illuminate/database": "^11.0|^12.0|^13.0",
         "illuminate/support": "^11.0|^12.0|^13.0",
         "rushing/laravel-data-nav": "*",
+        "rushing/laravel-schema-convergence": "*",
+        "rushing/php-popcorn": "dev-main",
+        "schemastud/laravel-data-schemas": "*",
         "splicewire/laravel-beam": "*",
         "splicewire/laravel-beam-accounts": "*",
         "splicewire/laravel-beam-mdx": "*",
         "splicewire/laravel-beam-sitemap": "*",
         "splicewire/laravel-beam-taxonomy": "*",
         "splicewire/laravel-beam-workflows": "*",
-        "symfony/process": "^6.4|^7.0",
-        "rushing/laravel-schema-convergence": "*",
-        "rushing/php-popcorn": "dev-main"
+        "symfony/process": "^6.4|^7.0"
     },
     "require-dev": {
         "orchestra/testbench": "^9.0|^10.0|^11.0",
@@ -110,6 +111,10 @@
         {
             "type": "git",
             "url": "https://github.com/stephenr85/php-popcorn.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/laravel-data-schemas.git"
         }
     ],
     "minimum-stability": "dev",
