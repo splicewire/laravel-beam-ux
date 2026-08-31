@@ -50,9 +50,5 @@ trait WiresPlacement
     #[Chained('boot', order: 80)]
     protected function describePlacements(): void
     {
-        $this->app->make(RegistryIndex::class)->describe(
-            $this->app->make(PlacementResolver::class),
-            by: self::class,
-        );
     }
 }
