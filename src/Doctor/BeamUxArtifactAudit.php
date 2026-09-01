@@ -140,6 +140,28 @@ class BeamUxArtifactAudit implements DoctorAudit
      */
     private function artifactFinding(string $check, array $stale, array $unsupported, ArtifactCoverage $coverage): Finding
     {
+        // ⚠️ A denominator of ZERO is not a pass (beam-docs-satellite 46). With no `page` row at all the
+        // loop above never ran, every bucket is `0`, and the arithmetic reconciles — so a host whose
+        // entire docs payload is gone emitted exactly the finding a host with nothing to check emits.
+        // Measured 2026-08-29: `~/Herd/satellite` and `~/Herd/tower` held 0 rows and served `/docs`,
+        // `/docs/api` and `/docs/mcp` as 404, while this line read green and the two tickets owning that
+        // propagation read *resolved*.
+        //
+        // WARN, never FAIL: whether a host should carry entry-backed pages is a fact about the HOST, so
+        // by this estate's rule it is advisory. It sits at the same severity as beam core's
+        // `ScribeOutputContractAudit::artifactPresent()`, which is the other half of the same payload —
+        // one warns that the spec is missing, this one warns that the pages that render it are.
+        if ($coverage->isEmpty()) {
+            return Finding::warn(
+                $check,
+                $coverage->sentence().' This host has beam_ux_entries migrated and holds no `page` row '.
+                'of any kind, so every entry-backed URL 404s — including the seeded docs tree. Run '.
+                '`php artisan splicewire:beam:seed` to reprovision it. Advisory: a site that '.
+                'deliberately ships no entry-backed pages can ignore this, but a payload lost to a '.
+                'reset, a re-clone or a `migrate:fresh` looks exactly the same from here.',
+            );
+        }
+
         if ($stale === [] && $unsupported === []) {
             return Finding::pass($check, $coverage->sentence());
         }

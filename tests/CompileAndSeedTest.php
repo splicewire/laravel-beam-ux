@@ -263,6 +263,54 @@ class CompileAndSeedTest extends TestCase
         $this->assertNull(BeamUxEntry::query()->where('slug', 'docs')->first());
     }
 
+    /**
+     * ⚠️ **A host that lost its whole docs payload read as a PASS**, and that is the finding this map
+     * kept catching in other people's instruments (beam-docs-satellite 46). Measured 2026-08-29:
+     * `~/Herd/satellite` and `~/Herd/tower` held **0** `beam_ux_entries` rows and served `/docs`,
+     * `/docs/api` and `/docs/mcp` as 404, while both tickets owning that propagation read *resolved*.
+     * Nothing said so — this audit's loop ran zero times, every bucket stayed `0`, and the arithmetic
+     * reconciled perfectly, so `artifactFinding()` returned {@see DoctorStatus::Pass} carrying the
+     * honest sentence *"no `page` entries exist, so nothing was checked."*
+     *
+     * Ticket 53 taught this audit to state its denominator and stopped one step short: a denominator of
+     * ZERO is the one reading where "nothing to check" and "the payload is gone" are the same output.
+     * The estate's cheap universal question — *can the instrument's answer distinguish "nothing there"
+     * from "didn't look"?* — was answered NO by the very class built to answer it.
+     *
+     * **Advisory, never fatal**, per this estate's rule: whether a host should carry entry-backed pages
+     * is a fact about the HOST, not something a declaration's author could have gotten right. A site
+     * that deliberately ships none can read this and move on; what it may not do is go unsaid.
+     *
+     * The second half is the direction that makes the first mean something: a host with entries — even
+     * one where every entry is legitimately EXCLUDED — must NOT warn, or the check degrades into a
+     * standing red that teaches people to stop reading the doctor.
+     */
+    public function test_the_doctor_warns_when_the_table_exists_and_holds_no_pages_at_all(): void
+    {
+        $empty = $this->audit()[0];
+
+        $this->assertSame(DoctorStatus::Warn, $empty->status, $empty->detail);
+        $this->assertStringContainsString('no `page` entries exist', $empty->detail);
+        $this->assertStringContainsString('splicewire:beam:seed', $empty->detail);
+
+        // The other direction. Two rows, BOTH legitimately excluded — the closest a populated host gets
+        // to the empty one, and the case that would break if the warn keyed off `covered` instead of
+        // `total`. It stays a pass.
+        BeamUxEntry::rootFor(BeamUxEntry::REALM_SITE);
+        BeamUxEntry::create([
+            'slug' => 'reference-pointer',
+            'type' => UxType::Page,
+            'format' => UxFormat::Mdx,
+            'segment' => 'reference',
+        ]);
+
+        $populated = $this->audit()[0];
+
+        $this->assertSame(DoctorStatus::Pass, $populated->status, $populated->detail);
+        $this->assertStringContainsString('0 of 2', $populated->detail);
+        $this->assertNotSame($empty->detail, $populated->detail);
+    }
+
     /** @return array<int, \Rushing\Doctor\Finding> */
     private function audit(): array
     {

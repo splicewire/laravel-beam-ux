@@ -67,6 +67,25 @@ class ArtifactCoverage
     }
 
     /**
+     * Whether this audit had a denominator of ZERO — no `page` row of any kind to check.
+     *
+     * ⚠️ **This is the one reading where a reconciling pass and a lost payload are the same output**, and
+     * it is why {@see BeamUxArtifactAudit} warns on it (beam-docs-satellite 46). Every bucket is `0`, the
+     * arithmetic sums perfectly, and {@see sentence()} says so honestly — but *"nothing to check"* and
+     * *"this host's whole docs tree is gone"* arrive byte-identical. Measured 2026-08-29 on `~/Herd/
+     * satellite` and `~/Herd/tower`: 0 rows, `/docs`, `/docs/api` and `/docs/mcp` all 404, and the only
+     * instrument that reads this table emitted a pass.
+     *
+     * Deliberately distinct from `covered === 0`, which is a legitimate and common state — a host whose
+     * every page is a structural node or a nav pointer covers nothing and is perfectly healthy. The
+     * question here is whether there was anything to cover AT ALL.
+     */
+    public function isEmpty(): bool
+    {
+        return $this->total === 0;
+    }
+
+    /**
      * The coverage sentence, prefixed to the finding's own detail. Always states the denominator — a
      * bare "everything is compiled" is exactly the reading this class exists to stop.
      */
