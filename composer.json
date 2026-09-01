@@ -125,7 +125,7 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "scripts": {
-        "test": "@php vendor/bin/phpunit",
+        "test": "@php -d memory_limit=512M vendor/bin/phpunit",
         "pint": "@php -d memory_limit=512M vendor/bin/pint"
     },
     "config": {
