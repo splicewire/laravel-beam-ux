@@ -78,7 +78,7 @@ class BeamUxRouteShadowAudit implements DoctorAudit
         }
 
         if (! $this->rendererMounted()) {
-            return [Finding::pass(
+            return [Finding::inconclusive(
                 self::CHECK,
                 'this host mounts no `Route::beamUxSite()`, so no entry is served over HTTP and nothing can shadow one.',
             )];
