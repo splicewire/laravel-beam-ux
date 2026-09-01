@@ -42,9 +42,14 @@ class UpdateFromNewerCommand extends Command
     public function handle(UpdateFromNewer $batch): int
     {
         if (! $batch->enabled()) {
-            $this->components->warn(
-                'update-from-newer is OFF (beam.ux.update_from_newer.enabled=false) — no disk edits flow back. Enable it to run.',
-            );
+            // A host condition must not throw (the gate being off is a fact about the HOST, not
+            // something the caller could have gotten right), so this stays WARN + SUCCESS. What it
+            // gains is a denominator: without one, "OFF" and "on, and everything was current" were
+            // equally reassuring — beam-docs-satellite 58.
+            $this->components->warn(sprintf(
+                'update-from-newer is OFF (beam.ux.update_from_newer.enabled=false) — no disk edits flow back. Enable it to run. — 0 of %d registered entries examined.',
+                $batch->registeredCount(),
+            ));
 
             return self::SUCCESS;
         }
@@ -61,11 +66,13 @@ class UpdateFromNewerCommand extends Command
 
         $result = $this->asSystemWriter(fn () => $batch->run($sources, $mtimes));
 
+        // The verdict states its DENOMINATOR, never a bare count: `0 updated · 33 unchanged` was
+        // byte-identical whether every entry was current or the command found no counterpart for a
+        // single one (beam-docs-satellite 58, the shape 53 fixed in `BeamUxArtifactAudit`).
         $this->components->info(sprintf(
-            'Direction %s · %d updated · %d unchanged.',
+            'Direction %s · %s',
             $result['direction'],
-            count($result['updated']),
-            count($result['skipped']),
+            $result['coverage']->sentence(),
         ));
 
         return self::SUCCESS;

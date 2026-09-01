@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Disk;
 
 use Splicewire\Beam\Storage\StorageDriver;
+use Splicewire\Beam\Ux\Doctor\ReconcileCoverage;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -60,25 +61,54 @@ class UpdateFromNewer
      * supplies what the filesystem holds; the batch decides whether it is newer and, if so, writes it
      * through the source-of-record driver). `$diskMtimes` maps the same path → its filesystem mtime.
      *
+     * ⚠️ **`skipped` fuses two opposite outcomes and always did** — "the file was there and was not
+     * newer" and "there was no file at all" both land in it, so `0 updated · 33 unchanged` reads as
+     * success on a run that examined nothing (beam-docs-satellite 58). The `coverage`
+     * {@see ReconcileCoverage} splits them. `skipped` is kept UNCHANGED for existing callers; the
+     * coverage is additive.
+     *
      * @param  array<string, string>  $sources  disk-relative path → current on-disk source
      * @param  array<string, int>  $diskMtimes  disk-relative path → filesystem mtime (epoch)
-     * @return array{enabled: bool, direction: string, updated: array<int, BeamUxEntry>, skipped: array<int, BeamUxEntry>}
+     * @return array{enabled: bool, direction: string, updated: array<int, BeamUxEntry>, skipped: array<int, BeamUxEntry>, coverage: ?ReconcileCoverage}
      */
     public function run(array $sources, array $diskMtimes): array
     {
         if (! $this->enabled()) {
-            return ['enabled' => false, 'direction' => $this->direction(), 'updated' => [], 'skipped' => []];
+            return [
+                'enabled' => false,
+                'direction' => $this->direction(),
+                'updated' => [],
+                'skipped' => [],
+                // Null rather than an all-zero object: the off-gate branch examined nothing, and a
+                // coverage reading of "0 of 0" would be a claim it is not entitled to make. The command
+                // states the denominator from {@see registeredCount()} instead.
+                'coverage' => null,
+            ];
         }
 
         $direction = $this->direction();
         $updated = [];
         $skipped = [];
+        $current = 0;
+        $misplaced = 0;
+        $unmatched = 0;
 
-        foreach (BeamUxEntry::all() as $entry) {
+        // basename → present under the scanned root. A same-basename file elsewhere makes an unpaired
+        // entry a MISPLACED CANDIDATE rather than a total miss; it is not proof, because a basename can
+        // collide across namespaces, which is why nothing acts on it.
+        $basenames = [];
+        foreach (array_keys($sources) as $relative) {
+            $basenames[basename($relative)] = true;
+        }
+
+        $entries = BeamUxEntry::all();
+
+        foreach ($entries as $entry) {
             $path = $this->placements->resolve($entry)->pathFor($entry);
 
             if (! array_key_exists($path, $sources) || ! array_key_exists($path, $diskMtimes)) {
                 $skipped[] = $entry;
+                isset($basenames[basename($path)]) ? $misplaced++ : $unmatched++;
 
                 continue;
             }
@@ -87,10 +117,29 @@ class UpdateFromNewer
                 $updated[] = $entry;
             } else {
                 $skipped[] = $entry;
+                $current++;
             }
         }
 
-        return ['enabled' => true, 'direction' => $direction, 'updated' => $updated, 'skipped' => $skipped];
+        return [
+            'enabled' => true,
+            'direction' => $direction,
+            'updated' => $updated,
+            'skipped' => $skipped,
+            'coverage' => new ReconcileCoverage(
+                total: $entries->count(),
+                updated: count($updated),
+                current: $current,
+                misplaced: $misplaced,
+                unmatched: $unmatched,
+            ),
+        ];
+    }
+
+    /** The denominator the off-gate branch reports: how many entries a run WOULD have examined. */
+    public function registeredCount(): int
+    {
+        return BeamUxEntry::query()->count();
     }
 
     /**

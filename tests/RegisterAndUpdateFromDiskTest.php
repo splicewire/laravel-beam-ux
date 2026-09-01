@@ -465,6 +465,124 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         );
     }
 
+    /**
+     * **The denominator guard** (beam-docs-satellite ticket 58, the same shape ticket 53 fixed in
+     * `BeamUxArtifactAudit`). A run where every entry was already current and a run where the command
+     * found NO counterpart for a single entry rendered the *identical* sentence —
+     * `Direction disk-to-record · 0 updated · 2 unchanged.` — and exited SUCCESS either way. That is
+     * this estate's signature defect: an instrument reporting success by not running.
+     *
+     * The assertion is on the RENDERED OUTPUT, deliberately: the command exists today, so a red here is
+     * an assertion failure on a string, never a `Class not found` that would prove nothing.
+     */
+    public function test_the_reconcile_sentence_distinguishes_all_current_from_matched_nothing(): void
+    {
+        config()->set('beam.ux.update_from_newer.enabled', true);
+        RecordingDriver::$diskIsNewer = false;
+
+        // Fixture A — two entries whose files sit at their placement path and are NOT newer.
+        $this->mdxEntry('alpha', 'docs.using');
+        $this->mdxEntry('beta', 'docs.using');
+        $this->writeFile('docs/using/page/alpha.mdx', "---\ntitle: Alpha\n---\n");
+        $this->writeFile('docs/using/page/beta.mdx', "---\ntitle: Beta\n---\n");
+
+        $current = $this->runReconcile();
+
+        // Fixture B — two entries with no file anywhere under the scanned root.
+        BeamUxEntry::query()->forceDelete();
+        @unlink($this->root.'/docs/using/page/alpha.mdx');
+        @unlink($this->root.'/docs/using/page/beta.mdx');
+        $this->mdxEntry('gamma', 'docs.using');
+        $this->mdxEntry('delta', 'docs.using');
+
+        $matchedNothing = $this->runReconcile();
+
+        $this->assertNotSame(
+            $current,
+            $matchedNothing,
+            'a run where 2 of 2 entries were current and a run where 0 of 2 had any counterpart must not '.
+            "render the same sentence.\n  all-current : {$current}\n  matched-none: {$matchedNothing}",
+        );
+
+        $this->assertStringContainsString('2 of 2', $current);
+        $this->assertStringContainsString('0 of 2', $matchedNothing);
+
+        RecordingDriver::$diskIsNewer = true;
+    }
+
+    /**
+     * The flagship's own case: the authored file is flat at `docs/using/api-keys.mdx` while
+     * `DefaultPlacement` resolves the mirror to `docs/using/page/api-keys.mdx`. The entry has no file at
+     * its placement path, but a file with its basename IS under the scanned root — which is a *candidate*
+     * (a basename can collide across namespaces), never a repair the command may name.
+     */
+    public function test_a_file_at_the_wrong_path_is_named_a_candidate_and_not_counted_current(): void
+    {
+        config()->set('beam.ux.update_from_newer.enabled', true);
+        RecordingDriver::$diskIsNewer = false;
+
+        $this->mdxEntry('api-keys', 'docs.using');
+        $this->writeFile('docs/using/api-keys.mdx', "---\ntitle: API keys\n---\n");
+
+        $out = $this->runReconcile();
+
+        $this->assertStringContainsString('candidate', $out, "the misplaced file must be reported: {$out}");
+        $this->assertStringContainsString('0 of 1', $out, "it must not count as reconciled: {$out}");
+
+        RecordingDriver::$diskIsNewer = true;
+    }
+
+    /**
+     * The arithmetic self-check ticket 53's `ArtifactCoverage` had to add in a FOLLOW-UP commit, after
+     * v1 shipped the very defect it was built to repair. Every entry lands in exactly one bucket, so the
+     * "read this as a lower bound" clause must be ABSENT on a mixed fixture.
+     */
+    public function test_every_entry_lands_in_a_bucket_so_no_lower_bound_clause_is_emitted(): void
+    {
+        config()->set('beam.ux.update_from_newer.enabled', true);
+        RecordingDriver::$diskIsNewer = true;
+
+        $this->mdxEntry('updated-one', 'docs.build');      // file at placement path, disk newer → updated
+        $this->mdxEntry('misplaced-one', 'docs.build');    // file flat → misplaced candidate
+        $this->mdxEntry('missing-one', 'docs.build');      // no file at all → unmatched
+        $this->writeFile('docs/build/page/updated-one.mdx', "---\ntitle: One\n---\n");
+        $this->writeFile('docs/build/misplaced-one.mdx', "---\ntitle: Two\n---\n");
+
+        $out = $this->runReconcile();
+
+        $this->assertStringNotContainsString('lower bound', $out, "the buckets must reconcile: {$out}");
+        $this->assertStringNotContainsString('counted in no bucket', $out, $out);
+        $this->assertStringContainsString('1 of 3', $out, $out);
+    }
+
+    /** An entry whose mirror path is `{namespace}/page/{slug}.mdx`. */
+    private function mdxEntry(string $slug, string $namespace): BeamUxEntry
+    {
+        return BeamUxEntry::create([
+            'slug' => $slug,
+            'type' => UxType::Page,
+            'format' => 'mdx',
+            'namespace' => $namespace,
+            'particle_id' => 'p-'.$slug,
+        ]);
+    }
+
+    /** Run the operator command over the scan root and return its rendered output, ANSI stripped. */
+    private function runReconcile(): string
+    {
+        $buffer = new \Symfony\Component\Console\Output\BufferedOutput;
+
+        $this->app->make(\Illuminate\Contracts\Console\Kernel::class)->call(
+            'splicewire:beam:ux:update-from-newer',
+            ['path' => $this->root],
+            $buffer,
+        );
+
+        $out = (string) preg_replace('/\e\[[0-9;]*[A-Za-z]/', '', $buffer->fetch());
+
+        return trim((string) preg_replace('/\s+/', ' ', $out));
+    }
+
     private function writeFile(string $relative, string $contents): void
     {
         $full = $this->root.'/'.$relative;
