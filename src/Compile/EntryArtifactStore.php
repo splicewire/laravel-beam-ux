@@ -29,21 +29,38 @@ class EntryArtifactStore
     /**
      * The **compiler generation** — bumped whenever `compile.mjs` changes the SHAPE of what it emits.
      *
-     * The version below hashes the BODY, which is the right key for "has the author edited this?" and
-     * the wrong one for "was this produced by the current compiler?". Ticket 07 changed the artifact
+     * ⚠️ **This paragraph used to say "the version below hashes the BODY". It does not, and never did.**
+     * {@see version()} hashes `head_version ?? particle.updated_at ?? entry.updated_at` — a HEAD pin or a
+     * TIMESTAMP, never the content. Measured 2026-08-31 at `~/Herd/splicewire-app`: 32 of 32 entry-linked
+     * particles carry `head_version IS NULL` (39 of 39 particles in `public`, in fact), so on the
+     * flagship today the artifact address is a hash of `updated_at` and nothing else.
+     *
+     * The consequence, which the false docblock hid: **ANY particle write stales the artifact**, including
+     * a byte-identical no-op re-write. `disk-to-record` touching a row it did not change is enough to
+     * orphan the compiled file and force a recompile. That is a live question, not a repair to make here
+     * — see beam-docs-satellite ticket 61.
+     *
+     * The generation constant is still needed for the reason below, and the reason survives the
+     * correction: an `updated_at` key is the right key for "has this row been written?" and the wrong one
+     * for "was this produced by the current compiler?". Ticket 07 changed the artifact
      * from an ES module with a bare `react/jsx-runtime` import into a runtime-injected module
      * (ADR-0209 §7, amended) — the bodies were untouched, so every artifact kept its address, and a
      * browser holding the previous file under that address went on using it. The URL is treated as
-     * effectively immutable precisely BECAUSE the version is supposed to move when the content does;
-     * a compiler change is a content change the body hash cannot see.
+     * effectively immutable precisely BECAUSE the version moves on every write; a compiler change writes
+     * no row, so it moves nothing a write-keyed address can see.
      *
      * Bump this on any change to the emitted shape. It costs one recompile and nothing else.
      */
     private const GENERATION = '3';
 
     /**
-     * The version key an artifact is stamped with. Short, opaque, and stable for an unchanged body
+     * The version key an artifact is stamped with. Short, opaque, and stable for an UNWRITTEN row
      * compiled by an unchanged compiler — callers treat it as a token, never parse it.
+     *
+     * ⚠️ It keys on the WRITE, not the content: the HEAD pin when the particle is versioned, otherwise
+     * the particle's `updated_at`, otherwise the entry's. On the flagship the first is null for every
+     * row, so a byte-identical re-write of a body still produces a NEW address and orphans the artifact
+     * at the old one. See the correction on {@see GENERATION}.
      */
     public function version(BeamUxEntry $entry): string
     {

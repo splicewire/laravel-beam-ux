@@ -44,17 +44,31 @@ class ReconcileCoverage
     }
 
     /**
-     * Entries counted in `total` and put in no bucket — which should be none, and is stated rather than
-     * trusted.
+     * The reconciliation residual: `total` minus every bucket. Zero is the only correct value, and it is
+     * stated rather than trusted.
      *
      * ⚠️ **This counter exists because {@see ArtifactCoverage} shipped without it and immediately grew
      * the exact defect it was built to repair** — a `total` that incremented on a branch none of the
      * buckets did, read out as a confident coverage figure with nothing reconciling the arithmetic. It
      * was added by a follow-up commit; adding it here in v1 is the whole point of copying the pattern.
+     *
+     * ⚠️ **The return is SIGNED, and deliberately so.** The first version of this method wrapped the
+     * subtraction in `max(0, …)`, which is the estate's signature defect landing on the self-check built
+     * to prevent it: a clamp can only ever see an UNDER-count, so an entry landing in two buckets — or a
+     * future branch incrementing one without a `continue` — read out as `0`, byte-identical to
+     * "everything reconciles". The defect that prompted this class was an under-count, so the clamp
+     * covered exactly the one direction that had already bitten and silently blessed the other. Callers
+     * must test `!== 0` (or {@see reconciles()}), never `> 0`.
      */
     public function unaccounted(): int
     {
-        return max(0, $this->total - $this->matched() - $this->misplaced - $this->unmatched);
+        return $this->total - $this->matched() - $this->misplaced - $this->unmatched;
+    }
+
+    /** Whether the buckets sum to `total` — the arithmetic this class exists to state rather than assume. */
+    public function reconciles(): bool
+    {
+        return $this->unaccounted() === 0;
     }
 
     /**
@@ -74,9 +88,15 @@ class ReconcileCoverage
             ? '; 0 without one'
             : "; {$this->unpaired()} without one ({$this->reasons()})";
 
-        if ($this->unaccounted() > 0) {
-            $sentence .= "; ⚠️ {$this->unaccounted()} counted in no bucket — this command's own ".
-                'arithmetic does not reconcile, so read the coverage as a lower bound';
+        if (! $this->reconciles()) {
+            $residual = $this->unaccounted();
+
+            $sentence .= $residual > 0
+                ? "; ⚠️ {$residual} counted in no bucket — this command's own arithmetic does not ".
+                    'reconcile, so read the coverage as a lower bound'
+                : '; ⚠️ '.abs($residual)." counted in more than one bucket — this command's own arithmetic ".
+                    'does not reconcile, so read the coverage as a lower bound on the FINDINGS and an '.
+                    'upper bound on the coverage';
         }
 
         return "{$sentence}.";

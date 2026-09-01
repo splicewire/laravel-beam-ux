@@ -46,10 +46,24 @@ class ArtifactCoverage
      * enumerating its known blind spots and not its unknown ones reads as thorough exactly where it is
      * weakest; a bucket added today can drift the same way tomorrow, so the sum is checked, not
      * assumed.
+     *
+     * ⚠️ **The return is SIGNED, and deliberately so.** The first version of this method wrapped the
+     * subtraction in `max(0, …)` — the estate's signature defect landing on the self-check built to
+     * prevent it. A clamp can only ever see an UNDER-count, so a row landing in two buckets, or a future
+     * branch incrementing one without a `continue`, read out as `0`: byte-identical to "everything
+     * reconciles". The defect this counter was added for was an under-count, so the clamp covered
+     * exactly the one direction that had already bitten. Callers must test `!== 0` (or
+     * {@see reconciles()}), never `> 0`.
      */
     public function unaccounted(): int
     {
-        return max(0, $this->total - $this->covered - $this->excluded() - $this->unsupported);
+        return $this->total - $this->covered - $this->excluded() - $this->unsupported;
+    }
+
+    /** Whether the buckets sum to `total` — the arithmetic this class exists to state rather than assume. */
+    public function reconciles(): bool
+    {
+        return $this->unaccounted() === 0;
     }
 
     /**
@@ -76,9 +90,14 @@ class ArtifactCoverage
             $sentence .= "; {$this->unsupported} in a format the bound compiler does not handle";
         }
 
-        if ($this->unaccounted() > 0) {
-            $sentence .= "; ⚠️ {$this->unaccounted()} counted in no bucket — this audit's own arithmetic ".
-                'does not reconcile, so read the coverage as a lower bound';
+        if (! $this->reconciles()) {
+            $residual = $this->unaccounted();
+
+            $sentence .= $residual > 0
+                ? "; ⚠️ {$residual} counted in no bucket — this audit's own arithmetic does not ".
+                    'reconcile, so read the coverage as a lower bound'
+                : '; ⚠️ '.abs($residual).' counted in more than one bucket — this audit\'s own '.
+                    'arithmetic does not reconcile, so read the coverage as a lower bound';
         }
 
         return "{$sentence}.";
