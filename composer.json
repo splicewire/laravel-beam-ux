@@ -22,6 +22,7 @@
         "illuminate/contracts": "^11.0|^12.0|^13.0",
         "illuminate/database": "^11.0|^12.0|^13.0",
         "illuminate/support": "^11.0|^12.0|^13.0",
+        "rushing/laravel-data-filters": "*",
         "rushing/laravel-data-nav": "*",
         "rushing/laravel-schema-convergence": "*",
         "rushing/php-popcorn": "dev-main",
@@ -76,6 +77,10 @@
         }
     },
     "repositories": [
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-data-filters.git"
+        },
         {
             "type": "git",
             "url": "https://github.com/stephenr85/laravel-data-nav.git"

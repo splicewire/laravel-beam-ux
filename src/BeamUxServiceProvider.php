@@ -4,6 +4,8 @@ namespace Splicewire\Beam\Ux;
 
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Route;
+use Rushing\DataFilters\Registry\ResourceDefinition as FilterResourceDefinition;
+use Rushing\DataFilters\Registry\ResourceRegistry as FilterResourceRegistry;
 use Rushing\Popcorn\Concerns\ChainsTraitMethods;
 use Rushing\Popcorn\Contracts\ChainsTraitMethods as ChainsTraitMethodsContract;
 use Spatie\LaravelPackageTools\Package;
@@ -27,6 +29,7 @@ use Splicewire\Beam\Ux\Concerns\WiresPublicSurface;
 use Splicewire\Beam\Ux\Concerns\WiresSitemap;
 use Splicewire\Beam\Ux\Concerns\WiresStorage;
 use Splicewire\Beam\Ux\Concerns\WiresThemeSchemas;
+use Splicewire\Beam\Ux\Data\BeamUxEntryData;
 use Splicewire\Beam\Ux\Database\Seeders\BeamUxSeeder;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
@@ -34,6 +37,7 @@ use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxRouteShadowAudit;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Query\BeamUxEntryResourceQuery;
 use Splicewire\Beam\Write\ParticleWriter;
 
 /**
@@ -203,5 +207,49 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             );
         }
 
+        $this->declareFilterResources();
+    }
+
+    /**
+     * Ship the `data-filters` resource this package's own filterable `#[ParticleResource]` promises.
+     *
+     * The reasoning, the failure it repairs, and why the ordering is load-bearing all live on
+     * {@see BeamUxEntryResourceQuery}. This method is only the registration, and it copies beam core's
+     * `declareFilterResources()` line for line, including both guards:
+     *
+     * - **the `bound()` guard** — data-filters may genuinely be absent at a host, in which case
+     *   `beam-ux-entry` is declared, just not filterable there;
+     * - **the `has()` guard, which is the CALLER's job and not the registry's** —
+     *   `registerDefinition()` overwrites plainly, so an unguarded package registration would silently
+     *   stomp a host that seeded its own `beam-ux-entry` key from `config('data-filters.resources')`.
+     *   Guarded, this is strictly additive.
+     *
+     * Registered IMPERATIVELY rather than through data-filters' `#[ResourceFilter]` discovery, for the
+     * same reason beam core, `laravel-beam-lineage` and `-calendars` do it this way:
+     * `config('data-filters.discover')` is HOST-owned and empty by default — a closed door to a
+     * package — so discovery here would register nothing at a host and leave the 500 in place.
+     *
+     * No `model:`. beam's `ParticleResourceModelResolver` (bound onto data-filters'
+     * `ResourceModelResolver` port) fills the backing off the `#[ParticleResource]` registered under
+     * the *same key*, lazily — so `BeamUxEntry` is named in one place and the two read paths cannot
+     * drift.
+     */
+    protected function declareFilterResources(): void
+    {
+        if (! $this->app->bound(FilterResourceRegistry::class)) {
+            return;
+        }
+
+        $registry = $this->app->make(FilterResourceRegistry::class);
+
+        if ($registry->has('beam-ux-entry')) {
+            return;
+        }
+
+        $registry->registerDefinition(new FilterResourceDefinition(
+            key: 'beam-ux-entry',
+            data: BeamUxEntryData::class,
+            query: BeamUxEntryResourceQuery::class,
+        ));
     }
 }
