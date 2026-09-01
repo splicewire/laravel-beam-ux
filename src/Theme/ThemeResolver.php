@@ -43,16 +43,25 @@ class ThemeResolver
     /**
      * ## Uncited central pin — a TIER IN A CASCADE, not a floor (re-measured 2026-08-30)
      * `realm-and-floor-reconciliation` ticket 05 judged this "not floor" from the docblock. Confirmed
-     * from data at `~/Herd/splicewire-app`, and the measurement separates this pin from every other
-     * uncited one in the estate: `beam_ux_entries` exists in **all 18 schemas** (`public` + 17
-     * `tenant_*`), where the seven uncited `splicewire/tower` pins each sit on a table present in
-     * `public` ALONE. Those are reachability declarations; this one genuinely selects a tier.
+     * from data at `~/Herd/splicewire-app`, and the residency separates this pin from every other
+     * uncited one in the estate: `beam_ux_entries` exists in **every** schema (`public` and each
+     * `tenant_*`), where the uncited `splicewire/tower` pins each sit on a table present in
+     * `public` ALONE.
      *
-     * The counterfactual differs in kind, too, and it is the dangerous signature. Unpinning a
-     * tower model raises `relation ... does not exist` inside a tenant frame — loud. Unpinning here
-     * returns **0 rows with no exception**: the tenant's own copy of the table is right there and is
-     * empty (measured: 1 row in `public`, 0 in every `tenant_*`). The central tier would simply stop
-     * contributing to `resolve()`'s deep-merge and the site would render package defaults, silently.
+     * The distinction that matters is **relation identity**, and it runs the opposite way round from
+     * how an earlier version of this note put it. {@see \Splicewire\Beam\Tenancy\PostgreSQLSchemaManager}
+     * sets `search_path` to `"<tenant_schema>,public"`, so for a `public`-only table pinned and
+     * unpinned resolve the *identical physical relation* — the tower pins change nothing today. Here
+     * both copies exist, and `search_path` order resolves the **tenant** one: unpinned, this reads
+     * `tenant_x.beam_ux_entries`, a *different physical relation* from `public.beam_ux_entries`. This
+     * is the pin whose removal changes behaviour; the tower ones are behaviourally redundant until a
+     * tenant is isolated database-per-tenant or the `,public` suffix is dropped. That distinction is
+     * structural and survives every row count. Full mechanism, measured at `~/Herd/splicewire-app`:
+     * `App\Vault\TenancyVaultContextGuard`'s docblock at the flagship.
+     *
+     * The counterfactual is also the dangerous signature: unpinning here raises no exception at all.
+     * The central tier would simply stop contributing to `resolve()`'s deep-merge and the site would
+     * render whatever the tenant copy holds — package defaults where it holds nothing — silently.
      *
      * No closed-list category applies and none is invented. A cascade tier is not `kernel`,
      * `tenant-isolation`, `query-engine`, `registry-runtime`, `auth` or `billing-wall`, and stretching
