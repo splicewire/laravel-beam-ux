@@ -36,6 +36,7 @@ use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxRouteShadowAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxThemeResolutionAudit;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Query\BeamUxEntryResourceQuery;
 use Splicewire\Beam\Write\ParticleWriter;
@@ -155,6 +156,15 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxChromeAudit::class,
+            );
+
+            // theme-entries-and-authoring ticket 07: `ThemeResolver::resolve()` never throws, so a query
+            // error in the cascade renders package defaults behind a 200, indistinguishable from "no
+            // theme configured". This runs the resolver on read and WARNS (never fails — a host fact)
+            // naming the tier and the exception class it swallowed.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxThemeResolutionAudit::class,
             );
 
             // ADR-0209 §7's reporting seam: entries whose compiled artifact is missing or stale. It is

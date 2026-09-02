@@ -2,6 +2,8 @@
 
 namespace Splicewire\Beam\Ux\Theme;
 
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Schema\ThemeSchemas;
@@ -19,6 +21,14 @@ use Throwable;
  * try/catch the way `RealmManifestProjector`/`CanMapBuilder` calls do today (those two ARE throwable;
  * their host call sites wrap them). This resolver self-guarantees safety instead, since `theme` is
  * unconditional shared-prop wiring with no natural "degrade to null" story a page could branch on.
+ *
+ * **But never SILENT** (ticket 07). The catch distinguishes two reasons to degrade. *Absence* — a tier
+ * whose `beam_ux_entries` does not exist (a fresh install, an unmigrated central) — is the expected
+ * host fact and stays quiet. *Everything else* is `report()`ed and recorded on {@see self::lastFailure()}
+ * for {@see \Splicewire\Beam\Ux\Doctor\BeamUxThemeResolutionAudit} to read, because a swallowed
+ * query error that returns package defaults is byte-identical to "no theme configured" — the estate's
+ * signature defect, an instrument reporting success by not running. The return value is unchanged in
+ * both cases; only whether anyone hears about it differs.
  *
  * **Theme entry identity**: `namespace = 'theme'`, `slug = 'default'` — a single canonical row per
  * schema (central or tenant), the same "identify by (namespace, slug), not by `type`" shape
@@ -70,6 +80,8 @@ class ThemeResolver
      */
     private const CENTRAL_CONNECTION = 'central';
 
+    private ?ThemeResolutionFailure $lastFailure = null;
+
     /**
      * @param  string|null  $realm  A "sub-brand" override on top of the default cascade — e.g. a Beam-
      *                              branded section living inside an otherwise Splicewire-themed host.
@@ -83,25 +95,74 @@ class ThemeResolver
      */
     public function resolve(?string $realm = null): array
     {
+        $this->lastFailure = null;
+
+        // The tier currently being read — carried across the single catch so a failure can NAME the
+        // entry it came from without splitting the never-throw envelope into four.
+        $entry = 'defaults';
+        $connection = null;
+
         try {
             $theme = $this->defaults();
+
+            [$entry, $connection] = ['central:'.self::SLUG, self::CENTRAL_CONNECTION];
             $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry(self::SLUG), self::CENTRAL_CONNECTION));
+
+            [$entry, $connection] = ['tenant:'.self::SLUG, null];
             $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry(self::SLUG), null));
 
             if ($realm !== null && $realm !== self::SLUG) {
+                [$entry, $connection] = ['central:'.$realm, self::CENTRAL_CONNECTION];
                 $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry($realm), self::CENTRAL_CONNECTION));
+
+                [$entry, $connection] = ['tenant:'.$realm, null];
                 $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry($realm), null));
             }
 
             return $theme;
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            if (! $this->isAbsence($e, $connection)) {
+                $this->lastFailure = new ThemeResolutionFailure($entry, $e::class, $e->getMessage(), $connection);
+                report($e);
+            }
+
             return $this->defaults();
         }
     }
 
     /**
+     * What the last {@see self::resolve()} swallowed that was NOT absence — `null` when it completed, or
+     * degraded only because a tier's table does not exist. Computed per call, never cached across one.
+     */
+    public function lastFailure(): ?ThemeResolutionFailure
+    {
+        return $this->lastFailure;
+    }
+
+    /**
+     * The one degrade reason that stays silent: a query failed because the tier's `beam_ux_entries`
+     * is not there at all. Anything else — the table present but the wrong shape, a connection that
+     * cannot be opened, a non-query Throwable — is a defect, and asking the schema is what separates
+     * the two. If even that question cannot be answered, the answer is "not absence": a connection
+     * that cannot say whether its tables exist is broken, not empty.
+     */
+    private function isAbsence(Throwable $e, ?string $connection): bool
+    {
+        if (! $e instanceof QueryException) {
+            return false;
+        }
+
+        try {
+            return ! Schema::connection($connection)->hasTable('beam_ux_entries');
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
      * The package-default theme — every field's JSON Schema `default` value, ticket 01's ONLY genuine
-     * "package default" tier. This is also what `resolve()` falls back to on ANY failure.
+     * "package default" tier. This is also what `resolve()` falls back to on ANY failure — reported
+     * or silent, see the class docblock.
      *
      * @return array{canvas: array<string, mixed>, shell: array<string, mixed>, site: array<string, mixed>}
      */

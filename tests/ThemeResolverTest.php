@@ -2,11 +2,14 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Theme\ThemeResolutionFailure;
 use Splicewire\Beam\Ux\Theme\ThemeResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
@@ -148,5 +151,75 @@ class ThemeResolverTest extends TestCase
         $theme = $this->resolver()->resolve();
 
         $this->assertSame('#4F7CFF', $theme['canvas']['accent']);
+    }
+
+    /**
+     * A central `beam_ux_entries` that EXISTS but is the wrong shape — a stale-snapshot migration, the
+     * exact "no such column" a host reads after a package moved its stub on. Not absence.
+     */
+    private function breakCentralTable(): void
+    {
+        Schema::connection('central')->create('beam_ux_entries', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->string('slug');
+        });
+    }
+
+    /**
+     * Ticket 07: a non-absence failure still degrades to defaults (never-throw is kept) AND is
+     * reported exactly once — the instrument must distinguish "nothing there" from "didn't look".
+     */
+    public function test_a_non_absence_failure_returns_defaults_and_is_reported_once(): void
+    {
+        Exceptions::fake();
+        $this->breakCentralTable();
+
+        $resolver = $this->resolver();
+        $theme = $resolver->resolve();
+
+        $this->assertSame('#4F7CFF', $theme['canvas']['accent']);
+
+        Exceptions::assertReported(QueryException::class);
+        Exceptions::assertReportedCount(1);
+
+        $failure = $resolver->lastFailure();
+        $this->assertInstanceOf(ThemeResolutionFailure::class, $failure);
+        $this->assertSame('central:default', $failure->entry);
+        $this->assertSame(QueryException::class, $failure->exception);
+        $this->assertSame('central', $failure->connection);
+    }
+
+    public function test_the_unmigrated_case_returns_defaults_and_reports_nothing(): void
+    {
+        Exceptions::fake();
+
+        $resolver = $this->resolver();
+        $theme = $resolver->resolve();
+
+        $this->assertSame('#4F7CFF', $theme['canvas']['accent']);
+
+        Exceptions::assertNothingReported();
+        $this->assertNull($resolver->lastFailure());
+    }
+
+    public function test_a_realm_tier_failure_names_the_realm_entry(): void
+    {
+        Exceptions::fake();
+        // Central is healthy and holds the default row; the TENANT table is the broken one.
+        $this->writeThemeEntry('central', ['canvas' => ['accent' => '#FF0000']]);
+        Schema::connection('testing')->drop('beam_ux_entries');
+        Schema::connection('testing')->create('beam_ux_entries', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->string('slug');
+        });
+
+        $resolver = $this->resolver();
+        $theme = $resolver->resolve('beam');
+
+        // Degrades to PACKAGE defaults, not to the central-resolved value — the whole cascade is one
+        // unit and a broken tier voids it; the report is what stops that reading as "no theme".
+        $this->assertSame('#4F7CFF', $theme['canvas']['accent']);
+        Exceptions::assertReportedCount(1);
+        $this->assertSame('tenant:default', $resolver->lastFailure()?->entry);
     }
 }
