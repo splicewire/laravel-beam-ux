@@ -66,6 +66,14 @@ that ran and found nothing rather than as a route miss; and `route:list` prints 
 happily, in a **different order** than the one that serves requests — so the console says the surface is
 healthy while every request disagrees.
 
+**Amended 2026-09-02 (api-surface-coherence ticket 134, ruled by 142):** the list **composes** — the
+macro unions the package baseline (`PublicEntryController::RESERVED_BY_BEAM`, `['api']`), the host's
+`beam.ux.site.reserved_prefixes`, and the macro argument. Before this the host value *replaced* the
+default, so the flagship reserving `mcp` would have un-reserved `api`; and `mergeConfigFrom` is shallow,
+so a host config carrying only that key replaced the package's whole `site` array. A host adds; it
+cannot subtract the baseline. The earlier promise that a host "may set it to `[]`" to serve `/api` from
+entries is withdrawn — nothing consumed it, and `api` is the fleet API boundary (ADR-0211 §7).
+
 The guard is a **route constraint**, not a check in the controller, because Laravel has no "next route":
 a catch-all that matches, resolves nothing and `abort`s has already swallowed the URL. Only a pattern
 that fails to match lets the router keep looking. Matching is anchored and segment-aware, so `api`

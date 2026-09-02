@@ -68,9 +68,11 @@ trait WiresPublicSurface
      * `web.php`. Both register AFTER this catch-all and lose to it by construction. The renderer then
      * runs, resolves nothing, and returns its uniform 404 — which reads as "the API is broken", not as
      * "a catch-all shadowed it", because the route IS registered and `route:list` prints it in a
-     * different order than the one that serves requests. Defaults to `['api']` from
-     * `beam.ux.site.reserved_prefixes`; the constraint is on the route, because Laravel has no "next
-     * route" and a controller that aborts has already swallowed the URL.
+     * different order than the one that serves requests. The list is the UNION of
+     * {@see PublicEntryController::RESERVED_BY_BEAM} (`api`), `beam.ux.site.reserved_prefixes` and
+     * `$reservedPrefixes` — a host adds to the baseline and cannot remove it (134/142: a host-side
+     * list must compose); the constraint is on the route, because Laravel has no "next route" and a
+     * controller that aborts has already swallowed the URL.
      *
      * `$claimRoot` is **off by default**: the direction of travel is a whole site served from entries,
      * but installing beam-ux must never take a host's homepage. `$page` is required and un-defaulted
@@ -98,7 +100,16 @@ trait WiresPublicSurface
             /** @var Router $this */
             $artifactRoot ??= config('beam.ux.site.artifact_root', 'beam/ux/artifacts');
             $routeName ??= config('beam.ux.route_name', 'beam.ux.');
-            $reservedPrefixes ??= config('beam.ux.site.reserved_prefixes', ['api']);
+            // COMPOSED, never replaced (api-surface-coherence 134, ruled by 142): the package baseline,
+            // the host's config and the macro argument are unioned. `??=` let a host that reserved `mcp`
+            // silently UN-reserve `api`, and `mergeConfigFrom` is shallow, so a published host config
+            // carrying only `site.reserved_prefixes` replaced this whole `site` array — two lists that
+            // each replaced the other. A host adds; it cannot subtract the baseline.
+            $reservedPrefixes = array_values(array_unique(array_merge(
+                PublicEntryController::RESERVED_BY_BEAM,
+                (array) config('beam.ux.site.reserved_prefixes', []),
+                $reservedPrefixes ?? [],
+            )));
 
             $artifactName = "{$routeName}site.artifact";
 

@@ -186,11 +186,17 @@ return [
     |                   boundary (ADR-0211 §7), so reserving it here invents no
     |                   new convention.
     |
-    |                   A host adds its own prefixes here (or passes them to the
-    |                   macro); a host served wholly from entries with no API at
-    |                   all may set it to `[]`. Matching is anchored and
-    |                   segment-aware: `api` reserves `/api` and `/api/...` and
-    |                   nothing else — an entry at `/docs/api` is untouched.
+    |                   A host ADDS its own prefixes here (or passes them to the
+    |                   macro); the three sources are unioned with the package's
+    |                   `api` baseline, never replacing it, so a host that
+    |                   reserves `mcp` keeps `api` reserved and `[]` means "add
+    |                   nothing" (api-surface-coherence 134 / 142: a host-side
+    |                   list must compose). ⚠️ Laravel's config merge is shallow —
+    |                   a published host file that carries only this key is fine,
+    |                   because the macro falls back to `artifact_root`'s default
+    |                   on its own. Matching is anchored and segment-aware: `api`
+    |                   reserves `/api` and `/api/...` and nothing else — an
+    |                   entry at `/docs/api` is untouched.
     |
     */
     'site' => [

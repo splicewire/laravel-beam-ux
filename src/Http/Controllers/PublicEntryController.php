@@ -47,6 +47,16 @@ class PublicEntryController
     ) {}
 
     /**
+     * The prefixes beam reserves on EVERY host, before the host's own list is unioned in. `api` is beam's
+     * fleet-wide API boundary (ADR-0211 §7), so reserving it invents no convention; and a host cannot
+     * subtract it — `beam.ux.site.reserved_prefixes` composes with this, it does not replace it
+     * (api-surface-coherence 134, ruled by 142).
+     *
+     * @var list<string>
+     */
+    public const RESERVED_BY_BEAM = ['api'];
+
+    /**
      * The `{path}` route constraint, reserving the given URI prefixes out of the catch-all.
      *
      * **This has to be a constraint, not a check inside `__invoke`.** Laravel has no "next route": a
@@ -68,7 +78,7 @@ class PublicEntryController
      *
      * @param  list<string>  $reservedPrefixes  slash-trimmed URI prefixes, e.g. `['api', 'webhooks']`
      */
-    public static function pathConstraint(array $reservedPrefixes = ['api']): string
+    public static function pathConstraint(array $reservedPrefixes = self::RESERVED_BY_BEAM): string
     {
         $prefixes = array_values(array_filter(array_map(
             fn ($prefix) => trim((string) $prefix, '/'),
