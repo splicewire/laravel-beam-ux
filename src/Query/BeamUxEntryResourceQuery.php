@@ -40,12 +40,17 @@ use Rushing\DataFilters\Query\ResourceQuery;
  * "Files" tool, `splicewire:beam:ux:entries`); `id` is the tiebreak that makes it total, since
  * `(namespace, slug)` is unique only per realm.
  *
- * There is deliberately **no row filter here**. `BeamUxEntryData` declares no `scope()` and no policy
- * is registered for {@see \Splicewire\Beam\Ux\Models\BeamUxEntry}; the read guard for this resource
- * is where it has always been — the schema the connection resolves to, plus the middleware on each
- * host's mount. Inventing one here would quietly turn ordering wiring into an authorization boundary
- * nothing else in the surface honours, which is the worse of the two failures because it would look
- * like it worked.
+ * There is deliberately **no row filter here**. `BeamUxEntryData` declares no `scope()`, and inventing
+ * one here would quietly turn ordering wiring into an authorization boundary nothing else in the surface
+ * honours, which is the worse of the two failures because it would look like it worked.
+ *
+ * ⚠️ An earlier version of this docblock then said "no policy is registered for BeamUxEntry; the read
+ * guard is the schema the connection resolves to, plus the middleware on each host's mount".
+ * beam-docs-satellite 65 measured that sentence for what it is — prose NOMINATING a gate no code
+ * enforced (the flagship mounted this index centrally, with neither) — and it is stale in both halves:
+ * {@see \Splicewire\Beam\Ux\Models\BeamUxEntry} carries `#[UseCascadePolicy]` since api-surface-coherence
+ * 147 (`0d3ca6b`), and that bound policy is what `ParticleController::index()`'s read gate reads. A host
+ * mounting this resource with no tenancy and no policy answers 403, not every row.
  */
 class BeamUxEntryResourceQuery extends ResourceQuery
 {
