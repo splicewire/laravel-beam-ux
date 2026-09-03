@@ -20,6 +20,19 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *
  * Composition seam (ADR-0092): URL inheritance is beam-ux's own engine, not the composed-down nav
  * projection.
+ *
+ * ⚠️ **This class composes an ADDRESS, not a promise that the address serves — and it is NOT the
+ * inverse of {@see EntryPathResolver}.** It walks `parent_id` and applies the segment grammar; that is
+ * the whole of it. It never asks whether the entry is in the realm being served, whether its `type` is
+ * routable, or whether a *different* row already owns the root-absolute segment it just emitted — all
+ * of which `EntryPathResolver` checks, and any of which turns this method's answer into a 404.
+ *
+ * Measured at `splicewire/www` (beam-docs-satellite ticket 69): this resolver reported corrected URLs
+ * for fifteen docs guides whose `realms` column was NULL, which `EntryPathResolver::routable()`'s
+ * `whereJsonContains` cannot match — so the composer and the server disagreed about the same rows, in
+ * silence, and the corpus 404'd behind a set of URLs that looked right everywhere they were printed.
+ * **A composed URL is not evidence of reachability.** Where reachability is what you need, round-trip
+ * it — {@see \Splicewire\Beam\Ux\Doctor\BeamUxReachabilityAudit} does exactly that, host-wide.
  */
 class UrlResolver
 {

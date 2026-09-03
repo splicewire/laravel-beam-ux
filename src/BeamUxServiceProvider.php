@@ -36,6 +36,7 @@ use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxReachabilityAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxRouteShadowAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxThemeResolutionAudit;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -195,6 +196,16 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxRouteShadowAudit::class,
+            );
+
+            // beam-docs-satellite 69: a composed URL is not evidence of reachability. `UrlResolver`
+            // reported corrected URLs for fifteen www docs guides while `EntryPathResolver` could not
+            // see six of the rows — `realms` was NULL, written past `BeamUxEntry::booted()`, and
+            // `whereJsonContains` cannot match NULL. The two are NOT inverses; this asserts the round
+            // trip, which is the only thing that can see the disagreement.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxReachabilityAudit::class,
             );
         }
 

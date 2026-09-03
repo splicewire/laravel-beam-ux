@@ -7,10 +7,24 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
- * The **inverse of {@see UrlResolver}** (ADR-0209 §1) — resolves a public request PATH back to the
- * containment chain that composes to it. `UrlResolver` walks a chain DOWN into a URL; serving needs the
- * other direction, and ADR-0165 §5's segment grammar makes that direction genuinely two-phase rather
- * than a mirror image.
+ * The **serving-direction counterpart of {@see UrlResolver}** (ADR-0209 §1) — resolves a public request
+ * PATH back to the containment chain that composes to it. `UrlResolver` walks a chain DOWN into a URL;
+ * serving needs the other direction, and ADR-0165 §5's segment grammar makes that direction genuinely
+ * two-phase rather than a mirror image.
+ *
+ * ⚠️ **The two are NOT inverses, and reading them as such has already cost a corpus.** An earlier
+ * version of this line called this class "the inverse of `UrlResolver`". It is not: this resolver
+ * applies conditions the composer knows nothing about — realm membership (`realms`, below),
+ * `type = page`, and a phase-1 lookup that finds a root-absolute segment GLOBALLY rather than through
+ * the ancestry the URL was composed from. So `UrlResolver::resolve($entry)` can return a confident URL
+ * that `EntryPathResolver::resolve()` answers `null` for, with no error on either side.
+ *
+ * Measured at `splicewire/www` (beam-docs-satellite ticket 69): fifteen published docs guides had
+ * correct composed URLs while six rows carried `realms = NULL` — written past
+ * {@see BeamUxEntry::booted()}'s defaulting hook, and `whereJsonContains` cannot match NULL — so
+ * `routable()` could not see them and every one of those URLs served a 404. **A composed URL is not
+ * evidence of reachability.** {@see \Splicewire\Beam\Ux\Doctor\BeamUxReachabilityAudit} is the standing
+ * round-trip check that exists because nothing else in the estate compares the two.
  *
  * **Phase 1 — the root-absolute prefix match.** Any node's `segment` may begin with `/`, which RESETS
  * the accumulated path to the realm root and ignores every ancestor above it. Such a node resolves to a
