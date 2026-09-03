@@ -244,6 +244,52 @@ class PublicEntryRendererTest extends TestCase
         $this->get(route('beam.ux.site.artifact', ['entry' => $operator->getKey()]))->assertNotFound();
     }
 
+    public function test_a_layout_naming_another_entry_carries_that_entrys_artifact_address(): void
+    {
+        // ADR-0213 §7: "the client imports the page artifact and its layout artifact and nests them."
+        // The client can only nest what it can address, so the payload carries the named entry's
+        // artifact under `chrome`, one slot per axis — and only when that entry is actually nestable.
+        $root = BeamUxEntry::rootFor();
+        $shell = $this->page('site-shell', ['parent_id' => $root->getKey()]);
+        $docs = $this->page('docs', ['segment' => 'docs', 'parent_id' => $root->getKey(), 'layout' => 'site-shell']);
+        $this->page('guide', ['segment' => 'guide', 'parent_id' => $docs->getKey()]);
+
+        $artifacts = $this->app->make(EntryArtifactStore::class);
+        $artifacts->put($shell, 'export default () => null');
+
+        $response = $this->get('/docs/guide');
+        $response->assertOk();
+
+        $this->assertSame('site-shell', $response->json('props.entry.layout'));
+        $this->assertNull($response->json('props.chrome.template'));
+
+        $url = (string) $response->json('props.chrome.layout.url');
+        $this->assertStringContainsString((string) $shell->getKey(), $url);
+        $this->assertStringContainsString($artifacts->version($shell), $url);
+        $this->assertSame($artifacts->version($shell), $response->json('props.chrome.layout.version'));
+
+        // The address is servable by the same macro's artifact route, not merely well-formed.
+        $this->get($url)->assertOk();
+    }
+
+    public function test_a_chrome_name_that_is_not_a_nestable_entry_carries_no_address(): void
+    {
+        $root = BeamUxEntry::rootFor();
+        $this->page('uncompiled-shell', ['parent_id' => $root->getKey()]);
+        $docs = $this->page('docs', ['segment' => 'docs', 'parent_id' => $root->getKey(), 'layout' => 'uncompiled-shell', 'template' => 'DocsLayout']);
+        $this->page('selfish', ['segment' => 'selfish', 'parent_id' => $docs->getKey(), 'layout' => 'selfish']);
+
+        // No artifact compiled for the named entry → nothing to nest; a registered-only name → no row.
+        $response = $this->get('/docs');
+        $response->assertOk();
+        $this->assertNull($response->json('props.chrome.layout'));
+        $this->assertNull($response->json('props.chrome.template'));
+
+        // An entry naming ITSELF as its layout is not a resolution either.
+        $this->app->make(EntryArtifactStore::class)->put(BeamUxEntry::query()->where('slug', 'selfish')->firstOrFail(), 'export default () => null');
+        $this->assertNull($this->get('/docs/selfish')->json('props.chrome.layout'));
+    }
+
     public function test_a_page_with_no_artifact_404s_rather_than_compiling_on_read(): void
     {
         $root = BeamUxEntry::rootFor();
@@ -367,6 +413,9 @@ class PublicEntryRendererTest extends TestCase
             $table->json('traverse')->nullable();
             $table->json('access')->nullable();
             $table->string('workflow_marking')->nullable()->index();
+            // ADR-0213's chrome columns — needed by the §7 entry-nesting cases below.
+            $table->string('layout')->nullable();
+            $table->string('template')->nullable();
             $table->string('workflow_version')->nullable();
             $table->timestamps();
             $table->softDeletes();

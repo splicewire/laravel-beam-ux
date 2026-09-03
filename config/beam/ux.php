@@ -302,7 +302,8 @@ return [
     | `BeamUxChromeAudit` fails on any declared name that is in neither this list
     | nor the entries table — a stale list is a false alarm, which is the right
     | direction, because the alternative is a guide that silently loses its rail
-    | behind a 200.
+    | behind a 200. A name that IS an entry's slug is accepted only on the terms
+    | the renderer nests it (a live, compiled page); otherwise it warns.
     |
     */
     'chrome' => [

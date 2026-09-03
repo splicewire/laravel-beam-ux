@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Rushing\Doctor\DoctorStatus;
+use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Containment\ChromeResolver;
 use Splicewire\Beam\Ux\Containment\NavProjector;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
@@ -30,7 +31,9 @@ use Splicewire\Beam\Ux\Type\UxType;
  *  - `NavProjector` emits one **href-less** heading per distinct `nav_group` and leaves ungrouped
  *    children where they were — the compatibility half of §8, and the reason no URL moves;
  *  - the three fields round-trip disk → row → disk;
- *  - `BeamUxChromeAudit` fails a name that resolves to neither a registered component nor an entry.
+ *  - `BeamUxChromeAudit` fails a name that resolves to neither a registered component nor an entry,
+ *    and WARNS on a name that IS an entry's slug but one the renderer cannot nest — deleted, not a
+ *    compilable page, or with no artifact compiled from its current body (beam-docs-satellite 55).
  */
 class EntryChromeTest extends TestCase
 {
@@ -233,17 +236,61 @@ class EntryChromeTest extends TestCase
 
     // ── the doctor check ────────────────────────────────────────────────────────────────────
 
-    public function test_the_audit_passes_for_a_registered_name_and_for_a_name_that_is_an_entry(): void
+    public function test_the_audit_passes_for_a_registered_name_and_for_a_name_that_is_a_nestable_entry(): void
     {
         config(['beam.ux.chrome.registered' => ['DocsLayout']]);
 
-        $this->page('site-shell', ['type' => UxType::Layout]);
+        // A nestable entry is what the renderer can actually import: a compilable PAGE with an artifact
+        // for its current body. (This case used to pass on a `layout`-typed row with no artifact —
+        // exactly the entry `EntryArtifactController` 404s on, so the pass was vacuous; ticket 55.)
+        $shell = $this->page('site-shell');
+        $this->artifacts()->put($shell, 'export default () => null');
         $this->page('docs', ['segment' => 'docs', 'layout' => 'DocsLayout', 'template' => 'site-shell']);
 
         $findings = (new BeamUxChromeAudit)->run();
 
         $this->assertCount(1, $findings);
         $this->assertSame(DoctorStatus::Pass, $findings[0]->status);
+    }
+
+    public function test_the_audit_warns_on_a_name_that_is_an_entry_the_renderer_cannot_nest(): void
+    {
+        config(['beam.ux.chrome.registered' => ['DocsLayout']]);
+
+        // Three ways a slug match is not a resolution: no artifact, a non-page type, a deleted row.
+        $this->page('site-shell');
+        $this->page('bare-shell', ['type' => UxType::Layout]);
+        // Soft-deleted directly: `delete()` fires model events a taxonomy listener in the harness cannot
+        // serve (no tag model bound here), and the audit reads the column, not the event.
+        $this->page('old-shell')->forceFill(['deleted_at' => now()])->saveQuietly();
+
+        $this->page('docs', ['segment' => 'docs', 'layout' => 'site-shell']);
+        $this->page('legal', ['segment' => 'legal', 'layout' => 'bare-shell', 'template' => 'old-shell']);
+
+        $findings = (new BeamUxChromeAudit)->run();
+
+        $this->assertCount(1, $findings);
+        // Advisory: whether a slug is nestable is a fact about THIS host's rows and compile state.
+        $this->assertSame(DoctorStatus::Warn, $findings[0]->status);
+        $this->assertStringContainsString('site-shell', $findings[0]->detail);
+        $this->assertStringContainsString('bare-shell', $findings[0]->detail);
+        $this->assertStringContainsString('old-shell', $findings[0]->detail);
+    }
+
+    public function test_the_audit_reports_the_unresolved_and_the_unnestable_as_two_findings(): void
+    {
+        config(['beam.ux.chrome.registered' => ['DocsLayout']]);
+
+        $this->page('site-shell');
+        $this->page('docs', ['segment' => 'docs', 'layout' => 'site-shell', 'template' => 'ProzeTemplate']);
+
+        $findings = (new BeamUxChromeAudit)->run();
+
+        $this->assertCount(2, $findings);
+        $this->assertSame(DoctorStatus::Fail, $findings[0]->status);
+        $this->assertStringContainsString('ProzeTemplate', $findings[0]->detail);
+        $this->assertSame(DoctorStatus::Warn, $findings[1]->status);
+        $this->assertStringContainsString('site-shell', $findings[1]->detail);
     }
 
     public function test_the_audit_fails_a_name_that_is_neither_registered_nor_an_entry(): void
@@ -269,5 +316,14 @@ class EntryChromeTest extends TestCase
             'type' => UxType::Page,
             'format' => UxFormat::Mdx,
         ], $attributes));
+    }
+
+    private function artifacts(): EntryArtifactStore
+    {
+        Storage::fake('artifacts');
+        config(['beam.ux.compile.disk' => 'artifacts']);
+        $this->app->forgetInstance(EntryArtifactStore::class);
+
+        return $this->app->make(EntryArtifactStore::class);
     }
 }

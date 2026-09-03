@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
+use Splicewire\Beam\Ux\Containment\ChromeEntryResolver;
 use Splicewire\Beam\Ux\Containment\ChromeResolver;
 use Splicewire\Beam\Ux\Containment\NavProjector;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
@@ -43,6 +44,7 @@ class PublicEntryController
         private EntryArtifactStore $artifacts,
         private NavProjector $nav,
         private EntryRenderer $renderer,
+        private ChromeEntryResolver $chromeEntries,
         private ChromeResolver $chrome = new ChromeResolver,
     ) {}
 
@@ -137,6 +139,15 @@ class PublicEntryController
                 'url' => $this->artifactUrl($request, $entry),
                 'version' => $this->artifacts->version($entry),
             ],
+            // The SECOND half of §7's resolution order, addressed the same way: when a chrome name is
+            // another entry's slug, the client "imports the page artifact and its layout artifact and
+            // nests them" — and it can only import what it can address. Null per axis when the name is
+            // not a nestable entry (`ChromeEntryResolver`); the client prefers a registered component
+            // of the same name on its own, so this never overrides a host registration.
+            'chrome' => [
+                'layout' => $this->chromeArtifact($request, $chrome['layout'], $entry),
+                'template' => $this->chromeArtifact($request, $chrome['template'], $entry),
+            ],
             // The already-gated nav for the whole realm, so a shell renders `<SiteNav rootPath>` — the
             // site nav and the docs sidebar out of ONE payload (ADR-0210 §5) — without a second
             // round trip. `withNav: false` at mount time is the escape hatch for a host that caches
@@ -167,6 +178,29 @@ class PublicEntryController
      * the docs index (beam-docs-satellite ticket 08): the server served the new module correctly, and
      * the browser never asked for it.
      */
+    /**
+     * The artifact address of the entry a chrome name resolves to, or null when it resolves to none.
+     *
+     * @return array{url: string, version: string}|null
+     */
+    private function chromeArtifact(Request $request, ?string $name, BeamUxEntry $for): ?array
+    {
+        if ($name === null || $name === '') {
+            return null;
+        }
+
+        $chrome = $this->chromeEntries->resolve($name, $for);
+
+        if ($chrome === null) {
+            return null;
+        }
+
+        return [
+            'url' => $this->artifactUrl($request, $chrome),
+            'version' => $this->artifacts->version($chrome),
+        ];
+    }
+
     private function artifactUrl(Request $request, BeamUxEntry $entry): string
     {
         $name = (string) ($request->route()?->defaults['beamUxArtifactRoute'] ?? '');
