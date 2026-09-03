@@ -8,6 +8,7 @@ use Splicewire\Beam\Ux\Console\CompileEntriesCommand;
 use Splicewire\Beam\Ux\Console\EnrichPageSchemasCommand;
 use Splicewire\Beam\Ux\Console\PinNodeCommand;
 use Splicewire\Beam\Ux\Console\PnpmOverridesCommand;
+use Splicewire\Beam\Ux\Console\ReapArtifactsCommand;
 use Splicewire\Beam\Ux\Console\RegisterFromDiskCommand;
 use Splicewire\Beam\Ux\Console\ScaffoldCommand;
 use Splicewire\Beam\Ux\Console\SeedNavCommand;
@@ -42,6 +43,7 @@ trait WiresCommands
             EnrichPageSchemasCommand::class,
             PnpmOverridesCommand::class,
             PinNodeCommand::class,
+            ReapArtifactsCommand::class,
         ]);
     }
 }

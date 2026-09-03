@@ -16,6 +16,7 @@ use Splicewire\Beam\Ux\Access\EntryAccessGate;
 use Splicewire\Beam\Ux\Access\Right;
 use Splicewire\Beam\Ux\Codec\BodyCodec;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
+use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Format\BodyStyle;
 use Splicewire\Beam\Ux\Format\UxFormat;
@@ -274,6 +275,15 @@ class BeamUxEntry extends Model implements WorkflowManaged
             // Nothing in this package calls forceDelete() on an entry today (Frame's generic
             // destroy() just calls delete()), but the guard is cheap and correct either way.
             if ($entry->isForceDeleting()) {
+                // The row is gone for good, so nothing can ever address this entry's artifacts again.
+                // `EntryArtifactStore::put()` prunes per entry and per VERSION — correctly; one `.js`
+                // per directory across the whole store is the evidence — but nothing has ever removed
+                // the DIRECTORY, and `forget()` sat public with zero callers estate-wide since it was
+                // written. Every entry ever force-deleted left its directory behind forever
+                // (beam-docs-satellite 66). A soft delete deliberately keeps it: that entry can be
+                // restored, and its artifact is still addressed by the version it was compiled at.
+                app(EntryArtifactStore::class)->forget($entry);
+
                 return;
             }
 
