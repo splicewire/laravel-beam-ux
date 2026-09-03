@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Schema;
+use Rushing\PermissionCascade\Attributes\UseCascadePolicy;
 use Rushing\PermissionCascade\Concerns\HasVisibility;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Revisions\RevisionRecorder;
@@ -121,7 +122,14 @@ use Splicewire\Beam\Write\ParticleWriter;
  * effect of inference. `page`/`layout`/`template` are EXCLUDED: their schemas come from the composition
  * model (slots/regions), not props. The inference engine + draft schema-ref = beam-ux's; the
  * particle body it rides = beam-core's (ADR-0092 vendor seam).
+ *
+ * Authorization for the AUTHORING API is declared HERE and bound by this package's provider
+ * (api-surface-coherence 147, the shape 135 landed for beam's `Hook`): `#[UseCascadePolicy]` gives
+ * `Gate::getPolicyFor(BeamUxEntry::class)` a real answer under the `beam_ux_entry` alias (ADR-0118).
+ * `EntryAccessGate` is untouched — it answers the PUBLIC surface's question, not this one. `HasVisibility`
+ * means the cascade's shared rung (grants + reach tier) already applies per row.
  */
+#[UseCascadePolicy]
 class BeamUxEntry extends Model implements WorkflowManaged
 {
     use HasFacets;

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Route;
 use Rushing\DataFilters\Registry\ResourceDefinition as FilterResourceDefinition;
 use Rushing\DataFilters\Registry\ResourceRegistry as FilterResourceRegistry;
+use Rushing\PermissionCascade\Support\CascadePolicyRegistrar;
 use Rushing\Popcorn\Concerns\ChainsTraitMethods;
 use Rushing\Popcorn\Contracts\ChainsTraitMethods as ChainsTraitMethodsContract;
 use Spatie\LaravelPackageTools\Package;
@@ -126,6 +127,15 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // ADDITIVE (`Relation::morphMap`), NEVER `enforceMorphMap`: a beam-composing host has many
         // models on class-string morphs. Mirrors {@see \Splicewire\Beam\BeamServiceProvider}.
         Relation::morphMap(['beam_ux_entry' => BeamUxEntry::class]);
+
+        // `BeamUxEntry` binds its authoring-API authorization HERE, in the package that owns the model
+        // (api-surface-coherence 147; the shape 135 landed for beam's `Hook`). Until this line existed
+        // the model carried NO policy, and the estate read that absence four ways at once:
+        // `ResourceFiltersController` fell through, `ParticleController::show()`/`destroy()` denied
+        // everyone but a host's Root bypass, `GateWriteGate` denied every REST write, and the Frame nav
+        // hid the seat. One declaration, consumed by all four; the `beam-ux-entry.*` family is seeded to
+        // a host's admin role by the host. `EntryAccessGate` (the public surface) is a different question.
+        CascadePolicyRegistrar::register(BeamUxEntry::class);
 
         // The boot half of the same concerns — route macros, commands, the workflow and schema
         // handovers. `WiresSitemap` and `WiresPublicSurface` each contribute to BOTH chains, one
