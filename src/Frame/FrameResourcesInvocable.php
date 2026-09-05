@@ -287,7 +287,7 @@ class FrameResourcesInvocable implements Invocable
      */
     private function resourceViewable(ResourceDefinition $def, ?Authenticatable $user): bool
     {
-        if ($user === null || $def->model === null) {
+        if ($def->model === null) {
             return true;
         }
 
@@ -297,7 +297,19 @@ class FrameResourcesInvocable implements Invocable
             return true;
         }
 
-        return $user->can('viewAny', $def->model);
+        // ⚠️ `$user === null` USED to short-circuit to `true`, ABOVE the policy lookup — so an
+        // anonymous reader passed this gate unconditionally while an authenticated one was filtered
+        // by `viewAny`, and anonymous therefore saw MORE nav than a logged-in user. Measured at
+        // `~/Herd/beam` on 2026-09-05, where `/frame/manifest` carries `web` and NO auth: an
+        // unauthenticated `curl` returned both seats, all five children and 12 resource definitions
+        // with their labels and hrefs, while an authenticated Demo Owner got one seat.
+        //
+        // That inverts the posture this method's own docblock claims. A null actor cannot satisfy a
+        // `viewAny` policy, so it is denied here exactly as a real actor failing that policy is —
+        // anonymous is now bounded ABOVE by authenticated, which is the only defensible ordering.
+        // A resource with no model, or with no `viewAny` policy, stays public: that is a declaration
+        // this host made, not an absence being read as permission.
+        return $user !== null && $user->can('viewAny', $def->model);
     }
 
     /**

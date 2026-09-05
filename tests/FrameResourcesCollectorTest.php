@@ -191,7 +191,24 @@ class FrameResourcesCollectorTest extends TestCase
         $this->assertSame(['Tenants', 'Packs', 'Plans', 'Hooks'], array_column($titles, 'title'));
     }
 
-    public function test_gating_is_skipped_entirely_with_no_authenticated_user(): void
+    /**
+     * ⚠️ **This test asserted the OPPOSITE until 2026-09-05**, under the name
+     * `test_gating_is_skipped_entirely_with_no_authenticated_user`: it registered a DENYING `viewAny`
+     * policy and pinned that an anonymous reader saw the row anyway. That was deliberate, and it was
+     * wrong — measured, not argued.
+     *
+     * `~/Herd/beam` mounts `/frame/manifest` on `web` with NO auth. An unauthenticated `curl` there
+     * returned BOTH nav seats, all five children and 12 resource definitions with labels and hrefs,
+     * while an authenticated Demo Owner received ONE seat. Anonymous saw strictly MORE than a
+     * logged-in user, over an endpoint anyone can reach — and the collector's own docblock claims
+     * secure-by-omission three lines above the arm that did it.
+     *
+     * A null actor cannot satisfy a `viewAny` policy, so it is denied exactly as a real actor failing
+     * that policy is. Anonymous is now bounded above by authenticated. A resource with no model or no
+     * `viewAny` policy stays public, because that is a declaration the host made rather than an
+     * absence being read as permission.
+     */
+    public function test_an_anonymous_reader_never_sees_more_than_an_authenticated_one(): void
     {
         \Illuminate\Support\Facades\Gate::policy(GatedFixtureModel::class, DenyingViewAnyPolicy::class);
 
@@ -209,7 +226,11 @@ class FrameResourcesCollectorTest extends TestCase
         // invisible here — the additive seed method is the mechanism, and the honest one to use.
         $this->app->make(ParticleResourceRegistry::class)->loadRealmMap(['operator' => ['gated']]);
 
-        $this->assertContains('Gated', array_column($this->invoke('platform', 'operator'), 'title'));
+        $this->assertNotContains(
+            'Gated',
+            array_column($this->invoke('platform', 'operator'), 'title'),
+            'a denying viewAny policy must deny the anonymous reader too — otherwise logging in REMOVES rows',
+        );
     }
 
     // ---------------------------------------------------------------- the href join
