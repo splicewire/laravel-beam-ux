@@ -64,6 +64,12 @@ class ProviderChainTest extends TestCase
         // executed by beam-docs-satellite ticket 40. `WiresEntryRoutes` is deleted, so the link is gone
         // — not renamed, not unhooked. The count assertion below moved 10 → 9 with it.
         'bootPublicRouteMacro',
+        // Added 2026-09-05 with the FrameResourcesInvocable lift: the collector that attaches a
+        // resource declaring `section:` to its nav seat was host code at exactly one host. Registering
+        // it here means any host gets it. `order: 55` seats it between `bootPublicRouteMacro` (50) and
+        // `registerThemeSchemas` (60) — it needs the particle declarations of link 5, nothing later.
+        // The count assertion below moved 9 -> 10 with it.
+        'bootFrameNavCollector',
         'registerThemeSchemas',
         // Added by registry-kernel ticket 38 — the three describes are boot links, and they sit in the
         // trait that owns each fill rather than in a provider block, because beam-ux's whole binding
@@ -115,7 +121,7 @@ class ProviderChainTest extends TestCase
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
         $this->assertCount(12, $this->chain('register'));
-        $this->assertCount(9, $this->chain('boot'));
+        $this->assertCount(10, $this->chain('boot'));
     }
 
     public function test_the_provider_declares_the_contract_so_a_detector_can_find_it(): void

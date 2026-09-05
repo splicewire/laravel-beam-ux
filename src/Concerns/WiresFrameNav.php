@@ -2,10 +2,13 @@
 
 namespace Splicewire\Beam\Ux\Concerns;
 
+use Rushing\DataNav\NavInvocableRegistry;
 use Rushing\Popcorn\Concerns\Chained;
 use Schemastud\Frame\Contracts\FrameNavContributor;
+use Schemastud\Frame\Contracts\ResourceRegistry;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Frame\FrameNavContribution;
+use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
 use Splicewire\Beam\Ux\Frame\RouteContextPlan;
 
 /**
@@ -49,5 +52,52 @@ trait WiresFrameNav
         if (config('beam.ux.frame_nav.enabled', true)) {
             $this->app->bind(FrameNavContributor::class, FrameNavContribution::class);
         }
+    }
+
+    /**
+     * The Frame-resources collector onto data-nav's own {@see NavInvocableRegistry} — so a host
+     * that declares a `section` on a resource gets that resource attached to its nav seat WITHOUT
+     * writing the collector, which until now only the flagship had.
+     *
+     * ## Registered, never invoked, until a host points a node at it
+     *
+     * This is a capability registration, not a nav. Nothing expands unless the host's own
+     * navigation declares an {@see \Rushing\DataNav\InvocableNavItem} naming
+     * {@see FrameResourcesInvocable::NAME} — the section skeleton, and the entitlement/permission
+     * vocabulary beside it, stay host IA (ADR-0092). So this is additive by construction: a host
+     * with no such node sees no change.
+     *
+     * ## Guarded on the registry being BOUND, and it does not throw
+     *
+     * "Is data-nav installed here" is a fact about the host, and the estate rule is that such a
+     * check reports an absence rather than a fatal (`docs/agents/traps/audits-and-findings.md`).
+     * data-nav binds the registry as a SINGLETON in `packageRegistered()`, so `bound()` answers
+     * true exactly when the package is installed — where the concrete class being auto-resolvable
+     * would answer true either way, and hand this a throwaway registry nothing reads.
+     *
+     * Frame's {@see \Schemastud\Frame\Contracts\ResourceRegistry} port is guarded for the second
+     * half of the same reason: the collector takes it by constructor, an unbound INTERFACE is not
+     * auto-resolvable, and resolving one at boot is a fatal at boot rather than an absent nav.
+     * Testbench does not auto-discover, so this is the difference between a suite that runs and a
+     * package that cannot boot inside one.
+     *
+     * Boot, not register: the registration RESOLVES the registry, and resolving another package's
+     * singleton during the register phase is how a binding gets frozen before its owner has
+     * declared it.
+     *
+     * `register()`, not a guarded `has()` check first: the registry declares
+     * `OnDuplicate::Supersede`, so a host re-registering its own collector over this one is the
+     * documented swap seam, and a registration conditional on what else registered first is load
+     * order recorded as truth.
+     */
+    #[Chained('boot', order: 55)]
+    protected function bootFrameNavCollector(): void
+    {
+        if (! $this->app->bound(NavInvocableRegistry::class) || ! $this->app->bound(ResourceRegistry::class)) {
+            return;
+        }
+
+        $this->app->make(NavInvocableRegistry::class)
+            ->register($this->app->make(FrameResourcesInvocable::class));
     }
 }
