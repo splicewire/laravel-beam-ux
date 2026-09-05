@@ -143,10 +143,27 @@ class FrameNavContribution implements FrameNavContributor
                 continue;
             }
 
+            $children = $this->keepBound($node->children, $bound);
+
+            // An EMPTY contributed seat is dropped. A package cannot know which realm its section
+            // belongs to at a given host — realm membership is the host's `config/frame.realms` list,
+            // and the same beam-ux `ops` resources sit in `operator` at the flagship and in `tenant`
+            // at the starter. So a package declares the seats it plausibly owns and the ones with
+            // nothing under them here never render, instead of leaving a dead header a user can click
+            // into an empty page. This is why declaring for two realms is not sloppy: it is the only
+            // honest way to say "wherever these resources ended up".
+            //
+            // Only a `*.section` seat, and only in a contributed tree — a HOST's empty section is
+            // deliberate (the flagship's Calendar seat is a curated standalone page that attaches no
+            // resources by design), and this method never runs over a host's navigation at all.
+            if ($children === [] && $name !== null && str_ends_with($name, '.section')) {
+                continue;
+            }
+
             $kept[] = $node->stamped(
                 active: $node->active,
                 activeTrail: $node->activeTrail,
-                children: $this->keepBound($node->children, $bound),
+                children: $children,
             );
         }
 

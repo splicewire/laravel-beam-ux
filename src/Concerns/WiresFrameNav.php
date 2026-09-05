@@ -8,6 +8,7 @@ use Rushing\Popcorn\Concerns\Chained;
 use Schemastud\Frame\Contracts\FrameNavContributor;
 use Schemastud\Frame\Contracts\ResourceRegistry;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
+use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 use Splicewire\Beam\Ux\Frame\DeclaredSectionNavigation;
@@ -107,6 +108,63 @@ trait WiresFrameNav
     }
 
     /**
+     * beam-ux seats its OWN two sections — `ops` and `authoring` — the way any package now can.
+     *
+     * ## Why both realms, for both seats
+     *
+     * Which realm these resources live in is the HOST's list, not this package's: `beam-ux-entry`,
+     * `beam-ux-mirror-status` and `beam-ux-sitemap-health` sit in `operator` at the flagship
+     * (`config/frame.realms`, whose own comment argues them into operator explicitly) and
+     * `beam-ux-entry` sits in `tenant` at the beam starter. A package that guessed one realm would be
+     * invisible at every host that chose the other. So both are declared, and
+     * {@see FrameNavContribution} drops the seat that turns out empty — the pairing is what makes
+     * declaring both honest rather than sloppy.
+     *
+     * ## Ungated, and that is a decision
+     *
+     * `entitlement: null, permission: null` is written out rather than defaulted, because an omission
+     * and a decision must not be spelled the same. These seats carry no gate of their own: the
+     * resources under them are `viewAny`-gated individually by the collector, and an empty seat is
+     * dropped — so an unauthorized reader sees the section disappear because its contents did, which
+     * is the same answer a seat-level gate would give with one fewer place to disagree.
+     *
+     * Boot order does not matter here, and that is by design rather than by luck: the navigation
+     * registered at 56 does not ENUMERATE sections at boot — it projects them per request. A seat
+     * declared by any package, at any boot order, in any provider, is picked up on the next request.
+     * An earlier draft of this pair read `targetedRealmKeys()` eagerly at 56 and would have silently
+     * missed every package whose provider booted later.
+     */
+    #[Chained('boot', order: 57)]
+    protected function bootOwnNavSections(): void
+    {
+        if (! $this->app->bound(NavSectionRegistry::class)) {
+            return;
+        }
+
+        $sections = $this->app->make(NavSectionRegistry::class);
+
+        foreach (['operator', 'tenant'] as $realm) {
+            $sections->register(
+                new NavSection(
+                    key: 'authoring', realm: $realm, label: 'Authoring',
+                    icon: 'FileText', href: '/authoring', order: 30,
+                    entitlement: null, permission: null,
+                ),
+                by: 'splicewire/laravel-beam-ux',
+            );
+
+            $sections->register(
+                new NavSection(
+                    key: 'ops', realm: $realm, label: 'Ops',
+                    icon: 'Server', href: '/ops', order: 80,
+                    entitlement: null, permission: null,
+                ),
+                by: 'splicewire/laravel-beam-ux',
+            );
+        }
+    }
+
+    /**
      * Register a DEFAULT navigation for every realm a package declared a seat for — so a host that
      * installs beam-calendars gets a Calendars section without writing a navigation at all.
      *
@@ -137,15 +195,16 @@ trait WiresFrameNav
             return;
         }
 
-        $sections = $this->app->make(NavSectionRegistry::class);
+
         $realms = $this->app->make(RealmRegistry::class);
         $navigations = $this->app->make(NavRegistry::class);
 
-        foreach ($sections->targetedRealmKeys() as $realm) {
-            if ($realms->tryResolve($realm) === null) {
-                continue;
-            }
-
+        // Driven by the realms that EXIST, not by the sections declared so far. Sections are projected
+        // per request, so this cannot depend on which providers have booted yet — a package declaring
+        // a seat at any later boot order is picked up on the next request rather than missed for the
+        // life of the process. A realm nobody seated projects an empty list, which is the same tree a
+        // host with no navigation already gets.
+        foreach (array_keys($realms->all()) as $realm) {
             $navigations->register(
                 $realm,
                 new DeclaredSectionNavigation($this->app->make(NavSectionProjector::class), $realm),

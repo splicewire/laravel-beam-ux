@@ -75,6 +75,10 @@ class ProviderChainTest extends TestCase
         // it) while this one registers an actual navigation — a host superseding the second still
         // wants the first.
         'bootDeclaredSectionNavigations',
+        // ...and at 57, beam-ux seating its OWN `ops`/`authoring` sections through the same public
+        // seam any other package uses. Deliberately not privileged: if this link were special-cased
+        // rather than a NavSection registration, the seam would be untested by its first consumer.
+        'bootOwnNavSections',
         'registerThemeSchemas',
         // Added by registry-kernel ticket 38 — the three describes are boot links, and they sit in the
         // trait that owns each fill rather than in a provider block, because beam-ux's whole binding
@@ -126,7 +130,7 @@ class ProviderChainTest extends TestCase
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
         $this->assertCount(12, $this->chain('register'));
-        $this->assertCount(11, $this->chain('boot'));
+        $this->assertCount(12, $this->chain('boot'));
     }
 
     public function test_the_provider_declares_the_contract_so_a_detector_can_find_it(): void

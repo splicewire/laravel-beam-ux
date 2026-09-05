@@ -35,6 +35,18 @@ class DeclaredSectionNavigationTest extends TestCase
         return $this->app->make(NavSectionRegistry::class);
     }
 
+    /** The projected seat with this section key, or null — beam-ux seats its own alongside. */
+    private function seatFor(string $realm, string $key): ?InvocableNavItem
+    {
+        foreach ($this->app->make(NavSectionProjector::class)->project($realm) as $seat) {
+            if (($seat->input['section'] ?? null) === $key) {
+                return $seat;
+            }
+        }
+
+        return null;
+    }
+
     private function declare(string $key, string $realm, int $order = 10): void
     {
         $this->sections()->register(
@@ -51,13 +63,14 @@ class DeclaredSectionNavigationTest extends TestCase
     {
         $this->declare('calendars', 'tenant');
 
-        $seats = $this->app->make(NavSectionProjector::class)->project('tenant');
+        // beam-ux seats its OWN `ops`/`authoring` in both realms, so this asserts on the declared
+        // seat by key rather than on an empty registry — the package under test is also a registrant.
+        $seat = $this->seatFor('tenant', 'calendars');
 
-        $this->assertCount(1, $seats);
-        $this->assertInstanceOf(InvocableNavItem::class, $seats[0]);
-        $this->assertSame('Calendars', $seats[0]->title);
-        $this->assertSame(FrameResourcesInvocable::NAME, $seats[0]->invocable);
-        $this->assertSame('calendars', $seats[0]->input['section']);
+        $this->assertInstanceOf(InvocableNavItem::class, $seat);
+        $this->assertSame('Calendars', $seat->title);
+        $this->assertSame(FrameResourcesInvocable::NAME, $seat->invocable);
+        $this->assertSame('calendars', $seat->input['section']);
     }
 
     /**
@@ -69,15 +82,13 @@ class DeclaredSectionNavigationTest extends TestCase
     {
         $this->declare('ops', 'operator');
 
-        $seats = $this->app->make(NavSectionProjector::class)->project('operator');
-
-        $this->assertSame('ops.section', $seats[0]->routeName);
+        $this->assertSame('ops.section', $this->seatFor('operator', 'ops')->routeName);
     }
 
     /** A realm no package targeted is empty, not an error. */
     public function test_an_untargeted_realm_projects_nothing(): void
     {
-        $this->assertSame([], $this->app->make(NavSectionProjector::class)->project('tenant'));
+        $this->assertSame([], $this->app->make(NavSectionProjector::class)->project('site'));
     }
 
     /**
@@ -147,5 +158,34 @@ class DeclaredSectionNavigationTest extends TestCase
         $this->expectExceptionMessageMatches('/tpyo\.index/');
 
         $this->app->make(FrameNavContribution::class)->contributeNav('tenant');
+    }
+
+    /**
+     * A seat whose resources all live in a DIFFERENT realm at this host renders nothing rather than a
+     * dead header. The package cannot know which realm applies — beam-ux's own `ops` resources sit in
+     * `operator` at the flagship and in `tenant` at the starter, because realm membership is the
+     * host's `config/frame.realms` list. Declaring both realms and dropping the empty one is the only
+     * honest way for a package to say "wherever these ended up".
+     */
+    public function test_an_empty_contributed_seat_is_dropped_rather_than_rendered_as_a_dead_header(): void
+    {
+        $contribution = $this->app->make(FrameNavContribution::class);
+
+        $prune = new \ReflectionMethod($contribution, 'pruneUnbound');
+        $prune->setAccessible(true);
+
+        $tree = NavTree::make([
+            InvocableNavItem::make(title: 'Full', invocable: FrameResourcesInvocable::NAME, routeName: 'full.section')
+                ->stamped(active: false, activeTrail: false, children: [
+                    NavLink::make(title: 'Child', href: '/c', routeName: 'kept.index'),
+                ]),
+            InvocableNavItem::make(title: 'Empty', invocable: FrameResourcesInvocable::NAME, routeName: 'empty.section')
+                ->stamped(active: false, activeTrail: false, children: []),
+        ]);
+
+        $pruned = $prune->invoke($contribution, [new RouteContextEntry(routeName: 'kept.index', path: 'c')], $tree);
+
+        $this->assertCount(1, $pruned->items);
+        $this->assertSame('Full', $pruned->items[0]->title);
     }
 }
