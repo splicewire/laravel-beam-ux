@@ -23,6 +23,7 @@ use Splicewire\Beam\Ux\Concerns\WiresContainment;
 use Splicewire\Beam\Ux\Concerns\WiresDisk;
 use Splicewire\Beam\Ux\Concerns\WiresEntitlements;
 use Splicewire\Beam\Ux\Concerns\WiresEntryWorkflow;
+use Splicewire\Beam\Ux\Concerns\WiresFrameNav;
 use Splicewire\Beam\Ux\Concerns\WiresInference;
 use Splicewire\Beam\Ux\Concerns\WiresParticleDeclarations;
 use Splicewire\Beam\Ux\Concerns\WiresPlacement;
@@ -70,6 +71,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
     use WiresDisk;
     use WiresEntitlements;
     use WiresEntryWorkflow;
+    use WiresFrameNav;
     use WiresInference;
     use WiresParticleDeclarations;
     use WiresPlacement;

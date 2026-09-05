@@ -314,4 +314,43 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | The `nav` + `routeContext` half of /frame/manifest
+    |--------------------------------------------------------------------------
+    |
+    | Frame's manifest has always emitted `resources` + `contexts`. `nav` and
+    | `routeContext` — the resolved navigation tree and the flat router table the
+    | SPA expands into leaves — reached the wire at EXACTLY ONE host in the
+    | estate, and only because that host hand-wrote its own copy of frame's
+    | manifest controller. Filling frame's `FrameNavContributor` plug from here
+    | is what makes them available to any host that installs beam-ux.
+    |
+    |  - `enabled`        bind the contributor at all. Additive when on: with no
+    |                     resolvable realm and no registered navigation, the
+    |                     contributor DECLINES and the payload is unchanged.
+    |  - `default_realm`  the realm to project when the matched route stamps no
+    |                     `realm` default — i.e. when a host mounts frame's single
+    |                     default `/frame/manifest` rather than one per realm.
+    |  - `route_context`  the HOST's own information architecture. Empty by
+    |                     default and deliberately so: every list here is a host
+    |                     fact, and a package guessing one would be the auto-mount
+    |                     vocabulary `api-surface-coherence` 141 retired. See
+    |                     `Splicewire\Beam\Ux\Frame\RouteContextPlan` for what each
+    |                     list means; a host whose entries deserve real reasoning
+    |                     binds a constructed plan in a provider instead.
+    |
+    | ⚠️ `route_context` being empty is not the same as it being unnecessary. A
+    | resource still reaches a realm only through `config('frame.realms')` — a
+    | host-side list (`api-surface-coherence` 142). A host that has spelled no
+    | membership gets an EMPTY routeContext, which is the honest reading and not a
+    | bug in this projection.
+    |
+    */
+    'frame_nav' => [
+        'enabled' => env('BEAM_UX_FRAME_NAV', true),
+        'default_realm' => env('BEAM_UX_FRAME_NAV_REALM', 'tenant'),
+        'route_context' => [],
+    ],
+
 ];

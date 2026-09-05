@@ -37,6 +37,12 @@ class ProviderChainTest extends TestCase
         'registerPublic',
         'registerInference',
         'registerPlacement',
+        // Added by the frame-nav promotion (OTB M2), not part of the historical hand-written block:
+        // it binds `Schemastud\Frame\Contracts\FrameNavContributor`, so `/frame/manifest` carries
+        // `nav` + `routeContext` at any beam-ux host instead of only at the one host that hand-wrote
+        // its own manifest controller. Sequenced at 55 — after the plan/projector bindings it
+        // resolves and before the storage/access links, none of which it touches.
+        'registerFrameNav',
         'registerStorage',
         'registerAccess',
         'registerContainment',
@@ -108,7 +114,7 @@ class ProviderChainTest extends TestCase
         // Guards the dead-seam shape from the other side: a rename that unhooked every link would leave
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
-        $this->assertCount(11, $this->chain('register'));
+        $this->assertCount(12, $this->chain('register'));
         $this->assertCount(9, $this->chain('boot'));
     }
 
