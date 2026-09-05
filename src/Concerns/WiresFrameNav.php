@@ -3,12 +3,17 @@
 namespace Splicewire\Beam\Ux\Concerns;
 
 use Rushing\DataNav\NavInvocableRegistry;
+use Rushing\DataNav\NavRegistry;
 use Rushing\Popcorn\Concerns\Chained;
 use Schemastud\Frame\Contracts\FrameNavContributor;
 use Schemastud\Frame\Contracts\ResourceRegistry;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
+use Splicewire\Beam\Nav\NavSectionRegistry;
+use Splicewire\Beam\Realm\RealmRegistry;
+use Splicewire\Beam\Ux\Frame\DeclaredSectionNavigation;
 use Splicewire\Beam\Ux\Frame\FrameNavContribution;
 use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
+use Splicewire\Beam\Ux\Frame\NavSectionProjector;
 use Splicewire\Beam\Ux\Frame\RouteContextPlan;
 
 /**
@@ -99,5 +104,53 @@ trait WiresFrameNav
 
         $this->app->make(NavInvocableRegistry::class)
             ->register($this->app->make(FrameResourcesInvocable::class));
+    }
+
+    /**
+     * Register a DEFAULT navigation for every realm a package declared a seat for — so a host that
+     * installs beam-calendars gets a Calendars section without writing a navigation at all.
+     *
+     * ## It cannot clobber a host, and not by being careful
+     *
+     * `NavRegistry` is `PickOne`/`Supersede`, and Laravel boots every vendor provider before the
+     * host's own. So a host registering its own navigation for the same realm replaces this one
+     * WHOLESALE, for free, by the ordering the framework already guarantees. The override seam is
+     * preserved by doing nothing to defend it — which is why this registers unconditionally rather
+     * than checking `has()` first. Checking would invert the precedence: first writer would win, and
+     * the host would need to know to unregister us.
+     *
+     * ## Two intersections, both host facts
+     *
+     * A seat is registered only where the declared realm EXISTS at this host ({@see RealmRegistry}),
+     * and only for realms some package actually targeted. A package declaring a seat for a realm this
+     * host does not ship is a silent no-op — the same posture `RealmOverlayRegistry` documents for an
+     * overlay whose realmKey was never registered. Neither is an error, because neither is a fact the
+     * declaring package could have known.
+     *
+     * Runs at boot order 56, after the collector above: the navigation's seats point at
+     * {@see FrameResourcesInvocable::NAME}, so the capability must already be registered.
+     */
+    #[Chained('boot', order: 56)]
+    protected function bootDeclaredSectionNavigations(): void
+    {
+        if (! $this->app->bound(NavRegistry::class) || ! $this->app->bound(NavSectionRegistry::class)) {
+            return;
+        }
+
+        $sections = $this->app->make(NavSectionRegistry::class);
+        $realms = $this->app->make(RealmRegistry::class);
+        $navigations = $this->app->make(NavRegistry::class);
+
+        foreach ($sections->targetedRealmKeys() as $realm) {
+            if ($realms->tryResolve($realm) === null) {
+                continue;
+            }
+
+            $navigations->register(
+                $realm,
+                new DeclaredSectionNavigation($this->app->make(NavSectionProjector::class), $realm),
+                by: 'splicewire/laravel-beam-ux',
+            );
+        }
     }
 }

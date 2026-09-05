@@ -70,6 +70,11 @@ class ProviderChainTest extends TestCase
         // `registerThemeSchemas` (60) — it needs the particle declarations of link 5, nothing later.
         // The count assertion below moved 9 -> 10 with it.
         'bootFrameNavCollector',
+        // ...and its pair at order 56: the default navigation built from those declared seats. Two
+        // links rather than one because the collector is a CAPABILITY (harmless if nothing points at
+        // it) while this one registers an actual navigation — a host superseding the second still
+        // wants the first.
+        'bootDeclaredSectionNavigations',
         'registerThemeSchemas',
         // Added by registry-kernel ticket 38 — the three describes are boot links, and they sit in the
         // trait that owns each fill rather than in a provider block, because beam-ux's whole binding
@@ -121,7 +126,7 @@ class ProviderChainTest extends TestCase
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
         $this->assertCount(12, $this->chain('register'));
-        $this->assertCount(10, $this->chain('boot'));
+        $this->assertCount(11, $this->chain('boot'));
     }
 
     public function test_the_provider_declares_the_contract_so_a_detector_can_find_it(): void

@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Frame;
 
 use Illuminate\Http\Request;
 use Rushing\DataNav\NavContext;
+use Rushing\DataNav\NavNode;
 use Rushing\DataNav\NavRegistry;
 use Rushing\DataNav\NavTree;
 use Rushing\Popcorn\Registries\Exceptions\RegistryMiss;
@@ -64,6 +65,10 @@ class FrameNavContribution implements FrameNavContributor
         $routeContext = $this->routes->routeContext($realm);
         $nav = $this->navigation($realm);
 
+        if ($this->navigations->tryResolve($realm) instanceof DeclaredSectionNavigation) {
+            $nav = $this->pruneUnbound($routeContext, $nav);
+        }
+
         $this->validator->assert($routeContext, $nav);
 
         return [
@@ -85,6 +90,67 @@ class FrameNavContribution implements FrameNavContributor
         } catch (RegistryMiss) {
             return NavTree::make([]);
         }
+    }
+
+    /**
+     * Drop the nodes naming a route this host does not mount — but ONLY from a navigation a package
+     * produced, never from one the host spelled out.
+     *
+     * ## Why the two are treated differently
+     *
+     * {@see RouteContextValidator::assert()} throws on a nav `routeName` with no RouteContext entry,
+     * and {@see FrameResourcesInvocable} leans on that throw by design: its docblock argues an
+     * unjoinable seat should keep a fallback href rather than vanish, because the validator will
+     * catch it "before this could ship". That reasoning is sound for HOST-authored nav — the throw
+     * reaches the person who wrote the offending line, at their own host, while they are building it.
+     *
+     * It does not survive package contribution. The identical throw becomes a 500 on `/frame/manifest`
+     * caused by a package the host merely INSTALLED, over a route the host was never obliged to
+     * mount. "Does this host mount that route" is a fact about the host, and the estate rule is that
+     * such a check reports an absence rather than a fatal (`docs/agents/traps/audits-and-findings.md`
+     * — the same shape as the event catalog whose boot-time throw made `~/Herd/tower` unbootable).
+     *
+     * So the validator is NOT weakened: a host that mis-spells its own routeName still gets the
+     * throw, immediately, exactly as before. Only a contributed node degrades to absent.
+     *
+     * A `*.section` node is left alone because the validator already exempts it — a section header
+     * binds to no leaf, so it is never the unbound thing.
+     */
+    protected function pruneUnbound(array $routeContext, NavTree $nav): NavTree
+    {
+        $bound = [];
+
+        foreach ($routeContext as $entry) {
+            $bound[$entry->routeName] = true;
+        }
+
+        return NavTree::make($this->keepBound($nav->items, $bound));
+    }
+
+    /**
+     * @param  array<int, NavNode>  $nodes
+     * @param  array<string, true>  $bound
+     * @return array<int, NavNode>
+     */
+    private function keepBound(array $nodes, array $bound): array
+    {
+        $kept = [];
+
+        foreach ($nodes as $node) {
+            $name = $node->routeName;
+
+            if ($name !== null && ! str_ends_with($name, '.section') && ! isset($bound[$name])) {
+                continue;
+            }
+
+            $kept[] = $node->stamped(
+                active: $node->active,
+                activeTrail: $node->activeTrail,
+                children: $this->keepBound($node->children, $bound),
+            );
+        }
+
+        return $kept;
     }
 
     /**
