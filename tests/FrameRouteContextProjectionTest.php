@@ -208,7 +208,7 @@ class FrameRouteContextProjectionTest extends TestCase
         $this->assertInstanceOf(FrameNavContribution::class, $this->app->make(FrameNavContributor::class));
     }
 
-    public function test_the_plan_defaults_empty_because_every_list_in_it_is_host_ia(): void
+    public function test_the_plan_the_package_binds_is_empty_because_every_list_in_it_is_host_ia(): void
     {
         $plan = $this->app->make(RouteContextPlan::class);
 
@@ -217,12 +217,14 @@ class FrameRouteContextProjectionTest extends TestCase
         $this->assertSame(['app' => ''], $plan->shellBases);
     }
 
-    public function test_a_published_config_block_is_read_as_the_host_list(): void
+    public function test_a_host_bound_plan_reaches_the_container_resolved_projector(): void
     {
-        config(['beam.ux.frame_nav.route_context' => [
-            'resource_paths' => ['audit' => 'history'],
-            'folded_resources' => ['invitations'],
-        ]]);
+        // The ONLY way a host supplies IA — there is no config arm, deliberately. This asserts the
+        // seam a host actually uses, rather than a second grammar nothing reads.
+        $this->app->bind(RouteContextPlan::class, fn (): RouteContextPlan => new RouteContextPlan(
+            resourcePaths: ['audit' => 'history'],
+            foldedResources: ['invitations'],
+        ));
 
         $byName = $this->byName($this->app->make(RouteContextProjector::class)->routeContext('tenant'));
 

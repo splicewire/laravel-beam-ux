@@ -28,6 +28,7 @@
         "rushing/laravel-schema-convergence": "*",
         "rushing/php-popcorn": "dev-main",
         "schemastud/laravel-data-schemas": "*",
+        "schemastud/laravel-frame": "*",
         "splicewire/laravel-beam": "*",
         "splicewire/laravel-beam-accounts": "*",
         "splicewire/laravel-beam-mdx": "*",
@@ -125,6 +126,10 @@
         {
             "type": "git",
             "url": "https://github.com/schemastud/laravel-data-schemas.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/laravel-frame.git"
         }
     ],
     "minimum-stability": "dev",

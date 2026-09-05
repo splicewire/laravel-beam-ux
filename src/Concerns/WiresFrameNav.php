@@ -7,7 +7,6 @@ use Schemastud\Frame\Contracts\FrameNavContributor;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Frame\FrameNavContribution;
 use Splicewire\Beam\Ux\Frame\RouteContextPlan;
-use Splicewire\Beam\Ux\Frame\RouteContextProjector;
 
 /**
  * One concern of {@see BeamUxServiceProvider}: the `nav` + `routeContext` half of
@@ -25,23 +24,20 @@ use Splicewire\Beam\Ux\Frame\RouteContextProjector;
  *
  * The {@see RouteContextPlan}, by contrast, defaults to EMPTY. Every list in it is host IA, and a
  * package guessing one would be exactly the auto-mount vocabulary `api-surface-coherence` 141
- * retired. A host publishes `beam.ux.frame_nav.route_context` — or binds a constructed plan where
- * the entries deserve docblocks — and that is the host spelling it out.
+ * retired. A host that wants IA rebinds the plan from its own provider — that is the host spelling
+ * it out, in the one grammar where a placement can carry the reasoning behind it.
  */
 trait WiresFrameNav
 {
     #[Chained('register', order: 55)]
     protected function registerFrameNav(): void
     {
-        $this->app->bind(RouteContextPlan::class, function (): RouteContextPlan {
-            $config = config('beam.ux.frame_nav.route_context');
-
-            return is_array($config) && $config !== []
-                ? RouteContextPlan::fromConfig($config)
-                : RouteContextPlan::empty();
-        });
-
-        $this->app->bind(RouteContextProjector::class);
+        // The EMPTY plan is the package's answer, and a host that wants IA rebinds this key from its
+        // own provider. There is deliberately no config arm: a `beam.ux.frame_nav.route_context`
+        // block would be vocabulary with no consumer — the flagship binds a constructed plan (its
+        // lists carry docblocks a config array cannot), the starter needs no lists at all, and
+        // "spell it out" (141) does not mean "spell it out twice, in two grammars".
+        $this->app->bind(RouteContextPlan::class, fn (): RouteContextPlan => RouteContextPlan::empty());
 
         // Left UNBOUND when disabled, rather than bound to null: frame resolves the port through a
         // nullable constructor argument, so an unbound interface already means "no contributor" and

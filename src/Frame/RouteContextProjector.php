@@ -9,7 +9,7 @@ use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 
 /**
- * Builds the router half of the frame manifest: the flat {@see RouteContextEntry}[] a JS host
+ * Builds the router half of the frame manifest: the flat {@see RouteContextEntry}[] a client
  * expands into router leaves, plus the `routeName => href` join a nav seat resolves its URL through.
  *
  * ## Why this is a package and used not to be
@@ -28,13 +28,23 @@ use Splicewire\Beam\Realm\RealmRegistry;
  * ## HARD GUARDRAIL — flat only
  *
  * Every entry carries per-route properties and nothing that encodes parent/child nesting.
- * Record-nested sub-routes (`circuits/:id/runs`, silo tabs) and pre-auth/public routes stay
- * HAND-WRITTEN in the host router; this projector never emits them.
+ * Record-nested sub-routes and pre-auth/public routes stay
+ * HAND-WRITTEN in the host's own router; this projector never emits them.
  * {@see RouteContextValidator} enforces it at emit.
  *
  * ## What it deliberately does NOT do
  *
- * It does not discover, contribute or auto-mount anything. A resource reaches a realm only by the
+ * ## The realm boundary: this class throws, {@see FrameNavContribution} does not
+ *
+ * Both entry points open `$this->realms->resolve($realm)`, which throws on a realm this host has
+ * never registered. That is deliberate and it is where the estate's *"a check whose answer depends
+ * on the host must not throw"* rule lands: the HOST-facing entry is the contributor, which asks
+ * `tryResolve()` first and DECLINES; this class is the internal engine, called with a realm the
+ * caller has already resolved, and a bad realm there is a programming error rather than a fact
+ * about the deployment. Call the contributor, not this, from anything a host's request reaches —
+ * and if you call this directly, resolve the realm yourself first.
+ *
+ * ## It does not discover, contribute or auto-mount anything. A resource reaches a realm only by the
  * host's own realm membership list (`config('frame.realms')`, read through
  * {@see ParticleResourceRegistry::keysForRealm()}), and a resource-less page exists only because a
  * host wrote it into its plan. Auto-mount retired as vocabulary (141) and this does not revive it.
@@ -86,7 +96,7 @@ class RouteContextProjector
     }
 
     /**
-     * The SPA URL each of a realm's leaves actually lives at, keyed by `routeName` — so a nav
+     * The URL each of a realm's leaves actually lives at, keyed by `routeName` — so a nav
      * seat's `href` and the route it points at come from ONE derivation instead of two.
      *
      * ## The shell contributes a segment only in a NON-CENTRAL realm
@@ -98,7 +108,7 @@ class RouteContextProjector
      * per realm — but it is a statement about how two mount components are wired, so a realm that
      * starts (or stops) passing a shell registry must be re-measured here.
      *
-     * @return array<string, string> routeName => absolute SPA path
+     * @return array<string, string> routeName => absolute client path
      */
     public function hrefs(string $realm): array
     {
@@ -164,7 +174,7 @@ class RouteContextProjector
 
         // The in-shell route STEM — the path segment and the `<stem>.edit` twin — follows the
         // DECLARED list route, not the resource key. For most resources they are the same word and
-        // the fallback keeps it that way; where a registry key normalises differently from the SPA
+        // the fallback keeps it that way; where a registry key normalises differently from the
         // surface it has always lived at, the key and the path are genuinely two facts and
         // deriving the path from the key silently moves the page.
         $stem = str_ends_with($listRoute, '.index')
@@ -223,7 +233,7 @@ class RouteContextProjector
             );
         } elseif ($definition->showable && ! in_array($key, $this->plan->detaillessResources, true)) {
             // `showable` is the server saying `records/{id}` answers even for a read-only INSPECT
-            // resource. Without this arm the server answered the record endpoint while the SPA had
+            // resource. Without this arm the server answered the record endpoint while the client had
             // no route to ask from.
             //
             // ⚠️ Suppressions live in {@see RouteContextPlan::$detaillessResources}, and adding one
