@@ -8,7 +8,6 @@ use Rushing\Popcorn\Registries\Gated;
 use Rushing\Popcorn\Registries\IsRegistry;
 use Rushing\Popcorn\Registries\OnDuplicate;
 use Rushing\Popcorn\Registries\Registry;
-use Rushing\Popcorn\Registries\RegistryArity;
 use Rushing\Popcorn\Registries\RegistryKey;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
@@ -42,10 +41,9 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  */
 #[IsRegistry(
     root: 'beam.ux.placements',
-    of: 'FilePlacement strategies by name — the disk mirror path an entry materializes to',
-    arity: RegistryArity::PickOne,
     entryType: FilePlacement::class,
     onDuplicate: OnDuplicate::Supersede,
+    description: 'FilePlacement strategies by name — the disk mirror path an entry materializes to',
     order: 46,
 )]
 class PlacementResolver implements Gated, Registry

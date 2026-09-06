@@ -8,7 +8,6 @@ use Rushing\Popcorn\Registries\Gated;
 use Rushing\Popcorn\Registries\IsRegistry;
 use Rushing\Popcorn\Registries\OnDuplicate;
 use Rushing\Popcorn\Registries\Registry;
-use Rushing\Popcorn\Registries\RegistryArity;
 use Rushing\Popcorn\Registries\RegistryKey;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -36,10 +35,9 @@ use Splicewire\Beam\Ux\Placement\PlacementResolver;
  */
 #[IsRegistry(
     root: 'beam.ux.storage-drivers',
-    of: 'StorageDriver implementations by name — where a BeamUxEntry particle body is read/written',
-    arity: RegistryArity::PickOne,
     entryType: StorageDriver::class,
     onDuplicate: OnDuplicate::Supersede,
+    description: 'StorageDriver implementations by name — where a BeamUxEntry particle body is read/written',
     order: 47,
 )]
 class StorageDriverResolver implements Gated, Registry

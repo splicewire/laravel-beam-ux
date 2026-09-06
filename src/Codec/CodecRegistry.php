@@ -8,7 +8,6 @@ use Rushing\Popcorn\Registries\Gated;
 use Rushing\Popcorn\Registries\IsRegistry;
 use Rushing\Popcorn\Registries\OnDuplicate;
 use Rushing\Popcorn\Registries\Registry;
-use Rushing\Popcorn\Registries\RegistryArity;
 use Rushing\Popcorn\Registries\RegistryKey;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -36,10 +35,9 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  */
 #[IsRegistry(
     root: 'beam.ux.codecs',
-    of: 'BodyCodec implementations by UxFormat — how a BeamUxEntry body compiles to/from its raw source',
-    arity: RegistryArity::PickOne,
     entryType: BodyCodec::class,
     onDuplicate: OnDuplicate::Supersede,
+    description: 'BodyCodec implementations by UxFormat — how a BeamUxEntry body compiles to/from its raw source',
     order: 45,
 )]
 class CodecRegistry implements Gated, Registry
