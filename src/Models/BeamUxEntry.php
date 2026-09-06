@@ -129,6 +129,8 @@ use Splicewire\Beam\Write\ParticleWriter;
  * `Gate::getPolicyFor(BeamUxEntry::class)` a real answer under the `beam_ux_entry` alias (ADR-0118).
  * `EntryAccessGate` is untouched — it answers the PUBLIC surface's question, not this one. `HasVisibility`
  * means the cascade's shared rung (grants + reach tier) already applies per row.
+ *
+ * @property string|null $particle_id
  */
 #[UseCascadePolicy]
 class BeamUxEntry extends Model implements WorkflowManaged
