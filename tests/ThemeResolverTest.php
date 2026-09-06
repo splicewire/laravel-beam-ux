@@ -128,6 +128,30 @@ class ThemeResolverTest extends TestCase
         $this->assertSame('#3A63E0', $theme['canvas']['accentHover']);
     }
 
+    public function test_missing_central_table_does_not_hide_the_tenant_theme(): void
+    {
+        $this->assertFalse(Schema::connection('central')->hasTable('beam_ux_entries'));
+        $this->writeThemeEntry('testing', ['canvas' => ['accent' => '#123456']]);
+
+        $resolver = $this->resolver();
+        $theme = $resolver->resolve();
+
+        $this->assertSame('#123456', $theme['canvas']['accent']);
+        $this->assertNull($resolver->lastFailure());
+    }
+
+    public function test_missing_tenant_table_does_not_discard_the_central_theme(): void
+    {
+        $this->writeThemeEntry('central', ['canvas' => ['accent' => '#654321']]);
+        Schema::connection('testing')->drop('beam_ux_entries');
+
+        $resolver = $this->resolver();
+        $theme = $resolver->resolve();
+
+        $this->assertSame('#654321', $theme['canvas']['accent']);
+        $this->assertNull($resolver->lastFailure());
+    }
+
     public function test_tenant_deep_merges_over_central_at_the_per_token_level_and_wins(): void
     {
         $this->writeThemeEntry('central', ['canvas' => ['accent' => '#FF0000', 'accentHover' => '#AA0000']]);

@@ -198,18 +198,30 @@ class ThemeResolver
             return null;
         }
 
-        return BeamUxEntry::on(self::CENTRAL_CONNECTION)
-            ->where('namespace', self::NAMESPACE)
-            ->where('slug', $slug)
-            ->first();
+        return $this->entryOn(self::CENTRAL_CONNECTION, $slug);
     }
 
     private function tenantEntry(string $slug): ?BeamUxEntry
     {
-        return BeamUxEntry::query()
-            ->where('namespace', self::NAMESPACE)
-            ->where('slug', $slug)
-            ->first();
+        return $this->entryOn(null, $slug);
+    }
+
+    private function entryOn(?string $connection, string $slug): ?BeamUxEntry
+    {
+        try {
+            return BeamUxEntry::on($connection)
+                ->where('namespace', self::NAMESPACE)
+                ->where('slug', $slug)
+                ->first();
+        } catch (QueryException $e) {
+            // An unmigrated tier contributes no override. Other tiers still resolve;
+            // genuine query failures retain resolve()'s reported fallback behavior.
+            if ($this->isAbsence($e, $connection)) {
+                return null;
+            }
+
+            throw $e;
+        }
     }
 
     /**
