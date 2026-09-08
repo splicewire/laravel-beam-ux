@@ -6,7 +6,7 @@ use Rushing\Popcorn\Registries\Authorizer;
 use Rushing\Popcorn\Registries\BasicRegistry;
 use Rushing\Popcorn\Registries\Gated;
 use Rushing\Popcorn\Registries\IsRegistry;
-use Rushing\Popcorn\Registries\OnDuplicate;
+use Rushing\Popcorn\Registries\OnKeyDuplicate;
 use Rushing\Popcorn\Registries\Registry;
 use Rushing\Popcorn\Registries\RegistryKey;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
@@ -36,7 +36,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 #[IsRegistry(
     root: 'beam.ux.codecs',
     entryType: BodyCodec::class,
-    onDuplicate: OnDuplicate::Supersede,
+    onKeyDuplicate: OnKeyDuplicate::Supersede,
     description: 'BodyCodec implementations by UxFormat — how a BeamUxEntry body compiles to/from its raw source',
     order: 45,
 )]

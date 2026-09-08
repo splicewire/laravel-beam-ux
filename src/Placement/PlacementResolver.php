@@ -6,7 +6,7 @@ use Rushing\Popcorn\Registries\Authorizer;
 use Rushing\Popcorn\Registries\BasicRegistry;
 use Rushing\Popcorn\Registries\Gated;
 use Rushing\Popcorn\Registries\IsRegistry;
-use Rushing\Popcorn\Registries\OnDuplicate;
+use Rushing\Popcorn\Registries\OnKeyDuplicate;
 use Rushing\Popcorn\Registries\Registry;
 use Rushing\Popcorn\Registries\RegistryKey;
 use Splicewire\Beam\Storage\StorageDriver;
@@ -42,7 +42,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 #[IsRegistry(
     root: 'beam.ux.placements',
     entryType: FilePlacement::class,
-    onDuplicate: OnDuplicate::Supersede,
+    onKeyDuplicate: OnKeyDuplicate::Supersede,
     description: 'FilePlacement strategies by name — the disk mirror path an entry materializes to',
     order: 46,
 )]

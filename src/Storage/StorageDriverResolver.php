@@ -6,7 +6,7 @@ use Rushing\Popcorn\Registries\Authorizer;
 use Rushing\Popcorn\Registries\BasicRegistry;
 use Rushing\Popcorn\Registries\Gated;
 use Rushing\Popcorn\Registries\IsRegistry;
-use Rushing\Popcorn\Registries\OnDuplicate;
+use Rushing\Popcorn\Registries\OnKeyDuplicate;
 use Rushing\Popcorn\Registries\Registry;
 use Rushing\Popcorn\Registries\RegistryKey;
 use Splicewire\Beam\Storage\StorageDriver;
@@ -36,7 +36,7 @@ use Splicewire\Beam\Ux\Placement\PlacementResolver;
 #[IsRegistry(
     root: 'beam.ux.storage-drivers',
     entryType: StorageDriver::class,
-    onDuplicate: OnDuplicate::Supersede,
+    onKeyDuplicate: OnKeyDuplicate::Supersede,
     description: 'StorageDriver implementations by name — where a BeamUxEntry particle body is read/written',
     order: 47,
 )]

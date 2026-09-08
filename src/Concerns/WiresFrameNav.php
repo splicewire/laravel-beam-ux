@@ -92,7 +92,7 @@ trait WiresFrameNav
      * declared it.
      *
      * `register()`, not a guarded `has()` check first: the registry declares
-     * `OnDuplicate::Supersede`, so a host re-registering its own collector over this one is the
+     * `OnKeyDuplicate::Supersede`, so a host re-registering its own collector over this one is the
      * documented swap seam, and a registration conditional on what else registered first is load
      * order recorded as truth.
      */
