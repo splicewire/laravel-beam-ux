@@ -14,9 +14,18 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * and "compiled from the CURRENT body?" with one existence check — and the same key is a free strong
  * ETag on the public route.
  *
- * `head_version` is the particle's own snapshot counter. A particle that has never been versioned (or a
- * host whose particle table predates the column) falls back to the particle's `updated_at`, then to the
- * entry's — degrading to a coarser but still monotonic key rather than to a constant, which would make
+ * `head_version` is the HEAD **pin**, and it is an opaque per-snapshot token — not a counter, and not
+ * ordered. {@see \Rushing\Versioning\Store\EloquentVersionStore} writes the `Version` row's id, which
+ * is a UUID (`HasUuids`); {@see \Rushing\Versioning\Git\GitVersionStore} writes the commit SHA. Neither
+ * is comparable to another, so the invariant this key rests on is **changes-when-the-content-changes**,
+ * never monotonicity: the value is hashed straight into the address below, and must never be ordered,
+ * ranged, or `max()`d. (An earlier version of this paragraph called it "the particle's own snapshot
+ * counter" and reasoned about a "monotonic" key. That was wrong under the Eloquent store it was written
+ * against, before the git driver existed.)
+ *
+ * A particle that has never been versioned (or a host whose particle table predates the column) falls
+ * back to the particle's `updated_at`, then to the entry's — coarser, but still moving on every write,
+ * which is all this key requires. What must never happen is degrading to a CONSTANT, which would make
  * every artifact permanently "current" and silently serve stale code forever.
  */
 class EntryArtifactStore
@@ -69,7 +78,7 @@ class EntryArtifactStore
         } catch (\Throwable) {
             // beam-core's particle table is absent (a host that installed beam-ux alone, or a harness
             // with a hand-built schema). Degrade to the entry's own timestamp rather than fataling: the
-            // key stays monotonic, it is just coarser. What must never happen is degrading to a CONSTANT,
+            // key still moves on every write, it is just coarser. What must never happen is a CONSTANT,
             // which would make every artifact permanently "current" and silently serve stale code.
             $particle = null;
         }
