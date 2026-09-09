@@ -37,14 +37,25 @@ class DeclaredSectionNavigation
     /**
      * The declared seats for this navigation's realm.
      *
-     * Takes the context to satisfy the registry's declared `callable(NavContext): list<NavNode>`
-     * entry type even though the seats do not vary by actor — the gating that DOES vary happens
-     * afterwards, in `NavGate`, off the meta this projection stamps.
+     * ## The context is no longer decorative
+     *
+     * It used to be taken only to satisfy the registry's declared
+     * `callable(NavContext): list<NavNode>` entry type, on the reasoning that seats do not vary by
+     * actor and the gating that does happens afterwards in `NavGate`, off the stamped meta. That
+     * holds for a HARD gate and fails for a soft one.
+     *
+     * A soft-gated seat's outcome is *present-but-locked*, and `NavGate` cannot produce it: the build
+     * gates through `NavGate::allows()`, which returns a bare bool and treats a lock as allowed, so a
+     * lock decided there is discarded before anything can be stamped with it. The verdict has to be
+     * folded onto the node BEFORE the node is handed over — which means here, at projection, with a
+     * principal in hand. So the context is forwarded now, and
+     * {@see NavSectionProjector::project()} reads `$context->user` for exactly the seats that
+     * declared a lock.
      *
      * @return array<int, NavNode>
      */
     public function __invoke(?NavContext $context = null): array
     {
-        return $this->projector->project($this->realm);
+        return $this->projector->project($this->realm, $context);
     }
 }

@@ -2,7 +2,10 @@
 
 namespace Splicewire\Beam\Ux\Frame;
 
+use Illuminate\Contracts\Auth\Access\Gate;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Rushing\DataNav\InvocableNavItem;
+use Rushing\DataNav\NavContext;
 use Rushing\DataNav\NavNode;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
@@ -41,13 +44,52 @@ use Splicewire\Beam\Nav\NavSectionRegistry;
  * exists so {@see FrameNavContribution} can tell a node a PACKAGE contributed from one the HOST
  * spelled out, and apply the unbound-route rule that differs between them — see the pruning
  * docblock there. Provenance is the whole reason the two can be treated differently at all.
+ *
+ * ## This is also where a SOFT-gated seat becomes a locked node
+ *
+ * `Rushing\DataNav\NavLocked`'s own docblock says the field *"is POPULATED by beam's manifest
+ * projection… this DTO + `NavNode::locked()` only make that state expressible and serialized"*. This
+ * is that projection: the one place in beam that turns a declared seat into a nav node, and so the
+ * only place that can decide hard→absence vs soft→locked without moving the decision into
+ * `rushing/laravel-data-nav`.
+ *
+ * ### Why the producer cannot be a gate STAGE, which is the obvious guess
+ *
+ * data-nav ships a three-way `NavVerdictStage` and a `NavGate::apply()` that folds a lock onto a
+ * node. Neither is reachable from a built navigation: `NavRegistry::build()` gates through
+ * `NavGate::allows()`, not `apply()` (`NavRegistry::gateExpand()`), and `allows()` deliberately
+ * counts a lock as ALLOWED and returns a bare `bool` — so a verdict stage's lock is evaluated,
+ * discarded, and never stamped on anything. `SoftGateProjectionTest` pins that binary reading on
+ * purpose. A stage therefore CANNOT produce a visible lock, and making it able to would mean
+ * switching `build()` to `apply()` — moving the projection into the package whose own docblock says
+ * beam owns it.
+ *
+ * Producing the lock HERE needs none of that. A soft seat is stamped before it is ever registered, so
+ * the gate has nothing to deny (see {@see NavSection::gateAfterLock()}), and `locked` is a serialized
+ * field, so it survives `build()`'s `toArray()`/`from()` active-stamping round-trip — the same
+ * round-trip that erases the `#[Hidden]` meta bag two paragraphs up. Wire-visible is exactly the
+ * difference between the two, and it is what makes this seam work where node-level provenance could
+ * not.
+ *
+ * ### Which plane a lock speaks for
+ *
+ * The ENTITLEMENT plane only. A lock says *"your plan does not include this"*; the permission plane
+ * says *"not for you"*, and a soft seat still carries its `permission` gate meta so that denial still
+ * omits. A tenant may hold an entitlement while a user still lacks the permission, so conflating them
+ * would show an upsell to someone whose organisation already pays.
  */
 class NavSectionProjector
 {
     /** The `#[Hidden]` meta key marking a node as package-contributed rather than host-spelled. */
     public const CONTRIBUTED = 'beam.nav.contributed';
 
-    public function __construct(private NavSectionRegistry $sections) {}
+    /** The Gate ability prefix beam-core defines one of per known feature key (ADR-0013 §2/§4). */
+    private const ENTITLEMENT_ABILITY = 'entitlement:';
+
+    public function __construct(
+        private NavSectionRegistry $sections,
+        private Gate $gate,
+    ) {}
 
     /**
      * The declared seats for one realm, in the registry's projection order.
@@ -56,12 +98,17 @@ class NavSectionProjector
      * a host fact, and a package declaring a seat for a realm this host does not ship is a silent
      * no-op, exactly as an unmatched `RealmOverlay` is at projection time.
      *
+     * `$context` is optional and only a SOFT-gated seat reads it: the lock verdict is per-principal,
+     * where every other field of a seat is not. Absent context means no principal, which the
+     * entitlement plane already handles (a guest holds nothing), so the parameter needs no caller
+     * to change.
+     *
      * @return array<int, NavNode>
      */
-    public function project(string $realm): array
+    public function project(string $realm, ?NavContext $context = null): array
     {
         return array_map(
-            fn (NavSection $section): NavNode => $this->seat($section),
+            fn (NavSection $section): NavNode => $this->seat($section, $context?->user),
             $this->sections->for($realm),
         );
     }
@@ -73,7 +120,7 @@ class NavSectionProjector
      * declared seat from a hand-written one — which is the point: the attachment rules, the sort and
      * the `viewAny` gating are identical either way.
      */
-    private function seat(NavSection $section): NavNode
+    private function seat(NavSection $section, ?Authenticatable $user): NavNode
     {
         $node = InvocableNavItem::make(
             title: $section->label,
@@ -89,8 +136,60 @@ class NavSectionProjector
             routeName: $section->key.'.section',
         );
 
-        // `gate()` already drops a null and keeps an empty array, so "declared and unsatisfiable"
-        // stays distinguishable from "never declared" all the way to the gate stage.
+        // A soft-gated seat the principal cannot reach: keep it, stamped with the wire-visible lock,
+        // and hand the gate a meta bag with the entitlement axis REMOVED — otherwise a host's
+        // entitlement stage would omit the node this lock exists to keep visible.
+        //
+        // `gate()`/`gateAfterLock()` already drop a null and keep an empty array, so "declared and
+        // unsatisfiable" stays distinguishable from "never declared" all the way to the gate stage.
+        if ($section->isSoftGated() && ! $this->entitled($section, $user)) {
+            return $node
+                ->withMeta($section->gateAfterLock() + [self::CONTRIBUTED => true])
+                ->locked($section->lock->reason, $section->lock->upsell);
+        }
+
         return $node->withMeta($section->gate() + [self::CONTRIBUTED => true]);
+    }
+
+    /**
+     * Whether the principal holds ANY of a seat's declared entitlement keys — the same any-of reading
+     * the hard entitlement stage applies, asked through beam-core's `entitlement:{key}` Gate plane
+     * (ADR-0013 §2/§4) rather than through a commerce type.
+     *
+     * ## Why it asks `has()` before `allows()`
+     *
+     * `Gate::allows()` on an UNDEFINED ability returns false — indistinguishable from a real denial,
+     * and beam registers the `entitlement:*` abilities only when a host has bound an
+     * `EntitlementResolver` (`BeamServiceProvider::registerEntitlementAbilities()` returns early
+     * otherwise). Reading that false as "unentitled" would lock every soft seat at every host that
+     * has no entitlement plane at all — turning a working section into a permanent upsell on a bare
+     * install. `has()` is the instrument that tells "not configured" from "denied"; unconfigured is
+     * INERT, so the seat projects unlocked and this whole addition stays byte-for-byte on a host that
+     * has not opted in.
+     *
+     * A declared-but-EMPTY list (`entitlement: []`) is not that case: the loop simply finds no key to
+     * satisfy and the seat locks, which is the "declared and admits nobody" reading `NavSection`
+     * argues for.
+     *
+     * The Gate plane is also the reason no commerce class is named here. `Splicewire\Tower\Navigation\
+     * Gates\EntitlementNavGateStage` constructor-injects a commerce `EntitlementGate` and type-checks
+     * a `Beam\Tenancy\Tenant`, neither of which exists at a bare beam host — referencing it from a
+     * projector every beam host loads would fail container resolution at nav-build time.
+     */
+    private function entitled(NavSection $section, ?Authenticatable $user): bool
+    {
+        foreach ($section->entitlement ?? [] as $key) {
+            $ability = self::ENTITLEMENT_ABILITY.$key;
+
+            if (! $this->gate->has($ability)) {
+                return true; // the plane does not know this key here — not configured, not denied
+            }
+
+            if ($this->gate->forUser($user)->allows($ability)) {
+                return true; // any-of: one held key reveals the seat, unlocked
+            }
+        }
+
+        return false;
     }
 }
