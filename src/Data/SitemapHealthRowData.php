@@ -10,6 +10,7 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
+use Splicewire\Beam\Ux\Filters\ProjectedExact;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Sitemap\EntryEntitlementGate;
 use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
@@ -53,11 +54,11 @@ class SitemapHealthRowData extends BeamData
         public ?string $type,
         #[Column(label: 'Routable', sort: 3)]
         public bool $routable,
-        #[Column(label: 'Published', sort: 4), Filterable(Exact::class)]
+        #[Column(label: 'Published', sort: 4), Filterable(ProjectedExact::class)]
         public bool $published,
         #[Column(label: 'Entitled', sort: 5)]
         public bool $entitled,
-        #[Column(label: 'Indexed', sort: 6), Filterable(Exact::class)]
+        #[Column(label: 'Indexed', sort: 6), Filterable(ProjectedExact::class)]
         public bool $indexed,
         #[Column(label: 'URL', sort: 7)]
         public ?string $url,

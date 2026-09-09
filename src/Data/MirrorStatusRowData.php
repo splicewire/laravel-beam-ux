@@ -9,6 +9,7 @@ use Schemastud\Frame\Attributes\Column;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
+use Splicewire\Beam\Ux\Filters\ProjectedExact;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
 use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
@@ -61,7 +62,7 @@ class MirrorStatusRowData extends BeamData
         public bool $exists,
         #[Column(label: 'Last Modified', sort: 5)]
         public ?string $lastModifiedAt,
-        #[Column(label: 'State', sort: 6), Filterable(Exact::class)]
+        #[Column(label: 'State', sort: 6), Filterable(ProjectedExact::class)]
         public string $state,
     ) {}
 

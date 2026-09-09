@@ -32,6 +32,8 @@ use Splicewire\Beam\Ux\Concerns\WiresSitemap;
 use Splicewire\Beam\Ux\Concerns\WiresStorage;
 use Splicewire\Beam\Ux\Concerns\WiresThemeSchemas;
 use Splicewire\Beam\Ux\Data\BeamUxEntryData;
+use Splicewire\Beam\Ux\Data\MirrorStatusRowData;
+use Splicewire\Beam\Ux\Data\SitemapHealthRowData;
 use Splicewire\Beam\Ux\Database\Seeders\BeamUxSeeder;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
@@ -275,14 +277,18 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
         $registry = $this->app->make(FilterResourceRegistry::class);
 
-        if ($registry->has('beam-ux-entry')) {
-            return;
+        foreach ([
+            'beam-ux-entry' => BeamUxEntryData::class,
+            'beam-ux-mirror-status' => MirrorStatusRowData::class,
+            'beam-ux-sitemap-health' => SitemapHealthRowData::class,
+        ] as $key => $data) {
+            if (! $registry->has($key)) {
+                $registry->registerDefinition(new FilterResourceDefinition(
+                    key: $key,
+                    data: $data,
+                    query: BeamUxEntryResourceQuery::class,
+                ));
+            }
         }
-
-        $registry->registerDefinition(new FilterResourceDefinition(
-            key: 'beam-ux-entry',
-            data: BeamUxEntryData::class,
-            query: BeamUxEntryResourceQuery::class,
-        ));
     }
 }

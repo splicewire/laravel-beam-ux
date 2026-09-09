@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Query;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Rushing\DataFilters\Query\ResourceQuery;
+use Spatie\QueryBuilder\QueryBuilder;
 
 /**
  * The base query behind the `beam-ux-entry` data-filters resource — the one
@@ -56,9 +57,20 @@ class BeamUxEntryResourceQuery extends ResourceQuery
 {
     protected function baseQuery(Request $request): Builder
     {
-        return ($this->definition->requireModel())::query()
-            ->orderBy('namespace')
-            ->orderBy('slug')
+        return ($this->definition->requireModel())::query();
+    }
+
+    protected function defaultSort(): ?string
+    {
+        return 'namespace';
+    }
+
+    public function apply(Request $request): QueryBuilder
+    {
+        // Spatie skips defaultSorts when an explicit sort is present. Keep the stable
+        // ID tie-break after the requested sort, never ahead of it in the base query.
+        return parent::apply($request)
+            ->defaultSorts('slug')
             ->orderBy('id');
     }
 }
