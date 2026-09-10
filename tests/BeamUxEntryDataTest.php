@@ -117,7 +117,7 @@ class BeamUxEntryDataTest extends TestCase
         ]);
     }
 
-    public function test_to_model_attributes_auto_derives_an_empty_namespace(): void
+    public function test_the_input_omits_namespace_and_prepare_defaults_only_new_entries(): void
     {
         $data = BeamUxEntryInputData::validateAndCreate([
             'type' => 'page',
@@ -126,7 +126,23 @@ class BeamUxEntryDataTest extends TestCase
             'realm' => 'site',
         ]);
 
-        $this->assertSame('', $data->toModelAttributes()['namespace']);
+        $this->assertArrayNotHasKey('namespace', $data->toModelAttributes());
+
+        $entry = new BeamUxEntry;
+        BeamUxEntryData::prepare($entry, $data);
+        $entry->fill($data->toModelAttributes())->save();
+        $this->assertSame('', $entry->refresh()->namespace);
+
+        foreach (['guides', null] as $namespace) {
+            $existing = BeamUxEntry::create([
+                'namespace' => $namespace,
+                'slug' => 'existing-'.($namespace ?? 'null'),
+                'type' => UxType::Page,
+            ]);
+            BeamUxEntryData::prepare($existing, $data);
+            $existing->fill($data->toModelAttributes())->save();
+            $this->assertSame($namespace, $existing->refresh()->namespace);
+        }
     }
 
     public function test_after_write_seeds_page_and_component_with_an_empty_blockdoc_body(): void

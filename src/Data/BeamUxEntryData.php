@@ -90,6 +90,14 @@ class BeamUxEntryData extends BeamData
         public ?string $namespace = null,
     ) {}
 
+    /** Default only a newly authored row; editing must preserve its disk namespace. */
+    public static function prepare(Model $model, mixed $input, mixed $actor = null): void
+    {
+        if ($model instanceof BeamUxEntry && ! $model->exists) {
+            $model->namespace = '';
+        }
+    }
+
     /**
      * The per-kind default body (ADR-0016 — `@splicewire/beam-ux/blockdoc`'s `JsonNode[]` tree, NOT
      * Puck): `page`/`component` both start as the same empty `JsonDoc` (`[]`, zero nodes) — the shape
@@ -104,7 +112,7 @@ class BeamUxEntryData extends BeamData
      */
     public static function afterWrite(Model $model, mixed $input): void
     {
-        if (! $model instanceof BeamUxEntry) {
+        if (! $model instanceof BeamUxEntry || ! $model->wasRecentlyCreated || $model->particle_id !== null) {
             return;
         }
 
