@@ -255,15 +255,7 @@ class RegisterEntriesFromDisk
             // `.mdx` entry decoded to an EMPTY STRING, and `PlacedDiskMirror` (which decodes through the
             // codec) wrote a blank `.mdx` back out with no error. Exactly the failure the model's own
             // `format` default docblock records finding for themes, in a second place.
-            $body = $entry->codec()->encode($source, $entry->body_style);
-
-            $driver = $this->drivers->resolve($entry);
-            $item = $driver->write('', $body, $entry->namespace);
-
-            if ($entry->particle_id === null && $item->key !== '') {
-                $entry->particle_id = $item->key;
-                $entry->save();
-            }
+            $this->writeBody($entry, $source);
 
             return $entry;
         });
@@ -293,6 +285,43 @@ class RegisterEntriesFromDisk
         }
 
         return $entry;
+    }
+
+    /**
+     * Import a body into an existing empty entry, such as a nav-seeded page. Never overwrite a body.
+     * Unlike scan(), which skips every existing entry, this is an explicit operator opt-in.
+     * Compilation failure propagates after retaining the imported body, as on the regular import path.
+     */
+    public function hydrateEmpty(BeamUxEntry $entry, string $source): bool
+    {
+        $format = $entry->format;
+        $hydrated = DB::transaction(function () use ($entry, $source, $format): bool {
+            $current = $entry->newQuery()->whereKey($entry->getKey())->lockForUpdate()->firstOrFail();
+            if ($current->particle_id !== null) {
+                return false;
+            }
+            $current->format = $format;
+            $this->writeBody($current, $source);
+            $this->inference->forEntry($current, $source, persist: true);
+
+            return true;
+        });
+        // Compile the stored body, including a retained body from a previous failed compilation.
+        // Never compile the caller's candidate source after the lock has been released.
+        $this->compile?->forEntry($entry->refresh());
+
+        return $hydrated;
+    }
+
+    /** Both new registration and explicit empty-entry hydration use the same codec and storage seam. */
+    private function writeBody(BeamUxEntry $entry, string $source): void
+    {
+        $body = $entry->codec()->encode($source, $entry->body_style);
+        $item = $this->drivers->resolve($entry)->write('', $body, $entry->namespace);
+        if ($entry->particle_id === null && $item->key !== '') {
+            $entry->particle_id = $item->key;
+            $entry->save();
+        }
     }
 
     /**

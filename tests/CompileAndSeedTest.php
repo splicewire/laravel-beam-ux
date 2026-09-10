@@ -56,6 +56,40 @@ class CompileAndSeedTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_empty_entry_hydration_compiles_once_and_does_not_replace_an_authored_body(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'nav-home', 'type' => UxType::Page, 'format' => UxFormat::Mdx]);
+        $batch = $this->app->make(\Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk::class);
+        $stale = $entry->fresh();
+        $this->assertTrue($batch->hydrateEmpty($entry, '# Imported home'));
+        $entry->refresh();
+        $key = $entry->particle_id;
+        $this->assertNotNull($key);
+        $this->assertTrue($this->app->make(EntryArtifactStore::class)->has($entry));
+        $this->assertFalse($batch->hydrateEmpty($stale, '# Replacement'));
+        $this->assertSame($key, $entry->fresh()->particle_id);
+        $this->assertStringContainsString('Imported home', $this->app->make(CompileEntryBody::class)->sourceFor($entry));
+    }
+
+    public function test_empty_entry_hydration_reports_compilation_failure_without_losing_the_imported_body(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'bad-nav-home', 'type' => UxType::Page, 'format' => UxFormat::Mdx]);
+        FakeCompiler::$fails = true;
+        try {
+            $this->app->make(\Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk::class)->hydrateEmpty($entry, '# Bad body');
+            $this->fail('A failed compilation must propagate.');
+        } catch (\Splicewire\Beam\Ux\Compile\CompilationFailed $e) {
+            $this->assertStringContainsString('bad-nav-home', $e->getMessage());
+        }
+        $entry->refresh();
+        $this->assertNotNull($entry->particle_id);
+        $this->assertFalse($this->app->make(EntryArtifactStore::class)->has($entry));
+        FakeCompiler::$fails = false;
+        $this->assertFalse($this->app->make(\Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk::class)->hydrateEmpty($entry, '# Must not replace'));
+        $this->assertTrue($this->app->make(EntryArtifactStore::class)->has($entry->fresh()));
+        $this->assertStringContainsString('Bad body', $this->app->make(CompileEntryBody::class)->sourceFor($entry));
+    }
+
     public function test_an_artifact_is_keyed_by_version_so_a_changed_body_is_absent_not_stale(): void
     {
         $entry = $this->page('guide');
