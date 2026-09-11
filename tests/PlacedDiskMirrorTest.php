@@ -76,6 +76,29 @@ class PlacedDiskMirrorTest extends TestCase
         $this->assertStringNotContainsString('First', $written);
     }
 
+    public function test_a_json_doc_body_mirrors_an_mdx_entry_to_nothing_which_is_why_the_save_op_refuses_one(): void
+    {
+        // The measured damage of G2-BEAM-AUTHOR-ENTRY (2026-09-11): the canvas saved a JsonNode[] list
+        // over the mdx `/docs` entry and this mirror wrote a 0-byte `docs.mdx`. `MdxBodyCodec::decode()`
+        // reads `content`/`frontmatter` keys a JsonDoc list does not have, so it is not a crash — it is
+        // a silent erasure, and the mirror is the RIGHT place for it to be silent (it projects whatever
+        // the source-of-record holds). The refusal therefore belongs upstream, in
+        // {@see \Splicewire\Beam\Ux\Particle\EntryBodySaveOp}; this test pins the mechanism that makes
+        // that guard load-bearing rather than defensive.
+        /** @var FilesystemAdapter $disk */
+        $disk = Storage::fake('beam-ux-mirror');
+        $mirror = $this->mirror($disk);
+
+        $entry = new BeamUxEntry(['slug' => 'docs', 'type' => UxType::Page, 'format' => UxFormat::Mdx, 'namespace' => 'starter']);
+        $path = (new DefaultPlacement)->pathFor($entry);
+
+        $this->assertTrue($mirror->mirror($entry, $path, [
+            ['kind' => 'block', 'tag' => 'div', 'props' => ['className' => 'page'], 'children' => []],
+        ]));
+
+        $this->assertSame('', (string) $disk->get($path));
+    }
+
     public function test_mirror_is_a_noop_when_no_disk_configured(): void
     {
         $mirror = $this->mirror(null);

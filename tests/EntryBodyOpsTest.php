@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use ReflectionClass;
 use Splicewire\Beam\Facades\Beam;
+use Splicewire\Beam\Mdx\MdxBody;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Particle\ParticleOperationRegistry;
@@ -122,6 +123,95 @@ class EntryBodyOpsTest extends TestCase
         EntryBodySaveOp::handle($entry, $this->saveRequest($entry, ['v' => 7]), actor: null);
 
         $this->assertSame(7, EntryBodyShowOp::handle($entry->fresh(), new Request, actor: null)->body['v']);
+    }
+
+    public function test_save_refuses_a_json_doc_body_on_an_mdx_entry_and_leaves_the_source_intact(): void
+    {
+        // Measured on beam.test 2026-09-11 (G2-BEAM-AUTHOR-ENTRY, SEVERE): the canvas editor opened on
+        // the mdx `/docs` entry and its Save wrote a JsonNode[] list over the `{frontmatter,content}`
+        // particle payload. `MdxBodyCodec::decode()` has no content key to read in that shape, so the
+        // disk mirror wrote 0 bytes and the compile produced an empty artifact — the public page went
+        // blank for every visitor. The format axis is the entry's, not the payload's: a body language
+        // that cannot carry a JsonDoc must refuse one rather than store it and lose the source.
+        $entry = BeamUxEntry::create(['slug' => 'docs', 'type' => 'page', 'format' => 'mdx', 'namespace' => null]);
+        EntryBodySaveOp::handle($entry, $this->saveRequest($entry, MdxBody::encode("# Docs\n\nReal content.")), actor: null);
+        $particleId = (string) $entry->fresh()->particle_id;
+
+        try {
+            EntryBodySaveOp::handle($entry->fresh(), $this->saveRequest($entry, [
+                ['kind' => 'block', 'tag' => 'div', 'props' => ['className' => 'page'], 'children' => []],
+            ]), actor: null);
+            $this->fail('a JsonDoc body was accepted on an mdx entry');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('body', $e->errors());
+            $this->assertStringContainsString('mdx', $e->errors()['body'][0]);
+        }
+
+        // The refusal is worth nothing if the write already landed: re-read the particle.
+        $this->assertSame($particleId, (string) $entry->fresh()->particle_id);
+        $envelope = EntryBodyShowOp::handle($entry->fresh(), new Request, actor: null);
+        $this->assertStringContainsString('Real content.', (string) $envelope->body[MdxBody::CONTENT_KEY]);
+    }
+
+    public function test_save_accepts_a_json_doc_body_on_a_tsx_entry_because_its_codec_can_carry_one(): void
+    {
+        // The other half of the guard: tsx is the ONE format whose codec prints a JsonNode[] list back
+        // to source (`TsxBodyCodec::decode()`'s `array_is_list` branch), so the canvas may save onto it.
+        $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        $payload = EntryBodySaveOp::handle($entry, $this->saveRequest($entry, [
+            ['kind' => 'block', 'tag' => 'h2', 'children' => [['kind' => 'text', 'value' => 'Authored']]],
+        ]), actor: null);
+
+        $this->assertSame('h2', EntryBodySaveOp::respond($payload, $entry->fresh())->body[0]['tag']);
+    }
+
+    public function test_a_css_theme_entry_also_refuses_a_json_doc_body(): void
+    {
+        // The guard is a codec CAPABILITY (`AcceptsJsonDoc`), not an mdx special case — every format
+        // that cannot carry a JsonDoc refuses one, including a host's own bespoke `UxFormatCase`.
+        $theme = BeamUxEntry::create(['slug' => 'beam', 'type' => 'theme', 'format' => 'css', 'namespace' => 'theme']);
+
+        $this->expectException(ValidationException::class);
+
+        EntryBodySaveOp::handle($theme, $this->saveRequest($theme, [
+            ['kind' => 'block', 'tag' => 'div', 'children' => []],
+        ]), actor: null);
+    }
+
+    public function test_the_envelope_carries_the_format_and_the_decoded_source_for_a_non_json_doc_body(): void
+    {
+        // The client half of the same defect: the dock offered the canvas on an mdx entry because the
+        // read op's envelope never said what body language the entry speaks. `format` is that answer,
+        // and `source` is what a source editor needs — the canvas body is NOT decoded into it (a tsx
+        // JsonDoc's source is the canvas's own to print), so `source === null` means "this IS a canvas
+        // document" and a string means "this is source text".
+        $mdx = BeamUxEntry::create(['slug' => 'docs', 'type' => 'page', 'format' => 'mdx', 'namespace' => null]);
+        EntryBodySaveOp::handle($mdx, $this->saveRequest($mdx, MdxBody::encode("---\ntitle: Docs\n---\n# Docs")), actor: null);
+
+        $envelope = EntryBodyShowOp::handle($mdx->fresh(), new Request, actor: null);
+        $this->assertSame('mdx', $envelope->format);
+        $this->assertStringContainsString('# Docs', (string) $envelope->source);
+        $this->assertStringContainsString('title: Docs', (string) $envelope->source);
+
+        $tsx = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+        EntryBodySaveOp::handle($tsx, $this->saveRequest($tsx, [
+            ['kind' => 'block', 'tag' => 'h2', 'children' => [['kind' => 'text', 'value' => 'Hi']]],
+        ]), actor: null);
+
+        $canvas = EntryBodyShowOp::handle($tsx->fresh(), new Request, actor: null);
+        $this->assertSame('tsx', $canvas->format);
+        $this->assertNull($canvas->source);
+    }
+
+    public function test_an_entry_with_no_body_yet_reports_its_format_and_no_source(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'about', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        $envelope = EntryBodyShowOp::handle($entry, new Request, actor: null);
+
+        $this->assertSame('tsx', $envelope->format);
+        $this->assertNull($envelope->source);
     }
 
     public function test_the_declared_input_rejects_a_payload_that_is_not_a_body(): void

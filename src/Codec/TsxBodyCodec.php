@@ -14,8 +14,12 @@ use Splicewire\Beam\Ux\Format\UxFormat;
  * The preamble is injected *deterministically* at encode time and captured as a distinct body facet, so
  * a decode round-trips to the author's original source (bare JSX) regardless of style — the preamble is
  * a derived artifact of `full`, never part of what the author typed.
+ *
+ * It is also the one codec that {@see AcceptsJsonDoc} — see `decode()`'s `array_is_list` branch. That
+ * marker is what lets the canvas editor save onto a tsx entry and what makes the same save a 422 on an
+ * mdx or css one.
  */
-class TsxBodyCodec implements BodyCodec
+class TsxBodyCodec implements AcceptsJsonDoc, BodyCodec
 {
     /** The particle-payload key holding the author's raw JSX/TSX source. */
     public const SOURCE_KEY = 'source';

@@ -47,9 +47,21 @@ class BeamUxEntryBodyData extends BeamData
      *                      (`/beam-ux/entries/{id}/versions`); distinct from `slug`, which addresses
      *                      this body endpoint. A client wires the version-history panel off this.
      * @param  string  $type  the UxType (layout|template|page|component|theme) — kind-driven placement input
+     * @param  string  $format  the UxFormat (tsx|mdx|css|…) — the entry's BODY LANGUAGE, the sibling axis
+     *                          to `type`. A client MUST read this before choosing an editor: the canvas
+     *                          edits a JsonDoc and only a codec that {@see AcceptsJsonDoc} can store one.
+     *                          Omitting it is what let the dock open the canvas on an mdx entry and blank
+     *                          the public page (G2-BEAM-AUTHOR-ENTRY, 2026-09-11); the server now refuses
+     *                          that write, and this field is what lets a client not attempt it.
      * @param  array<string, mixed>|null  $schema  the resolved JSON-Schema for the SchemaForm, or null when
      *                                             the entry declares no inline schema (permissive fallback)
      * @param  array<string, mixed>  $body  the current particle body — seeds the SchemaForm's formData
+     * @param  string|null  $source  the body decoded back to its own source text, for the formats whose
+     *                               body is NOT a canvas document — the mdx/css text a source editor
+     *                               opens. Null means "there is no separate source": either the body IS a
+     *                               JsonDoc (the canvas prints its own source) or the entry has no body
+     *                               yet. Null is therefore an ANSWER, not a missing value, and the two
+     *                               cases are distinguishable through `body`.
      * @param  string|null  $compileError  why compile-on-save (ADR-0209 §7) could not produce this
      *                                     entry's artifact, or null when it did. The save itself still
      *                                     LANDS — refusing to store a draft with a syntax error in it
@@ -63,8 +75,10 @@ class BeamUxEntryBodyData extends BeamData
         public string $slug,
         public string $id,
         public string $type,
+        public string $format,
         public ?array $schema,
         public array $body,
+        public ?string $source = null,
         public ?string $compileError = null,
     ) {}
 }

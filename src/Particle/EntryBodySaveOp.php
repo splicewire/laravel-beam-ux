@@ -6,11 +6,14 @@ use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Schemastud\DataSchemas\Migration\AcceptanceGate;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Schema\Contracts\SchemaTargetResolver;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
+use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
+use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
@@ -99,6 +102,8 @@ class EntryBodySaveOp
         /** @var BeamUxEntry $model */
         $input = BeamUxEntryBodyInputData::validateAndCreate($request->all());
 
+        self::refuseJsonDocOnAForeignFormat($model, $input->body);
+
         $written = self::authoringDriver()->write(
             (string) ($model->particle_id ?? ''),
             $input->body,
@@ -138,6 +143,49 @@ class EntryBodySaveOp
             $reloaded?->body ?? [],
             $payload['compileError'],
         );
+    }
+
+    /**
+     * Refuse a **canvas document written onto a format that cannot carry one** — 422 on `body`, before
+     * step 1, so nothing lands.
+     *
+     * This is the one shape check the declared input cannot make. `BeamUxEntryBodyInputData` validates
+     * the payload against itself (`present`, `array`), and by that standard a `JsonNode[]` list is a
+     * perfectly good body; what makes it wrong is the ENTRY it is aimed at, which the DTO deliberately
+     * does not carry (ADR-0214 §2 — the entry is addressed by `{id}` on the route). So the check lives
+     * here, at the first point that holds both halves, and reuses the input's own 422 envelope rather
+     * than inventing a second refusal shape for the client to learn.
+     *
+     * Measured, 2026-09-11 (G2-BEAM-AUTHOR-ENTRY): the dock offered the canvas on the mdx `/docs` entry;
+     * Save wrote its JsonDoc over the `{frontmatter,content}` particle payload; `MdxBodyCodec::decode()`
+     * found neither key, so the disk mirror wrote 0 bytes and the compile produced an empty artifact,
+     * and `/docs` went blank for every visitor. Nothing downstream can recover from that — the mirror
+     * and the compiler are both faithfully projecting a source-of-record that has already lost the
+     * source. The refusal has to be here, above the write.
+     *
+     * The question asked is a codec CAPABILITY ({@see AcceptsJsonDoc}), never a format name: a host's
+     * own `UxFormatCase` earns the canvas by implementing the marker, and beam-ux never learns its name.
+     *
+     * @param  array<string, mixed>  $body
+     */
+    private static function refuseJsonDocOnAForeignFormat(BeamUxEntry $entry, array $body): void
+    {
+        if (! JsonDocShape::is($body) || $entry->codec() instanceof AcceptsJsonDoc) {
+            return;
+        }
+
+        $format = $entry->getAttribute('format');
+        $format = is_object($format) && property_exists($format, 'value') ? (string) $format->value : (string) $format;
+
+        throw ValidationException::withMessages([
+            'body' => sprintf(
+                'This entry is authored as %s source, which cannot carry a canvas document. Saving one '.
+                'here would replace the source with an empty file. Edit it as %s source, or change the '.
+                "entry's format first.",
+                $format,
+                $format,
+            ),
+        ]);
     }
 
     /** Compile the just-saved body to its artifact, returning the diagnostic instead of throwing. */

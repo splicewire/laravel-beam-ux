@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Particle;
 
 use Splicewire\Beam\Ux\Canvas\ViewGateFilter;
+use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Schema\ThemeSchemas;
@@ -58,10 +59,43 @@ class EntryBodyEnvelope
             slug: (string) $entry->slug,
             id: (string) $entry->id,
             type: $this->typeValue($entry),
+            format: $this->formatValue($entry),
             schema: $this->schemaFor($entry),
             body: $body,
+            source: $this->sourceFor($entry, $body),
             compileError: $compileError,
         );
+    }
+
+    /**
+     * The body decoded back to its own source text — for the formats whose body is NOT a canvas
+     * document. Null for a JsonDoc body (the canvas prints its own source client-side, and asking the
+     * server for a second printing would give the editor two competing sources of truth) and null for
+     * an entry with no body yet.
+     *
+     * This is the read-side half of the same seam {@see \Splicewire\Beam\Ux\Particle\EntryBodySaveOp}'s
+     * refusal guards: a client that must not open the canvas on an mdx entry needs to be handed
+     * something it CAN open, and that is this string.
+     *
+     * @param  array<string, mixed>  $body
+     */
+    public function sourceFor(BeamUxEntry $entry, array $body): ?string
+    {
+        if ($body === [] || JsonDocShape::is($body)) {
+            return null;
+        }
+
+        return $entry->codec()->decode($body);
+    }
+
+    /** The `UxFormat` as its wire string — the same raw-or-cast tolerance {@see typeValue()} has. */
+    public function formatValue(BeamUxEntry $entry): string
+    {
+        $format = $entry->getAttribute('format');
+
+        return is_object($format) && property_exists($format, 'value')
+            ? (string) $format->value
+            : (string) $format;
     }
 
     /**
