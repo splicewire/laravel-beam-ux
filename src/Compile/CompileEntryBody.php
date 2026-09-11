@@ -2,6 +2,9 @@
 
 namespace Splicewire\Beam\Ux\Compile;
 
+use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
+use Splicewire\Beam\Ux\Codec\JsonDocPrinter;
+use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Console\CompileEntriesCommand;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -91,6 +94,17 @@ class CompileEntryBody
     /**
      * The entry's raw source, decoded from its particle body by its own format codec (ADR-0164) — the
      * same round trip the editor performs, so the compiler sees exactly what an author wrote.
+     *
+     * ⚠️ **A canvas-authored body is printed as a MODULE, not as the disk mirror's statements.** The two
+     * consumers of a JsonDoc's source want irreconcilable things: `PlacedDiskMirror` wants a file
+     * `@splicewire/beam-ux/blockdoc`'s `parse()` can read back (bare JSX statements), and the compiler
+     * wants something with a `default` export, because `<EntryBody>` imports the artifact and reads
+     * `default` off it. `TsxBodyCodec::decode()` serves the first, so this serves the second.
+     *
+     * Measured on beam.test 2026-09-11 (G2-BEAM-AUTHOR-ENTRY): an owner authored `/`, Save reported
+     * "Saved" truthfully, the artifact compiled with no error and was served 200 — and it exported
+     * nothing, so the reader rendered "not compiled yet" over a body that had compiled fine. A
+     * canvas-authored page had never been renderable, and nothing anywhere failed.
      */
     public function sourceFor(BeamUxEntry $entry): ?string
     {
@@ -104,7 +118,13 @@ class CompileEntryBody
             return null;
         }
 
-        return $entry->codec()->decode($item->body ?? []);
+        $body = $item->body ?? [];
+
+        if ($entry->codec() instanceof AcceptsJsonDoc && JsonDocShape::is($body)) {
+            return JsonDocPrinter::printModule($body);
+        }
+
+        return $entry->codec()->decode($body);
     }
 
     public function artifacts(): EntryArtifactStore

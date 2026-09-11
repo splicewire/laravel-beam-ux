@@ -139,4 +139,35 @@ class JsonDocPrinterTest extends TestCase
 
         $this->assertStringContainsString('onClick={handleClick}', $out);
     }
+
+    public function test_print_module_wraps_the_document_in_a_default_exported_component(): void
+    {
+        // G2-BEAM-AUTHOR-ENTRY, measured on beam.test 2026-09-11. `print()` emits bare JSX statements
+        // for the disk mirror, which `blockdoc`'s `parse()` must read back — and which esbuild happily
+        // compiles to a module that exports NOTHING. `<EntryBody>` imports the artifact and reads
+        // `default` off it, so an owner's saved page rendered as "not compiled yet" while the compile
+        // reported success. Two consumers, two shapes.
+        $out = JsonDocPrinter::printModule([
+            ['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Authored']]],
+            ['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Body']]],
+        ]);
+
+        $this->assertStringContainsString('export default function Page()', $out);
+        $this->assertStringContainsString('<h2>Authored</h2>', $out);
+        $this->assertStringContainsString('<p>Body</p>', $out);
+        // One fragment, not one statement per root: adjacent roots are the normal shape for a page and
+        // a `return` takes one expression.
+        $this->assertStringContainsString('<>', $out);
+        $this->assertStringNotContainsString('</h2>;', $out);
+    }
+
+    public function test_print_module_of_an_emptied_document_still_exports_a_component(): void
+    {
+        // Emptying a page is a legitimate edit. A module with no default export would reach the reader
+        // as a FAILURE ("not compiled yet") rather than as an empty page.
+        $out = JsonDocPrinter::printModule([]);
+
+        $this->assertStringContainsString('export default function Page()', $out);
+        $this->assertStringContainsString('return null;', $out);
+    }
 }

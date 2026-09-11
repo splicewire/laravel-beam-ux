@@ -12,6 +12,7 @@ use Splicewire\Beam\Mdx\MdxBody;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Particle\ParticleOperationRegistry;
+use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -212,6 +213,44 @@ class EntryBodyOpsTest extends TestCase
 
         $this->assertSame('tsx', $envelope->format);
         $this->assertNull($envelope->source);
+    }
+
+    public function test_a_canvas_authored_body_compiles_from_a_module_not_from_bare_jsx_statements(): void
+    {
+        // G2-BEAM-AUTHOR-ENTRY, measured on beam.test 2026-09-11. The disk mirror's source
+        // (`TsxBodyCodec::decode()` -> `JsonDocPrinter::print()`) is bare JSX STATEMENTS, because
+        // `blockdoc`'s `parse()` has to read that file back. esbuild compiles those to a module that
+        // exports nothing - so the owner's authored `/` served a 200 artifact with no `default`, and
+        // `<EntryBody>` rendered "not compiled yet" over a body that had compiled fine. The compiler
+        // gets the MODULE form; the mirror keeps the statements.
+        $entry = BeamUxEntry::create(['slug' => 'canvas-home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        $node = ['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Authored']]];
+
+        EntryBodySaveOp::handle($entry, Request::create('/x', 'POST', ['body' => [$node]]), actor: null);
+
+        $source = (string) $this->app->make(CompileEntryBody::class)->sourceFor($entry->fresh());
+
+        $this->assertStringContainsString('export default function Page()', $source);
+        $this->assertStringContainsString('<h2>Authored</h2>', $source);
+
+        // The MIRROR is unchanged: its consumer is a re-parseable file, not a module.
+        $this->assertSame('<h2>Authored</h2>;', $entry->fresh()->codec()->decode([$node]));
+    }
+
+    public function test_a_file_authored_tsx_body_compiles_from_its_own_source_untouched(): void
+    {
+        // The other branch: a `{source: ...}` body is a real module already and must not be re-wrapped.
+        $entry = BeamUxEntry::create(['slug' => 'file-home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        EntryBodySaveOp::handle($entry, Request::create('/x', 'POST', [
+            'body' => $entry->codec()->encode('export default function Page() { return <div>File</div>; }'),
+        ]), actor: null);
+
+        $source = (string) $this->app->make(CompileEntryBody::class)->sourceFor($entry->fresh());
+
+        $this->assertStringContainsString('<div>File</div>', $source);
+        $this->assertSame(1, substr_count($source, 'export default'));
     }
 
     public function test_the_declared_input_rejects_a_payload_that_is_not_a_body(): void

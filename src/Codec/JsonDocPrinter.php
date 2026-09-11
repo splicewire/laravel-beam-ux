@@ -35,6 +35,42 @@ class JsonDocPrinter
         return implode("\n", array_map(fn (array $n) => self::printNode($n, $depth).';', $doc));
     }
 
+    /**
+     * Print a JSON document as a **compilable ES module** — a default-exported component returning the
+     * whole tree in one fragment.
+     *
+     * {@see print()} deliberately emits bare JSX STATEMENTS, because its consumer is the disk mirror and
+     * `@splicewire/beam-ux/blockdoc`'s `parse()` has to read that file back. The COMPILER's consumer is
+     * different and irreconcilable with it: `EntryArtifactController` serves a module that
+     * `<EntryBody>` imports and calls, reading `default` off what it returns. Bare statements are a
+     * valid file and an empty module — esbuild compiles them, nothing is exported, and the reader gets
+     * a module with no `default`.
+     *
+     * Measured on beam.test 2026-09-11 (G2-BEAM-AUTHOR-ENTRY): an owner authored `/`, Save reported
+     * "Saved" truthfully, the artifact compiled and was served 200 — and it was
+     * `export default function (runtime) { … return module.exports; }` with an empty `module.exports`,
+     * so the reader rendered the "not compiled yet" state over a body that had compiled fine. A
+     * canvas-authored page had never been renderable; nothing failed anywhere, which is why it took a
+     * browser to find.
+     *
+     * One fragment and not one statement per root: adjacent roots are the normal shape for a real page,
+     * and a `return` takes one expression.
+     *
+     * @param  array<int, array<string, mixed>>  $doc
+     */
+    public static function printModule(array $doc): string
+    {
+        if ($doc === []) {
+            // An emptied page is a legitimate state and must still produce a module that renders
+            // nothing, rather than one with no default export (which reads to a client as a failure).
+            return "export default function Page() {\n  return null;\n}\n";
+        }
+
+        $body = implode("\n", array_map(fn (array $n) => self::printNode($n, 3), $doc));
+
+        return "export default function Page() {\n  return (\n    <>\n{$body}\n    </>\n  );\n}\n";
+    }
+
     /** @param  array<string, mixed>  $node */
     private static function printNode(array $node, int $depth): string
     {
