@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
@@ -288,6 +289,36 @@ class PublicEntryRendererTest extends TestCase
         // An entry naming ITSELF as its layout is not a resolution either.
         $this->app->make(EntryArtifactStore::class)->put(BeamUxEntry::query()->where('slug', 'selfish')->firstOrFail(), 'export default () => null');
         $this->assertNull($this->get('/docs/selfish')->json('props.chrome.layout'));
+    }
+
+    public function test_a_never_authored_entry_is_handed_n_o_artifact_url_so_the_reader_can_say_so_honestly(): void
+    {
+        // G2-BEAM-AUTHOR-EMPTY-ENTRY, measured on beam.test 2026-09-11: a guest reading the
+        // never-authored `/about` was told to run `php artisan splicewire:beam:ux:compile` — a command
+        // they cannot run, on a host where it already answered "already current 13". The entry was not
+        // uncompiled; it had never been written at all. An entry with no particle has no body, so no
+        // artifact can exist at any address, and `''` is what the shell reads as "no content yet".
+        $root = BeamUxEntry::rootFor();
+        $page = $this->page('unwritten', ['segment' => 'unwritten', 'parent_id' => $root->getKey()]);
+        $this->assertNull($page->particle_id);
+
+        $response = $this->withHeader('X-Inertia', 'true')->get('/unwritten');
+
+        $response->assertOk();
+        $this->assertSame('', $response->json('props.artifact.url'));
+    }
+
+    public function test_an_entry_wit_h_a_body_keeps_its_artifact_url_even_when_the_artifact_is_missing(): void
+    {
+        // The other side of the split: here the compile advice is TRUE and `BeamUxArtifactAudit` names
+        // the row, so the address stays and the reader keeps the operator-facing message.
+        $root = BeamUxEntry::rootFor();
+        $page = $this->page('written', ['segment' => 'written', 'parent_id' => $root->getKey()]);
+        $page->forceFill(['particle_id' => (string) Str::uuid()])->save();
+
+        $url = $this->withHeader('X-Inertia', 'true')->get('/written')->json('props.artifact.url');
+
+        $this->assertNotSame('', $url);
     }
 
     public function test_a_page_with_no_artifact_404s_rather_than_compiling_on_read(): void

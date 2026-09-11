@@ -201,8 +201,29 @@ class PublicEntryController
         ];
     }
 
+    /**
+     * The address of the entry's compiled artifact — or `''`, which the shell reads as **never
+     * authored** and not as *"the artifact failed to load"*.
+     *
+     * An entry with no `particle_id` has no body at all: nothing has ever been written, so there is
+     * nothing to compile and no artifact can exist at any address. Handing the shell a URL anyway made
+     * it import a guaranteed 404 and render the operator-facing *"run `php artisan
+     * splicewire:beam:ux:compile`"* line — measured on beam.test 2026-09-11 (G2-BEAM-AUTHOR-EMPTY-ENTRY):
+     * a guest reading the never-authored `/about` was told to run a command they cannot run, on a host
+     * where it already reported "already current 13". The advice was not merely useless, it was false.
+     *
+     * An entry that HAS a body but whose artifact is missing keeps its URL and keeps that message,
+     * because there the advice is true and `BeamUxArtifactAudit` names the row. And an entry that has
+     * an artifact on disk keeps its URL regardless of what the particle column says — the artifact
+     * EXISTING is the stronger evidence, and a stale `particle_id` must never hide content that is
+     * actually there.
+     */
     private function artifactUrl(Request $request, BeamUxEntry $entry): string
     {
+        if ($entry->particle_id === null && ! $this->artifacts->has($entry)) {
+            return '';
+        }
+
         $name = (string) ($request->route()?->defaults['beamUxArtifactRoute'] ?? '');
 
         if ($name === '' || ! app('router')->has($name)) {
