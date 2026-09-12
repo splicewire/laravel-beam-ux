@@ -2,28 +2,15 @@
 
 namespace Splicewire\Beam\Ux\Particle;
 
-use Illuminate\Contracts\Auth\Access\Gate;
-use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
-use Schemastud\DataSchemas\Migration\AcceptanceGate;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
-use Splicewire\Beam\Schema\Contracts\SchemaTargetResolver;
-use Splicewire\Beam\Storage\ParticleStorageDriver;
-use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
-use Splicewire\Beam\Ux\Codec\JsonDocShape;
-use Splicewire\Beam\Ux\Compile\CompilationFailed;
-use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
-use Splicewire\Beam\Ux\Placement\PlacementResolver;
-use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
+use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
-use Splicewire\Beam\Write\ParticleWriter;
-use Splicewire\Beam\Write\PolicyWriteGate;
 
 /**
  * `POST /beam-ux-entries/{id}/op/save-body` — persist an edited body to the entry's particle. The
@@ -33,22 +20,31 @@ use Splicewire\Beam\Write\PolicyWriteGate;
  * Naming follows the sibling pair on this resource, which names the read for its subject (`workflow`)
  * and the write for its verb (`transition`).
  *
- * ## What one save does, in order — all four steps are load-bearing
+ * ## This op is the IMMEDIATE-PUBLISH write, and that is now a statement with a sibling
  *
- *  1. **Write** through a request-scoped {@see ParticleStorageDriver} over a {@see PolicyWriteGate}-backed
- *     {@see ParticleWriter}. The gate PERMITS when no per-entry policy is declared, deliberately: this
- *     is an authenticated editor write behind the host's auth middleware and this op's declared
- *     `ability`, not a deny-by-default anonymous submission. (ADR-0092 composition seam: the surface
- *     is beam-ux's, the versioned particle it round-trips is beam-core's — this package forks neither.)
- *  2. **Bind the particle id on first write.** An entry can exist with `particle_id` null — `ScaffoldCommand`,
- *     `RegisterEntriesFromDisk` and the tests all create rows that way — and the freshly-minted key is
- *     what makes the next read find anything.
- *  3. **Mirror to disk** at the entry's resolved `FilePlacement` (charter S2 / ADR-0165). The particle
- *     above is the source-of-record; this projects the same body to a git-trackable file at
- *     `{namespace}/{type}/{slug}.{ext}`. A no-op when the storage disk is not configured.
- *  4. **Compile the artifact** (ADR-0209 §7) — the first of the three producers and the one that
- *     matters most, because it is where content actually changes in production. It runs against the
- *     source just persisted, so the artifact and the particle version it is keyed by cannot disagree.
+ * `save-draft` / `publish` ({@see EntryDraftSaveOp}, {@see EntryPublishOp}) split the same act in two
+ * for an author who wants to work before anyone reads it. This op stays what it always was — a save
+ * that is live the moment it returns — and the difference is only WHEN the publish half runs, not
+ * whether. Every step below is {@see EntryPublication}'s, so the two paths cannot drift.
+ *
+ * ## What one save does, in order — all five steps are load-bearing
+ *
+ *  1. **Refuse a body this entry's codec cannot store** — 422 on `body`, before anything lands
+ *     ({@see EntryPublication::assertStorable()}, which carries the measured reason).
+ *  2. **Baseline.** Record the body that is currently LIVE as this entry's first version, because
+ *     step 3 is about to overwrite it and nothing else would ever have frozen it.
+ *  3. **Write** through a request-scoped particle storage driver over a permissive policy write gate:
+ *     this is an authenticated editor write behind the host's auth middleware and this op's declared
+ *     `ability`, not a deny-by-default anonymous submission. The **particle id binds on first write**
+ *     — an entry can exist with `particle_id` null (`ScaffoldCommand`, `RegisterEntriesFromDisk` and
+ *     the tests all create rows that way) and the freshly-minted key is what makes the next read find
+ *     anything. (ADR-0092 composition seam: the surface is beam-ux's, the versioned particle it
+ *     round-trips is beam-core's — this package forks neither.)
+ *  4. **Publish**: record the written body as a version and move the entry's publication pin to it.
+ *     The pin is what the artifact's address is keyed on, so this step is what makes the save public.
+ *  5. **Mirror to disk** at the entry's resolved `FilePlacement` (charter S2 / ADR-0165) and
+ *     **compile the artifact** (ADR-0209 §7) — both follow the PUBLISHED body, both at the address
+ *     step 4 named, so the artifact and the version it is keyed by cannot disagree.
  *
  * ## Why a failed compile does not fail the save
  *
@@ -102,28 +98,26 @@ class EntryBodySaveOp
         /** @var BeamUxEntry $model */
         $input = BeamUxEntryBodyInputData::validateAndCreate($request->all());
 
-        self::refuseJsonDocOnAForeignFormat($model, $input->body);
+        $publication = app(EntryPublication::class);
 
-        $written = self::authoringDriver()->write(
-            (string) ($model->particle_id ?? ''),
-            $input->body,
-            $model->namespace,
-        );
+        $publication->assertStorable($model, $input->body);
 
-        if ($model->particle_id === null && $written->key !== '') {
-            $model->particle_id = $written->key;
-            $model->save();
-        }
+        // The BASELINE goes first, before the write: it records the body that is currently live as this
+        // entry's first version, and the write is about to destroy it. Without that, the body a reader
+        // was served up to this moment would exist nowhere, and `restore` on the very next edit would
+        // have nothing to roll back to. It is a no-op for an entry that already has history.
+        $publication->baseline($model);
 
-        app(PlacedDiskMirror::class)->mirror(
-            $model,
-            app(PlacementResolver::class)->resolve($model)->pathFor($model),
-            $written->body,
-        );
+        $written = $publication->write($model, $input->body);
 
         return [
-            'key' => $written->key,
-            'compileError' => self::compileAfterSave($model),
+            'key' => $written['key'],
+            // A save through THIS op is its own publish — that is its contract, and
+            // `g2-beam-author-entry` is the journey that proves it. What changed is that it now
+            // publishes the way {@see EntryPublishOp} does: the body is recorded as a version, the
+            // publication pin moves to it, the disk mirror and the artifact follow the pin. An author
+            // who never opens the draft affordance sees no difference, and gains a history.
+            'compileError' => $publication->publishWritten($model->refresh()),
         ];
     }
 
@@ -143,76 +137,5 @@ class EntryBodySaveOp
             $reloaded?->body ?? [],
             $payload['compileError'],
         );
-    }
-
-    /**
-     * Refuse a **canvas document written onto a format that cannot carry one** — 422 on `body`, before
-     * step 1, so nothing lands.
-     *
-     * This is the one shape check the declared input cannot make. `BeamUxEntryBodyInputData` validates
-     * the payload against itself (`present`, `array`), and by that standard a `JsonNode[]` list is a
-     * perfectly good body; what makes it wrong is the ENTRY it is aimed at, which the DTO deliberately
-     * does not carry (ADR-0214 §2 — the entry is addressed by `{id}` on the route). So the check lives
-     * here, at the first point that holds both halves, and reuses the input's own 422 envelope rather
-     * than inventing a second refusal shape for the client to learn.
-     *
-     * Measured, 2026-09-11 (G2-BEAM-AUTHOR-ENTRY): the dock offered the canvas on the mdx `/docs` entry;
-     * Save wrote its JsonDoc over the `{frontmatter,content}` particle payload; `MdxBodyCodec::decode()`
-     * found neither key, so the disk mirror wrote 0 bytes and the compile produced an empty artifact,
-     * and `/docs` went blank for every visitor. Nothing downstream can recover from that — the mirror
-     * and the compiler are both faithfully projecting a source-of-record that has already lost the
-     * source. The refusal has to be here, above the write.
-     *
-     * The question asked is a codec CAPABILITY ({@see AcceptsJsonDoc}), never a format name: a host's
-     * own `UxFormatCase` earns the canvas by implementing the marker, and beam-ux never learns its name.
-     *
-     * @param  array<string, mixed>  $body
-     */
-    private static function refuseJsonDocOnAForeignFormat(BeamUxEntry $entry, array $body): void
-    {
-        if (! JsonDocShape::is($body) || $entry->codec() instanceof AcceptsJsonDoc) {
-            return;
-        }
-
-        $format = $entry->getAttribute('format');
-        $format = is_object($format) && property_exists($format, 'value') ? (string) $format->value : (string) $format;
-
-        throw ValidationException::withMessages([
-            'body' => sprintf(
-                'This entry is authored as %s source, which cannot carry a canvas document. Saving one '.
-                'here would replace the source with an empty file. Edit it as %s source, or change the '.
-                "entry's format first.",
-                $format,
-                $format,
-            ),
-        ]);
-    }
-
-    /** Compile the just-saved body to its artifact, returning the diagnostic instead of throwing. */
-    private static function compileAfterSave(BeamUxEntry $entry): ?string
-    {
-        try {
-            app(CompileEntryBody::class)->forEntry($entry->refresh(), force: true);
-
-            return null;
-        } catch (CompilationFailed $e) {
-            return $e->getMessage();
-        }
-    }
-
-    /**
-     * A request-scoped {@see ParticleStorageDriver} for the authenticated authoring write: the same
-     * particle primary the default resolver uses, but over a {@see ParticleWriter} bound to a
-     * permissive {@see PolicyWriteGate}, reusing the container-resolved target/acceptance/event
-     * dependencies unchanged.
-     */
-    private static function authoringDriver(): ParticleStorageDriver
-    {
-        return new ParticleStorageDriver(new ParticleWriter(
-            new PolicyWriteGate(app(Gate::class)),
-            app(SchemaTargetResolver::class),
-            app(AcceptanceGate::class),
-            app(Dispatcher::class),
-        ));
     }
 }

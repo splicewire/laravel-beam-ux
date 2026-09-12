@@ -143,6 +143,16 @@ return new class extends Migration
                 $table->string('workflow_marking')->nullable()->index();
                 $table->string('workflow_version')->nullable();
 
+                // Publication: the id of the `versions` row the PUBLIC artifact was compiled from — a
+                // second pin into the ONE version store beside `beam_particles.head_version` (the
+                // working HEAD an author edits). Draft-pending is the two pointers disagreeing. NULL =
+                // never published through the draft/publish path; the artifact then keys on the
+                // particle write, exactly as it did before the pin existed. Deliberately NOT
+                // `workflow_marking`, which governs whether the ENTRY is visible at all — see the
+                // `add_published_version_to_beam_ux_entries_table` stub for why the two stay
+                // orthogonal. Not indexed: it is read per already-loaded row, never queried against.
+                $table->uuid('published_version')->nullable();
+
                 $table->timestamps();
                 $table->softDeletes();
             })

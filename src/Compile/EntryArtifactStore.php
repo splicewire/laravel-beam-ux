@@ -14,6 +14,13 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * and "compiled from the CURRENT body?" with one existence check — and the same key is a free strong
  * ETag on the public route.
  *
+ * **Which version, once there are two pins.** The entry's `published_version` is the one a reader is
+ * served ({@see \Splicewire\Beam\Ux\Publish\EntryPublication}); the particle's `head_version` is the
+ * working HEAD an author edits. Only the first enters this address — otherwise recording a draft would
+ * move every reader's artifact URL to a file nobody compiled, which is the whole state this pin exists
+ * to keep from happening. A null publication pin falls through to the HEAD/timestamp chain below, so an
+ * entry that has never been through the draft/publish path addresses exactly as it always did.
+ *
  * `head_version` is the HEAD **pin**, and it is an opaque per-snapshot token — not a counter, and not
  * ordered. {@see \Rushing\Versioning\Store\EloquentVersionStore} writes the `Version` row's id, which
  * is a UUID (`HasUuids`); {@see \Rushing\Versioning\Git\GitVersionStore} writes the commit SHA. Neither
@@ -83,7 +90,15 @@ class EntryArtifactStore
             $particle = null;
         }
 
-        $source = $particle?->getAttribute('head_version')
+        // The PUBLICATION PIN wins, and that is what makes a draft invisible. `head_version` is the
+        // working HEAD — it moves the moment an author records a draft — so keying on it would move the
+        // artifact's address out from under every reader as soon as anyone started editing, and the
+        // page would read as uncompiled until a publish caught up. `published_version` names the
+        // version the reader is entitled to, so an unpublished draft changes neither the address nor
+        // the file sitting at it. NULL (never published through the draft/publish path, or a host that
+        // has not migrated the column) falls through to exactly the previous behaviour.
+        $source = $entry->getAttribute('published_version')
+            ?? $particle?->getAttribute('head_version')
             ?? $particle?->getAttribute('updated_at')
             ?? $entry->getAttribute('updated_at')
             ?? '0';

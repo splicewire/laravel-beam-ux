@@ -26,6 +26,7 @@
         "rushing/laravel-data-nav": "*",
         "rushing/laravel-permission-cascade": "*",
         "rushing/laravel-schema-convergence": "*",
+        "rushing/laravel-versioning": "*",
         "rushing/php-popcorn": "dev-main",
         "schemastud/laravel-data-schemas": "*",
         "schemastud/laravel-frame": "*",
@@ -118,6 +119,10 @@
         {
             "type": "git",
             "url": "https://github.com/stephenr85/laravel-schema-convergence.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-versioning.git"
         },
         {
             "type": "git",

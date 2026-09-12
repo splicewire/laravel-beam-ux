@@ -93,6 +93,11 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             // of the `realms` fallback stack directly on `beam_ux_entries`.
             ->hasMigrations([
                 'shared/create_beam_ux_entries_table',
+                // The publication pin (`published_version`). An ALTER beside the create because
+                // editing a `create_*` stub reaches nothing already migrated — a host that installed
+                // beam-ux before this pass gets the column from here, a fresh one from the create,
+                // and each no-ops for the other.
+                'shared/add_published_version_to_beam_ux_entries_table',
             ]);
 
         // The docs seed stubs (ticket 02 §4, ADR-0210). Optionally published — publishing is how a host

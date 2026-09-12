@@ -91,6 +91,15 @@ use Splicewire\Beam\Write\ParticleWriter;
  * (guards, versioned definitions, activitylog Display projection) comes wholesale from that package; this
  * model owns only the subject shape.
  *
+ * **Publication aspect (the `published_version` pin, {@see \Splicewire\Beam\Ux\Publish\EntryPublication}).**
+ * A SECOND pin into the ONE version store `rushing/laravel-versioning` already provides, never a second
+ * store. The has-a {@see BeamParticle} carries the working HEAD (`head_version` — the newest recorded
+ * snapshot of the body an author is editing); `published_version` on THIS row carries the snapshot a
+ * READER is served, because {@see \Splicewire\Beam\Ux\Compile\EntryArtifactStore} keys the compiled
+ * artifact's address on it. A draft is pending when the two pointers disagree — a derived fact, not a
+ * flag anyone has to keep true. Orthogonal to the workflow aspect above: `workflow_marking` decides
+ * whether the entry is visible AT ALL, this decides WHICH recorded body a visible entry serves.
+ *
  * **Classification facets (S7 — OPTIONAL, ADR-0165 §2).** Via {@see HasFacets} the entry attaches the
  * sibling beam-taxonomy `BeamSilo` (`silos()`, hierarchical, `siloable` morph) + `BeamTag` (`tags()`,
  * flat, `taggable` morph) as OPTIONAL polymorphic classification — null for fragments, filled for content.
@@ -193,6 +202,8 @@ class BeamUxEntry extends Model implements WorkflowManaged
         // Workflow aspect (S6): the optional beam-workflows subject envelope.
         'workflow_marking',
         'workflow_version',
+        // Publication aspect: the version the PUBLIC artifact was compiled from ({@see EntryPublication}).
+        'published_version',
     ];
 
     protected $attributes = [
