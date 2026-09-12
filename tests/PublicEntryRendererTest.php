@@ -184,6 +184,24 @@ class PublicEntryRendererTest extends TestCase
         $this->assertStringContainsString((string) $version, (string) $url);
     }
 
+    public function test_a_bound_particle_holding_an_empty_document_is_addressed_like_an_unauthored_page(): void
+    {
+        // The reader's `unauthored` state (no artifact URL) is what lets a host render its own default
+        // page; a URL to nothing would read as `failed` and show guests an operator message.
+        $root = BeamUxEntry::rootFor();
+        $entry = $this->page('cleared', ['segment' => 'cleared', 'parent_id' => $root->getKey(), 'format' => UxFormat::Tsx]);
+
+        // The recording driver stands in for the particle store: a bound key whose document is `[]`.
+        $key = (string) Str::uuid();
+        $this->app->make(StorageDriverResolver::class)->resolve($entry)->write($key, [], null);
+        $entry->forceFill(['particle_id' => $key])->save();
+
+        $response = $this->withHeader('X-Inertia', 'true')->get('/cleared');
+        $response->assertOk();
+
+        $this->assertSame('', data_get($response->json(), 'props.artifact.url'));
+    }
+
     public function test_a_guarded_artifact_is_no_store_and_a_public_one_is_cacheable(): void
     {
         $root = BeamUxEntry::rootFor();

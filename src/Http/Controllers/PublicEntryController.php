@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Containment\ChromeEntryResolver;
 use Splicewire\Beam\Ux\Containment\ChromeResolver;
@@ -221,6 +222,14 @@ class PublicEntryController
     private function artifactUrl(Request $request, BeamUxEntry $entry): string
     {
         if ($entry->particle_id === null && ! $this->artifacts->has($entry)) {
+            return '';
+        }
+
+        // A bound particle holding an EMPTY document is the same reader state as no particle at all:
+        // nothing authored, nothing to address. Read only when no artifact exists, so a page that has
+        // a body pays nothing here; a particle that cannot be read keeps its address (the compile
+        // advice is true there, and the artifact audit names the row).
+        if (! $this->artifacts->has($entry) && app(CompileEntryBody::class)->holdsEmptyDocument($entry)) {
             return '';
         }
 

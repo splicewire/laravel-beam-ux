@@ -13,6 +13,7 @@ use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Particle\ParticleOperationRegistry;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
+use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -336,6 +337,30 @@ class EntryBodyOpsTest extends TestCase
     }
 
     /** @param array<string, mixed> $body */
+    public function test_clearing_a_body_to_an_empty_document_retires_its_artifact_and_reads_as_no_body(): void
+    {
+        // Measured 2026-09-12 on beam.test: the G2 authoring probe restored `/` to `[]`, the save compiled
+        // an artifact that exported nothing, and every guest was told to run an artisan command over a
+        // page whose honest state is "nothing authored yet". Clearing is a legal act; it must land on
+        // the unauthored reader state, not on a stale or empty module.
+        $entry = BeamUxEntry::create(['slug' => 'cleared-home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+        $node = ['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Authored']]];
+        $artifacts = $this->app->make(EntryArtifactStore::class);
+
+        EntryBodySaveOp::handle($entry, Request::create('/x', 'POST', ['body' => [$node]]), actor: null);
+        // The Node compiler is not part of this suite; stand the authored artifact up the way the
+        // compile step would have, so the clearing save has something real to retire.
+        $artifacts->put($entry->fresh(), 'export default () => null');
+        $this->assertTrue($artifacts->has($entry->fresh()));
+
+        $payload = EntryBodySaveOp::handle($entry->fresh(), Request::create('/x', 'POST', ['body' => []]), actor: null);
+
+        $this->assertNull($payload['compileError'], 'clearing a document is not a compile failure');
+        $this->assertFalse($artifacts->has($entry->fresh()), 'an empty body leaves no artifact behind');
+        $this->assertNull($this->app->make(CompileEntryBody::class)->sourceFor($entry->fresh()));
+        $this->assertSame([], EntryBodyShowOp::handle($entry->fresh(), new Request, actor: null)->body);
+    }
+
     private function saveRequest(BeamUxEntry $entry, array $body): Request
     {
         return Request::create('/beam-ux-entries/'.$entry->id.'/op/save-body', 'POST', ['body' => $body]);

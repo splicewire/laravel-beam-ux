@@ -68,7 +68,15 @@ class CompileEntryBody
         $source ??= $this->sourceFor($entry);
 
         if ($source === null) {
-            throw CompilationFailed::for($entry, 'it has no body to compile.');
+            // No body is no artifact. A cleared document (`[]`) used to compile to a module that
+            // exported nothing, and the reader then told every GUEST to run an artisan command over a
+            // page whose honest state is "nothing authored yet" — measured 2026-09-12 on beam.test,
+            // satellite.test and a fresh tower after the G2 authoring probe restored `/` to `[]`. Any
+            // artifact left from an earlier body is retired so the reader sees the unauthored state
+            // (and the host's own default page) rather than a stale module.
+            $this->artifacts->forget($entry);
+
+            return null;
         }
 
         return $this->artifacts->put($entry, $this->compiler->compile($entry, $source));
@@ -120,11 +128,31 @@ class CompileEntryBody
 
         $body = $item->body ?? [];
 
+        if ($body === []) {
+            return null; // a bound particle holding an empty document is still "no body yet"
+        }
+
         if ($entry->codec() instanceof AcceptsJsonDoc && JsonDocShape::is($body)) {
             return JsonDocPrinter::printModule($body);
         }
 
         return $entry->codec()->decode($body);
+    }
+
+    /**
+     * Whether the entry's bound particle READS and holds an empty document — the state a cleared
+     * canvas leaves behind. Distinct from "the particle cannot be read" (a stale id, a driver that
+     * has nothing under the key): there the body is unknown, and an existing address must stand.
+     */
+    public function holdsEmptyDocument(BeamUxEntry $entry): bool
+    {
+        if ($entry->particle_id === null) {
+            return false;
+        }
+
+        $item = $this->drivers->resolve($entry)->read((string) $entry->particle_id);
+
+        return $item !== null && ($item->body ?? []) === [];
     }
 
     public function artifacts(): EntryArtifactStore
