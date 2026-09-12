@@ -67,8 +67,57 @@ class JsonDocPrinter
         }
 
         $body = implode("\n", array_map(fn (array $n) => self::printNode($n, 3), $doc));
+        $islands = self::componentNames($doc);
 
-        return "export default function Page() {\n  return (\n    <>\n{$body}\n    </>\n  );\n}\n";
+        // Island names are BARE IDENTIFIERS in the printed JSX, and an artifact imports nothing — so
+        // they have to come from somewhere. `<EntryBody>` already hands a compiled body its host
+        // registry on a `components` prop (the compiler runs without `providerImportSource`, ADR-0209),
+        // and this is the line that connects the two: the canvas resolves `<DemoHero>` through its
+        // `CanvasConfig` registry, and the artifact resolves the SAME name through the SAME map.
+        //
+        // Measured on beam.test 2026-09-11: without it the saved page threw `DemoHero is not defined`
+        // and took the whole page down — not just the body.
+        $destructure = $islands === []
+            ? ''
+            : '  const { '.implode(', ', $islands)."} = components;\n";
+        $signature = $islands === [] ? 'Page()' : 'Page({ components = {} })';
+
+        return "export default function {$signature} {\n{$destructure}  return (\n    <>\n{$body}\n    </>\n  );\n}\n";
+    }
+
+    /**
+     * Every distinct COMPONENT island name in the document, in first-seen order — the names the printed
+     * JSX references as bare identifiers and {@see printModule()} destructures from `components`.
+     *
+     * `isComponent` is the lens's own answer (a PascalCase tag it could not decompose), so this asks the
+     * document rather than re-deciding by casing.
+     *
+     * @param  array<int, array<string, mixed>>  $doc
+     * @return list<string>
+     */
+    public static function componentNames(array $doc): array
+    {
+        $found = [];
+
+        $walk = function (array $nodes) use (&$walk, &$found): void {
+            foreach ($nodes as $node) {
+                if (! is_array($node)) {
+                    continue;
+                }
+
+                $name = $node['name'] ?? null;
+
+                if (($node['isComponent'] ?? false) === true && is_string($name) && $name !== '') {
+                    $found[$name] = true;
+                }
+
+                $walk((array) ($node['children'] ?? []));
+            }
+        };
+
+        $walk($doc);
+
+        return array_keys($found);
     }
 
     /** @param  array<string, mixed>  $node */

@@ -170,4 +170,54 @@ class JsonDocPrinterTest extends TestCase
         $this->assertStringContainsString('export default function Page()', $out);
         $this->assertStringContainsString('return null;', $out);
     }
+
+    public function test_print_module_resolves_component_islands_through_the_components_prop(): void
+    {
+        // Island names are BARE IDENTIFIERS in printed JSX and an artifact imports nothing. `<EntryBody>`
+        // hands a compiled body its host registry on a `components` prop; this is what connects them, so
+        // the canvas and the artifact resolve the SAME name through the SAME map. Measured on beam.test
+        // 2026-09-11: without it the saved page threw `DemoHero is not defined` and took the WHOLE page
+        // down, not just the body.
+        $out = JsonDocPrinter::printModule([
+            [
+                'kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false, 'props' => [],
+                'children' => [
+                    ['kind' => 'block', 'name' => 'DemoHero', 'isComponent' => true, 'dynamic' => false, 'props' => [], 'children' => []],
+                    ['kind' => 'block', 'name' => 'DemoHero', 'isComponent' => true, 'dynamic' => false, 'props' => [], 'children' => []],
+                    ['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Hi']]],
+                ],
+            ],
+        ]);
+
+        $this->assertStringContainsString('Page({ components = {} })', $out);
+        // Once, not once per occurrence, and plain tags are never destructured.
+        $this->assertStringContainsString('const { DemoHero} = components;', $out);
+        $this->assertSame(1, substr_count($out, '= components;'));
+        $this->assertStringNotContainsString('h2 }', $out);
+    }
+
+    public function test_print_module_takes_no_components_prop_when_the_document_has_no_islands(): void
+    {
+        // A signature that promises a prop nothing reads is a claim; omit it.
+        $out = JsonDocPrinter::printModule([
+            ['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Plain']]],
+        ]);
+
+        $this->assertStringContainsString('export default function Page()', $out);
+        $this->assertStringNotContainsString('components', $out);
+    }
+
+    public function test_component_names_reports_each_island_once_in_first_seen_order(): void
+    {
+        $names = JsonDocPrinter::componentNames([
+            ['kind' => 'block', 'name' => 'Second', 'isComponent' => true, 'dynamic' => false, 'props' => [], 'children' => [
+                ['kind' => 'block', 'name' => 'First', 'isComponent' => true, 'dynamic' => false, 'props' => [], 'children' => []],
+                ['kind' => 'text', 'value' => 'x'],
+            ]],
+            ['kind' => 'block', 'name' => 'Second', 'isComponent' => true, 'dynamic' => false, 'props' => [], 'children' => []],
+            ['kind' => 'opaque', 'reason' => 'map', 'source' => '{x.map(() => <li/>)}'],
+        ]);
+
+        $this->assertSame(['Second', 'First'], $names);
+    }
 }
