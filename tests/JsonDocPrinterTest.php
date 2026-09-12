@@ -220,4 +220,35 @@ class JsonDocPrinterTest extends TestCase
 
         $this->assertSame(['Second', 'First'], $names);
     }
+
+    public function test_print_module_emits_style_as_a_react_object_while_the_mirror_keeps_the_string(): void
+    {
+        // Measured on beam.test 2026-09-11: the saved page rendered `style="max-width:900px"`, React
+        // refused the string (minified error #62) and the whole page died. The canvas never had this
+        // problem — `blockToProps` runs the body's style through `parseStyle` — so an artifact that does
+        // not is the lens that disagrees, and it must agree. kebab->camel is part of it: React ignores
+        // `max-width` and warns.
+        $node = [
+            'kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false, 'children' => [],
+            'props' => [['name' => 'style', 'kind' => 'string', 'value' => 'max-width: 900px; margin: 0 auto']],
+        ];
+
+        $module = JsonDocPrinter::printModule([$node]);
+
+        $this->assertStringContainsString('style={{"maxWidth":"900px","margin":"0 auto"}}', $module);
+        $this->assertStringNotContainsString('style="', $module);
+
+        // The MIRROR keeps the authored attribute: that file is read back by blockdoc's `parse()`.
+        $this->assertStringContainsString('style="max-width: 900px; margin: 0 auto"', JsonDocPrinter::print([$node]));
+    }
+
+    public function test_print_module_drops_an_empty_style_rather_than_emitting_an_empty_object(): void
+    {
+        $out = JsonDocPrinter::printModule([[
+            'kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false, 'children' => [],
+            'props' => [['name' => 'style', 'kind' => 'string', 'value' => '  ']],
+        ]]);
+
+        $this->assertStringNotContainsString('style', $out);
+    }
 }

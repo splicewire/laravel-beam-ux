@@ -66,7 +66,7 @@ class JsonDocPrinter
             return "export default function Page() {\n  return null;\n}\n";
         }
 
-        $body = implode("\n", array_map(fn (array $n) => self::printNode($n, 3), $doc));
+        $body = implode("\n", array_map(fn (array $n) => self::printNode($n, 3, module: true), $doc));
         $islands = self::componentNames($doc);
 
         // Island names are BARE IDENTIFIERS in the printed JSX, and an artifact imports nothing — so
@@ -121,7 +121,7 @@ class JsonDocPrinter
     }
 
     /** @param  array<string, mixed>  $node */
-    private static function printNode(array $node, int $depth): string
+    private static function printNode(array $node, int $depth, bool $module = false): string
     {
         $pad = str_repeat(self::INDENT, $depth);
         $kind = $node['kind'] ?? null;
@@ -138,7 +138,7 @@ class JsonDocPrinter
         $tag = (string) ($node['name'] ?? '');
         /** @var array<int, array<string, mixed>> $props */
         $props = (array) ($node['props'] ?? []);
-        $attrs = implode('', array_map([self::class, 'printProp'], $props));
+        $attrs = implode('', array_map(fn (array $prop) => self::printProp($prop, $module), $props));
         $open = $isFragment ? '<>' : "<{$tag}{$attrs}>";
         $close = $isFragment ? '</>' : "</{$tag}>";
 
@@ -160,7 +160,7 @@ class JsonDocPrinter
             return "{$pad}{$open}{$inner}{$close}";
         }
 
-        $kids = implode("\n", array_map(fn (array $c) => self::printNode($c, $depth + 1), $children));
+        $kids = implode("\n", array_map(fn (array $c) => self::printNode($c, $depth + 1, $module), $children));
 
         return "{$pad}{$open}\n{$kids}\n{$pad}{$close}";
     }
@@ -181,11 +181,27 @@ class JsonDocPrinter
         return true;
     }
 
-    /** @param  array<string, mixed>  $p */
-    private static function printProp(array $p): string
+    /**
+     * @param  array<string, mixed>  $p
+     * @param  bool  $module  printing for {@see printModule()} (an executable artifact) rather than for
+     *                        the disk mirror. The only difference is `style`, and it is not cosmetic:
+     *                        JSX source may carry `style="max-width:900px"` and React REFUSES a string
+     *                        at runtime (minified error #62), killing the page. The canvas has always
+     *                        parsed it — `blockToProps` runs the body's style through `parseStyle` — so
+     *                        an artifact that does not is the lens that disagrees. Measured on beam.test
+     *                        2026-09-11. The mirror keeps the string: that file is read back by
+     *                        `blockdoc`'s `parse()`, which expects the authored attribute.
+     */
+    private static function printProp(array $p, bool $module = false): string
     {
         $name = (string) ($p['name'] ?? '');
         $value = $p['value'] ?? '';
+
+        if ($module && $name === 'style' && ($p['kind'] ?? 'string') === 'string') {
+            $parsed = self::parseStyle((string) $value);
+
+            return $parsed === [] ? '' : ' style={'.json_encode($parsed, JSON_UNESCAPED_SLASHES).'}';
+        }
 
         return match ($p['kind'] ?? 'string') {
             'boolean-shorthand' => " {$name}",
@@ -199,6 +215,38 @@ class JsonDocPrinter
             // with `{…}` already stripped by the lens; re-wrap it.
             default => ' '.$name.'={'.trim((string) $value).'}',
         };
+    }
+
+    /**
+     * A CSS declaration string to React's style object — the PHP port of
+     * `@splicewire/beam-ux/blockdoc`'s `parseStyle()`, including its kebab→camel property rename, which
+     * is what React actually requires (it ignores `font-size` and warns).
+     *
+     * @return array<string, string>
+     */
+    private static function parseStyle(string $css): array
+    {
+        $out = [];
+
+        foreach (explode(';', $css) as $declaration) {
+            $at = strpos($declaration, ':');
+
+            if ($at === false) {
+                continue;
+            }
+
+            $property = (string) preg_replace_callback(
+                '/-([a-z])/',
+                fn (array $m) => strtoupper($m[1]),
+                trim(substr($declaration, 0, $at)),
+            );
+
+            if ($property !== '') {
+                $out[$property] = trim(substr($declaration, $at + 1));
+            }
+        }
+
+        return $out;
     }
 
     /** Escape a text leaf for JSX body content (only `{`, `}`, `<`, `>` are special). */
