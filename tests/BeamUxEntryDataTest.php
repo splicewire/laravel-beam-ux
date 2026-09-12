@@ -39,6 +39,8 @@ class BeamUxEntryDataTest extends TestCase
             $table->string('realm')->default('site')->index();
             $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();
+            $table->string('segment')->nullable();
+            $table->integer('nav_order')->nullable();
             $table->timestamps();
             $table->softDeletes();
             $table->unique(['namespace', 'slug']);
@@ -161,6 +163,93 @@ class BeamUxEntryDataTest extends TestCase
             $raw = (string) DB::table('beam_particles')->where('id', $entry->particle_id)->value('payload');
             $this->assertJsonStringEqualsJsonString('[]', $raw);
         }
+    }
+
+    public function test_segment_and_nav_order_round_trip_through_the_console_form(): void
+    {
+        // theme-entries-and-authoring provenance sweep, ux-demo-convergence 2026-09-12: no owner
+        // ruling ever deferred these two columns; the console form simply never carried them, while
+        // NavProjector has always read both live off the row.
+        $data = BeamUxEntryInputData::validateAndCreate([
+            'type' => 'page',
+            'title' => 'Songs',
+            'slug' => 'songs',
+            'realm' => 'site',
+            'segment' => '/songs',
+            'nav_order' => 30,
+        ]);
+
+        $this->assertSame('/songs', $data->segment);
+        $this->assertSame(30, $data->nav_order);
+        $this->assertSame('/songs', $data->toModelAttributes()['segment']);
+        $this->assertSame(30, $data->toModelAttributes()['nav_order']);
+    }
+
+    public function test_segment_and_nav_order_are_optional_and_default_null(): void
+    {
+        $data = BeamUxEntryInputData::validateAndCreate([
+            'type' => 'component',
+            'title' => 'Hero block',
+            'slug' => 'hero-block',
+            'realm' => 'site',
+        ]);
+
+        $this->assertNull($data->segment);
+        $this->assertNull($data->nav_order);
+        $this->assertNull($data->toModelAttributes()['segment']);
+        $this->assertNull($data->toModelAttributes()['nav_order']);
+    }
+
+    public function test_two_pass_through_siblings_may_share_a_null_segment(): void
+    {
+        // The documented shape (ContainmentTest::test_unplaced_page_entries_without_a_segment_are_excluded_from_nav):
+        // several segment-less entries under the same parent must not collide.
+        BeamUxEntry::create(['namespace' => '', 'slug' => 'about', 'type' => UxType::Page, 'segment' => null]);
+
+        $data = BeamUxEntryInputData::validateAndCreate([
+            'type' => 'page',
+            'title' => 'FAQ',
+            'slug' => 'faq',
+            'realm' => 'site',
+            'segment' => null,
+        ]);
+
+        $this->assertNull($data->segment);
+    }
+
+    public function test_a_segment_already_taken_by_a_sibling_under_the_same_parent_is_rejected(): void
+    {
+        $parent = BeamUxEntry::create(['namespace' => '', 'slug' => 'blog', 'type' => UxType::Page, 'segment' => '/blog']);
+        BeamUxEntry::create(['namespace' => '', 'slug' => 'existing', 'type' => UxType::Page, 'segment' => 'first-post', 'parent_id' => $parent->id]);
+
+        $this->expectException(ValidationException::class);
+
+        BeamUxEntryInputData::validateAndCreate([
+            'type' => 'page',
+            'title' => 'Second post',
+            'slug' => 'second-post',
+            'realm' => 'site',
+            'segment' => 'first-post',
+            'parent_id' => $parent->id,
+        ]);
+    }
+
+    public function test_the_same_segment_is_permitted_under_a_different_parent(): void
+    {
+        $blogA = BeamUxEntry::create(['namespace' => '', 'slug' => 'blog-a', 'type' => UxType::Page, 'segment' => '/blog-a']);
+        $blogB = BeamUxEntry::create(['namespace' => '', 'slug' => 'blog-b', 'type' => UxType::Page, 'segment' => '/blog-b']);
+        BeamUxEntry::create(['namespace' => '', 'slug' => 'a-post', 'type' => UxType::Page, 'segment' => 'intro', 'parent_id' => $blogA->id]);
+
+        $data = BeamUxEntryInputData::validateAndCreate([
+            'type' => 'page',
+            'title' => 'Intro',
+            'slug' => 'b-intro',
+            'realm' => 'site',
+            'segment' => 'intro',
+            'parent_id' => $blogB->id,
+        ]);
+
+        $this->assertSame('intro', $data->segment);
     }
 
     public function test_after_write_seeds_a_theme_entry_with_the_currently_resolved_theme(): void

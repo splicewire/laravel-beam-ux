@@ -5,9 +5,11 @@ namespace Splicewire\Beam\Ux\Data;
 use Closure;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Unique;
 use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\Widget;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -53,10 +55,21 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         public string $realm,
         #[Title('Parent'), ResourceRef('beam-ux-entry', value: 'id', label: 'title')]
         public ?string $parent_id = null,
+        // Containment/nav fields (theme-entries-and-authoring provenance sweep, ux-demo-convergence
+        // 2026-09-12): `segment` and `nav_order` were never actually deferred by an owner ruling — the
+        // console form simply never carried them. `NavProjector::project()` already reads both LIVE off
+        // the entry row (`nav_order` for sibling order, `segment` for the URL/whether the node is a nav
+        // destination at all), so exposing them here is wiring an existing read to an existing write
+        // seam, not new mechanism. `segment` null/'' is the documented pass-through state (no URL, no
+        // nav link, children still splice through) — never rejected, only validated when present.
+        #[Title('Segment')]
+        public ?string $segment = null,
+        #[Title('Nav order')]
+        public ?int $nav_order = null,
     ) {}
 
     /** @return array<string, mixed> */
-    public static function rules(): array
+    public static function rules(ValidationContext $context): array
     {
         $current = self::currentEntry();
         $slug = Rule::unique('beam_ux_entries')->where('namespace', $current !== null ? $current->namespace : '')->withoutTrashed();
@@ -77,7 +90,42 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
                 }
             }],
             'parent_id' => ['nullable', 'string', 'exists:beam_ux_entries,id'],
+            // Mirrors the real DB constraint (`create_beam_ux_entries_table.php.stub`:
+            // `unique index … on beam_ux_entries (parent_id, segment) where deleted_at is null`) —
+            // ONE public URL per (parent, segment). Scoped to `parent_id`, not realm: the database
+            // index isn't realm-scoped either (an entry belongs to one row's `parent_id` regardless of
+            // how many realms its `realms` fallback stack lists it in), so a laxer app-level rule would
+            // let two entries collide at the same parent+segment in different realms and then fail at
+            // the DB on save with a raw constraint violation instead of a 422. `nullable` short-circuits
+            // this for null/omitted segments — multiple pass-through siblings sharing a null segment is
+            // the documented, permitted shape (ContainmentTest::test_unplaced_page_entries_without_a_segment_are_excluded_from_nav).
+            'segment' => ['nullable', 'string', 'max:255', self::segmentUniqueRule($context)],
+            'nav_order' => ['nullable', 'integer'],
         ];
+    }
+
+    /**
+     * Scoped like the `slug` rule above: same parent, excluding the persisted update target. The
+     * submitted `parent_id` comes from the validation payload itself (`ValidationContext::$fullPayload`)
+     * rather than `request('parent_id')` — this DTO's own tests call `validateAndCreate()` with a bare
+     * array, never through an HTTP request, and the two would silently diverge on any such caller.
+     */
+    private static function segmentUniqueRule(ValidationContext $context): Unique
+    {
+        $current = self::currentEntry();
+        $payload = is_array($context->fullPayload) ? $context->fullPayload : [];
+        $parentId = $current !== null ? $current->parent_id : ($payload['parent_id'] ?? null);
+
+        $rule = Rule::unique('beam_ux_entries')
+            ->where('parent_id', $parentId)
+            ->whereNotNull('segment')
+            ->withoutTrashed();
+
+        if ($current !== null) {
+            $rule->ignore($current);
+        }
+
+        return $rule;
     }
 
     /** Resolve only the persisted update target, never an ID supplied in the body. */
@@ -102,6 +150,8 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             'slug' => $this->slug,
             'realm' => $this->realm,
             'parent_id' => $this->parent_id,
+            'segment' => $this->segment,
+            'nav_order' => $this->nav_order,
         ];
     }
 }
