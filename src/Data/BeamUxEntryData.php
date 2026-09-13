@@ -88,6 +88,17 @@ class BeamUxEntryData extends BeamData
         // afterWrite) plus blank (no namespace) — same combobox-not-enum reasoning as realm above.
         #[Title('Namespace'), Widget('combobox', options: ['suggestions' => ['', 'realms', 'theme']])]
         public ?string $namespace = null,
+        // Containment/nav fields (theme-entries-and-authoring provenance sweep, ux-demo-convergence
+        // 2026-09-12): this is the class the edit FORM's schema is actually generated from
+        // (`FrameResourceController::schema()` reflects `editData ?? data`, and this resource sets no
+        // `editData`) — `BeamUxEntryInputData` alone governs what a submit ACCEPTS, not what the form
+        // OFFERS. `NavProjector` has always read both live off the row; they were simply never on the
+        // form that edits it. `nav_order` gets no #[Widget] — a plain number input is what an ordering
+        // integer needs, and Frame's JsonSchemaGenerator already renders `?int` that way.
+        #[Title('Segment')]
+        public ?string $segment = null,
+        #[Title('Nav order')]
+        public ?int $nav_order = null,
     ) {}
 
     /** Default only a newly authored row; editing must preserve its disk namespace. */

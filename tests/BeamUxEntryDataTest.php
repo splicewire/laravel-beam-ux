@@ -252,6 +252,27 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertSame('intro', $data->segment);
     }
 
+    public function test_the_display_data_class_hydrates_segment_and_nav_order_off_the_model(): void
+    {
+        // BeamUxEntryData, not BeamUxEntryInputData, is what `FrameResourceController::schema()`
+        // reflects for the edit form (`editData ?? data`, and this resource sets no `editData`) — a
+        // property that exists only on the input class is invisible to the browser. This is the read
+        // half of the same wiring `test_segment_and_nav_order_round_trip_through_the_console_form`
+        // proves on the write side.
+        $entry = BeamUxEntry::create([
+            'namespace' => '',
+            'slug' => 'about',
+            'type' => UxType::Page,
+            'segment' => '/about',
+            'nav_order' => 20,
+        ]);
+
+        $data = BeamUxEntryData::from($entry);
+
+        $this->assertSame('/about', $data->segment);
+        $this->assertSame(20, $data->nav_order);
+    }
+
     public function test_after_write_seeds_a_theme_entry_with_the_currently_resolved_theme(): void
     {
         $entry = BeamUxEntry::create(['namespace' => '', 'slug' => 'default', 'type' => UxType::Theme]);
