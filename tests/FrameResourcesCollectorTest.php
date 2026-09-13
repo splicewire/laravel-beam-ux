@@ -204,9 +204,10 @@ class FrameResourcesCollectorTest extends TestCase
      * secure-by-omission three lines above the arm that did it.
      *
      * A null actor cannot satisfy a `viewAny` policy, so it is denied exactly as a real actor failing
-     * that policy is. Anonymous is now bounded above by authenticated. A resource with no model or no
-     * `viewAny` policy stays public, because that is a declaration the host made rather than an
-     * absence being read as permission.
+     * that policy is. Anonymous is now bounded above by authenticated. A model-backed resource with no
+     * `viewAny` policy stays public (its row scope is its read gate). A resource with NO model used to
+     * stay public too, by an arm that returned before this rule could run; it no longer does — see
+     * {@see test_an_anonymous_reader_is_never_shown_a_model_less_resource()}.
      */
     public function test_an_anonymous_reader_never_sees_more_than_an_authenticated_one(): void
     {
@@ -231,6 +232,54 @@ class FrameResourcesCollectorTest extends TestCase
             array_column($this->invoke('platform', 'operator'), 'title'),
             'a denying viewAny policy must deny the anonymous reader too — otherwise logging in REMOVES rows',
         );
+    }
+
+    // ---------------------------------------------------------------- model-less resources
+
+    /**
+     * A resource with no Eloquent model used to return `true` from `resourceViewable()` before anything
+     * was asked — so no declaration could hide its seat from anyone (DESIGN-02, otb-ui-frontier-sidebar).
+     * Its declared `policy:` ability is now the read gate, asked through beam's `ResourceVisibility`, the
+     * same answer frame's socket gives. Paired with the allowed actor so a collector that hid every
+     * model-less seat cannot pass.
+     */
+    public function test_a_model_less_resource_declaring_an_ability_is_listed_only_to_an_actor_holding_it(): void
+    {
+        $this->registerModelLess('queue', policy: 'queue.read');
+        \Illuminate\Support\Facades\Gate::define('queue.read', fn (\Illuminate\Foundation\Auth\User $user): bool => $user->getAuthIdentifier() === 7);
+
+        $this->assertNotContains('Queue', array_column($this->invoke('platform', 'operator', user: $this->actor(8)), 'title'));
+        $this->assertContains('Queue', array_column($this->invoke('platform', 'operator', user: $this->actor(7)), 'title'));
+    }
+
+    /**
+     * App ADR-0119 §2, pinned rather than reversed: a model-less resource declaring NO read gate stays
+     * listed to an authenticated actor — "the API layer still enforces". `splicewire:beam:doctor`'s
+     * `particle.model-less-read-gate` counts every one that rests on that sentence.
+     */
+    public function test_an_undeclared_model_less_resource_stays_listed_to_an_authenticated_actor(): void
+    {
+        $this->registerModelLess('queue');
+
+        $this->assertContains('Queue', array_column($this->invoke('platform', 'operator', user: $this->actor(8)), 'title'));
+    }
+
+    /**
+     * The 2026-09-05 rule — anonymous is bounded above by authenticated — applied to the arm that returned
+     * before it could run. Declared or not, a null actor is never shown a model-less seat.
+     */
+    public function test_an_anonymous_reader_is_never_shown_a_model_less_resource(): void
+    {
+        $this->registerModelLess('queue');
+        $this->registerModelLess('gated-queue', policy: 'queue.read', label: 'Gated queue');
+        \Illuminate\Support\Facades\Gate::define('queue.read', fn (?\Illuminate\Foundation\Auth\User $user = null): bool => true);
+
+        $anonymous = array_column($this->invoke('platform', 'operator'), 'title');
+
+        $this->assertNotContains('Queue', $anonymous);
+        $this->assertNotContains('Gated queue', $anonymous);
+        // The model-backed, policy-less seats beside them are unchanged for the same reader.
+        $this->assertSame(['Tenants', 'Packs', 'Plans', 'Hooks'], $anonymous);
     }
 
     // ---------------------------------------------------------------- the href join
@@ -341,6 +390,32 @@ class FrameResourcesCollectorTest extends TestCase
 
     // ---------------------------------------------------------------- helpers
 
+    private function registerModelLess(string $key, ?string $policy = null, string $label = 'Queue'): void
+    {
+        $registry = $this->app->make(ParticleResourceRegistry::class);
+
+        $registry->register(new ParticleResource(
+            key: $key,
+            backing: ModelLessFixtureFeed::class,
+            data: CollectorFixtureData::class,
+            filterable: false,
+            label: $label,
+            policy: $policy,
+            section: 'platform',
+            navOrder: 0,
+            routeName: $key.'.index',
+            readOnly: true,
+            showable: false,
+        ), by: self::class);
+
+        $registry->loadRealmMap(['operator' => [$key]]);
+    }
+
+    private function actor(int $id): \Illuminate\Foundation\Auth\User
+    {
+        return (new \Illuminate\Foundation\Auth\User)->forceFill(['id' => $id]);
+    }
+
     /**
      * @param  array<int, array<string, mixed>>  $static
      * @return array<int, array<string, mixed>>
@@ -386,6 +461,15 @@ class FrameResourcesCollectorTest extends TestCase
 class CollectorFixtureData extends \Spatie\LaravelData\Data
 {
     public function __construct(public string $id = '') {}
+}
+
+/** A streams-only backing with no model — the population `members` and `review-queue` are in. */
+class ModelLessFixtureFeed implements \Splicewire\Beam\Particle\Backing\StreamsRecords
+{
+    public function records(array $filters, ?string $cursor, int $perPage): \Illuminate\Contracts\Pagination\CursorPaginator
+    {
+        return new \Illuminate\Pagination\CursorPaginator([], $perPage);
+    }
 }
 
 /** A model-backed fixture, so `ResourceDefinition::$model` is non-null and the viewAny gate engages. */

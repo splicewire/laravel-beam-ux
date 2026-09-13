@@ -4,7 +4,6 @@ namespace Splicewire\Beam\Ux\Frame;
 
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Support\Facades\Gate;
 use Rushing\DataNav\InvocableNavItem;
 use Rushing\DataNav\NavContext;
 use Rushing\DataNav\NavLink;
@@ -12,6 +11,7 @@ use Rushing\Popcorn\Binding;
 use Rushing\Popcorn\Contracts\Invocable;
 use Schemastud\Frame\Contracts\ResourceRegistry;
 use Schemastud\Frame\Registry\ResourceDefinition;
+use Splicewire\Beam\Authorization\ResourceVisibility;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 
@@ -26,7 +26,8 @@ use Splicewire\Beam\Realm\RealmRegistry;
  * {@see NavContext}, bound into the container by `NavRegistry` during the build)
  * it: selects the resources whose `nav->section` matches; filters by realm
  * (through {@see ParticleResourceRegistry::realmsFor()}, the one membership authority) and
- * per-resource `viewAny` RBAC (service-backed resources with no model stay visible); sorts by
+ * per-resource visibility (through {@see ResourceVisibility::listable()}, the answer frame's socket
+ * shares — `viewAny` for a model-backed resource, the declared read gate for a model-less one); sorts by
  * `navOrder` (nulls last) then label; and emits each as a child `NavLink`. Hand-authored
  * non-resource children passed as `input['static']` are merged into that SAME ordering and may
  * carry their own `navOrder`.
@@ -73,6 +74,7 @@ class FrameResourcesInvocable implements Invocable
         private RealmRegistry $realms,
         private ParticleResourceRegistry $particles,
         private RouteContextProjector $routes,
+        private ResourceVisibility $visibility,
     ) {}
 
     public function name(): string
@@ -126,8 +128,8 @@ class FrameResourcesInvocable implements Invocable
     /**
      * The resources that auto-attach into a section, ordered by `navOrder` (nulls
      * last) then label — each a child `NavLink` carrying the resource's icon +
-     * routeName, **href derived from the leaf that `routeName` names**. A model-backed
-     * resource is additionally `viewAny`-gated (secure-by-omission).
+     * routeName, **href derived from the leaf that `routeName` names**. Each resource is additionally
+     * visibility-gated through {@see ResourceVisibility::listable()} (secure-by-omission).
      *
      * The label tiebreak stays here rather than moving to the merged sort: it orders resources
      * against each other, and the merged sort is deliberately kind-blind. Stability carries it
@@ -267,49 +269,41 @@ class FrameResourcesInvocable implements Invocable
     }
 
     /**
-     * Whether a resource may appear for this user — the per-resource `viewAny`
-     * gate. A service-backed union resource (no model) has no policy model to
-     * check, so it stays visible; the API enforces its own access. With no
-     * authenticated user, filtering is skipped (endpoints still enforce).
+     * Whether a resource may appear for this user — asked of {@see ResourceVisibility::listable()}, never
+     * answered here.
      *
-     * ⚠️ ASKS the Gate for whatever policy is bound and skips when the model has none, or none
-     * declaring `viewAny` — the same reading `ResourceFiltersController::gateOnModel()` makes, for the
-     * same reason: Laravel DENIES an ability nobody defined, so the unconditional `can()` this used to
-     * be hid the seat of every resource that leans on its row-level scope instead of a class policy
-     * (ADR-0156 §83: for a filterable resource the data-filters query IS the index's gate). Measured
-     * 2026-09-02 at the flagship (api-surface-coherence 135): `circuit-runs`, `beam-ux-entry`,
-     * `rules`, `evidence` and `hooks` all vanished for every non-Root member while their indexes
-     * answered by URL — a wrong absence a reader cannot tell from a permissions denial. A resource
-     * that DOES bind a policy is still permission-gated.
+     * ## Why this no longer answers the question itself
      *
-     * Read posture only. A missing policy on a WRITE stays denied — one posture per kind, decided at
-     * the declaration, not two per surface.
+     * It used to, in three arms, and the first one returned before anything was asked:
+     * `if ($def->model === null) { return true; }`. A resource with no Eloquent model (`members`,
+     * `review-queue`) was therefore listed to every reader — anonymous included, which inverted the
+     * 2026-09-05 rule below for exactly that population — and no declaration could hide it. Frame's socket
+     * and the filter sub-surface skipped the same question the same way, so the rail agreed with the wire
+     * only because neither looked (DESIGN-02, otb-ui-frontier-sidebar). One class now answers for all
+     * three, and a model-less resource that declares `policy:` is gated by that ability at each.
+     *
+     * The model-less skip for an UNDECLARED resource is not reversed: app ADR-0119 §2 decided it ("the API
+     * layer still enforces"), so such a resource stays listed to an authenticated actor and
+     * `splicewire:beam:doctor`'s `particle.model-less-read-gate` counts every one resting on that.
+     *
+     * The model-backed arms moved to that class verbatim, and their history is still the reason for them:
+     *
+     *  - ASKS the Gate for whatever policy is bound and skips when the model has none, or none declaring
+     *    `viewAny` — the reading `ResourceFiltersController::gateOnModel()` makes, because Laravel DENIES an
+     *    ability nobody defined. The unconditional `can()` this used to be hid the seat of every resource
+     *    that leans on its row-level scope (ADR-0156 §83); measured 2026-09-02 at the flagship
+     *    (api-surface-coherence 135): `circuit-runs`, `beam-ux-entry`, `rules`, `evidence` and `hooks`
+     *    vanished for every non-Root member while their indexes answered by URL.
+     *  - A null actor cannot satisfy a bound `viewAny`. `$user === null` USED to short-circuit to `true`
+     *    above the policy lookup, so anonymous saw MORE nav than a logged-in user — measured at
+     *    `~/Herd/beam` on 2026-09-05, where `/frame/manifest` carries `web` and NO auth.
+     *
+     * Read posture only. A missing policy on a WRITE stays denied — one posture per kind, decided at the
+     * declaration, not two per surface.
      */
     private function resourceViewable(ResourceDefinition $def, ?Authenticatable $user): bool
     {
-        if ($def->model === null) {
-            return true;
-        }
-
-        $policy = Gate::getPolicyFor($def->model);
-
-        if ($policy === null || ! method_exists($policy, 'viewAny')) {
-            return true;
-        }
-
-        // ⚠️ `$user === null` USED to short-circuit to `true`, ABOVE the policy lookup — so an
-        // anonymous reader passed this gate unconditionally while an authenticated one was filtered
-        // by `viewAny`, and anonymous therefore saw MORE nav than a logged-in user. Measured at
-        // `~/Herd/beam` on 2026-09-05, where `/frame/manifest` carries `web` and NO auth: an
-        // unauthenticated `curl` returned both seats, all five children and 12 resource definitions
-        // with their labels and hrefs, while an authenticated Demo Owner got one seat.
-        //
-        // That inverts the posture this method's own docblock claims. A null actor cannot satisfy a
-        // `viewAny` policy, so it is denied here exactly as a real actor failing that policy is —
-        // anonymous is now bounded ABOVE by authenticated, which is the only defensible ordering.
-        // A resource with no model, or with no `viewAny` policy, stays public: that is a declaration
-        // this host made, not an absence being read as permission.
-        return $user !== null && $user->can('viewAny', $def->model);
+        return $this->visibility->listable($def, $user);
     }
 
     /**
