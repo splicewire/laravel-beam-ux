@@ -35,6 +35,12 @@ use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
  *    (after this link). The sweep is idempotent — a realm whose dashboard is already registered is
  *    skipped — so running it twice registers nothing twice.
  *
+ * **Known limit, and it follows from those two moments:** a realm a host provider registers in its own
+ * `boot()` gets its dashboard on `Application::booted()`, which is AFTER the route loader, so a route file
+ * reading `RouteContextProjector::hrefs()` for that realm at load time will not see the dashboard leaf —
+ * the host must register such a realm before this boot link (a `register()`, or a provider ordered ahead)
+ * for its route file to see it; the base realms, registered at the first moment above, are unaffected.
+ *
  * ## The read gate is a decision written on the declaration
  *
  * `policy:` is {@see RealmDashboard::abilityFor()} — the realm gate's own ability string, so the dashboard

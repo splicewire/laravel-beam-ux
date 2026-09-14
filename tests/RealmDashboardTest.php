@@ -239,10 +239,12 @@ class RealmDashboardTest extends TestCase
         // `overview` is chosen when declared, and only then.
         $this->assertSame('overview', $byResource['optin']['context']);
 
-        // The static-child resource: a summary card, href from the router leaf its route name names.
+        // The static-child resource: a summary card, href from the router leaf its route name names. It
+        // declares no `navOrder`, so the card takes the index of the rail leaf that admitted it — 5, the
+        // same number its own tile carries below.
         $this->assertSame('summary', $byResource['members']['context']);
         $this->assertSame('/operator/members', $byResource['members']['href']);
-        $this->assertNull($byResource['members']['navOrder']);
+        $this->assertSame(5, $byResource['members']['navOrder']);
 
         // Tiles follow every card, in the RAIL's order (platform at 10: streams 1, gizmos 2, declined 3,
         // hidden 4; then people at 20: Members) — not alphabetical. Minus the dashboard's own leaf.
@@ -257,6 +259,62 @@ class RealmDashboardTest extends TestCase
         $this->assertNull($tiles[0]['summary']);
         $this->assertNull($tiles[0]['resource']);
         $this->assertNotContains('/operator/dashboard', array_column($tiles, 'href'));
+    }
+
+    /**
+     * The order a card with NO declared `navOrder` sorts at is the rail's, not the label's — measured at
+     * the beam starter, where `users` and `teams` declare none and reach the rail as a seat's static
+     * children: the cards read `teams, users` while the tiles for the SAME two resources read
+     * `Users, Teams`. The fixture reproduces that shape deliberately anti-alphabetically (rail `Zulu`
+     * then `Alpha`), and `charlie` is last in the rail while declaring `navOrder: 0`, so a declared
+     * order still wins over the seat it sits in.
+     */
+    public function test_cards_with_no_declared_nav_order_follow_the_rail_and_a_declared_nav_order_still_wins(): void
+    {
+        $this->app->make(NavSectionRegistry::class)->register(
+            new NavSection(
+                key: 'vault', realm: 'operator', label: 'Vault', icon: 'Archive', href: '/vault', order: 30,
+                entitlement: null, permission: null,
+                static: [
+                    ['title' => 'Zulu', 'href' => '/operator/zulu', 'routeName' => 'zulu.index'],
+                    ['title' => 'Alpha', 'href' => '/operator/alpha', 'routeName' => 'alpha.index'],
+                    ['title' => 'Charlie', 'href' => '/operator/charlie', 'routeName' => 'charlie.index'],
+                ],
+            ),
+            by: self::class,
+        );
+
+        $registry = $this->app->make(ParticleResourceRegistry::class);
+
+        foreach ([['zulu', 'Zulu', null], ['alpha', 'Alpha', null], ['charlie', 'Charlie', 0]] as [$key, $label, $navOrder]) {
+            $registry->register(new ParticleResource(
+                key: $key, backing: DashGizmo::class, data: DashGizmoData::class, filterable: false,
+                label: $label, navOrder: $navOrder, readOnly: true,
+            ), ['operator'], by: self::class);
+        }
+
+        $this->actingAs($this->staff());
+
+        $rows = $this->rows();
+        $cards = array_values(array_filter($rows, fn (array $row): bool => $row['context'] !== 'nav'));
+
+        // charlie 0 (declared, though last in the rail), streams 1, gizmos 2 (declared), then the
+        // undeclared three in RAIL order — members 5, zulu 6, alpha 7 — then optin, in no leaf at all.
+        $this->assertSame(
+            ['charlie', 'streams', 'gizmos', 'members', 'zulu', 'alpha', 'optin'],
+            array_column($cards, 'resource'),
+        );
+        $this->assertSame([0, 1, 2, 5, 6, 7, null], array_column($cards, 'navOrder'));
+
+        // The proof that this is the rail's order and not the label's: alphabetically `alpha` leads.
+        $this->assertLessThan(
+            array_search('alpha', array_column($cards, 'resource'), true),
+            array_search('zulu', array_column($cards, 'resource'), true),
+        );
+
+        // And a card's number is the number its own tile carries — one rail position, read once.
+        $byLabel = array_column(array_filter($rows, fn (array $row): bool => $row['context'] === 'nav'), 'navOrder', 'label');
+        $this->assertSame(['Zulu' => 6, 'Alpha' => 7, 'Charlie' => 8], array_intersect_key($byLabel, array_flip(['Zulu', 'Alpha', 'Charlie'])));
     }
 
     public function test_a_member_without_the_realm_entitlement_is_refused_by_the_realm_gate(): void

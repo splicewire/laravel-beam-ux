@@ -67,7 +67,10 @@ use Throwable;
  * ## One sort, one page
  *
  * Cards sort once by `navOrder` (nulls last) then label, exactly as the rail does; tiles follow every card
- * in the rail's own walk order (a tile's `navOrder` IS its rail index). The page is {@see Unpaged}: a
+ * in the rail's own walk order (a tile's `navOrder` IS its rail index). A card whose resource declares NO
+ * `navOrder` takes the rail index of the leaf that admitted it, so the cards read in the rail's order too
+ * — the reference host's `users`/`teams` declare none, and a label fallback read them `teams, users` while
+ * their own tiles read `Users, Teams`. The page is {@see Unpaged}: a
  * dashboard is one screen, its population is bounded by the realm's resource count, and the handler
  * envelopes it so neither the request's `perPage` nor frame's `per_page` can land a card on a second page.
  *
@@ -169,7 +172,7 @@ class DashboardBacking implements Unpaged
                 continue; // the host mounts no list route for it — drop, never throw
             }
 
-            $context = DashboardParticipation::contextFor($definition, $rail, $href);
+            $context = DashboardParticipation::contextFor($definition, $rail, $href, $seat);
 
             if ($context === null) {
                 continue;
@@ -187,7 +190,11 @@ class DashboardBacking implements Unpaged
                 label: $summary->label,
                 icon: $summary->icon ?? $definition->nav->icon,
                 href: $href,
-                navOrder: $definition->nav->navOrder,
+                // A declared `navOrder` wins. With none declared, the card takes the index of the rail
+                // leaf that admitted it — the SAME leaf the tile is drawn from — so a card and its tile
+                // cannot read in two different orders. Null only for a resource on the dashboard by
+                // declaration alone, which sits in no leaf and therefore has no rail position.
+                navOrder: $definition->nav->navOrder ?? $seat?->index,
                 resource: $key,
                 summary: $summary,
             );
