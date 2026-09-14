@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Data;
 use Schemastud\Frame\Attributes\WidgetIn;
 use Schemastud\Frame\Data\SummaryResponseData;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
+use Splicewire\Beam\Dashboard\DashboardParticipation;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
 
@@ -33,16 +34,16 @@ use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
 #[WidgetIn('list-item', 'dashboard-card')]
 class DashboardCardRowData extends BeamData
 {
-    public const CONTEXT_SUMMARY = 'summary';
+    public const CONTEXT_SUMMARY = DashboardParticipation::CONTEXT_SUMMARY;
 
-    public const CONTEXT_OVERVIEW = 'overview';
+    public const CONTEXT_OVERVIEW = DashboardParticipation::CONTEXT_OVERVIEW;
 
     public const CONTEXT_NAV = 'nav';
 
     /**
      * @param  string  $id  `{context}:{resource}` for a card, `nav:{routeName|href}` for a tile — unique within the realm's page
      * @param  'summary'|'overview'|'nav'  $context  the render context the row is drawn in
-     * @param  int|null  $navOrder  the resource's declared nav order; null sorts last (tiles carry none)
+     * @param  int|null  $navOrder  a card: the resource's declared nav order, null sorts last; a tile: its index in the rail's walk
      * @param  string|null  $resource  the summarized resource's key; null on a tile
      */
     public function __construct(

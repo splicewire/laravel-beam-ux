@@ -12,6 +12,7 @@ use Rushing\Popcorn\Contracts\Invocable;
 use Schemastud\Frame\Contracts\ResourceRegistry;
 use Schemastud\Frame\Registry\ResourceDefinition;
 use Splicewire\Beam\Authorization\ResourceVisibility;
+use Splicewire\Beam\Particle\ListRouteName;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 
@@ -202,7 +203,7 @@ class FrameResourcesInvocable implements Invocable
 
         return array_map(
             function (ResourceDefinition $def) use ($base, $hrefs): array {
-                $routeName = $def->nav->routeName ?? $def->key.'.index';
+                $routeName = ListRouteName::of($def);
                 $href = $hrefs[$routeName] ?? $base.'/'.$def->key;
 
                 return [

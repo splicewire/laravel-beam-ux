@@ -11,6 +11,7 @@ use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavNode;
 use Schemastud\Frame\Contracts\ResourceRegistry;
 use Splicewire\Beam\Authorization\ResourceVisibility;
+use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
@@ -104,7 +105,9 @@ class NavSectionProjector
 
     /**
      * The realm's dashboard leaf (when its `{realm}-dashboard` resource is registered and the principal
-     * may list it), then the declared seats for the realm in the registry's projection order.
+     * may list it) and the declared seats for the realm, in ONE ordering: {@see NavSection::compare()}'s
+     * `[order, key]`, the leaf carrying its declaration's `navOrder` as its order. Kind is not a sort
+     * input — a host seat declaring `order <= 0` precedes the dashboard, and that is the rule.
      *
      * A realm no package targeted yields no seats — not an error. "Which realms exist here" is a host
      * fact, and a package declaring a seat for a realm this host does not ship is a silent no-op,
@@ -118,25 +121,30 @@ class NavSectionProjector
      */
     public function project(string $realm, ?NavContext $context = null): array
     {
-        return [
-            ...$this->dashboardLeaf($realm, $context?->user),
-            ...array_map(
-                fn (NavSection $section): NavNode => $this->seat($section, $context?->user),
-                $this->sections->for($realm),
-            ),
-        ];
+        /** @var list<array{0: int, 1: string, 2: NavNode}> $entries */
+        $entries = $this->dashboardLeaf($realm, $context?->user);
+
+        foreach ($this->sections->for($realm) as $section) {
+            $entries[] = [$section->order, $section->key, $this->seat($section, $context?->user)];
+        }
+
+        usort($entries, fn (array $a, array $b): int => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
+
+        return array_map(fn (array $entry): NavNode => $entry[2], $entries);
     }
 
     /**
-     * The section-less, realm-level leaf for the realm's dashboard resource, at nav order zero — the
-     * one node this projection emits that is NOT a seat (realm-dashboards ticket 04).
+     * The section-less, realm-level leaf for the realm's dashboard resource, as one `[order, key, node]`
+     * entry of the projection — the one node this projection emits that is NOT a seat (realm-dashboards
+     * ticket 04).
      *
      * ## Why a leaf and not a seat
      *
      * A seat is a header whose children the collector attaches by `section:`; the dashboard is a
      * destination with no children, and giving it a section would nest "the realm's landing" under a
-     * header. It is emitted FIRST because `NavSection::compare()` orders seats among themselves and the
-     * dashboard is the head of the realm, before any of them.
+     * header. Its ORDER is the declaration's `navOrder` (zero, as beam-ux registers it), entering the
+     * same comparison as the seats rather than being prepended: the declaration says where it sits, and
+     * a host that wants a seat ahead of it declares a lower order.
      *
      * ## Gated like a resource, bound like a leaf
      *
@@ -148,7 +156,7 @@ class NavSectionProjector
      * bound. The href is read off that SAME projection rather than derived here; a realm whose router
      * cannot be projected (frame's registry port unbound) gets no leaf rather than an unjoinable one.
      *
-     * @return array<int, NavNode>
+     * @return list<array{0: int, 1: string, 2: NavNode}>
      */
     private function dashboardLeaf(string $realm, ?Authenticatable $user): array
     {
@@ -179,15 +187,17 @@ class NavSectionProjector
             return [];
         }
 
-        return [
+        return [[
+            $definition->nav->navOrder ?? 0,
+            $key,
             NavLink::make(
-                title: $definition->nav->label !== '' ? $definition->nav->label : 'Dashboard',
+                title: $definition->nav->label !== '' ? $definition->nav->label : RealmDashboard::LABEL,
                 href: $href,
                 match: trim($href, '/'),
                 icon: $definition->nav->icon,
                 routeName: $routeName,
             )->withMeta([self::CONTRIBUTED => true]),
-        ];
+        ]];
     }
 
     /**

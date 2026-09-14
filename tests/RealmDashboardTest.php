@@ -18,13 +18,13 @@ use Schemastud\Frame\Data\SummaryResponseData;
 use Schemastud\Frame\FrameServiceProvider;
 use Schemastud\Frame\Registry\ResourceDefinition;
 use Spatie\LaravelData\Data;
+use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Particle\Backing\StreamsRecords;
 use Splicewire\Beam\Particle\ParticleResource;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
-use Splicewire\Beam\Ux\Frame\RealmDashboard;
 use Splicewire\Beam\Ux\Frame\RouteContextPlan;
 use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
 use Splicewire\Beam\Ux\Tests\Fixtures\FakeEntitlementResolver;
@@ -44,17 +44,17 @@ class RealmDashboardTest extends TestCase
     private FakeEntitlementResolver $entitlements;
 
     /**
-     * ⚠️ Frame's provider goes FIRST, not appended as the other frame-aware suites here do. Both frame
-     * and beam bind `ResourceAccessGate` — frame to its permit-everything `OpenResourceAccessGate`, beam
-     * to the realm gate — and the later binding wins. Appended, frame's would override beam's and the
-     * member's 403 below would come back 200 over a green suite. Same order beam's own
-     * `ResourceSummaryTest` uses, for the same reason.
+     * Frame's provider is APPENDED, as the other frame-aware suites here do — the order that used to turn
+     * the member's 403 below into a 200 over a green suite, because frame's register() bound its
+     * permit-everything `OpenResourceAccessGate` after beam's realm gate. Beam now re-binds on `booted()`
+     * when frame's default won ({@see RealmDashboardRegistrationTest} pins it), so this suite deliberately
+     * runs in the order that was the trap.
      *
      * @return array<int, class-string>
      */
     protected function getPackageProviders($app): array
     {
-        return [FrameServiceProvider::class, ...parent::getPackageProviders($app), PermissionCascadeServiceProvider::class];
+        return [...parent::getPackageProviders($app), FrameServiceProvider::class, PermissionCascadeServiceProvider::class];
     }
 
     protected function getEnvironmentSetUp($app): void
@@ -76,7 +76,7 @@ class RealmDashboardTest extends TestCase
         // realm off this default — asserted on the manifest below.
         $app['config']->set('beam.ux.frame_nav.default_realm', 'operator');
         $app['config']->set('frame.realms', [
-            'operator' => ['gizmos', 'streams', 'declined', 'hidden', 'orphan', 'unseated', 'optin'],
+            'operator' => ['gizmos', 'streams', 'declined', 'hidden', 'orphan', 'unseated', 'optin', 'members'],
         ]);
     }
 
@@ -95,6 +95,17 @@ class RealmDashboardTest extends TestCase
         // A seat for `platform` in the operator realm, so "nav-seated" has something to be true of.
         $this->app->make(NavSectionRegistry::class)->register(
             new NavSection(key: 'platform', realm: 'operator', label: 'Platform', icon: 'Server', href: '/platform', order: 10, entitlement: null, permission: null),
+            by: self::class,
+        );
+
+        // The reference host's shape: a seat whose STATIC child names a resource declaring no `section:`.
+        // "Nav-seated" means "a leaf of the rail resolves to it", so `members` is on the dashboard.
+        $this->app->make(NavSectionRegistry::class)->register(
+            new NavSection(
+                key: 'people', realm: 'operator', label: 'People', icon: 'Users', href: '/people', order: 20,
+                entitlement: null, permission: null,
+                static: [['title' => 'Members', 'href' => '/operator/members', 'routeName' => 'members.index']],
+            ),
             by: self::class,
         );
 
@@ -145,6 +156,13 @@ class RealmDashboardTest extends TestCase
         $registry->register(new ParticleResource(
             key: 'optin', backing: DashGizmo::class, data: DashOverviewData::class, filterable: false,
             label: 'Opted in', icon: 'eye', readOnly: true,
+        ), by: self::class);
+
+        // No `section:`, no declaration, no navOrder — in the rail only through the `people` seat's static
+        // child above. The same shape as `unseated`, minus the static: the static is what seats it.
+        $registry->register(new ParticleResource(
+            key: 'members', backing: DashGizmo::class, data: DashGizmoData::class, filterable: false,
+            label: 'Members', icon: 'user', readOnly: true,
         ), by: self::class);
     }
 
@@ -197,10 +215,11 @@ class RealmDashboardTest extends TestCase
 
         $rows = $this->rows();
 
-        // Cards: streams (1), gizmos (2), opted in (undeclared ⇒ last). Not declined (provider
-        // declines), hidden (opt-out), orphan (unmounted), unseated (undeclared, no seat).
+        // Cards: streams (1), gizmos (2), then members and opted in (undeclared ⇒ last, by label). Not
+        // declined (provider declines), hidden (opt-out), orphan (unmounted), unseated (undeclared, in no
+        // rail leaf).
         $this->assertSame(
-            ['streams', 'gizmos', 'optin'],
+            ['streams', 'gizmos', 'members', 'optin'],
             array_column(array_filter($rows, fn (array $row): bool => $row['context'] !== 'nav'), 'resource'),
         );
 
@@ -220,12 +239,20 @@ class RealmDashboardTest extends TestCase
         // `overview` is chosen when declared, and only then.
         $this->assertSame('overview', $byResource['optin']['context']);
 
-        // Tiles follow every card: the realm's nav leaves for this actor, minus the dashboard's own.
+        // The static-child resource: a summary card, href from the router leaf its route name names.
+        $this->assertSame('summary', $byResource['members']['context']);
+        $this->assertSame('/operator/members', $byResource['members']['href']);
+        $this->assertNull($byResource['members']['navOrder']);
+
+        // Tiles follow every card, in the RAIL's order (platform at 10: streams 1, gizmos 2, declined 3,
+        // hidden 4; then people at 20: Members) — not alphabetical. Minus the dashboard's own leaf.
         $tiles = array_values(array_filter($rows, fn (array $row): bool => $row['context'] === 'nav'));
         $this->assertNotEmpty($tiles);
-        $this->assertSame(count($rows) - 3, count($tiles));
-        $this->assertSame(array_slice($rows, 3), $tiles, 'every tile is after every card');
-        $this->assertSame(['Declined', 'Gizmos', 'Hidden', 'Streams'], array_column($tiles, 'label'));
+        $this->assertSame(count($rows) - 4, count($tiles));
+        $this->assertSame(array_slice($rows, 4), $tiles, 'every tile is after every card');
+        $this->assertSame(['Streams', 'Gizmos', 'Declined', 'Hidden', 'Members'], array_column($tiles, 'label'));
+        // Index 0 of the walk is the dashboard's own leaf, which draws no tile.
+        $this->assertSame([1, 2, 3, 4, 5], array_column($tiles, 'navOrder'), 'a tile\'s navOrder is its rail index');
         $this->assertSame('/operator/streams', array_column($tiles, 'href', 'label')['Streams']);
         $this->assertNull($tiles[0]['summary']);
         $this->assertNull($tiles[0]['resource']);
@@ -258,14 +285,32 @@ class RealmDashboardTest extends TestCase
         $this->assertNotContains('gated', array_column($this->rows(), 'resource'));
     }
 
+    /**
+     * Frame's controller re-slices a flat list by `per_page` (its own name for the page size, not the
+     * handler's `perPage`) — the cut the first version of this test never sent. The backing is
+     * {@see \Splicewire\Beam\Particle\Backing\Unpaged}, so the handler envelopes the whole page itself.
+     */
     public function test_every_card_is_in_one_page_whatever_per_page_the_request_asks_for(): void
     {
         $this->actingAs($this->staff());
 
-        $this->assertSame(
-            array_column($this->rows(), 'id'),
-            array_column($this->rows('?perPage=1'), 'id'),
-        );
+        $all = $this->getJson('frame/resources/operator-dashboard')->assertOk()->json();
+        $cut = $this->getJson('frame/resources/operator-dashboard?per_page=1&perPage=1')->assertOk()->json();
+
+        $this->assertGreaterThan(1, count($all['data']));
+        $this->assertSame(array_column($all['data'], 'id'), array_column($cut['data'], 'id'));
+        $this->assertSame(['streams', 'gizmos', 'members', 'optin'], array_values(array_filter(array_column($cut['data'], 'resource'))));
+        $this->assertSame(count($all['data']), $cut['total']);
+        $this->assertSame(1, $cut['page']);
+        $this->assertSame(count($all['data']), $cut['perPage']);
+    }
+
+    public function test_a_card_has_no_detail_read(): void
+    {
+        $this->actingAs($this->staff());
+
+        // `showable: false`, and the backing resolves nothing: refused on the flag, never a 500.
+        $this->getJson('frame/resources/operator-dashboard/records/summary:gizmos')->assertStatus(405);
     }
 
     public function test_the_backing_yields_nothing_for_a_realm_this_host_does_not_have(): void
@@ -306,11 +351,11 @@ class RealmDashboardTest extends TestCase
         $this->assertSame('operator-dashboard', $leaves['operator-dashboard.index']['resource']);
         $this->assertArrayNotHasKey('operator-dashboard.edit', $leaves, 'showable: false, editable: false ⇒ no :id twin');
 
-        // The section-less realm-level leaf, first, at order zero.
+        // The section-less realm-level leaf, first: its declared order (0) sorts ahead of every seat here.
         $first = $manifest['nav']['items'][0];
         $this->assertSame('operator-dashboard.index', $first['routeName']);
         $this->assertSame('/operator/dashboard', $first['href']);
-        $this->assertSame('Dashboard', $first['title']);
+        $this->assertSame(RealmDashboard::LABEL, $first['title']);
         $this->assertSame([], $first['children']);
 
         // The gap ticket 01's review nominated: the contexts block, read off the HTTP response.
@@ -323,6 +368,30 @@ class RealmDashboardTest extends TestCase
             ['participates' => true, 'widget' => 'figure-card'],
             $manifest['contexts']['optin']['byNode']['']['overview'],
         );
+    }
+
+    /**
+     * Kind is not a sort input: the leaf enters `NavSection::compare()`'s `[order, key]` with its declared
+     * `navOrder`, so a host seat that declares a lower order precedes it — and one at the same order
+     * falls to the key tiebreak like any two seats.
+     */
+    public function test_a_seat_declaring_a_lower_order_than_the_leaf_precedes_it(): void
+    {
+        $this->app->make(NavSectionRegistry::class)->register(
+            // A bound static child, so the contributed seat is not pruned as empty.
+            new NavSection(
+                key: 'ahead', realm: 'operator', label: 'Ahead', icon: 'Star', href: '/ahead', order: -1,
+                entitlement: null, permission: null,
+                static: [['title' => 'Gizmos', 'href' => '/operator/gizmos', 'routeName' => 'gizmos.index']],
+            ),
+            by: self::class,
+        );
+
+        $this->actingAs($this->staff());
+
+        $items = $this->getJson('frame/manifest')->assertOk()->json('nav.items');
+
+        $this->assertSame(['ahead.section', 'operator-dashboard.index', 'platform.section', 'people.section'], array_column($items, 'routeName'));
     }
 
     public function test_the_nav_leaf_is_absent_for_an_actor_the_dashboard_refuses(): void

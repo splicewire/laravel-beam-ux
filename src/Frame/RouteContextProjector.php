@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Frame;
 use Schemastud\Frame\Contracts\ResourceRegistry;
 use Schemastud\Frame\Registry\ResourceDefinition;
 use Schemastud\Frame\Registry\RouteContextEntry;
+use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 

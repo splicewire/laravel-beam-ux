@@ -79,11 +79,11 @@ class ProviderChainTest extends TestCase
         // seam any other package uses. Deliberately not privileged: if this link were special-cased
         // rather than a NavSection registration, the seam would be untested by its first consumer.
         'bootOwnNavSections',
-        // ...and at 58, the `{realm}-dashboard` resource per registered realm (realm-dashboards 04).
-        // After the seats above because the backing decides default participation by "is this
-        // resource nav-seated here"; the registration itself is deferred to `Application::booted()`
-        // so a realm a HOST provider registers at boot still gets its dashboard. The count moved
-        // 12 -> 13 with it.
+        // ...and at 58, the `{realm}-dashboard` resource per registered realm (realm-dashboards 04):
+        // registered HERE for the realms known by now (a host route file reads the projection while
+        // routes load, before any Application::booted() callback), and swept once more on
+        // `Application::booted()` so a realm a HOST provider registers at boot still gets its
+        // dashboard. The count moved 12 -> 13 with it.
         'bootRealmDashboards',
         'registerThemeSchemas',
         // Added by registry-kernel ticket 38 — the three describes are boot links, and they sit in the

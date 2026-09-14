@@ -6,31 +6,29 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Pagination\CursorPaginator as CursorPaginatorContract;
 use Illuminate\Pagination\CursorPaginator;
-use ReflectionClass;
 use Schemastud\Frame\Contracts\ResourceSummaryProvider;
 use Schemastud\Frame\Data\SummaryResponseData;
 use Schemastud\Frame\Registry\ResourceDefinition;
-use Schemastud\Frame\Registry\WidgetContextProjector;
 use Splicewire\Beam\Authorization\ActorPort;
+use Splicewire\Beam\Authorization\AuthenticatedActor;
 use Splicewire\Beam\Authorization\ResourceVisibility;
-use Splicewire\Beam\Nav\NavSection;
-use Splicewire\Beam\Nav\NavSectionRegistry;
-use Splicewire\Beam\Particle\Backing\ResolvedRecord;
-use Splicewire\Beam\Particle\Backing\ResolvesRecord;
-use Splicewire\Beam\Particle\Backing\StreamsRecords;
+use Splicewire\Beam\Dashboard\DashboardParticipation;
+use Splicewire\Beam\Dashboard\RailLeaves;
+use Splicewire\Beam\Dashboard\RealmDashboard;
+use Splicewire\Beam\Particle\Backing\Unpaged;
+use Splicewire\Beam\Particle\ListRouteName;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Particle\Registry\ResourceRegistryBacking;
 use Splicewire\Beam\Realm\RealmRegistry;
 use Splicewire\Beam\Ux\Data\DashboardCardRowData;
 use Splicewire\Beam\Ux\Frame\FrameNavContribution;
 use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
-use Splicewire\Beam\Ux\Frame\RealmDashboard;
 use Splicewire\Beam\Ux\Frame\RouteContextProjector;
 use Throwable;
 
 /**
- * One realm's dashboard as a resource — the cards of the realm's nav-seated resources, then the realm's
- * nav manifest drawn as jump-to tiles, one {@see DashboardCardRowData} each (realm-dashboards ticket 04,
+ * One realm's dashboard as a resource — the cards of the realm's rail-seated resources, then the realm's
+ * rail drawn as jump-to tiles, one {@see DashboardCardRowData} each (realm-dashboards ticket 04,
  * executing the otb-ui-frontier-sidebar DESIGN-01 ruling that a dashboard is a read-only resource).
  *
  * The template is {@see ResourceRegistryBacking}: model-less, streams-only, actor-filtered, in-memory
@@ -45,16 +43,17 @@ use Throwable;
  *
  *  1. the actor may not LIST it ({@see ResourceVisibility::listable()} — `viewAny` for a model-backed
  *     resource, the declared read gate for a model-less one, never a null actor);
- *  2. its read Data class declares `#[Summary(false)]` — the opt-out;
- *  3. it is neither nav-SEATED in this realm (declares `section:` and a package seated that section
- *     here, {@see NavSectionRegistry}) nor explicitly opted in (declares `summary` or `overview`);
- *  4. the host does not mount its list route (its `routeName` names no leaf in the realm's router
+ *  2. the host does not mount its list route (its route name names no leaf in the realm's router
  *     projection) — a package cannot 500 a host's dashboard by naming a resource the host never placed;
- *  5. its summary provider declines, or names no provider — an honest absence, never an invented zero.
+ *  3. it is not ON the dashboard ({@see DashboardParticipation::contextFor()} — the ONE rule, shared with
+ *     beam's `DashboardTierAudit`): a leaf of the realm's rail resolves to it, or it declares
+ *     `summary`/`overview`; `#[Summary(false)]` opts out;
+ *  4. its summary provider declines, or names no provider — an honest absence, never an invented zero.
  *
- * Default participation is decided HERE, not by frame: a realm resource participates iff it is seated,
- * unless it opts out. `overview` is opt-in, and a card whose resource declares one renders in that
- * context; otherwise `summary`.
+ * "The rail" is the PROJECTED navigation for this actor — `FrameNavContribution::contributeNav()`, the
+ * tree the rail renders — so a resource a host seats through a section's static children (the beam
+ * starter's `users`/`teams`, which declare no `section:`) is on the dashboard exactly when it is in the
+ * rail. The same walk yields the tiles, so a card and a tile cannot disagree about what the rail holds.
  *
  * ## Two gates, both written down
  *
@@ -67,43 +66,38 @@ use Throwable;
  *
  * ## One sort, one page
  *
- * Cards sort once by `navOrder` (nulls last) then label, exactly as the rail does; tiles follow every card.
- * The page is deliberately UNPAGED: a dashboard is one screen, its population is bounded by the realm's
- * resource count, and the request's `perPage` is ignored so no card ever lands on a second page.
+ * Cards sort once by `navOrder` (nulls last) then label, exactly as the rail does; tiles follow every card
+ * in the rail's own walk order (a tile's `navOrder` IS its rail index). The page is {@see Unpaged}: a
+ * dashboard is one screen, its population is bounded by the realm's resource count, and the handler
+ * envelopes it so neither the request's `perPage` nor frame's `per_page` can land a card on a second page.
+ *
+ * ## No detail, by declaration
+ *
+ * The resource is `showable: false` and this backing resolves nothing: a card is a projection of ANOTHER
+ * resource, whose own list is the place to open it. The handler refuses the detail read on the flag.
  *
  * ## Hrefs come from the router projection, not from the key
  *
- * A card's `href` is the leaf its resource's `routeName` names in {@see RouteContextProjector::hrefs()}
+ * A card's `href` is the leaf its resource's list route name names in {@see RouteContextProjector::hrefs()}
  * — the ONE derivation {@see FrameResourcesInvocable} also reads — so the card and the rail seat cannot
  * point at two different URLs. The summary payload itself carries no href (frame's socket is realm-blind).
  */
-class DashboardBacking implements ResolvesRecord, StreamsRecords
+class DashboardBacking implements Unpaged
 {
     public function __construct(
         public readonly string $realm,
     ) {}
 
     /**
-     * Every row, one page. `$filters` is ignored (the resource is not filterable) and `$perPage` is
-     * overridden by the row count — see the class docblock. A cursor is accepted only so the contract is
-     * honoured: any cursor restarts the single page.
+     * Every row, one page. `$filters` is ignored (the resource is not filterable) and `$perPage` by the
+     * {@see Unpaged} contract. A cursor is accepted only so the contract is honoured: any cursor restarts
+     * the single page.
      */
     public function records(array $filters, ?string $cursor, int $perPage): CursorPaginatorContract
     {
         $rows = $this->rows();
 
         return new CursorPaginator($rows, max(1, count($rows)), null, ['parameters' => ['id']]);
-    }
-
-    public function resolve(string $id, array $filters): ?ResolvedRecord
-    {
-        foreach ($this->rows() as $row) {
-            if ($row->id === $id) {
-                return new ResolvedRecord(record: $row);
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -124,7 +118,8 @@ class DashboardBacking implements ResolvesRecord, StreamsRecords
             return [];
         }
 
-        $rows = [...$this->cards($container), ...$this->tiles($container)];
+        $rail = $this->rail($container);
+        $rows = [...$this->cards($container, $rail), ...$this->tiles($rail)];
 
         // ONE sort: tiles after every card, then navOrder (undeclared trails), then label. Stable, so
         // rows tied on all three keep their build order.
@@ -144,16 +139,12 @@ class DashboardBacking implements ResolvesRecord, StreamsRecords
     /**
      * @return list<DashboardCardRowData>
      */
-    private function cards(Container $container): array
+    private function cards(Container $container, RailLeaves $rail): array
     {
         $particles = $container->make(ParticleResourceRegistry::class);
         $visibility = $container->make(ResourceVisibility::class);
         $actor = $this->actor($container);
         $hrefs = $this->hrefs($container);
-        $seats = array_map(
-            fn (NavSection $section): string => $section->key,
-            $container->make(NavSectionRegistry::class)->for($this->realm),
-        );
 
         $cards = [];
 
@@ -172,16 +163,16 @@ class DashboardBacking implements ResolvesRecord, StreamsRecords
                 continue;
             }
 
-            $context = $this->contextFor($definition, $seats);
-
-            if ($context === null) {
-                continue;
-            }
-
-            $href = $hrefs[$definition->nav->routeName ?? $key.'.index'] ?? null;
+            $href = $hrefs[ListRouteName::of($definition)] ?? null;
 
             if ($href === null) {
                 continue; // the host mounts no list route for it — drop, never throw
+            }
+
+            $context = DashboardParticipation::contextFor($definition, $rail, $href);
+
+            if ($context === null) {
+                continue;
             }
 
             $summary = $this->summarize($container, $definition);
@@ -203,39 +194,6 @@ class DashboardBacking implements ResolvesRecord, StreamsRecords
         }
 
         return $cards;
-    }
-
-    /**
-     * The context a resource's card renders in, or null when the resource is not on this realm's
-     * dashboard: `overview` when it declares one, `summary` when it declares one or is nav-seated here;
-     * null on `#[Summary(false)]`, on an undeclared unseated resource, and on a Data class whose
-     * declarations frame's projector rejects.
-     *
-     * @param  list<string>  $seats  the section keys seated in this realm
-     * @return 'summary'|'overview'|null
-     */
-    private function contextFor(ResourceDefinition $definition, array $seats): ?string
-    {
-        try {
-            $contexts = (new WidgetContextProjector)->forClass(new ReflectionClass($definition->data));
-        } catch (Throwable) {
-            return null;
-        }
-
-        $summary = $contexts[DashboardCardRowData::CONTEXT_SUMMARY] ?? null;
-        $overview = $contexts[DashboardCardRowData::CONTEXT_OVERVIEW] ?? null;
-
-        if ($summary !== null && ($summary['participates'] ?? true) === false) {
-            return null;
-        }
-
-        if ($overview !== null && ($overview['participates'] ?? true) !== false) {
-            return DashboardCardRowData::CONTEXT_OVERVIEW;
-        }
-
-        $seated = $definition->nav->section !== null && in_array($definition->nav->section, $seats, true);
-
-        return $summary !== null || $seated ? DashboardCardRowData::CONTEXT_SUMMARY : null;
     }
 
     /**
@@ -263,54 +221,50 @@ class DashboardBacking implements ResolvesRecord, StreamsRecords
     }
 
     /**
-     * The realm's nav manifest as tiles — every LEAF (a node with an href and no children) of the
-     * contributed, gated, pruned navigation, minus the dashboard's own leaf. The seats themselves are
-     * headers, not destinations, so they draw no tile. Read through the same contributor the manifest
-     * uses, so a tile exists exactly where a rail entry does for this actor.
-     *
-     * @return list<DashboardCardRowData>
+     * The realm's rail for this actor — every leaf of the contributed, gated, pruned navigation, in walk
+     * order. Read through the same contributor the manifest uses, so a tile exists exactly where a rail
+     * entry does, and a card's "seated" reading is the rail the actor sees. Empty when the realm has no
+     * navigation or it cannot be built (reported, not thrown: the cards that declare themselves survive).
      */
-    private function tiles(Container $container): array
+    private function rail(Container $container): RailLeaves
     {
         try {
             $nav = $container->make(FrameNavContribution::class)->contributeNav($this->realm);
         } catch (Throwable $e) {
             report($e);
 
-            return [];
+            return new RailLeaves([]);
         }
 
-        $tiles = [];
+        return RailLeaves::fromNavItems($nav['nav']['items'] ?? []);
+    }
+
+    /**
+     * The rail as tiles — every leaf minus the dashboard's own, `navOrder` stamped with the leaf's walk
+     * index so the tiles read in the rail's order. The seats themselves are headers, not destinations,
+     * so they draw no tile.
+     *
+     * @return list<DashboardCardRowData>
+     */
+    private function tiles(RailLeaves $rail): array
+    {
         $own = RealmDashboard::routeNameFor($this->realm);
+        $tiles = [];
 
-        $walk = function (array $nodes) use (&$walk, &$tiles, $own): void {
-            foreach ($nodes as $node) {
-                $children = is_array($node['children'] ?? null) ? $node['children'] : [];
-
-                if ($children !== []) {
-                    $walk($children);
-
-                    continue;
-                }
-
-                $href = $node['href'] ?? null;
-                $routeName = $node['routeName'] ?? null;
-
-                if (! is_string($href) || $href === '' || $routeName === $own) {
-                    continue;
-                }
-
-                $tiles[] = new DashboardCardRowData(
-                    id: DashboardCardRowData::CONTEXT_NAV.':'.($routeName ?? $href),
-                    context: DashboardCardRowData::CONTEXT_NAV,
-                    label: (string) ($node['title'] ?? $href),
-                    icon: is_string($node['icon'] ?? null) ? $node['icon'] : null,
-                    href: $href,
-                );
+        foreach ($rail->leaves as $leaf) {
+            if ($leaf->routeName === $own) {
+                continue;
             }
-        };
 
-        $walk($nav['nav']['items'] ?? []);
+            $tiles[] = new DashboardCardRowData(
+                id: DashboardCardRowData::CONTEXT_NAV.':'.($leaf->routeName ?? $leaf->href),
+                context: DashboardCardRowData::CONTEXT_NAV,
+                label: $leaf->title,
+                icon: $leaf->icon,
+                href: $leaf->href,
+                navOrder: $leaf->index,
+            );
+        }
 
         return $tiles;
     }
@@ -333,8 +287,6 @@ class DashboardBacking implements ResolvesRecord, StreamsRecords
 
     private function actor(Container $container): ?Authenticatable
     {
-        $actor = $container->make(ActorPort::class)->actor();
-
-        return $actor instanceof Authenticatable ? $actor : null;
+        return AuthenticatedActor::from($container->make(ActorPort::class));
     }
 }
