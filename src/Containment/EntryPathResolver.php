@@ -92,7 +92,9 @@ class EntryPathResolver
             $chain = $this->descend($anchor, array_slice($pieces, $take), $realm);
 
             if ($chain !== null) {
-                return [...$this->ancestry($anchor), ...$chain];
+                $ancestry = $this->ancestry($anchor);
+
+                return $ancestry === null ? null : [...$ancestry, ...$chain];
             }
         }
 
@@ -226,19 +228,30 @@ class EntryPathResolver
     }
 
     /**
-     * A node's root-first ancestry INCLUDING itself, walked up `parent_id`. Used only after a phase-1
-     * absolute match, where the URL's own pieces say nothing about how deep the node really sits.
+     * A node's root-first ancestry INCLUDING itself, walked up `parent_id`. Shared by URL resolution, artifact access and sitemap checks. Broken parent links and cycles deny instead of dropping ancestor requirements.
      *
-     * @return array<int, BeamUxEntry>
+     * @return array<int, BeamUxEntry>|null
      */
-    protected function ancestry(BeamUxEntry $entry): array
+    public function ancestry(BeamUxEntry $entry): ?array
     {
         $chain = [];
+        $seen = [];
         $node = $entry;
 
         while ($node !== null) {
+            $key = $node->getKey() ?? spl_object_id($node);
+            if (isset($seen[$key])) {
+                return null;
+            }
+            $seen[$key] = true;
             array_unshift($chain, $node);
+            if ($node->parent_id === null) {
+                break;
+            }
             $node = $node->parent;
+            if ($node === null) {
+                return null;
+            }
         }
 
         return $chain;

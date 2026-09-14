@@ -136,6 +136,7 @@ return new class extends Migration
                 // evaluated in memory over a chain the caller already holds, never queried against.
                 $table->json('traverse')->nullable();
                 $table->json('access')->nullable();
+                $table->json('requirements')->nullable();
 
                 // Workflow: an OPTIONAL subject of the sibling laravel-beam-workflows engine. NULL marking
                 // = unmanaged / at-initial; the published-marking gate reads it so an unmanaged entry stays

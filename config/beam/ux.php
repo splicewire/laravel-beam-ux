@@ -242,27 +242,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Docs subtree seed (ADR-0210 — the OTB docs surface)
-    |--------------------------------------------------------------------------
-    |
-    | `splicewire:beam:seed` seeds the `site` realm root (ADR-0209 §9 — the
-    | renderer never writes, so SOMETHING has to make the root exist) and, under
-    | the gate below, the docs subtree beneath it: a docs root plus the API
-    | reference page beam-ux contributes.
-    |
-    | `segment` is the docs root's own URL segment and it is seeded as DATA the
-    | site owns from creation — re-rooting to `/beam/docs` is an edit to one row,
-    | not a config change and not a realm. This key is the seed's INITIAL value
-    | only; it is never read again, and editing it later moves nothing.
-    |
-    */
-    'docs' => [
-        'seed' => env('BEAM_UX_SEED_DOCS', true),
-        'segment' => env('BEAM_UX_DOCS_SEGMENT', '/docs'),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
     | Access (ADR-0212 — the two conjunctive rights)
     |--------------------------------------------------------------------------
     |
@@ -308,7 +287,6 @@ return [
     */
     'chrome' => [
         'registered' => [
-            'DocsLayout',
             'ProseTemplate',
             'SpreadTemplate',
         ],

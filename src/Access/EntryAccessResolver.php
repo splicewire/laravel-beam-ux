@@ -53,7 +53,8 @@ class EntryAccessResolver
             return false;
         }
 
-        return $this->canTraverseAll($actor, $chain)
+        return $this->requirementsAllow($actor, [...$chain, $target])
+            && $this->canTraverseAll($actor, $chain)
             && $this->gate->allows($actor, $target, Right::Access);
     }
 
@@ -83,7 +84,8 @@ class EntryAccessResolver
             return false;
         }
 
-        return $this->canTraverseAll($actor, $chain)
+        return $this->requirementsAllow($actor, $chain)
+            && $this->canTraverseAll($actor, $chain)
             && $this->gate->allows($actor, $node, Right::Access);
     }
 
@@ -93,7 +95,42 @@ class EntryAccessResolver
      */
     public function permits(?Authenticatable $actor, BeamUxEntry $entry, Right $right): bool
     {
-        return $this->gate->allows($actor, $entry, $right);
+        return $this->requirementsAllow($actor, [$entry]) && $this->gate->allows($actor, $entry, $right);
+    }
+
+    /**
+     * Requirements are conjunctive, separate from the host's opaque any-of token lists. An absent
+     * package leaves its named binding absent and its retained entries inaccessible, even to a host
+     * gate that grants every permission. Resolve live: worker/request state must not cache a verdict.
+     *
+     * @param  array<int, BeamUxEntry>  $chain
+     */
+    private function requirementsAllow(?Authenticatable $actor, array $chain): bool
+    {
+        foreach ($chain as $entry) {
+            $requirements = $entry->requirements;
+            if ($requirements === null) {
+                continue;
+            }
+            if (! is_array($requirements) || ! array_is_list($requirements)) {
+                return false;
+            }
+            foreach ($requirements as $name) {
+                if (! is_string($name) || ! preg_match('/^[a-z][a-z0-9-]*$/D', $name)) {
+                    return false;
+                }
+                $binding = 'beam.ux.requirement.'.$name;
+                if (! app()->bound($binding)) {
+                    return false;
+                }
+                $requirement = app($binding);
+                if (! $requirement instanceof EntryRequirement || ! $requirement->allows($actor, $entry)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     public function gate(): EntryAccessGate

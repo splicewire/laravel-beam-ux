@@ -62,6 +62,11 @@ class EntrySitemapSource implements SitemapSource
                 continue;
             }
 
+            $chain = app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)->ancestry($entry);
+            if ($chain === null || ! app(\Splicewire\Beam\Ux\Access\EntryAccessResolver::class)->canList(null, $chain)) {
+                continue;
+            }
+
             yield Url::create($base.$entry->url());
         }
     }

@@ -77,12 +77,9 @@ class PublicEntryGate
             return null;
         }
 
-        $chain = [];
-        $node = $entry;
-
-        while ($node !== null) {
-            array_unshift($chain, $node);
-            $node = $node->parent;
+        $chain = $this->paths->ancestry($entry);
+        if ($chain === null) {
+            return null;
         }
 
         if ($this->publish !== null && ! $this->publish->isPublished($entry)) {
@@ -107,6 +104,9 @@ class PublicEntryGate
     public function isRestricted(array $chain): bool
     {
         foreach ($chain as $entry) {
+            if ($entry->requirements !== null && $entry->requirements !== []) {
+                return true;
+            }
             foreach (Right::cases() as $right) {
                 if ($entry->tokensFor($right) !== null) {
                     return true;

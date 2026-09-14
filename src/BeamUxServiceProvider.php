@@ -93,22 +93,13 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             // of the `realms` fallback stack directly on `beam_ux_entries`.
             ->hasMigrations([
                 'shared/create_beam_ux_entries_table',
+                'shared/add_requirements_to_beam_ux_entries_table',
                 // The publication pin (`published_version`). An ALTER beside the create because
                 // editing a `create_*` stub reaches nothing already migrated — a host that installed
                 // beam-ux before this pass gets the column from here, a fresh one from the create,
                 // and each no-ops for the other.
                 'shared/add_published_version_to_beam_ux_entries_table',
             ]);
-
-        // The docs seed stubs (ticket 02 §4, ADR-0210). Optionally published — publishing is how a host
-        // customises what a fresh install seeds; not publishing is how it gets the default. Following
-        // beam-core's own `beam-stubs` tag and beam-client-runtime's `resource_path('js/lib/')` publish:
-        // a stub is established precedent, and it is not a RENDERED page, which is the thing no beam
-        // package ships.
-        $this->publishes(
-            [__DIR__.'/../stubs/docs' => resource_path('beam-ux/docs')],
-            'beam-ux-docs',
-        );
     }
 
     public function packageRegistered(): void

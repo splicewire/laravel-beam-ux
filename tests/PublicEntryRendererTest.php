@@ -415,6 +415,44 @@ class PublicEntryRendererTest extends TestCase
         $this->assertSame('.*', PublicEntryController::pathConstraint(['', '/']));
     }
 
+    public function test_a_retained_capability_subtree_is_closed_on_all_public_read_paths(): void
+    {
+        $root = BeamUxEntry::rootFor();
+        $docs = $this->page('docs', ['segment' => '/docs', 'parent_id' => $root->getKey(), 'requirements' => ['example']]);
+        $child = $this->page('reference', ['segment' => 'api', 'parent_id' => $docs->getKey()]);
+        $this->page('ordinary', ['segment' => '/ordinary', 'parent_id' => $root->getKey()]);
+        $artifacts = app(EntryArtifactStore::class);
+        $artifacts->put($child, 'export default () => null');
+        $url = route('beam.ux.site.artifact', ['entry' => $child->getKey(), 'version' => $artifacts->version($child)]);
+        $this->get('/docs/api')->assertNotFound();
+        $this->get($url)->assertNotFound();
+        $this->get('/ordinary')->assertOk();
+        $this->assertCount(1, app(\Splicewire\Beam\Ux\Containment\NavProjector::class)->project('site')->items);
+        $urls = iterator_to_array(app(\Splicewire\Beam\Ux\Sitemap\EntrySitemapSource::class)->urls());
+        foreach ($urls as $listed) {
+            $this->assertStringNotContainsString('/docs', $listed->url);
+        }
+        $requirement = new class implements \Splicewire\Beam\Ux\Access\EntryRequirement
+        {
+            public bool $enabled = true;
+
+            public function allows(?Authenticatable $actor, BeamUxEntry $entry): bool
+            {
+                return $this->enabled;
+            }
+        };
+        $this->app->instance('beam.ux.requirement.example', $requirement);
+        $this->get('/docs/api')->assertOk();
+        $response = $this->get($url)->assertOk();
+        $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
+        $requirement->enabled = false;
+        $this->get($url)->assertNotFound();
+        $requirement->enabled = true;
+        BeamUxEntry::query()->whereKey($docs->getKey())->update(['deleted_at' => now()]);
+        $this->get($url)->assertNotFound();
+        $this->get('/docs/api')->assertNotFound();
+    }
+
     /** @param array<string, mixed> $attributes */
     private function page(string $slug, array $attributes = []): BeamUxEntry
     {
@@ -461,6 +499,7 @@ class PublicEntryRendererTest extends TestCase
             $table->integer('nav_order')->nullable();
             $table->json('traverse')->nullable();
             $table->json('access')->nullable();
+            $table->json('requirements')->nullable();
             $table->string('workflow_marking')->nullable()->index();
             // ADR-0213's chrome columns — needed by the §7 entry-nesting cases below.
             $table->string('layout')->nullable();

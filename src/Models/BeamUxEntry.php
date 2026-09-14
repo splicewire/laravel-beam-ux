@@ -199,6 +199,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
         // beam-ux. NULL = no declaration = no constraint (inherit); `[]` = declared-but-empty = deny.
         'traverse',
         'access',
+        'requirements',
         // Workflow aspect (S6): the optional beam-workflows subject envelope.
         'workflow_marking',
         'workflow_version',
@@ -235,6 +236,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
             // deny); the two are NOT interchangeable and `tokensFor()` preserves the difference.
             'traverse' => 'array',
             'access' => 'array',
+            'requirements' => 'array',
         ];
     }
 

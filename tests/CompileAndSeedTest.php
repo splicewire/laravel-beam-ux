@@ -250,51 +250,14 @@ class CompileAndSeedTest extends TestCase
         $this->assertStringNotContainsString('counted in no bucket', $detail);
     }
 
-    public function test_the_seeder_provisions_the_realm_root_and_the_docs_subtree(): void
+    public function test_generic_ux_seeding_provisions_the_realm_without_documentation(): void
     {
         $this->seed(BeamUxSeeder::class);
-
-        $root = BeamUxEntry::query()->where('namespace', 'realms')->where('slug', 'site')->first();
-        $this->assertNotNull($root, 'ADR-0209 §9: the root is seeded, never created by a GET');
-
-        $docs = BeamUxEntry::query()->where('slug', 'docs')->firstOrFail();
-        $this->assertSame('/docs', $docs->segment);
-        $this->assertSame($root->getKey(), $docs->parent_id);
-
-        $api = BeamUxEntry::query()->where('slug', 'docs-api')->firstOrFail();
-        $this->assertSame($docs->getKey(), $api->parent_id);
-        $this->assertSame('/docs/api', $api->url());
-
-        // The page points at beam core's own artifact route, interpolated at seed time because a body
-        // cannot call route() (ticket 21 / ADR-0211).
-        $source = $this->app->make(CompileEntryBody::class)->sourceFor($api);
-        $this->assertStringContainsString('/beam/openapi.yaml', (string) $source);
-    }
-
-    public function test_re_seeding_never_clobbers_what_the_site_has_edited(): void
-    {
-        $this->seed(BeamUxSeeder::class);
-
-        // The site re-roots its docs and re-titles the reference page — a data edit on rows it owns,
-        // which is the entire reason ticket 02 ruled docs a containment subtree rather than config.
-        BeamUxEntry::query()->where('slug', 'docs')->update(['segment' => '/beam/docs']);
-        BeamUxEntry::query()->where('slug', 'docs-api')->update(['title' => 'Our API']);
-
-        $this->seed(BeamUxSeeder::class);
-
-        $this->assertSame('/beam/docs', BeamUxEntry::query()->where('slug', 'docs')->value('segment'));
-        $this->assertSame('Our API', BeamUxEntry::query()->where('slug', 'docs-api')->value('title'));
-        $this->assertSame(1, BeamUxEntry::query()->where('slug', 'docs')->count());
-    }
-
-    public function test_the_docs_seed_can_be_gated_off_while_the_realm_root_still_lands(): void
-    {
-        config(['beam.ux.docs.seed' => false]);
-
-        $this->seed(BeamUxSeeder::class);
-
-        $this->assertNotNull(BeamUxEntry::query()->where('namespace', 'realms')->where('slug', 'site')->first());
+        $root = BeamUxEntry::query()->where('namespace', 'realms')->where('slug', 'site')->firstOrFail();
+        $this->assertSame('site', $root->slug);
         $this->assertNull(BeamUxEntry::query()->where('slug', 'docs')->first());
+        $this->seed(BeamUxSeeder::class);
+        $this->assertSame(1, BeamUxEntry::query()->where('namespace', 'realms')->where('slug', 'site')->count());
     }
 
     /**
