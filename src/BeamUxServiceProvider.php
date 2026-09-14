@@ -28,6 +28,7 @@ use Splicewire\Beam\Ux\Concerns\WiresInference;
 use Splicewire\Beam\Ux\Concerns\WiresParticleDeclarations;
 use Splicewire\Beam\Ux\Concerns\WiresPlacement;
 use Splicewire\Beam\Ux\Concerns\WiresPublicSurface;
+use Splicewire\Beam\Ux\Concerns\WiresRealmDashboards;
 use Splicewire\Beam\Ux\Concerns\WiresSitemap;
 use Splicewire\Beam\Ux\Concerns\WiresStorage;
 use Splicewire\Beam\Ux\Concerns\WiresThemeSchemas;
@@ -78,6 +79,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
     use WiresParticleDeclarations;
     use WiresPlacement;
     use WiresPublicSurface;
+    use WiresRealmDashboards;
     use WiresSitemap;
     use WiresStorage;
     use WiresThemeSchemas;

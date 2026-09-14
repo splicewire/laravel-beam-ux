@@ -78,7 +78,7 @@ class RouteContextProjector
                 continue;
             }
 
-            array_push($entries, ...$this->resourceLeaves($resource, $guard));
+            array_push($entries, ...$this->resourceLeaves($resource, $guard, $realm));
         }
 
         foreach ($this->plan->standaloneFor($definition) as $page) {
@@ -159,9 +159,15 @@ class RouteContextProjector
      * `update` off it — so gating on `creatable` hands a resource an edit shell whose save the
      * server refuses.
      *
+     * The realm's own dashboard resource (`{realm}-dashboard`, realm-dashboards ticket 04) is the one
+     * key whose path does NOT follow its stem: the stem would mount the operator dashboard at
+     * `/operator/operator-dashboard`, and the realm base already says which realm it is. It mounts at
+     * {@see RealmDashboard::PATH} under the realm base unless the host's plan pins a path, and — being
+     * `showable: false`, `editable: false` — emits no `:id` twin.
+     *
      * @return array<int, RouteContextEntry>
      */
-    protected function resourceLeaves(ResourceDefinition $definition, ?string $guard): array
+    protected function resourceLeaves(ResourceDefinition $definition, ?string $guard, string $realm = ''): array
     {
         $key = $definition->key;
 
@@ -198,7 +204,8 @@ class RouteContextProjector
 
         // The path may be pinned by host IA while the routeName stays the stem's — `routeName` is
         // documented as stable identity, so only the URL half moves.
-        $path = $this->plan->resourcePaths[$key] ?? $stem;
+        $path = $this->plan->resourcePaths[$key]
+            ?? ($realm !== '' && RealmDashboard::isKey($key, $realm) ? RealmDashboard::PATH : $stem);
 
         $entries = [new RouteContextEntry(
             routeName: $listRoute,

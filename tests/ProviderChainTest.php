@@ -79,6 +79,12 @@ class ProviderChainTest extends TestCase
         // seam any other package uses. Deliberately not privileged: if this link were special-cased
         // rather than a NavSection registration, the seam would be untested by its first consumer.
         'bootOwnNavSections',
+        // ...and at 58, the `{realm}-dashboard` resource per registered realm (realm-dashboards 04).
+        // After the seats above because the backing decides default participation by "is this
+        // resource nav-seated here"; the registration itself is deferred to `Application::booted()`
+        // so a realm a HOST provider registers at boot still gets its dashboard. The count moved
+        // 12 -> 13 with it.
+        'bootRealmDashboards',
         'registerThemeSchemas',
         // Added by registry-kernel ticket 38 — the three describes are boot links, and they sit in the
         // trait that owns each fill rather than in a provider block, because beam-ux's whole binding
@@ -130,7 +136,7 @@ class ProviderChainTest extends TestCase
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
         $this->assertCount(12, $this->chain('register'));
-        $this->assertCount(12, $this->chain('boot'));
+        $this->assertCount(13, $this->chain('boot'));
     }
 
     public function test_the_provider_declares_the_contract_so_a_detector_can_find_it(): void

@@ -91,15 +91,22 @@ class FrameRouteContextProjectionTest extends TestCase
     {
         $projector = $this->projector();
 
+        // Each realm's own `{realm}-dashboard` (registered by beam-ux at boot, realm-dashboards 04)
+        // leads its list: a list leaf, no `:id` twin, and — the one key whose path does not follow
+        // its stem — mounted at `dashboard` rather than `operator-dashboard`.
         $this->assertSame(
-            ['tenants.index', 'tenants.edit'],
+            ['operator-dashboard.index', 'tenants.index', 'tenants.edit'],
             $this->routeNames($projector->routeContext('operator'))
         );
 
         $this->assertSame(
-            ['circuits.index', 'circuits.edit', 'fragments.index', 'fragments.edit', 'invitations.index', 'audit.index', 'audit.edit'],
+            ['tenant-dashboard.index', 'circuits.index', 'circuits.edit', 'fragments.index', 'fragments.edit', 'invitations.index', 'audit.index', 'audit.edit'],
             $this->routeNames($projector->routeContext('tenant'))
         );
+
+        $this->assertSame('dashboard', $this->byName($projector->routeContext('operator'))['operator-dashboard.index']->path);
+        $this->assertSame('/operator/dashboard', $projector->hrefs('operator')['operator-dashboard.index']);
+        $this->assertSame('/dashboard', $projector->hrefs('tenant')['tenant-dashboard.index']);
     }
 
     public function test_the_single_record_twin_follows_the_declaration_not_the_key(): void

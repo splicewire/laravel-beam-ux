@@ -4,11 +4,18 @@ namespace Splicewire\Beam\Ux\Frame;
 
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Container\Container;
 use Rushing\DataNav\InvocableNavItem;
 use Rushing\DataNav\NavContext;
+use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavNode;
+use Schemastud\Frame\Contracts\ResourceRegistry;
+use Splicewire\Beam\Authorization\ResourceVisibility;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
+use Splicewire\Beam\Particle\ParticleResourceRegistry;
+use Splicewire\Beam\Realm\RealmRegistry;
+use Throwable;
 
 /**
  * Projects the top-level nav SEATS a package declared ({@see NavSection}, `beam.nav.sections`) into
@@ -89,28 +96,98 @@ class NavSectionProjector
     public function __construct(
         private NavSectionRegistry $sections,
         private Gate $gate,
+        private ParticleResourceRegistry $particles,
+        private ResourceVisibility $visibility,
+        private RealmRegistry $realms,
+        private Container $container,
     ) {}
 
     /**
-     * The declared seats for one realm, in the registry's projection order.
+     * The realm's dashboard leaf (when its `{realm}-dashboard` resource is registered and the principal
+     * may list it), then the declared seats for the realm in the registry's projection order.
      *
-     * A realm no package targeted yields an empty list — not an error. "Which realms exist here" is
-     * a host fact, and a package declaring a seat for a realm this host does not ship is a silent
-     * no-op, exactly as an unmatched `RealmOverlay` is at projection time.
+     * A realm no package targeted yields no seats — not an error. "Which realms exist here" is a host
+     * fact, and a package declaring a seat for a realm this host does not ship is a silent no-op,
+     * exactly as an unmatched `RealmOverlay` is at projection time.
      *
-     * `$context` is optional and only a SOFT-gated seat reads it: the lock verdict is per-principal,
-     * where every other field of a seat is not. Absent context means no principal, which the
-     * entitlement plane already handles (a guest holds nothing), so the parameter needs no caller
-     * to change.
+     * `$context` is optional: a SOFT-gated seat reads it for its per-principal lock verdict, and the
+     * dashboard leaf reads it for its visibility gate. Absent context means no principal — a guest holds
+     * nothing and is never shown a model-less resource — so the parameter needs no caller to change.
      *
      * @return array<int, NavNode>
      */
     public function project(string $realm, ?NavContext $context = null): array
     {
-        return array_map(
-            fn (NavSection $section): NavNode => $this->seat($section, $context?->user),
-            $this->sections->for($realm),
-        );
+        return [
+            ...$this->dashboardLeaf($realm, $context?->user),
+            ...array_map(
+                fn (NavSection $section): NavNode => $this->seat($section, $context?->user),
+                $this->sections->for($realm),
+            ),
+        ];
+    }
+
+    /**
+     * The section-less, realm-level leaf for the realm's dashboard resource, at nav order zero — the
+     * one node this projection emits that is NOT a seat (realm-dashboards ticket 04).
+     *
+     * ## Why a leaf and not a seat
+     *
+     * A seat is a header whose children the collector attaches by `section:`; the dashboard is a
+     * destination with no children, and giving it a section would nest "the realm's landing" under a
+     * header. It is emitted FIRST because `NavSection::compare()` orders seats among themselves and the
+     * dashboard is the head of the realm, before any of them.
+     *
+     * ## Gated like a resource, bound like a leaf
+     *
+     * The node exists only for a principal {@see ResourceVisibility::listable()} admits to the dashboard
+     * resource — the same question the collector asks of every resource child, so the rail and the
+     * dashboard's own read gate cannot disagree (a null principal is never shown a model-less resource).
+     * Its `routeName` is the resource's declared list route, which {@see RouteContextProjector} emits as
+     * a `mounts: 'list'` leaf at `/{realmBase}/dashboard` — so {@see RouteContextValidator} finds it
+     * bound. The href is read off that SAME projection rather than derived here; a realm whose router
+     * cannot be projected (frame's registry port unbound) gets no leaf rather than an unjoinable one.
+     *
+     * @return array<int, NavNode>
+     */
+    private function dashboardLeaf(string $realm, ?Authenticatable $user): array
+    {
+        $key = RealmDashboard::keyFor($realm);
+
+        if (! $this->particles->has($key) || $this->realms->tryResolve($realm) === null) {
+            return [];
+        }
+
+        try {
+            $definition = $this->particles->definition($key, $realm);
+
+            if (! $this->visibility->listable($definition, $user)) {
+                return [];
+            }
+
+            $hrefs = $this->container->bound(ResourceRegistry::class)
+                ? $this->container->make(RouteContextProjector::class)->hrefs($realm)
+                : [];
+        } catch (Throwable) {
+            return [];
+        }
+
+        $routeName = RealmDashboard::routeNameFor($realm);
+        $href = $hrefs[$routeName] ?? null;
+
+        if ($href === null) {
+            return [];
+        }
+
+        return [
+            NavLink::make(
+                title: $definition->nav->label !== '' ? $definition->nav->label : 'Dashboard',
+                href: $href,
+                match: trim($href, '/'),
+                icon: $definition->nav->icon,
+                routeName: $routeName,
+            )->withMeta([self::CONTRIBUTED => true]),
+        ];
     }
 
     /**
