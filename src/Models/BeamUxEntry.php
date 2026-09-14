@@ -139,6 +139,7 @@ use Splicewire\Beam\Write\ParticleWriter;
  * `EntryAccessGate` is untouched — it answers the PUBLIC surface's question, not this one. `HasVisibility`
  * means the cascade's shared rung (grants + reach tier) already applies per row.
  *
+ * @property list<string>|null $requirements Installed capabilities required to read this entry.
  * @property string|null $particle_id
  */
 #[UseCascadePolicy]
