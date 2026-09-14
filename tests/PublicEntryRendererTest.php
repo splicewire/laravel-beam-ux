@@ -453,6 +453,22 @@ class PublicEntryRendererTest extends TestCase
         $this->get('/docs/api')->assertNotFound();
     }
 
+    public function test_relative_pages_cannot_bypass_broken_realm_root_ancestry(): void
+    {
+        $root = BeamUxEntry::rootFor();
+        $docs = $this->page('relative-docs', ['segment' => 'docs', 'parent_id' => $root->getKey()]);
+        $api = $this->page('relative-api', ['segment' => 'api', 'parent_id' => $docs->getKey()]);
+        app(EntryArtifactStore::class)->put($api, 'export default () => null;');
+        $page = $this->get('/docs/api')->assertOk();
+        $artifact = $page->json('props.artifact.url');
+        $this->get($artifact)->assertOk();
+        foreach ([(string) Str::uuid(), $root->getKey()] as $parent) {
+            BeamUxEntry::whereKey($root->getKey())->update(['parent_id' => $parent]);
+            $this->get('/docs/api')->assertNotFound();
+            $this->get($artifact)->assertNotFound();
+        }
+    }
+
     /** @param array<string, mixed> $attributes */
     private function page(string $slug, array $attributes = []): BeamUxEntry
     {

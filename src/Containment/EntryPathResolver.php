@@ -108,7 +108,9 @@ class EntryPathResolver
 
         $chain = $this->descend($root, $pieces, $realm);
 
-        return $chain === null ? null : [$root, ...$chain];
+        $ancestry = $this->ancestry($root);
+
+        return $chain === null || $ancestry === null ? null : [...$ancestry, ...$chain];
     }
 
     /**

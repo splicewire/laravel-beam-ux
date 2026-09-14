@@ -3,7 +3,7 @@
 namespace Splicewire\Beam\Ux\Sitemap;
 
 use Spatie\Sitemap\Tags\Url;
-use Splicewire\Beam\Sitemap\Contracts\SitemapSource;
+use Splicewire\Beam\Sitemap\Contracts\LiveSitemapSource;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -31,7 +31,7 @@ use Splicewire\Beam\Ux\Type\UxType;
  *     default {@see PublicEntitlementGate} treats every entry as public, a gating
  *     host re-binds it.
  */
-class EntrySitemapSource implements SitemapSource
+class EntrySitemapSource implements LiveSitemapSource
 {
     public function __construct(
         private SitemapBaseUrlResolver $baseUrl,

@@ -33,7 +33,7 @@
         "splicewire/laravel-beam": "*",
         "splicewire/laravel-beam-accounts": "*",
         "splicewire/laravel-beam-mdx": "*",
-        "splicewire/laravel-beam-sitemap": "*",
+        "splicewire/laravel-beam-sitemap": "dev-main",
         "splicewire/laravel-beam-taxonomy": "*",
         "splicewire/laravel-beam-workflows": "*",
         "symfony/process": "^6.4|^7.0"
