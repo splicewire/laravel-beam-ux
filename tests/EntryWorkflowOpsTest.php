@@ -23,7 +23,7 @@ use Splicewire\Beam\Workflows\Data\WorkflowTransitionAttemptData;
  * directly rather than through `ParticleOperationController` — the same lighter-weight tier
  * `MirrorStatusRowDataTest`/`SitemapHealthRowDataTest` used for `project()`, proving the op's own logic
  * rather than re-testing the generic controller plumbing. Table/binding setup mirrors
- * `EntryWorkflowTest`'s own fixture exactly (same S6 columns + definition-store tables + a no-op
+ * `EntryWorkflowTest`'s own fixture exactly (same S6 columns + beam-workflows' declared migrations + a no-op
  * `AwaitingStore` so the always-registered clear-on-transition listener has nothing to reach for).
  */
 class EntryWorkflowOpsTest extends TestCase
@@ -144,25 +144,7 @@ class EntryWorkflowOpsTest extends TestCase
             $table->unique(['namespace', 'slug']);
         });
 
-        Schema::create('workflow_definition_lineages', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('key')->unique();
-            $table->string('name');
-            $table->boolean('is_system')->default(false);
-            $table->timestamps();
-        });
-
-        Schema::create('workflow_definition_versions', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('lineage_id');
-            $table->unsignedInteger('version');
-            $table->json('blueprint');
-            $table->boolean('is_active')->default(false);
-            $table->timestamps();
-
-            $table->unique(['lineage_id', 'version']);
-            $table->index(['lineage_id', 'is_active']);
-        });
+        $this->runBeamWorkflowsMigrations();
 
         Schema::create('activity_log', function (Blueprint $table) {
             $table->bigIncrements('id');

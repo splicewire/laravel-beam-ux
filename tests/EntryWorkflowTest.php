@@ -172,29 +172,12 @@ class EntryWorkflowTest extends TestCase
             $table->softDeletes();
             $table->unique(['namespace', 'slug']);
         });
-        // The beam-workflows definition-store tables. Left EMPTY: the entry publish lifecycle resolves
-        // through the code-registered blueprint (the package's back-compat path), so no DB lineage is
-        // needed — but `LifecycleService::resolve()` probes `activeVersion()` before falling through to
-        // the blueprint registry, so the tables must exist for that probe to return null cleanly.
-        Schema::create('workflow_definition_lineages', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('key')->unique();
-            $table->string('name');
-            $table->boolean('is_system')->default(false);
-            $table->timestamps();
-        });
-
-        Schema::create('workflow_definition_versions', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('lineage_id');
-            $table->unsignedInteger('version');
-            $table->json('blueprint');
-            $table->boolean('is_active')->default(false);
-            $table->timestamps();
-
-            $table->unique(['lineage_id', 'version']);
-            $table->index(['lineage_id', 'is_active']);
-        });
+        // The beam-workflows schema, from the package's own declared migrations. The definition store is
+        // left EMPTY: the entry publish lifecycle resolves through the code-registered blueprint (the
+        // package's back-compat path), so no DB lineage is needed — but `LifecycleService::resolve()`
+        // probes `activeVersion()` before falling through to the blueprint registry, and an applied
+        // transition writes its committed facts, so the tables must exist.
+        $this->runBeamWorkflowsMigrations();
 
         // The spatie/activitylog projection the workflows Display seam writes to on each transition
         // (versioned definitions + activitylog Display come from the package free — S6). Present so a

@@ -3,12 +3,15 @@
 namespace Splicewire\Beam\Ux\Tests;
 
 use Orchestra\Testbench\TestCase as Orchestra;
+use ReflectionClass;
+use RuntimeException;
 use Rushing\DataNav\ServiceProvider as DataNavServiceProvider;
 use Rushing\Popcorn\Laravel\PopcornServiceProvider;
 use Rushing\Versioning\VersioningServiceProvider;
 use Schemastud\DataSchemas\LaravelDataSchemasServiceProvider;
 use Spatie\Activitylog\ActivitylogServiceProvider;
 use Spatie\LaravelData\LaravelDataServiceProvider;
+use Spatie\LaravelPackageTools\Package;
 use Splicewire\Beam\BeamServiceProvider;
 use Splicewire\Beam\Sitemap\BeamSitemapServiceProvider;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
@@ -47,5 +50,41 @@ abstract class TestCase extends Orchestra
             // tripwire in `RegistryConformanceTest` is what keeps this line honest.
             PopcornServiceProvider::class,
         ];
+    }
+
+    /**
+     * Runs every migration `splicewire/laravel-beam-workflows` declares, in its declared order.
+     *
+     * Those migrations ship publish-only (`runsMigrations` stays false), so Testbench never loads
+     * them. The list comes from `BeamWorkflowsServiceProvider::configurePackage()`'s own
+     * `->hasMigrations([...])` rather than a hand-built copy here: a hand-built copy is what broke
+     * when workflows began writing `workflow_transition_facts` on every applied transition. A
+     * migration the package adds later reaches this harness with no edit. Same technique as
+     * `splicewire/laravel-beam-market`'s `tests/TestCase.php::runPackageSharedMigrationStubs()`.
+     */
+    protected function runBeamWorkflowsMigrations(): void
+    {
+        $package = new Package;
+        $package->setBasePath(dirname((new ReflectionClass(BeamWorkflowsServiceProvider::class))->getFileName()));
+
+        (new BeamWorkflowsServiceProvider($this->app))->configurePackage($package);
+
+        if ($package->migrationFileNames === []) {
+            throw new RuntimeException('BeamWorkflowsServiceProvider declares no migrations; this harness cannot build the workflows schema.');
+        }
+
+        foreach ($package->migrationFileNames as $name) {
+            $migration = $package->basePath("/../database/migrations/{$name}.php");
+
+            if (! file_exists($migration)) {
+                $migration .= '.stub';
+            }
+
+            if (! file_exists($migration)) {
+                throw new RuntimeException("BeamWorkflowsServiceProvider declares migration [{$name}], but no file exists at [{$migration}].");
+            }
+
+            (require $migration)->up();
+        }
     }
 }
