@@ -121,16 +121,148 @@ class NavSectionProjector
      */
     public function project(string $realm, ?NavContext $context = null): array
     {
+        // Only walk the resource catalog when this realm HAS a dashboard — the leaf's href and the
+        // static-row join below are the only two readers, and both are inert without one.
+        $hrefs = $this->particles->has(RealmDashboard::keyFor($realm)) && $this->realms->tryResolve($realm) !== null
+            ? $this->hrefs($realm)
+            : [];
+
+        /** @var list<array{0: int, 1: string, 2: NavNode}> $leaf */
+        $leaf = $this->dashboardLeaf($realm, $context?->user, $hrefs);
+        $leafHref = $leaf === [] ? null : $this->normalizeHref($leaf[0][2]->href ?? '');
+
         /** @var list<array{0: int, 1: string, 2: NavNode}> $entries */
-        $entries = $this->dashboardLeaf($realm, $context?->user);
+        $entries = [];
+
+        /** @var array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}|null $authored */
+        $authored = null;
 
         foreach ($this->sections->for($realm) as $section) {
-            $entries[] = [$section->order, $section->key, $this->seat($section, $context?->user)];
+            $static = $this->withoutTheLeafsOwnRow($section->static, $leafHref, $hrefs, $authored);
+
+            $entries[] = [$section->order, $section->key, $this->seat($section, $context?->user, $static)];
         }
+
+        if ($authored !== null) {
+            $leaf[0][2] = $this->wearing($leaf[0][2], $authored);
+        }
+
+        $entries = [...$leaf, ...$entries];
 
         usort($entries, fn (array $a, array $b): int => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
 
         return array_map(fn (array $entry): NavNode => $entry[2], $entries);
+    }
+
+    /**
+     * A seat's hand-authored rows MINUS the one that lands on the realm dashboard's own href — and the
+     * dropped row handed back through `$authored` so the leaf can wear its label and icon.
+     *
+     * ## Why one entry and not two
+     *
+     * A host that authors its rail from `resources/beam-ux/nav.yml` writes a row for its dashboard page
+     * — the starter's `dashboard: {segment: /dashboard, realm: account}` — and that row becomes a static
+     * child of whichever seat the host's own rail builder hands it to. Beam-ux ALSO emits the realm's
+     * `{realm}-dashboard` leaf at the top level ({@see dashboardLeaf()}), and the two are the same
+     * destination: measured at `beam.test` and `satellite.test`, the account rail carried
+     * *Platform › Dashboard* beside *Dashboard*, both `/dashboard`.
+     *
+     * The de-duplication happens HERE rather than at either author. The host's `nav.yml` is a statement
+     * about which pages exist and must not have to know that a package now seats one of them; the
+     * `{realm}-dashboard` registration is a package fact and must not learn what a host authored. This
+     * projector is the one place that sees both, which is the same reason the seat translation lives
+     * here at all.
+     *
+     * ## The survivor is the LEAF, wearing the authored label and icon
+     *
+     * The generated leaf wins its position (its declaration's `navOrder`, ahead of the seats) because
+     * that placement is the realm-dashboard decision (ticket 04) and a row nested under a seat is the
+     * thing being corrected. But the authored `title`/`icon` are the host's own words about its own
+     * page, so they ride onto the leaf when they differ from what the resource declared — a host that
+     * called it "Home" keeps "Home", and one that wrote nothing keeps the leaf's defaults.
+     *
+     * ## Identity is `routeName` when the row names one, and the href when it does not
+     *
+     * {@see FrameResourcesInvocable::staticChildren()} derives a static's rendered href as
+     * `$hrefs[$routeName] ?? $declared`, so those are exactly the two questions worth asking. A
+     * nav.yml-derived row carries no `routeName` (a name the routeContext cannot bind would be pruned),
+     * which is why the href arm is the live one; the routeName arm covers a host that spells the
+     * dashboard leaf out by name.
+     *
+     * @param  list<array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>  $static
+     * @param  array<string, string>  $hrefs  routeName => leaf href, from {@see RouteContextProjector::hrefs()}
+     * @param  array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}|null  $authored
+     * @return list<array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>
+     */
+    private function withoutTheLeafsOwnRow(array $static, ?string $leafHref, array $hrefs, ?array &$authored): array
+    {
+        if ($leafHref === null || $static === []) {
+            return $static;
+        }
+
+        $kept = [];
+
+        foreach ($static as $row) {
+            $routeName = $row['routeName'] ?? null;
+            $href = ($routeName !== null ? $hrefs[$routeName] ?? null : null) ?? ($row['href'] ?? '');
+
+            if ($this->normalizeHref($href) !== $leafHref) {
+                $kept[] = $row;
+
+                continue;
+            }
+
+            // First one wins: two seats both claiming the dashboard is a host defect, and taking the
+            // first keeps the outcome deterministic (the registry's order) rather than last-write.
+            $authored ??= $row;
+        }
+
+        return $kept;
+    }
+
+    /**
+     * The leaf carrying an authored row's title and icon where it has them — a clone, on the same
+     * shape as {@see NavNode::stamped()}/{@see NavNode::locked()}, so the meta bag and the lock survive.
+     *
+     * @param  array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}  $authored
+     */
+    private function wearing(NavNode $leaf, array $authored): NavNode
+    {
+        $clone = clone $leaf;
+
+        if (($authored['title'] ?? '') !== '') {
+            $clone->title = $authored['title'];
+        }
+
+        if (($authored['icon'] ?? null) !== null && $authored['icon'] !== '') {
+            $clone->icon = $authored['icon'];
+        }
+
+        return $clone;
+    }
+
+    /** One spelling for a client path, so `/dashboard`, `dashboard` and `/dashboard/` compare equal. */
+    private function normalizeHref(string $href): string
+    {
+        return '/'.trim($href, '/');
+    }
+
+    /**
+     * The realm's `routeName => href` map, or an empty one where it cannot be built. A host that has
+     * bound no frame {@see ResourceRegistry}, or a realm whose router will not project, is a host fact
+     * and yields no join rather than a fatal — the same decline {@see FrameNavContribution} makes.
+     *
+     * @return array<string, string>
+     */
+    private function hrefs(string $realm): array
+    {
+        try {
+            return $this->container->bound(ResourceRegistry::class)
+                ? $this->container->make(RouteContextProjector::class)->hrefs($realm)
+                : [];
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     /**
@@ -156,9 +288,10 @@ class NavSectionProjector
      * bound. The href is read off that SAME projection rather than derived here; a realm whose router
      * cannot be projected (frame's registry port unbound) gets no leaf rather than an unjoinable one.
      *
+     * @param  array<string, string>  $hrefs  routeName => leaf href, from {@see hrefs()}
      * @return list<array{0: int, 1: string, 2: NavNode}>
      */
-    private function dashboardLeaf(string $realm, ?Authenticatable $user): array
+    private function dashboardLeaf(string $realm, ?Authenticatable $user, array $hrefs): array
     {
         $key = RealmDashboard::keyFor($realm);
 
@@ -172,10 +305,6 @@ class NavSectionProjector
             if (! $this->visibility->listable($definition, $user)) {
                 return [];
             }
-
-            $hrefs = $this->container->bound(ResourceRegistry::class)
-                ? $this->container->make(RouteContextProjector::class)->hrefs($realm)
-                : [];
         } catch (Throwable) {
             return [];
         }
@@ -206,8 +335,14 @@ class NavSectionProjector
      * The `input` mirrors what a host's own section helper passes, so the collector cannot tell a
      * declared seat from a hand-written one — which is the point: the attachment rules, the sort and
      * the `viewAny` gating are identical either way.
+     *
+     * The `static` rows are passed IN rather than read off the section, because
+     * {@see withoutTheLeafsOwnRow()} has already removed any row that duplicates the realm's dashboard
+     * leaf. Everything else about the seat is untouched.
+     *
+     * @param  list<array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>  $static
      */
-    private function seat(NavSection $section, ?Authenticatable $user): NavNode
+    private function seat(NavSection $section, ?Authenticatable $user, array $static): NavNode
     {
         $node = InvocableNavItem::make(
             title: $section->label,
@@ -215,7 +350,7 @@ class NavSectionProjector
             input: [
                 'section' => $section->key,
                 'realm' => $section->realm,
-                'static' => $section->static,
+                'static' => $static,
             ],
             href: $section->href,
             match: trim($section->href, '/').'*',

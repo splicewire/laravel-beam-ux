@@ -2,11 +2,14 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use Illuminate\Foundation\Auth\User;
 use Rushing\DataNav\InvocableNavItem;
+use Rushing\DataNav\NavContext;
 use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavRegistry;
 use Rushing\DataNav\NavTree;
 use Schemastud\Frame\Registry\RouteContextEntry;
+use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Ux\Frame\DeclaredSectionNavigation;
@@ -158,6 +161,115 @@ class DeclaredSectionNavigationTest extends TestCase
         $this->expectExceptionMessageMatches('/tpyo\.index/');
 
         $this->app->make(FrameNavContribution::class)->contributeNav('tenant');
+    }
+
+    /**
+     * Seat one section for the `tenant` realm carrying the given hand-authored rows.
+     *
+     * @param  list<array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>  $static
+     */
+    private function declareWithStatic(array $static, string $key = 'platform'): void
+    {
+        $this->sections()->register(
+            new NavSection(
+                key: $key, realm: 'tenant', label: 'Platform',
+                icon: 'Server', href: '/'.$key, order: 10,
+                entitlement: null, permission: null, static: $static,
+            ),
+            by: 'app',
+        );
+    }
+
+    /**
+     * Every href the projection puts in front of a reader for one realm — the top-level nodes AND the
+     * hand-authored rows each seat hands the collector, which is where a static child's href lives
+     * before {@see FrameResourcesInvocable} expands it. Counting only the top level would miss the
+     * duplicate entirely, because the two Dashboards sat on different rungs.
+     *
+     * @return list<string>
+     */
+    private function projectedHrefs(string $realm): array
+    {
+        $hrefs = [];
+
+        foreach ($this->app->make(NavSectionProjector::class)->project($realm, new NavContext(user: new User)) as $node) {
+            $hrefs[] = (string) $node->href;
+
+            foreach (($node instanceof InvocableNavItem ? $node->input['static'] ?? [] : []) as $row) {
+                $hrefs[] = (string) ($row['href'] ?? '');
+            }
+        }
+
+        return $hrefs;
+    }
+
+    /**
+     * ⚠️ **Measured at `beam.test` and `satellite.test` (realm-dashboards ticket 09):** the account rail
+     * carried *Platform › Dashboard* — the authored `resources/beam-ux/nav.yml` row, handed to a host
+     * seat as a static child — beside the realm-level Dashboard leaf beam-ux generates. Both hrefs were
+     * `/dashboard`, so a reader saw the same destination twice on two different rungs.
+     *
+     * Neither author can fix it alone: the host's `nav.yml` is its statement of which pages exist and
+     * must not have to know a package now seats one of them, and the `{realm}-dashboard` registration
+     * is a package fact that cannot learn what a host authored. So the projection collapses them, and
+     * the survivor is the generated leaf at the leaf's own position.
+     */
+    public function test_an_authored_row_at_the_dashboard_href_collapses_into_the_generated_leaf(): void
+    {
+        $this->declareWithStatic([
+            ['title' => 'Dashboard', 'href' => '/dashboard', 'icon' => 'Home'],
+            ['title' => 'Connectors', 'href' => '/connectors'],
+        ]);
+
+        $hrefs = $this->projectedHrefs('tenant');
+
+        $this->assertSame(['/dashboard'], array_values(array_filter($hrefs, fn (string $h): bool => $h === '/dashboard')));
+        $this->assertContains('/connectors', $hrefs, 'the seat keeps every other authored row');
+    }
+
+    /**
+     * The survivor is the LEAF — its position and its `routeName`, not the nested row's — wearing the
+     * host's own words for its own page. A host that titled the row "Home" keeps "Home"; the icon
+     * rides along for the same reason.
+     */
+    public function test_the_surviving_leaf_keeps_its_place_and_wears_the_authored_label_and_icon(): void
+    {
+        $this->declareWithStatic([['title' => 'Home', 'href' => '/dashboard', 'icon' => 'House']]);
+
+        $nodes = $this->app->make(NavSectionProjector::class)->project('tenant', new NavContext(user: new User));
+
+        $this->assertSame('Home', $nodes[0]->title);
+        $this->assertSame('House', $nodes[0]->icon);
+        $this->assertSame('/dashboard', $nodes[0]->href);
+        $this->assertSame(RealmDashboard::routeNameFor('tenant'), $nodes[0]->routeName);
+    }
+
+    /**
+     * An authored row that is not the dashboard is none of this projection's business — asserted with a
+     * principal in hand, so the leaf DOES exist and the collapse is genuinely declining rather than
+     * absent.
+     */
+    public function test_an_authored_row_at_a_different_href_is_untouched(): void
+    {
+        $row = ['title' => 'Connectors', 'href' => '/connectors', 'icon' => 'Plug', 'navOrder' => 5];
+        $this->declareWithStatic([$row]);
+
+        $nodes = $this->app->make(NavSectionProjector::class)->project('tenant', new NavContext(user: new User));
+
+        $this->assertSame('/dashboard', $nodes[0]->href, 'the leaf is present, so the collapse arm was live');
+        $this->assertSame([$row], $this->seatIn($nodes, 'platform')->input['static']);
+    }
+
+    /** The projected seat with this section key, from an already-built projection. */
+    private function seatIn(array $nodes, string $key): InvocableNavItem
+    {
+        foreach ($nodes as $node) {
+            if ($node instanceof InvocableNavItem && ($node->input['section'] ?? null) === $key) {
+                return $node;
+            }
+        }
+
+        $this->fail("no seat [{$key}] in the projection");
     }
 
     /**
