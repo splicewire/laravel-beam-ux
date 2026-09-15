@@ -48,7 +48,5 @@ trait WiresPlacement
      * In boot, in the trait that owns the fill — see {@see WiresCodecs::describeCodecs()}.
      */
     #[Chained('boot', order: 80)]
-    protected function describePlacements(): void
-    {
-    }
+    protected function describePlacements(): void {}
 }

@@ -7,10 +7,10 @@ use Rushing\DataNav\NavRegistry;
 use Rushing\Popcorn\Concerns\Chained;
 use Schemastud\Frame\Contracts\FrameNavContributor;
 use Schemastud\Frame\Contracts\ResourceRegistry;
-use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
+use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Frame\DeclaredSectionNavigation;
 use Splicewire\Beam\Ux\Frame\FrameNavContribution;
 use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
@@ -194,7 +194,6 @@ trait WiresFrameNav
         if (! $this->app->bound(NavRegistry::class) || ! $this->app->bound(NavSectionRegistry::class)) {
             return;
         }
-
 
         $realms = $this->app->make(RealmRegistry::class);
         $navigations = $this->app->make(NavRegistry::class);
