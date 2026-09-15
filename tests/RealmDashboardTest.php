@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Pagination\CursorPaginator as Paginator;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Rushing\PermissionCascade\Contracts\EntitlementResolver;
 use Rushing\PermissionCascade\PermissionCascadeServiceProvider;
@@ -344,6 +345,39 @@ class RealmDashboardTest extends TestCase
     }
 
     /**
+     * A throwing provider drops its card WITHOUT taking the request's open transaction with it. On
+     * PostgreSQL the failed statement aborts that transaction, so every later query of the request is
+     * refused (`25P02`) and the dashboard 500s instead of dropping one row — measured at
+     * laravel-tower-starter. sqlite does not abort, so this pins the mechanism instead: the provider writes
+     * a row before it throws, and only a rollback to a savepoint around the provider removes that row while
+     * leaving the enclosing transaction open.
+     */
+    public function test_a_throwing_provider_is_rolled_back_to_a_savepoint_and_the_open_transaction_survives(): void
+    {
+        $this->app->make(ParticleResourceRegistry::class)->register(new ParticleResource(
+            key: 'broken', backing: DashFeed::class, data: DashGizmoData::class, filterable: false,
+            label: 'Broken', section: 'platform', navOrder: 0, readOnly: true,
+            summaryProvider: DashWritesThenThrowsSummaryProvider::class,
+        ), ['operator'], by: self::class);
+
+        $this->actingAs($this->staff());
+
+        DB::beginTransaction();
+
+        try {
+            $rows = $this->rows();
+
+            $this->assertSame(['streams', 'gizmos', 'members', 'optin'], array_values(array_filter(
+                array_column(array_filter($rows, fn (array $row): bool => $row['context'] !== 'nav'), 'resource'),
+            )), 'the throwing provider drops only its own card');
+            $this->assertSame(1, DB::transactionLevel(), 'the enclosing transaction is still open');
+            $this->assertSame(3, DashGizmo::query()->count(), 'the provider\'s write was rolled back to its savepoint');
+        } finally {
+            DB::rollBack();
+        }
+    }
+
+    /**
      * Frame's controller re-slices a flat list by `per_page` (its own name for the page size, not the
      * handler's `perPage`) — the cut the first version of this test never sent. The backing is
      * {@see \Splicewire\Beam\Particle\Backing\Unpaged}, so the handler envelopes the whole page itself.
@@ -510,5 +544,16 @@ class DashFeedSummaryProvider implements ResourceSummaryProvider
             figures: [new SummaryFigureData(key: 'open', label: 'Open', value: 4)],
             overview: null,
         );
+    }
+}
+
+/** Writes a row, then throws — the shape of a provider whose query fails partway through a request. */
+class DashWritesThenThrowsSummaryProvider implements ResourceSummaryProvider
+{
+    public function summary(ResourceDefinition $resource): ?SummaryResponseData
+    {
+        DashGizmo::create(['name' => 'written-before-the-throw']);
+
+        throw new \RuntimeException('relation "broken" does not exist');
     }
 }

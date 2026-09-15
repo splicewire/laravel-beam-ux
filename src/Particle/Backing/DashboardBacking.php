@@ -2,9 +2,11 @@
 
 namespace Splicewire\Beam\Ux\Particle\Backing;
 
+use Closure;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Pagination\CursorPaginator as CursorPaginatorContract;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Pagination\CursorPaginator;
 use Schemastud\Frame\Contracts\ResourceSummaryProvider;
 use Schemastud\Frame\Data\SummaryResponseData;
@@ -209,6 +211,14 @@ class DashboardBacking implements Unpaged
      * naming no provider, a provider that declines, or one that throws is a dropped row. A throwing
      * provider is reported, not swallowed silently — the dashboard stays up and the host's log says why a
      * card is missing.
+     *
+     * "Stays up" includes the request's open database transactions. On PostgreSQL a failed statement
+     * aborts the enclosing transaction, so a provider whose query throws, caught here, used to leave every
+     * later query of the request refused with `25P02 current transaction is aborted` — the dashboard 500ed
+     * on the NEXT card or gate check instead of dropping one row. Measured at laravel-tower-starter, whose
+     * operator rail seats `conduits`, a tenant table its central test schema does not carry. Each provider
+     * therefore runs inside a savepoint on every connection that already has a transaction open, and a
+     * throw rolls back to it. With no transaction open (an ordinary request) nothing is issued.
      */
     private function summarize(Container $container, ResourceDefinition $definition): ?SummaryResponseData
     {
@@ -219,12 +229,50 @@ class DashboardBacking implements Unpaged
         try {
             $provider = $container->make($definition->summaryProvider);
 
-            return $provider instanceof ResourceSummaryProvider ? $provider->summary($definition) : null;
+            if (! $provider instanceof ResourceSummaryProvider) {
+                return null;
+            }
+
+            return $this->withinSavepoints($container, fn (): ?SummaryResponseData => $provider->summary($definition));
         } catch (Throwable $e) {
             report($e);
 
             return null;
         }
+    }
+
+    /**
+     * @template T
+     *
+     * @param  Closure(): T  $callback
+     * @return T
+     */
+    private function withinSavepoints(Container $container, Closure $callback): mixed
+    {
+        $open = array_values(array_filter(
+            $container->make('db')->getConnections(),
+            fn (ConnectionInterface $connection): bool => $connection->transactionLevel() > 0,
+        ));
+
+        foreach ($open as $connection) {
+            $connection->beginTransaction();
+        }
+
+        try {
+            $result = $callback();
+        } catch (Throwable $e) {
+            foreach (array_reverse($open) as $connection) {
+                $connection->rollBack();
+            }
+
+            throw $e;
+        }
+
+        foreach (array_reverse($open) as $connection) {
+            $connection->commit();
+        }
+
+        return $result;
     }
 
     /**
