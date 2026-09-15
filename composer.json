@@ -130,11 +130,47 @@
         },
         {
             "type": "git",
+            "url": "https://github.com/stephenr85/laravel-popcorn.git"
+        },
+        {
+            "type": "git",
             "url": "https://github.com/schemastud/laravel-data-schemas.git"
         },
         {
             "type": "git",
             "url": "https://github.com/schemastud/laravel-frame.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/codegen.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-doctor.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/laravel-json-ns.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/splicewire/laravel-beam-sync.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-pipeline-registry.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/php-json-ns.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/laravel-graphine.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/stephenr85/php-graphine.git"
         }
     ],
     "minimum-stability": "dev",

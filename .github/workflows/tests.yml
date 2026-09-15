@@ -1,0 +1,64 @@
+name: tests
+
+# Package-tier suite runner, shaped on rushing/laravel-data-filters' ci.yml (the family's package-tier
+# precedent) with actions pinned by SHA as in splicewire/laravel-beam-starter's tests.yml.
+#
+# No composer.lock is committed (the splicewire package convention), so `composer update` resolves
+# every family `dev-main` requirement to its PUSHED tip: a sibling's pushed rename turns this red on
+# the next run. Composer reads `repositories` only from the ROOT package, so composer.json must list
+# the git repository of the whole transitive family closure; a resolve failure reading "could not be
+# found in any version" means another undeclared transitive repository, not a broken package.
+#
+# Every git dependency in the closure was PUBLIC when this was written (2026-09-15), so there is no
+# GitHub App token step. If one becomes private, add the create-github-app-token step (with
+# `owner: ${{ github.repository_owner }}`) and the git `insteadOf`, as the starters do.
+#
+# The suite runs on sqlite (testbench); RealmDashboardTest pins the PostgreSQL savepoint mechanism
+# without a PostgreSQL server, so no database service is needed.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          extensions: mbstring, sqlite3, pdo_sqlite
+          coverage: none
+
+      - name: Resolve dependencies from git
+        run: composer update --no-interaction --no-progress --prefer-dist
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.GITHUB_TOKEN }}"}}'
+
+      # A committed co-dev lock would make this job resolve from local paths; assert it cannot.
+      - name: Assert the resolved lock is git-only
+        run: |
+          count=$(jq '[(.packages + (."packages-dev" // []))[] | select(.dist.type == "path")] | length' composer.lock)
+          if [ "$count" -ne 0 ]; then
+            echo "::error::composer.lock resolved ${count} packages from local paths."
+            exit 1
+          fi
+
+      - name: Lint (Pint)
+        run: composer pint -- --test
+
+      - name: Run the suite
+        run: composer test
