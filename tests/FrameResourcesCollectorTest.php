@@ -398,7 +398,6 @@ class FrameResourcesCollectorTest extends TestCase
             key: $key,
             backing: ModelLessFixtureFeed::class,
             data: CollectorFixtureData::class,
-            filterable: false,
             label: $label,
             policy: $policy,
             section: 'platform',

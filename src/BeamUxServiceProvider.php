@@ -244,28 +244,8 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
     }
 
     /**
-     * Ship the `data-filters` resource this package's own filterable `#[ParticleResource]` promises.
-     *
-     * The reasoning, the failure it repairs, and why the ordering is load-bearing all live on
-     * {@see BeamUxEntryResourceQuery}. This method is only the registration, and it copies beam core's
-     * `declareFilterResources()` line for line, including both guards:
-     *
-     * - **the `bound()` guard** — data-filters may genuinely be absent at a host, in which case
-     *   `beam-ux-entry` is declared, just not filterable there;
-     * - **the `has()` guard, which is the CALLER's job and not the registry's** —
-     *   `registerDefinition()` overwrites plainly, so an unguarded package registration would silently
-     *   stomp a host that seeded its own `beam-ux-entry` key from `config('data-filters.resources')`.
-     *   Guarded, this is strictly additive.
-     *
-     * Registered IMPERATIVELY rather than through data-filters' `#[ResourceFilter]` discovery, for the
-     * same reason beam core, `laravel-beam-lineage` and `-calendars` do it this way:
-     * `config('data-filters.discover')` is HOST-owned and empty by default — a closed door to a
-     * package — so discovery here would register nothing at a host and leave the 500 in place.
-     *
-     * No `model:`. beam's `ParticleResourceModelResolver` (bound onto data-filters'
-     * `ResourceModelResolver` port) fills the backing off the `#[ParticleResource]` registered under
-     * the *same key*, lazily — so `BeamUxEntry` is named in one place and the two read paths cannot
-     * drift.
+     * Registers the entry and mirror queries without replacing host definitions.
+     * Beam resolves their backing models from the matching particle declarations.
      */
     protected function declareFilterResources(): void
     {

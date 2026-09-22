@@ -92,7 +92,7 @@ class DashboardBacking implements Unpaged
     ) {}
 
     /**
-     * Every row, one page. `$filters` is ignored (the resource is not filterable) and `$perPage` by the
+     * Every row, one page. `$filters` is ignored (the backing declares no filter vocabulary) and `$perPage` by the
      * {@see Unpaged} contract. A cursor is accepted only so the contract is honoured: any cursor restarts
      * the single page.
      */

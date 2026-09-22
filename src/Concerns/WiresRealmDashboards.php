@@ -86,9 +86,6 @@ trait WiresRealmDashboards
                 key: RealmDashboard::keyFor($realm),
                 backing: new DashboardBacking($realm),
                 data: DashboardCardRowData::class,
-                // Not filterable: the row set is the realm's card list, and a `filter[...]` bag
-                // would promise a query the backing does not have.
-                filterable: false,
                 label: RealmDashboard::LABEL,
                 icon: 'LayoutDashboard',
                 // The realm gate's ability — see the trait docblock. Declared, never omitted.

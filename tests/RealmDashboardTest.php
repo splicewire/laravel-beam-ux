@@ -117,52 +117,44 @@ class RealmDashboardTest extends TestCase
 
         // Seated, model-backed, default provider: one `total` figure counted through the index query.
         $registry->register(new ParticleResource(
-            key: 'gizmos', backing: DashGizmo::class, data: DashGizmoData::class, filterable: false,
-            label: 'Gizmos', icon: 'box', section: 'platform', navOrder: 2, readOnly: true,
+            key: 'gizmos', backing: DashGizmo::class, data: DashGizmoData::class, label: 'Gizmos', icon: 'box', section: 'platform', navOrder: 2, readOnly: true,
         ), by: self::class);
 
         // Seated, streams-only, CUSTOM provider: figures the default could never count.
         $registry->register(new ParticleResource(
-            key: 'streams', backing: DashFeed::class, data: DashGizmoData::class, filterable: false,
-            label: 'Streams', icon: 'radio', section: 'platform', navOrder: 1, readOnly: true,
+            key: 'streams', backing: DashFeed::class, data: DashGizmoData::class, label: 'Streams', icon: 'radio', section: 'platform', navOrder: 1, readOnly: true,
             summaryProvider: DashFeedSummaryProvider::class,
         ), by: self::class);
 
         // Seated, streams-only, DEFAULT provider: declines — an honest absence, not a zero card.
         $registry->register(new ParticleResource(
-            key: 'declined', backing: DashFeed::class, data: DashGizmoData::class, filterable: false,
-            label: 'Declined', section: 'platform', navOrder: 3, readOnly: true,
+            key: 'declined', backing: DashFeed::class, data: DashGizmoData::class, label: 'Declined', section: 'platform', navOrder: 3, readOnly: true,
         ), by: self::class);
 
         // Seated and countable, but the Data class says `#[Summary(false)]`.
         $registry->register(new ParticleResource(
-            key: 'hidden', backing: DashGizmo::class, data: DashOptedOutData::class, filterable: false,
-            label: 'Hidden', section: 'platform', navOrder: 4, readOnly: true,
+            key: 'hidden', backing: DashGizmo::class, data: DashOptedOutData::class, label: 'Hidden', section: 'platform', navOrder: 4, readOnly: true,
         ), by: self::class);
 
         // Seated and countable; the host folds its route.
         $registry->register(new ParticleResource(
-            key: 'orphan', backing: DashGizmo::class, data: DashGizmoData::class, filterable: false,
-            label: 'Orphan', section: 'platform', navOrder: 5, readOnly: true,
+            key: 'orphan', backing: DashGizmo::class, data: DashGizmoData::class, label: 'Orphan', section: 'platform', navOrder: 5, readOnly: true,
         ), by: self::class);
 
         // Countable and mounted, but neither seated nor declared: not on the dashboard.
         $registry->register(new ParticleResource(
-            key: 'unseated', backing: DashGizmo::class, data: DashGizmoData::class, filterable: false,
-            label: 'Unseated', navOrder: 0, readOnly: true,
+            key: 'unseated', backing: DashGizmo::class, data: DashGizmoData::class, label: 'Unseated', navOrder: 0, readOnly: true,
         ), by: self::class);
 
         // Unseated but declares `overview`: opted in, and drawn in the overview context.
         $registry->register(new ParticleResource(
-            key: 'optin', backing: DashGizmo::class, data: DashOverviewData::class, filterable: false,
-            label: 'Opted in', icon: 'eye', readOnly: true,
+            key: 'optin', backing: DashGizmo::class, data: DashOverviewData::class, label: 'Opted in', icon: 'eye', readOnly: true,
         ), by: self::class);
 
         // No `section:`, no declaration, no navOrder — in the rail only through the `people` seat's static
         // child above. The same shape as `unseated`, minus the static: the static is what seats it.
         $registry->register(new ParticleResource(
-            key: 'members', backing: DashGizmo::class, data: DashGizmoData::class, filterable: false,
-            label: 'Members', icon: 'user', readOnly: true,
+            key: 'members', backing: DashGizmo::class, data: DashGizmoData::class, label: 'Members', icon: 'user', readOnly: true,
         ), by: self::class);
     }
 
@@ -288,8 +280,7 @@ class RealmDashboardTest extends TestCase
 
         foreach ([['zulu', 'Zulu', null], ['alpha', 'Alpha', null], ['charlie', 'Charlie', 0]] as [$key, $label, $navOrder]) {
             $registry->register(new ParticleResource(
-                key: $key, backing: DashGizmo::class, data: DashGizmoData::class, filterable: false,
-                label: $label, navOrder: $navOrder, readOnly: true,
+                key: $key, backing: DashGizmo::class, data: DashGizmoData::class, label: $label, navOrder: $navOrder, readOnly: true,
             ), ['operator'], by: self::class);
         }
 
@@ -330,8 +321,7 @@ class RealmDashboardTest extends TestCase
         // that actor, present for one holding it — so a backing that skipped `listable()` fails here.
         \Illuminate\Support\Facades\Gate::define('gizmos.read', fn (User $user): bool => $user->getAuthIdentifier() === 7);
         $this->app->make(ParticleResourceRegistry::class)->register(new ParticleResource(
-            key: 'gated', backing: DashFeed::class, data: DashGizmoData::class, filterable: false,
-            label: 'Gated', section: 'platform', navOrder: 0, readOnly: true, policy: 'gizmos.read',
+            key: 'gated', backing: DashFeed::class, data: DashGizmoData::class, label: 'Gated', section: 'platform', navOrder: 0, readOnly: true, policy: 'gizmos.read',
             summaryProvider: DashFeedSummaryProvider::class,
         ), ['operator'], by: self::class);
 
