@@ -69,7 +69,7 @@ class EntryWorkflowOpsTest extends TestCase
         $this->bindPageWorkflow();
         $page = BeamUxEntry::create(['slug' => 'about', 'type' => UxType::Page, 'segment' => '/about']);
 
-        $request = Request::create('/beam-ux-entries/'.$page->id.'/op/transition', 'POST', ['transition' => 'publish']);
+        $request = Request::create('/beam-ux-entries/'.$page->id.'/transition', 'POST', ['transition' => 'publish']);
         $payload = EntryWorkflowTransitionOp::handle($page, $request, actor: null);
 
         $this->assertInstanceOf(TransitionResult::class, $payload);
@@ -90,7 +90,7 @@ class EntryWorkflowOpsTest extends TestCase
         $page = BeamUxEntry::create(['slug' => 'about', 'type' => UxType::Page, 'segment' => '/about']);
 
         // `unpublish` is not legal from `draft` — the initial place.
-        $request = Request::create('/beam-ux-entries/'.$page->id.'/op/transition', 'POST', ['transition' => 'unpublish']);
+        $request = Request::create('/beam-ux-entries/'.$page->id.'/transition', 'POST', ['transition' => 'unpublish']);
         $payload = EntryWorkflowTransitionOp::handle($page, $request, actor: null);
         $attempt = EntryWorkflowTransitionOp::respond($payload, $page);
 
@@ -104,7 +104,7 @@ class EntryWorkflowOpsTest extends TestCase
     {
         $component = BeamUxEntry::create(['slug' => 'hero', 'type' => UxType::Component, 'segment' => '/hero']);
 
-        $request = Request::create('/beam-ux-entries/'.$component->id.'/op/transition', 'POST', ['transition' => 'publish']);
+        $request = Request::create('/beam-ux-entries/'.$component->id.'/transition', 'POST', ['transition' => 'publish']);
         $payload = EntryWorkflowTransitionOp::handle($component, $request, actor: null);
         $attempt = EntryWorkflowTransitionOp::respond($payload, $component);
 

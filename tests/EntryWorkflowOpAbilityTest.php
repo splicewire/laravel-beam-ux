@@ -111,7 +111,7 @@ class EntryWorkflowOpAbilityTest extends TestCase
 
         $this->actingAs(new AuthoringUser);
 
-        $this->postJson("/beam-ux-entry/{$entry->id}/op/workflow")->assertOk();
+        $this->postJson("/beam-ux-entry/{$entry->id}/workflow")->assertOk();
     }
 
     public function test_an_actor_without_the_entitlement_is_forbidden(): void
@@ -127,7 +127,7 @@ class EntryWorkflowOpAbilityTest extends TestCase
 
         $this->actingAs(new AuthoringUser);
 
-        $this->postJson("/beam-ux-entry/{$entry->id}/op/workflow")->assertForbidden();
+        $this->postJson("/beam-ux-entry/{$entry->id}/workflow")->assertForbidden();
     }
 
     /**

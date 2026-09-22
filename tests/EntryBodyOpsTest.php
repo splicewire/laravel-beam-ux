@@ -89,7 +89,7 @@ class EntryBodyOpsTest extends TestCase
         $entry = BeamUxEntry::create(['slug' => 'about', 'type' => 'page', 'namespace' => null]);
         $this->assertNull($entry->particle_id);
 
-        $request = Request::create('/beam-ux-entries/'.$entry->id.'/op/save-body', 'POST', [
+        $request = Request::create('/beam-ux-entries/'.$entry->id.'/save-body', 'POST', [
             'body' => ['kind' => 'doc', 'children' => [['kind' => 'text', 'value' => 'hello']]],
         ]);
 
@@ -363,7 +363,7 @@ class EntryBodyOpsTest extends TestCase
 
     private function saveRequest(BeamUxEntry $entry, array $body): Request
     {
-        return Request::create('/beam-ux-entries/'.$entry->id.'/op/save-body', 'POST', ['body' => $body]);
+        return Request::create('/beam-ux-entries/'.$entry->id.'/save-body', 'POST', ['body' => $body]);
     }
 
     private function attributeOn(string $class): ParticleOp
