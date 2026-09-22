@@ -9,6 +9,7 @@ use Illuminate\Validation\Rules\Unique;
 use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\Widget;
+use Spatie\LaravelData\Attributes\Validation\In;
 use Spatie\LaravelData\Support\Validation\ValidationContext;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
@@ -45,7 +46,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
     public const CREATABLE_TYPES = ['page', 'component', 'theme'];
 
     public function __construct(
-        #[Title('Type')]
+        #[Title('Type'), In(self::CREATABLE_TYPES)]
         public string $type,
         #[Title('Title')]
         public string $title,
@@ -67,6 +68,20 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         #[Title('Nav order')]
         public ?int $nav_order = null,
     ) {}
+
+    /** Existing untitled rows open as an empty required field; identity and namespace stay server-owned. */
+    public static function fromModel(BeamUxEntry $entry): self
+    {
+        return new self(
+            type: $entry->type->value,
+            title: $entry->title ?? '',
+            slug: $entry->slug,
+            realm: $entry->realm,
+            parent_id: $entry->parent_id,
+            segment: $entry->segment,
+            nav_order: $entry->nav_order,
+        );
+    }
 
     /** @return array<string, mixed> */
     public static function rules(ValidationContext $context): array

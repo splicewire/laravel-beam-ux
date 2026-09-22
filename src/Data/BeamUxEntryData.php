@@ -22,10 +22,8 @@ use Splicewire\Beam\Ux\Type\UxType;
  * `SitemapData` demonstrates: dropping this one annotated Data class into a scanned `discover_paths`
  * IS the wiring, served by the generic `FrameResourceController` — no hand-built controller.
  *
- * A HOST still owns registering this package's own `discover_paths`/`particle.classes` entry so its
- * own Frame boot actually finds this class (per-host `theme-host-wiring` ticket's "Frame nav
- * registration" scope item) — a package Data class doesn't land in a host's `app_path('Data')` scan
- * on its own.
+ * The package contributes this declaration through WiresParticleDeclarations. The input DTO
+ * owns the create/edit form; this read projection owns the list columns and stored identity.
  *
  * **`afterWrite`** (a static-method convention `AttributedParticleDiscovery` wires automatically,
  * fired by `ParticleWriter`'s `PersistStage` strictly AFTER the row is saved) mints the per-kind
@@ -38,6 +36,7 @@ use Splicewire\Beam\Ux\Type\UxType;
     key: 'beam-ux-entry',
     backing: BeamUxEntry::class,
     input: BeamUxEntryInputData::class,
+    editData: BeamUxEntryInputData::class,
     label: 'Entries',
     group: 'Content',
     icon: 'file-text',
@@ -49,10 +48,7 @@ use Splicewire\Beam\Ux\Type\UxType;
 // only when the viewer holds the required central-root grant; see EntryPromoter::authorized()), not
 // filtered out of this static list, which just declares the action VOCABULARY.
 #[RowActions(['edit', 'duplicate', 'delete', 'promote-to-central'])]
-// #[Column] (below) drives the Entries LIST's table headers only — JsonSchemaGenerator (the edit
-// FORM's source) never reads it, a separate seam entirely (found live: the edit panel read "UxType"
-// for the type field and the bare class name "BeamUxEntryData" for its own heading, both from
-// JsonSchemaGenerator falling back to raw PHP names with no #[Title] on this class to override).
+// Column attributes describe the list. BeamUxEntryInputData describes the writable form.
 #[TypeScript]
 #[Title('UX Entry')]
 class BeamUxEntryData extends BeamData
@@ -89,13 +85,7 @@ class BeamUxEntryData extends BeamData
         // afterWrite) plus blank (no namespace) — same combobox-not-enum reasoning as realm above.
         #[Title('Namespace'), Widget('combobox', options: ['suggestions' => ['', 'realms', 'theme']])]
         public ?string $namespace = null,
-        // Containment/nav fields (theme-entries-and-authoring provenance sweep, ux-demo-convergence
-        // 2026-09-12): this is the class the edit FORM's schema is actually generated from
-        // (`FrameResourceController::schema()` reflects `editData ?? data`, and this resource sets no
-        // `editData`) — `BeamUxEntryInputData` alone governs what a submit ACCEPTS, not what the form
-        // OFFERS. `NavProjector` has always read both live off the row; they were simply never on the
-        // form that edits it. `nav_order` gets no #[Widget] — a plain number input is what an ordering
-        // integer needs, and Frame's JsonSchemaGenerator already renders `?int` that way.
+        // Read projections keep placement values alongside the input DTO's writable fields.
         #[Title('Segment')]
         public ?string $segment = null,
         #[Title('Nav order')]

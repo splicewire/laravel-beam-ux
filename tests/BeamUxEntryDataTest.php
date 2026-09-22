@@ -3,10 +3,12 @@
 namespace Splicewire\Beam\Ux\Tests;
 
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
+use Schemastud\Frame\FrameServiceProvider;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Ux\Data\BeamUxEntryData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryInputData;
@@ -23,6 +25,19 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class BeamUxEntryDataTest extends TestCase
 {
+    protected function getPackageProviders($app): array
+    {
+        return [FrameServiceProvider::class, ...parent::getPackageProviders($app)];
+    }
+
+    protected function defineEnvironment($app): void
+    {
+        parent::defineEnvironment($app);
+        $app['config']->set('database.default', 'testing');
+        $app['config']->set('database.connections.testing', ['driver' => 'sqlite', 'database' => ':memory:']);
+        $app['config']->set('frame.middleware', []);
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -64,6 +79,60 @@ class BeamUxEntryDataTest extends TestCase
         // The default WriteGate delegates to the Laravel gate; grant create so afterWrite()'s body
         // write passes (same precedent as BeamUxEntryTest).
         Gate::define('create', fn ($user = null) => true);
+    }
+
+    public function test_the_mounted_form_only_offers_writable_fields_and_keeps_declared_widgets(): void
+    {
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+        $schema = $this->getJson('/frame/resources/beam-ux-entry/schema')->assertOk()->json();
+        $this->assertSame(['type', 'title', 'slug', 'realm', 'parent_id', 'segment', 'nav_order'], array_keys($schema['properties']));
+        $this->assertNotContains('id', $schema['required']);
+        $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $schema['properties']['type']['enum']);
+        $this->assertSame('combobox', $schema['properties']['realm']['x-stud-widget']);
+        $this->assertArrayHasKey('x-stud-resource-ref', $schema['properties']['parent_id']);
+    }
+
+    public function test_mounted_create_generates_identity_and_body_and_edit_preserves_them(): void
+    {
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+        $input = ['type' => 'page', 'title' => 'New page', 'slug' => 'new-page', 'realm' => 'site'];
+        $data = $this->postJson('/frame/resources/beam-ux-entry', $input)->assertSuccessful()->json('data');
+        $entry = BeamUxEntry::findOrFail($data['id']);
+        $this->assertTrue(\Illuminate\Support\Str::isUuid($entry->id));
+        $this->assertSame('', $entry->namespace);
+        $particleId = $entry->particle_id;
+        $this->assertNotNull($particleId);
+        $driver = app(StorageDriverResolver::class)->resolve($entry);
+        $this->assertSame([], $driver->read($particleId)?->body);
+        $entry->namespace = 'docs';
+        $entry->saveQuietly();
+        $body = [['type' => 'text', 'text' => 'Keep this authored body']];
+        Gate::policy(\Splicewire\Beam\Models\BeamParticle::class, EntryFormPolicy::class);
+        $driver->write($particleId, $body, $entry->namespace);
+        $this->getJson('/frame/resources/beam-ux-entry/records/'.$entry->id)->assertOk()
+            ->assertJsonPath('data.type', 'page')->assertJsonPath('data.title', 'New page');
+        $this->putJson('/frame/resources/beam-ux-entry/records/'.$entry->id, [...$input, 'title' => 'Edited page'])->assertSuccessful();
+        $entry->refresh();
+        $this->assertSame('Edited page', $entry->title);
+        $this->assertSame($particleId, $entry->particle_id);
+        $this->assertSame('docs', $entry->namespace);
+        $this->assertSame($body, $driver->read($particleId)?->body);
+    }
+
+    public function test_mounted_edit_projects_enum_and_untitled_existing_entry_without_read_only_fields(): void
+    {
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+        $entry = BeamUxEntry::create(['type' => UxType::Page, 'slug' => 'untitled', 'realm' => 'site', 'namespace' => 'docs', 'title' => null, 'segment' => 'untitled', 'nav_order' => 4]);
+        $data = $this->getJson('/frame/resources/beam-ux-entry/records/'.$entry->id)->assertOk()->json('data');
+        $this->assertSame('page', $data['type']);
+        $this->assertSame('', $data['title']);
+        $this->assertSame('untitled', $data['segment']);
+        $this->assertSame(4, $data['nav_order']);
+        $this->assertSame($entry->id, $data['id']);
+        $this->assertArrayNotHasKey('namespace', $data);
     }
 
     public function test_it_accepts_page_component_and_theme_but_rejects_layout_and_template(): void
@@ -254,11 +323,7 @@ class BeamUxEntryDataTest extends TestCase
 
     public function test_the_display_data_class_hydrates_segment_and_nav_order_off_the_model(): void
     {
-        // BeamUxEntryData, not BeamUxEntryInputData, is what `FrameResourceController::schema()`
-        // reflects for the edit form (`editData ?? data`, and this resource sets no `editData`) — a
-        // property that exists only on the input class is invisible to the browser. This is the read
-        // half of the same wiring `test_segment_and_nav_order_round_trip_through_the_console_form`
-        // proves on the write side.
+        // The list/read projection retains placement values independently of the input form.
         $entry = BeamUxEntry::create([
             'namespace' => '',
             'slug' => 'about',
@@ -284,5 +349,23 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertSame(app(ThemeResolver::class)->resolve(), $body);
         // Not blank — a real starting point (the resolved defaults), never an empty {canvas:{},...}.
         $this->assertSame('#4F7CFF', $body['canvas']['accent']);
+    }
+}
+
+class EntryFormPolicy
+{
+    public function viewAny(User $user): bool
+    {
+        return true;
+    }
+
+    public function create(User $user): bool
+    {
+        return true;
+    }
+
+    public function update(User $user): bool
+    {
+        return true;
     }
 }
