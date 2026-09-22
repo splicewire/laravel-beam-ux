@@ -42,6 +42,7 @@ use Splicewire\Beam\Ux\Type\UxType;
     group: 'Content',
     icon: 'file-text',
     section: 'authoring',
+    form: 'enriched',
 )]
 // Ticket 06: the row-actions manifest a consuming host's mounted RowActions component reads to know
 // which actions this resource supports — 'promote-to-central' is CONDITIONAL client-side (rendered
