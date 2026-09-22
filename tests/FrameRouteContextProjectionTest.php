@@ -100,7 +100,7 @@ class FrameRouteContextProjectionTest extends TestCase
         );
 
         $this->assertSame(
-            ['tenant-dashboard.index', 'circuits.index', 'circuits.edit', 'fragments.index', 'fragments.edit', 'invitations.index', 'audit.index', 'audit.edit'],
+            ['tenant-dashboard.index', 'circuits.index', 'circuits.create', 'circuits.edit', 'fragments.index', 'fragments.create', 'fragments.edit', 'invitations.index', 'invitations.create', 'audit.index', 'audit.edit'],
             $this->routeNames($projector->routeContext('tenant'))
         );
 
@@ -131,6 +131,42 @@ class FrameRouteContextProjectionTest extends TestCase
         $this->assertArrayNotHasKey('invitations.edit', $byName);
     }
 
+    public function test_creation_is_independent_of_record_edit_and_detail(): void
+    {
+        $registry = $this->app->make(\Splicewire\Beam\Particle\ParticleResourceRegistry::class);
+        foreach (['immutable' => 'frame', 'host-owned' => 'host'] as $key => $affordance) {
+            $registry->register(new ParticleResource(
+                key: $key,
+                backing: 'Acme\\Particles\\Fixture',
+                data: FixtureResourceData::class,
+                label: ucfirst($key),
+                editable: false,
+                showable: true,
+                createAffordance: $affordance,
+            ));
+        }
+        $registry->loadRealmMap(['tenant' => ['immutable', 'host-owned']]);
+        $projector = $this->projector(new RouteContextPlan(resourcePaths: ['immutable' => 'catalog']));
+        $byName = $this->byName($projector->routeContext('tenant'));
+
+        // Create-only resources need a form even though no record twin exists.
+        $this->assertSame('edit', $byName['invitations.create']->mounts);
+        $this->assertSame('invitations/new', $byName['invitations.create']->path);
+        $this->assertArrayNotHasKey('invitations.edit', $byName);
+        // Immutable records create in an edit shell and open in a read-only shell.
+        $this->assertSame('edit', $byName['immutable.create']->mounts);
+        $this->assertSame('catalog/new', $byName['immutable.create']->path);
+        $this->assertSame('/catalog/new', $projector->hrefs('tenant')['immutable.create']);
+        $this->assertSame('detail', $byName['immutable.edit']->mounts);
+        $this->assertSame('catalog/:id', $byName['immutable.edit']->path);
+        $this->assertSame('immutable', $byName['immutable.create']->resource);
+        $this->assertSame($byName['immutable.index']->guard, $byName['immutable.create']->guard);
+        // Read-only capability and host-owned presentation both refuse generic creation.
+        $this->assertArrayNotHasKey('audit.create', $byName);
+        $this->assertArrayNotHasKey('host-owned.create', $byName);
+        $this->assertSame('detail', $byName['host-owned.edit']->mounts);
+    }
+
     public function test_each_host_list_changes_the_projection_it_names(): void
     {
         $plan = new RouteContextPlan(
@@ -148,10 +184,15 @@ class FrameRouteContextProjectionTest extends TestCase
         $this->assertSame('widget', $byName['circuits.edit']->mounts);
         $this->assertSame('circuit-graph', $byName['circuits.edit']->widget);
         $this->assertTrue($byName['circuits.edit']->lazy);
+        $this->assertSame('widget', $byName['circuits.create']->mounts);
+        $this->assertSame('circuit-graph', $byName['circuits.create']->widget);
+        $this->assertSame('circuits/new', $byName['circuits.create']->path);
+        $this->assertTrue($byName['circuits.create']->lazy);
 
         // shelledResources — nests the LIST leaf and emits NO edit twin.
         $this->assertSame('knowledge', $byName['fragments.index']->shell);
         $this->assertArrayNotHasKey('fragments.edit', $byName);
+        $this->assertArrayNotHasKey('fragments.create', $byName);
 
         // resourcePaths — the URL moves, the routeName (stable identity) does not.
         $this->assertSame('history', $byName['audit.index']->path);
@@ -159,6 +200,7 @@ class FrameRouteContextProjectionTest extends TestCase
 
         // foldedResources — no leaf at all.
         $this->assertArrayNotHasKey('invitations.index', $byName);
+        $this->assertArrayNotHasKey('invitations.create', $byName);
 
         // standalone — a resource-less leaf, inheriting the realm's guard.
         $this->assertSame('calendar', $byName['calendar']->path);
@@ -237,6 +279,7 @@ class FrameRouteContextProjectionTest extends TestCase
 
         $this->assertSame('history', $byName['audit.index']->path);
         $this->assertArrayNotHasKey('invitations.index', $byName);
+        $this->assertArrayNotHasKey('invitations.create', $byName);
     }
 
     private function projector(?RouteContextPlan $plan = null): RouteContextProjector

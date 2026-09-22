@@ -21,7 +21,7 @@ use Splicewire\Beam\Realm\RealmRegistry;
  * inherited `resources` + `contexts` and nothing else.
  *
  * Nothing about the derivation was host-specific — the derivation is *"a realm's resources become
- * a list leaf, plus an edit/widget/detail twin where the declaration allows one, plus the
+ * a list leaf, an independent create leaf, an edit/widget/detail twin where declared, plus the
  * resource-less pages the host names."* What was host-specific is the seven LISTS it reads, and
  * those stay host-owned in {@see RouteContextPlan} (api-surface-coherence 141/142: the host still
  * spells out its realms and mounts). **The list is host code; the projection is package code.**
@@ -61,7 +61,7 @@ class RouteContextProjector
 
     /**
      * The flat RouteContext for one realm: a list leaf for every resource the host's membership
-     * list places in that realm, its single-record twin where the declaration allows one, plus the
+     * list places in that realm, its Frame-owned create leaf and declared single-record twin, plus the
      * realm's resource-less standalone pages. Leaves inherit the realm's guard unless a standalone
      * entry pins its own.
      *
@@ -145,8 +145,10 @@ class RouteContextProjector
     }
 
     /**
-     * The flat leaves for one resource: its list route, plus at most one single-record twin — a
-     * heavyweight `widget` mount, a simple `edit` form, or a read-only `detail`.
+     * The flat leaves for one resource: its list route, an independent Frame-owned create route,
+     * and at most one single-record twin — a heavyweight `widget`, `edit` form, or `detail`.
+     * Creation uses an `edit` form (or the declared heavyweight widget) with no record parameter.
+     * The resolved create affordance owns that decision independently of show/edit capabilities.
      *
      * The list `routeName` is the resource's DECLARED one (the nav join key); the twin suffixes
      * `.edit` to stay unique. That suffix is POSITIONAL, not a verb — it names "the per-record twin
@@ -179,7 +181,7 @@ class RouteContextProjector
 
         $listRoute = $definition->nav->routeName ?? $key.'.index';
 
-        // The in-shell route STEM — the path segment and the `<stem>.edit` twin — follows the
+        // The in-shell route STEM — the path segment and the `<stem>.create` and `<stem>.edit` leaves — follows the
         // DECLARED list route, not the resource key. For most resources they are the same word and
         // the fallback keeps it that way; where a registry key normalises differently from the
         // surface it has always lived at, the key and the path are genuinely two facts and
@@ -189,7 +191,7 @@ class RouteContextProjector
             : $key;
 
         // A shelled resource nests its LIST leaf under a hand-written layout at a real path, and
-        // does NOT auto-emit an edit leaf — its record routes stay hand-written.
+        // does NOT emit create or record leaves — those routes stay hand-written.
         if (isset($this->plan->shelledResources[$key])) {
             $shelled = $this->plan->shelledResources[$key];
 
@@ -218,6 +220,19 @@ class RouteContextProjector
         )];
 
         $widget = $this->plan->heavyweightEditors[$key] ?? null;
+
+        if ($definition->resolvedCreateAffordance() === 'frame') {
+            $entries[] = new RouteContextEntry(
+                routeName: $stem.'.create',
+                path: $path.'/new',
+                shell: 'app',
+                lazy: $widget !== null,
+                guard: $guard,
+                mounts: $widget !== null ? 'widget' : 'edit',
+                widget: $widget,
+                resource: $key,
+            );
+        }
 
         if ($widget !== null) {
             $entries[] = new RouteContextEntry(
