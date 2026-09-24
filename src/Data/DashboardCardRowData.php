@@ -20,6 +20,10 @@ use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
  *    TARGET resource's root entry for that context.
  *  - `nav` — a jump-to tile drawn from the realm's nav manifest: `label`, `icon`, `href` and an
  *    optional `description`; no `summary`, no manifest lookup.
+ *  - `welcome` — the ONE row of a dashboard that would otherwise have none for this viewer: the
+ *    first-run / nothing-yet panel, carried in `welcome` ({@see DashboardWelcomeData}). `label` is its
+ *    heading, `href` is empty (the panel is not a door; its `actions` are), no `resource`, no `summary`.
+ *    It never sits beside a card or a tile — {@see DashboardBacking} emits it only in their absence.
  *
  * ## Bound to `list-item`, class-level
  *
@@ -40,9 +44,11 @@ class DashboardCardRowData extends BeamData
 
     public const CONTEXT_NAV = 'nav';
 
+    public const CONTEXT_WELCOME = 'welcome';
+
     /**
-     * @param  string  $id  `{context}:{resource}` for a card, `nav:{routeName|href}` for a tile — unique within the realm's page
-     * @param  'summary'|'overview'|'nav'  $context  the render context the row is drawn in
+     * @param  string  $id  `{context}:{resource}` for a card, `nav:{routeName|href}` for a tile, `welcome` for the welcome row — unique within the realm's page
+     * @param  'summary'|'overview'|'nav'|'welcome'  $context  the render context the row is drawn in
      * @param  int|null  $navOrder  a card: the resource's declared nav order, null sorts last; a tile: its index in the rail's walk
      * @param  string|null  $resource  the summarized resource's key; null on a tile
      */
@@ -56,10 +62,16 @@ class DashboardCardRowData extends BeamData
         public ?string $resource = null,
         public ?SummaryResponseData $summary = null,
         public ?string $description = null,
+        public ?DashboardWelcomeData $welcome = null,
     ) {}
 
     public function isTile(): bool
     {
         return $this->context === self::CONTEXT_NAV;
+    }
+
+    public function isWelcome(): bool
+    {
+        return $this->context === self::CONTEXT_WELCOME;
     }
 }

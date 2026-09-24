@@ -77,6 +77,12 @@ use Throwable;
  * dashboard is one screen, its population is bounded by the realm's resource count, and the handler
  * envelopes it so neither the request's `perPage` nor frame's `per_page` can land a card on a second page.
  *
+ * ## Never an empty page for a signed-in viewer
+ *
+ * When the viewer has no card and no tile, the page is ONE `welcome` row ({@see DashboardWelcome}): a
+ * first-run panel for someone on no team, a softer "nothing here yet" otherwise. It is emitted only in
+ * that absence, so a populated dashboard is byte-identical to what it was.
+ *
  * ## No detail, by declaration
  *
  * The resource is `showable: false` and this backing resolves nothing: a card is a projection of ANOTHER
@@ -126,6 +132,14 @@ class DashboardBacking implements Unpaged
 
         $rail = $this->rail($container);
         $rows = [...$this->cards($container, $rail), ...$this->tiles($rail)];
+
+        // Nothing for this viewer: the one welcome row instead of an empty list — see DashboardWelcome.
+        // A guest gets nothing (the dashboard's own gate refuses one before the socket reaches here).
+        if ($rows === []) {
+            $actor = $this->actor($container);
+
+            return $actor === null ? [] : [$container->make(DashboardWelcome::class)->row($actor)];
+        }
 
         // ONE sort: tiles after every card, then navOrder (undeclared trails), then label. Stable, so
         // rows tied on all three keep their build order.

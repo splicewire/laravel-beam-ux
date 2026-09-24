@@ -26,8 +26,11 @@ use Splicewire\Beam\Particle\Backing\StreamsRecords;
 use Splicewire\Beam\Particle\ParticleResource;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
+use Splicewire\Beam\Ux\Data\DashboardCardRowData;
+use Splicewire\Beam\Ux\Data\DashboardWelcomeData;
 use Splicewire\Beam\Ux\Frame\RouteContextPlan;
 use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
+use Splicewire\Beam\Ux\Particle\Backing\DashboardWelcome;
 use Splicewire\Beam\Ux\Tests\Fixtures\FakeEntitlementResolver;
 
 /**
@@ -421,6 +424,110 @@ class RealmDashboardTest extends TestCase
         $this->assertNotContains('gizmos', $resources);
     }
 
+    // ---------------------------------------------------------------- the welcome row
+
+    /**
+     * The first-run reading (ux-demo-convergence replay 9): a signed-in viewer on no team whose realm has
+     * no card and no tile for them gets ONE `welcome` row, not an empty page. This host mounts the
+     * settings page and neither a create-team page nor an invitation-accept route, so the panel offers
+     * the settings link only and carries no invitation hint — no affordance the host does not route.
+     */
+    public function test_a_teamless_viewer_with_nothing_to_see_gets_one_first_run_welcome_row(): void
+    {
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => null);
+        $this->app['router']->get('settings/profile', fn () => 'ok')->name(DashboardWelcome::SETTINGS_ROUTE);
+        $this->app['router']->getRoutes()->refreshNameLookups();
+
+        $this->actingAs($this->member()->forceFill(['name' => 'Probe User']));
+
+        $rows = $this->getJson('frame/resources/tenant-dashboard')->assertOk()->json('data');
+
+        $this->assertCount(1, $rows);
+        $this->assertSame('welcome', $rows[0]['id']);
+        $this->assertSame(DashboardCardRowData::CONTEXT_WELCOME, $rows[0]['context']);
+        $this->assertSame('Welcome, Probe User', $rows[0]['label']);
+        $this->assertNull($rows[0]['resource']);
+        $this->assertNull($rows[0]['summary']);
+        $this->assertSame([
+            'state' => DashboardWelcomeData::STATE_FIRST_RUN,
+            'heading' => 'Welcome, Probe User',
+            'body' => "You aren't on a team yet, so there's nothing to show here.",
+            'actions' => [['key' => 'settings', 'label' => 'Account settings', 'href' => '/settings/profile']],
+            'hint' => null,
+        ], $rows[0]['welcome']);
+    }
+
+    public function test_the_first_run_panel_offers_team_creation_and_the_invitation_hint_only_where_the_host_routes_them(): void
+    {
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => null);
+        $this->app['router']->get('teams/create', fn () => 'ok')->name(DashboardWelcome::CREATE_TEAM_ROUTE);
+        $this->app['router']->get('invitations/{token}', fn () => 'ok')->name(DashboardWelcome::ACCEPT_INVITATION_ROUTE);
+        $this->app['router']->getRoutes()->refreshNameLookups();
+
+        $this->actingAs($this->member());
+
+        $welcome = $this->getJson('frame/resources/tenant-dashboard')->assertOk()->json('data.0.welcome');
+
+        // A nameless viewer is still welcomed, just not by a name we would have to invent.
+        $this->assertSame('Welcome', $welcome['heading']);
+        $this->assertSame([['key' => 'create-team', 'label' => 'Create a team', 'href' => '/teams/create']], $welcome['actions']);
+        $this->assertSame('Have an invitation? Open the link from your email.', $welcome['hint']);
+    }
+
+    public function test_a_viewer_on_a_team_with_nothing_to_see_gets_the_softer_empty_panel(): void
+    {
+        $team = new DashTeam(seats: [8]);
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => $team);
+
+        $this->actingAs($this->member()->forceFill(['name' => 'Probe User']));
+
+        $rows = $this->getJson('frame/resources/tenant-dashboard')->assertOk()->json('data');
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(DashboardWelcomeData::STATE_EMPTY, $rows[0]['welcome']['state']);
+        $this->assertSame('Nothing here yet', $rows[0]['label']);
+        $this->assertStringNotContainsString('team', $rows[0]['welcome']['body']);
+        $this->assertNull($rows[0]['welcome']['hint']);
+    }
+
+    public function test_a_team_that_does_not_seat_the_viewer_is_no_team_for_them(): void
+    {
+        $team = new DashTeam(seats: [99]);
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => $team);
+
+        $this->actingAs($this->member());
+
+        $this->assertSame(
+            DashboardWelcomeData::STATE_FIRST_RUN,
+            $this->getJson('frame/resources/tenant-dashboard')->assertOk()->json('data.0.welcome.state'),
+        );
+    }
+
+    public function test_a_resolver_that_cannot_answer_makes_no_claim_about_teams(): void
+    {
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => throw new \RuntimeException('no tenancy here'));
+
+        $this->actingAs($this->member());
+
+        $this->assertSame(
+            DashboardWelcomeData::STATE_EMPTY,
+            $this->getJson('frame/resources/tenant-dashboard')->assertOk()->json('data.0.welcome.state'),
+        );
+    }
+
+    public function test_a_populated_dashboard_carries_no_welcome_row_and_a_guest_gets_none(): void
+    {
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => null);
+
+        $this->actingAs($this->staff());
+        $this->assertNotContains(DashboardCardRowData::CONTEXT_WELCOME, array_column($this->rows(), 'context'));
+
+        // The backing asked directly with no actor: the dashboard's own gate refuses a guest before the
+        // socket reaches it, and the backing does not welcome one either.
+        $this->app['auth']->forgetGuards();
+        $this->assertSame([], (new DashboardBacking('tenant'))->rows());
+    }
+
     // ---------------------------------------------------------------- the manifest
 
     public function test_the_manifest_carries_the_dashboard_resource_its_list_leaf_its_nav_leaf_and_its_contexts(): void
@@ -549,5 +656,41 @@ class DashWritesThenThrowsSummaryProvider implements ResourceSummaryProvider
         DashGizmo::create(['name' => 'written-before-the-throw']);
 
         throw new \RuntimeException('relation "broken" does not exist');
+    }
+}
+
+/** The smallest team: seats the listed user ids as members. Only `memberRole()` is read here. */
+class DashTeam implements \Splicewire\Beam\Accounts\Contracts\TeamContract
+{
+    /** @param  list<int>  $seats */
+    public function __construct(private array $seats) {}
+
+    public function memberRole(\Illuminate\Contracts\Auth\Authenticatable $user): ?\Splicewire\Beam\Accounts\Enums\Role
+    {
+        return in_array($user->getAuthIdentifier(), $this->seats, true) ? \Splicewire\Beam\Accounts\Enums\Role::Member : null;
+    }
+
+    public function teamKey(): int|string
+    {
+        return 1;
+    }
+
+    public function members()
+    {
+        return [];
+    }
+
+    public function hasMember(\Illuminate\Contracts\Auth\Authenticatable $user): bool
+    {
+        return $this->memberRole($user) !== null;
+    }
+
+    public function assignMember(\Illuminate\Contracts\Auth\Authenticatable $user, \Splicewire\Beam\Accounts\Enums\Role $role): void {}
+
+    public function removeMember(\Illuminate\Contracts\Auth\Authenticatable $user): void {}
+
+    public function invitations()
+    {
+        return [];
     }
 }
