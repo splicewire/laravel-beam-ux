@@ -345,7 +345,7 @@ class RealmDashboardTest extends TestCase
     public function test_a_throwing_provider_is_rolled_back_to_a_savepoint_and_the_open_transaction_survives(): void
     {
         $this->app->make(ParticleResourceRegistry::class)->register(new ParticleResource(
-            key: 'broken', backing: DashFeed::class, data: DashGizmoData::class, filterable: false,
+            key: 'broken', backing: DashFeed::class, data: DashGizmoData::class,
             label: 'Broken', section: 'platform', navOrder: 0, readOnly: true,
             summaryProvider: DashWritesThenThrowsSummaryProvider::class,
         ), ['operator'], by: self::class);
