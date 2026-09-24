@@ -108,6 +108,42 @@ class ThemeResolverTest extends TestCase
         $this->assertSame('#FFFFFF', $theme['site']['background']);
     }
 
+    public function test_it_emits_the_site_light_and_dark_slots_side_by_side(): void
+    {
+        $site = $this->resolver()->resolve()['site'];
+
+        $this->assertSame('#FFFFFF', $site['background']);
+        $this->assertSame('#0B0F17', $site['darkBackground']);
+        $this->assertSame('#E5E7EB', $site['darkForeground']);
+        $this->assertSame('#FFFFFF', $site['accentForeground']);
+        $this->assertSame('#0B0F17', $site['darkAccentForeground']);
+    }
+
+    public function test_a_theme_that_predates_the_dark_slots_keeps_its_light_values_and_gains_dark_defaults(): void
+    {
+        // Every seeded theme row today carries light site slots only (the starters' ThemeSeeder).
+        $this->writeThemeEntry('central', ['site' => ['background' => '#f8fafc', 'foreground' => '#0f172a']]);
+
+        $site = $this->resolver()->resolve()['site'];
+
+        $this->assertSame('#f8fafc', $site['background']);
+        $this->assertSame('#0f172a', $site['foreground']);
+        $this->assertSame('#0B0F17', $site['darkBackground']);
+        $this->assertSame('#E5E7EB', $site['darkForeground']);
+    }
+
+    public function test_a_tenant_overrides_one_dark_slot_without_touching_the_light_one(): void
+    {
+        $this->writeThemeEntry('central', ['site' => ['accent' => '#0f172a', 'darkAccent' => '#e2e8f0']]);
+        $this->writeThemeEntry('testing', ['site' => ['darkAccent' => '#38bdf8']]);
+
+        $site = $this->resolver()->resolve()['site'];
+
+        $this->assertSame('#0f172a', $site['accent']);
+        $this->assertSame('#38bdf8', $site['darkAccent']);
+        $this->assertSame('#A9BDFF', $site['darkAccentHover']);
+    }
+
     public function test_central_absent_never_throws_and_falls_back_to_defaults(): void
     {
         // No 'central' connection tables exist at all (never migrated) — the resolver degrades, not throws.

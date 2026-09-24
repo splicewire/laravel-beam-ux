@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Concerns;
 
 use Rushing\Popcorn\Concerns\Chained;
 use Schemastud\DataSchemas\Lifecycle\FilesystemSchemaRegistry;
+use Schemastud\DataSchemas\Lifecycle\SchemaFingerprint;
 use Spatie\LaravelPackageTools\Package;
 use Splicewire\Beam\Schema\SchemaSources;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
@@ -41,6 +42,7 @@ trait WiresThemeSchemas
         $registry = new FilesystemSchemaRegistry(ThemeSchemas::directory());
 
         foreach (ThemeSchemas::all() as $schema) {
+            $this->forgetStaleThemeArtifact($registry, $schema);
             $registry->register($schema);
         }
 
@@ -49,6 +51,36 @@ trait WiresThemeSchemas
                 'theme',
                 fn () => new FilesystemSchemaRegistry(ThemeSchemas::directory()),
             );
+        }
+    }
+
+    /**
+     * The regeneration the docblock above promises. The directory is a generated, gitignored
+     * PROJECTION of {@see ThemeSchemas} — not a published registry whose readers hold instances of an
+     * older shape — so when the package's declaration changes (a new token slot), the artifact left by
+     * the previous boot is stale output, not a frozen contract. `register()` rightly refuses to reshape
+     * a stored `$id`; left alone it made every host sharing this package directory fail to boot on the
+     * first request after the change (theme.site gaining its dark slots, 2026-09-24; the same freeze was
+     * cleared by hand when it gained typography). Removing only the stale file of an `$id` this package
+     * declares keeps the guard intact for every other schema and every other tier.
+     *
+     * @param  array<string, mixed>  $schema
+     */
+    private function forgetStaleThemeArtifact(FilesystemSchemaRegistry $registry, array $schema): void
+    {
+        $id = $schema['$id'];
+        $stored = $registry->get($id);
+
+        if ($stored === null || SchemaFingerprint::of($stored) === SchemaFingerprint::of($schema)) {
+            return;
+        }
+
+        foreach (glob(ThemeSchemas::directory().'/*.schema.json') ?: [] as $path) {
+            $decoded = json_decode((string) file_get_contents($path), true);
+
+            if (is_array($decoded) && ($decoded['$id'] ?? null) === $id) {
+                @unlink($path);
+            }
         }
     }
 }

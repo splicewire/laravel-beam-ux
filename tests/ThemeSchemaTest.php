@@ -8,6 +8,7 @@ use Schemastud\DataSchemas\Lifecycle\FilesystemSchemaRegistry;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Schema\BeamSchemaRegistry;
 use Splicewire\Beam\Schema\DatabaseSchemaRegistry;
+use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Schema\ThemeSchemas;
 
 /**
@@ -83,6 +84,68 @@ class ThemeSchemaTest extends TestCase
         $this->assertSame(ThemeSchemas::SHELL_ID, $schema['$id']);
         $this->assertCount(10, $schema['properties']);
         $this->assertSame('#f4f4f5', $schema['properties']['surface']['default']);
+    }
+
+    public function test_site_schema_carries_a_dark_counterpart_for_every_colour_slot(): void
+    {
+        $properties = $this->fileRegistry()->get(ThemeSchemas::SITE_ID)['properties'];
+
+        foreach (['background', 'foreground', 'muted', 'accent', 'accentHover', 'accentForeground', 'border'] as $slot) {
+            $dark = 'dark'.ucfirst($slot);
+
+            $this->assertArrayHasKey($slot, $properties);
+            $this->assertArrayHasKey($dark, $properties, "{$slot} has no dark counterpart");
+            $this->assertSame('color', $properties[$dark]['format'], "{$dark} renders as a colour field");
+            $this->assertNotSame($properties[$slot]['default'], $properties[$dark]['default'], "{$dark} repeats the light default");
+        }
+    }
+
+    public function test_site_dark_defaults_read_as_a_dark_scheme(): void
+    {
+        $properties = ThemeSchemas::site()['properties'];
+
+        // A dark page under light ink, and a label on the (lighter) dark accent that is dark itself —
+        // `#fff` on a lifted accent was the unreadable pairing.
+        $this->assertLessThan(0.1, $this->luminance($properties['darkBackground']['default']));
+        $this->assertGreaterThan(0.6, $this->luminance($properties['darkForeground']['default']));
+        $this->assertLessThan(
+            $this->luminance($properties['darkAccent']['default']),
+            $this->luminance($properties['darkAccentForeground']['default']),
+        );
+        $this->assertSame('#FFFFFF', $properties['accentForeground']['default']);
+    }
+
+    /** Relative luminance of a `#rrggbb` colour (WCAG). */
+    private function luminance(string $hex): float
+    {
+        [$r, $g, $b] = array_map(function (string $pair): float {
+            $c = hexdec($pair) / 255;
+
+            return $c <= 0.03928 ? $c / 12.92 : (($c + 0.055) / 1.055) ** 2.4;
+        }, str_split(ltrim($hex, '#'), 2));
+
+        return 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
+    }
+
+    public function test_boot_regenerates_a_theme_artifact_left_by_an_older_declaration(): void
+    {
+        // The artifact directory is shared by every host that links this package. An artifact written
+        // by the previous shape of `theme.site` made `register()` refuse the new one, and the boot threw.
+        $registry = new FilesystemSchemaRegistry(ThemeSchemas::directory());
+        $older = ThemeSchemas::site();
+        unset($older['properties']['darkBackground']);
+
+        foreach (glob(ThemeSchemas::directory().'/theme-site.*.schema.json') ?: [] as $path) {
+            unlink($path);
+        }
+        $registry->register($older);
+        $this->assertArrayNotHasKey('darkBackground', $registry->get(ThemeSchemas::SITE_ID)['properties']);
+
+        $provider = $this->app->getProvider(BeamUxServiceProvider::class);
+        (fn () => $this->registerThemeSchemas())->call($provider);
+
+        $this->assertArrayHasKey('darkBackground', $registry->get(ThemeSchemas::SITE_ID)['properties']);
+        $this->assertCount(1, glob(ThemeSchemas::directory().'/theme-site.*.schema.json') ?: []);
     }
 
     public function test_root_theme_schema_ref_composes_all_three_namespaces(): void

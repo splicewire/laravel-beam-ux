@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Schema;
 
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
+use Splicewire\Beam\Ux\Theme\ThemeResolver;
 
 /**
  * Theme token JSON Schema source (theme-entries-and-authoring ticket 01). Three namespaced
@@ -25,6 +26,14 @@ use Splicewire\Beam\Ux\BeamUxServiceProvider;
  * `site` is net-new (today's site palette is unstructured raw hex literals inline in host JSX,
  * no existing shape to match) — a reasonable first namespace: a small palette plus the `:hover`
  * accent treatment every host site currently hand-rolls.
+ *
+ * `site` carries its DARK variant as flat `dark*` siblings of the light slots (`darkBackground` beside
+ * `background`), not a nested `dark` object. Flat keeps the `css` codec's round-trip exact
+ * (`site.darkBackground` ⇄ `--theme-site-dark-background`; a nested `site.dark.background` would decode
+ * to the same name and re-encode as `site.darkBackground`), keeps {@see ThemeResolver::defaults()} a
+ * one-level read, and lets a tier override one dark slot alone through the resolver's per-token merge.
+ * The site layout applies the `dark*` values whenever the visitor's scheme is dark (the app's stored
+ * appearance, else the system preference — the same `.dark` class the app shell toggles).
  */
 class ThemeSchemas
 {
@@ -112,6 +121,7 @@ class ThemeSchemas
                 'muted' => self::color('Secondary/muted text.', '#6B7280'),
                 'accent' => self::color('Primary accent (links, buttons).', '#4F7CFF'),
                 'accentHover' => self::color('Accent :hover treatment (buttons, links).', '#3A63E0'),
+                'accentForeground' => self::color('Text on an accent fill (the primary button label).', '#FFFFFF'),
                 'border' => self::color('Dividers/card borders.', '#D4D4D8'),
                 // Typography (theme-entries-and-authoring follow-up: a brand-distinct sub-site needs more
                 // than recoloring — mirrors canvas's fontBody/fontMono naming, split a third way since a
@@ -119,6 +129,16 @@ class ThemeSchemas
                 'fontSans' => self::font('Primary UI/body font stack.', 'system-ui, sans-serif'),
                 'fontSerif' => self::font('Display/headline font stack (falls back to fontSans when a brand has none).', 'system-ui, sans-serif'),
                 'fontMono' => self::font('Code/label font stack.', 'ui-monospace, monospace'),
+                // The dark variant — applied when the visitor's scheme is dark. Defaults are a neutral
+                // dark pairing of the light defaults above: a near-black page, light ink, and an accent
+                // lifted far enough to read on it, with a DARK label on that lighter accent.
+                'darkBackground' => self::color('Dark scheme: page background.', '#0B0F17'),
+                'darkForeground' => self::color('Dark scheme: primary body text.', '#E5E7EB'),
+                'darkMuted' => self::color('Dark scheme: secondary/muted text.', '#9CA3AF'),
+                'darkAccent' => self::color('Dark scheme: primary accent (links, buttons).', '#8AA4FF'),
+                'darkAccentHover' => self::color('Dark scheme: accent :hover treatment.', '#A9BDFF'),
+                'darkAccentForeground' => self::color('Dark scheme: text on an accent fill.', '#0B0F17'),
+                'darkBorder' => self::color('Dark scheme: dividers/card borders.', '#262B36'),
             ],
         ];
     }

@@ -59,6 +59,18 @@ class CssBodyCodecTest extends TestCase
         $this->assertSame($original, $roundTripped);
     }
 
+    public function test_the_site_dark_slots_round_trip_through_their_own_token_names(): void
+    {
+        $codec = new CssBodyCodec;
+        $original = ['site' => ['background' => '#f8fafc', 'darkBackground' => '#0b0f17', 'darkAccentForeground' => '#0b0f17']];
+
+        $css = $codec->decode($original);
+
+        $this->assertStringContainsString('--theme-site-dark-background: #0b0f17;', $css);
+        $this->assertStringContainsString('--theme-site-dark-accent-foreground: #0b0f17;', $css);
+        $this->assertSame($original, $codec->encode($css));
+    }
+
     public function test_encode_reads_a_light_hand_edit_of_a_generated_file(): void
     {
         // Round-trip fidelity matters here specifically because a generated theme.css is meant to be

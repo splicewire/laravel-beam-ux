@@ -71,6 +71,11 @@ class EntryBodyOpsTest extends TestCase
         $this->assertSame('Theme', $envelope->schema['title']);
         $this->assertSame(ThemeSchemas::canvas(), $envelope->schema['properties']['canvas']);
         $this->assertSame(ThemeSchemas::site(), $envelope->schema['properties']['site']);
+
+        // The theme editor is Frame's form over this schema, so the dark variant's slots ARE its fields.
+        $site = $envelope->schema['properties']['site']['properties'];
+        $this->assertArrayHasKey('darkBackground', $site);
+        $this->assertArrayHasKey('darkAccent', $site);
     }
 
     public function test_an_inline_schema_ref_is_surfaced_by_value_over_the_theme_fallback(): void
