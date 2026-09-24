@@ -401,12 +401,16 @@ class RealmDashboardTest extends TestCase
     }
 
     /**
-     * The null-actor reading of the SECOND gate: a model-less resource is never shown to a guest
-     * ({@see \Splicewire\Beam\Authorization\ResourceVisibility::listable()}), while a policy-less
-     * model-backed one is — so a guest's rows are exactly the model-backed cards. The dashboard's OWN gate
-     * refuses the guest before this backing runs on the socket; this pins the per-row rule in isolation.
+     * The null-actor reading of the SECOND gate
+     * ({@see \Splicewire\Beam\Authorization\ResourceVisibility::listable()}): a guest is shown no card
+     * for a resource the read boundary refuses it. A model-less resource is never shown to a guest, and
+     * neither is the policy-less, unscoped, model-backed `gizmos` — {@see \Splicewire\Beam\Authorization\ResourceReadGuard}
+     * refuses its reads to anyone without a policy, tenancy, a row predicate or the realm's entitlement
+     * (laravel-beam 473fbfd, 49a7612), and `listable()` now asks that guard rather than a parallel rule.
+     * The dashboard's OWN gate refuses the guest before this backing runs on the socket; this pins the
+     * per-row rule in isolation.
      */
-    public function test_a_null_actor_is_shown_no_model_less_card(): void
+    public function test_a_null_actor_is_shown_no_card_for_a_resource_the_read_boundary_refuses(): void
     {
         $resources = array_map(
             fn ($row) => $row->resource,
@@ -414,7 +418,7 @@ class RealmDashboardTest extends TestCase
         );
 
         $this->assertNotContains('streams', $resources);
-        $this->assertContains('gizmos', $resources);
+        $this->assertNotContains('gizmos', $resources);
     }
 
     // ---------------------------------------------------------------- the manifest

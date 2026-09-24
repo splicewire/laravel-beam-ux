@@ -177,6 +177,10 @@
     "prefer-stable": true,
     "scripts": {
         "test": "@php vendor/bin/phpunit",
+        "test:toolchain": [
+            "@putenv BEAM_UX_NODE_MODULES=../../../../laravel/starters/laravel-beam-starter/node_modules",
+            "@test"
+        ],
         "pint": "@php -d memory_limit=512M vendor/bin/pint"
     },
     "config": {

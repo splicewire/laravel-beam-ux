@@ -31,18 +31,63 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class ArtifactModuleContractTest extends TestCase
 {
+    /** Set by {@see requireToolchain()}: the root the compiler resolves `node_modules` from. */
+    private ?string $toolchainRoot = null;
+
     /**
      * The end-to-end assertion needs a real host toolchain, which a testbench does not have — so it
      * skips here and runs where the toolchain exists. A guard that only ever skips is worth nothing,
      * which is the same trap as a config test seeding the key it reads, so the contract is ALSO pinned
      * at the source below, where it always runs. The two halves fail for different reasons: this one if
      * the emitted module is wrong, that one if the script stops trying to emit the right thing.
+     *
+     * ## Borrowing a host's toolchain: `BEAM_UX_NODE_MODULES`
+     *
+     * The host owns `@mdx-js/mdx` and `esbuild`; beam-ux vendors neither, and that stays. To run the
+     * end-to-end half here anyway, point `BEAM_UX_NODE_MODULES` at a host's `node_modules` directory
+     * (absolute, or relative to this package's root). The compiler then runs with that directory's
+     * PARENT as its root — `compile.mjs` resolves the toolchain through
+     * `createRequire(<root>/package.json)`, i.e. from `<root>/node_modules`, exactly as it does in a host.
+     *
+     * `composer test:toolchain` sets it to the fleet layout's `laravel/starters/laravel-beam-starter`
+     * (`@putenv`, relative, because Composer does not expand `$HOME` there) and runs the suite. The
+     * variable lives in a composer script rather than `phpunit.xml` because `<env>` cannot be made
+     * conditional on the path existing, and a committed machine path would turn a missing checkout into
+     * a failure instead of a skip. With neither `base_path('node_modules/@mdx-js/mdx')` nor the variable
+     * resolving to a toolchain, the test still skips.
      */
     private function requireToolchain(): void
     {
-        if (! is_dir(base_path('node_modules/@mdx-js/mdx'))) {
-            $this->markTestSkipped('The host toolchain (@mdx-js/mdx) is not installed in this testbench.');
+        $this->toolchainRoot = $this->resolveToolchainRoot();
+
+        if ($this->toolchainRoot === null) {
+            $this->markTestSkipped(
+                'The host toolchain (@mdx-js/mdx) is not installed in this testbench; set BEAM_UX_NODE_MODULES '.
+                'to a host\'s node_modules (or run `composer test:toolchain`) to run it.',
+            );
         }
+    }
+
+    /** The directory whose `node_modules` holds `@mdx-js/mdx`: the testbench's own, else the borrowed one. */
+    private function resolveToolchainRoot(): ?string
+    {
+        if (is_dir(base_path('node_modules/@mdx-js/mdx'))) {
+            return base_path();
+        }
+
+        $borrowed = getenv('BEAM_UX_NODE_MODULES');
+
+        if (! is_string($borrowed) || $borrowed === '') {
+            return null;
+        }
+
+        if (! str_starts_with($borrowed, '/')) {
+            $borrowed = dirname(__DIR__).'/'.$borrowed;
+        }
+
+        $nodeModules = realpath($borrowed);
+
+        return $nodeModules !== false && is_dir($nodeModules.'/@mdx-js/mdx') ? dirname($nodeModules) : null;
     }
 
     /**
@@ -95,6 +140,6 @@ class ArtifactModuleContractTest extends TestCase
             'format' => UxFormat::Mdx,
         ]);
 
-        return (new NodeEntryBodyCompiler(workingDirectory: base_path()))->compile($entry, $source);
+        return (new NodeEntryBodyCompiler(workingDirectory: $this->toolchainRoot ?? base_path()))->compile($entry, $source);
     }
 }

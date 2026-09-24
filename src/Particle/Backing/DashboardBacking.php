@@ -44,7 +44,8 @@ use Throwable;
  * order, each a reason to DROP the row rather than throw:
  *
  *  1. the actor may not LIST it ({@see ResourceVisibility::listable()} — `viewAny` for a model-backed
- *     resource, the declared read gate for a model-less one, never a null actor);
+ *     resource with a policy, beam's read guard for a policy-less one, the declared read gate for a
+ *     model-less one, never a null actor for a model-less one);
  *  2. the host does not mount its list route (its route name names no leaf in the realm's router
  *     projection) — a package cannot 500 a host's dashboard by naming a resource the host never placed;
  *  3. it is not ON the dashboard ({@see DashboardParticipation::contextFor()} — the ONE rule, shared with
