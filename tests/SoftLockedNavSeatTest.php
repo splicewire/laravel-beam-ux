@@ -6,9 +6,9 @@ use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Foundation\Auth\User;
 use Rushing\DataNav\NavContext;
 use Rushing\DataNav\NavRegistry;
+use Splicewire\Beam\Nav\NavSeatLock;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
-use Splicewire\Beam\Nav\NavSeatLock;
 use Splicewire\Beam\Ux\Frame\DeclaredSectionNavigation;
 use Splicewire\Beam\Ux\Frame\NavSectionProjector;
 

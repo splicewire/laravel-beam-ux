@@ -94,7 +94,5 @@ trait WiresStorage
      * {@see registerStorage()}), and only the mirror disk handle is eager.
      */
     #[Chained('boot', order: 90)]
-    protected function describeStorageDrivers(): void
-    {
-    }
+    protected function describeStorageDrivers(): void {}
 }

@@ -49,7 +49,5 @@ trait WiresCodecs
      * widened it. The describe belongs where the fill finishes, which is here.
      */
     #[Chained('boot', order: 70)]
-    protected function describeCodecs(): void
-    {
-    }
+    protected function describeCodecs(): void {}
 }
