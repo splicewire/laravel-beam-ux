@@ -95,6 +95,7 @@ class EntryBodyClearTest extends TestCase
         $this->assertNull($fresh->particle_id, 'the entry is still bound to its particle');
         $this->assertNull($fresh->getAttribute('published_version'));
         Storage::disk('mirror')->assertMissing($mirrorPath);
+        $this->assertSame([], Storage::disk('mirror')->allDirectories(), 'the emptied placement directories were left behind');
         $this->assertSame([], Storage::disk('artifacts')->allFiles(), 'an artifact survived the clear');
 
         // Every reader's answer is the unauthored one, not the empty-document one.
@@ -173,6 +174,17 @@ class EntryBodyClearTest extends TestCase
         $this->assertNotNull($entry->fresh()->particle_id);
         Storage::disk('mirror')->assertExists($this->mirrorPath($entry));
         $this->assertSame('', Storage::disk('mirror')->get($this->mirrorPath($entry)));
+    }
+
+    public function test_the_mirror_prunes_only_the_directories_the_removal_emptied(): void
+    {
+        $sibling = $this->savedPage(self::BODY);
+        $entry = $this->savedPage(self::BODY);
+
+        app(EntryPublication::class)->clear($entry);
+
+        Storage::disk('mirror')->assertMissing($this->mirrorPath($entry));
+        Storage::disk('mirror')->assertExists($this->mirrorPath($sibling));
     }
 
     public function test_clearing_an_unauthored_entry_is_a_no_op_that_leaves_disk_source_alone(): void

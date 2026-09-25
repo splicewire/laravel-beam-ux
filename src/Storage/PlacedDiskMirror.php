@@ -72,6 +72,21 @@ class PlacedDiskMirror
             return false;
         }
 
-        return $this->disk->delete($path);
+        if (! $this->disk->delete($path)) {
+            return false;
+        }
+
+        // Prune the placement directories the removal emptied (`{namespace}/{type}/`), so a cleared page
+        // leaves the git-tracked mirror root as it was before the page was first published — no empty
+        // `starter/page/` behind. Only EMPTY directories go; anything holding another file stays.
+        for ($dir = dirname($path); $dir !== '.' && $dir !== '' && $dir !== '/'; $dir = dirname($dir)) {
+            if ($this->disk->files($dir) !== [] || $this->disk->directories($dir) !== []) {
+                break;
+            }
+
+            $this->disk->deleteDirectory($dir);
+        }
+
+        return true;
     }
 }
