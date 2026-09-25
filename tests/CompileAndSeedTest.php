@@ -314,6 +314,90 @@ class CompileAndSeedTest extends TestCase
         return $this->app->make(BeamUxArtifactAudit::class)->run();
     }
 
+    /**
+     * FOURTH reader, same blind spot. d033815 taught the compiler (`forEntry` retires the artifact) and
+     * the public reader (`artifactUrl` returns `''`) that a particle holding an EMPTY document is the
+     * unauthored state, not a missing artifact. This audit reads the same property and was not told, so
+     * a restore to `[]` (the G2 authoring spec's teardown) left `home` and `about` reported as "will 404"
+     * on a host still serving both 200. Measured 2026-09-24 on the live `tower` starter
+     * (untouched-7-G1-TOWER-INSTALLER-RERUN.log): `ERROR … 2 page(s) have no current artifact and will
+     * 404: home, about`, while `curl https://tower.test/` and `/about` returned 200.
+     */
+    public function test_the_doctor_does_not_count_a_page_cleared_to_an_empty_document_as_a_missing_artifact(): void
+    {
+        $this->emptyPage('about');
+
+        $finding = $this->audit()[0];
+
+        $this->assertSame(DoctorStatus::Pass, $finding->status, $finding->detail);
+        $this->assertStringContainsString('0 of 1', $finding->detail);
+        $this->assertStringContainsString('1 excluded', $finding->detail);
+        $this->assertStringContainsString('empty document', $finding->detail);
+        $this->assertStringNotContainsString('counted in no bucket', $finding->detail);
+
+        // The exclusion is narrow: a page with a BODY and no artifact beside it is still the error.
+        $this->page('guide', '# Guide');
+
+        $this->assertSame(DoctorStatus::Fail, $this->audit()[0]->status);
+    }
+
+    /**
+     * The stale branch put its rows in `$stale` and in no COUNTED bucket, so every genuine finding also
+     * printed "⚠️ N counted in no bucket — this audit's own arithmetic does not reconcile". The residual
+     * clause fired on the one path it was never meant to describe, which trains a reader to discount it.
+     */
+    public function test_a_page_with_no_current_artifact_is_counted_in_its_own_bucket_and_the_arithmetic_reconciles(): void
+    {
+        $this->app->make(CompileEntryBody::class)->forEntry($this->page('guide', '# Guide'));
+        $this->page('mcp', '# MCP');
+
+        $finding = $this->audit()[0];
+
+        $this->assertSame(DoctorStatus::Fail, $finding->status);
+        $this->assertStringContainsString('1 of 2', $finding->detail);
+        $this->assertStringContainsString('1 with no current artifact', $finding->detail);
+        $this->assertStringContainsString('will 404: mcp', $finding->detail);
+        $this->assertStringNotContainsString('counted in no bucket', $finding->detail);
+    }
+
+    /**
+     * The backfill the doctor prescribes must not report a compile it did not do. For a page holding an
+     * empty document `forEntry()` returns null without throwing, and the command printed
+     * `about → …/artifact.js` and counted it `compiled` — an artifact that does not exist.
+     */
+    public function test_the_backfill_command_does_not_claim_an_artifact_for_an_empty_document(): void
+    {
+        $entry = $this->emptyPage('about');
+
+        $this->artisan('splicewire:beam:ux:compile')
+            ->expectsOutputToContain('empty document')
+            ->doesntExpectOutputToContain('→')
+            ->expectsOutputToContain('compiled 0')
+            ->assertSuccessful();
+
+        $this->assertFalse($this->app->make(CompileEntryBody::class)->artifacts()->has($entry));
+    }
+
+    /** A page bound to a particle that holds an EMPTY document — what `save-body {body: []}` leaves. */
+    private function emptyPage(string $slug): BeamUxEntry
+    {
+        $entry = BeamUxEntry::create([
+            'slug' => $slug,
+            'type' => UxType::Page,
+            'format' => UxFormat::Mdx,
+            'segment' => $slug,
+        ]);
+
+        $written = $this->app->make(StorageDriverResolver::class)
+            ->resolve($entry)
+            ->write('', [], $entry->namespace);
+
+        $entry->particle_id = $written->key;
+        $entry->save();
+
+        return $entry->fresh();
+    }
+
     /** A page with a body persisted through the storage driver, the way any real producer leaves one. */
     private function page(string $slug, string $source = '# page'): BeamUxEntry
     {

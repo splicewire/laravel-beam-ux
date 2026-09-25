@@ -62,6 +62,7 @@ class BeamUxArtifactAudit implements DoctorAudit
         $total = 0;
         $excludedStructural = 0;
         $excludedPointer = 0;
+        $excludedEmpty = 0;
         $unsupportedCount = 0;
 
         foreach (BeamUxEntry::query()->where('type', UxType::Page->value)->cursor() as $entry) {
@@ -109,6 +110,19 @@ class BeamUxArtifactAudit implements DoctorAudit
                     continue;
                 }
 
+                // FOURTH reader. A particle holding an EMPTY document is the pointer's state reached by
+                // a different route: an author cleared the canvas, or a restore wrote back the `[]` the
+                // read op returned for a never-authored page. d033815 taught the compiler (it retires
+                // the artifact) and the public reader (it addresses the page as unauthored, 200) and not
+                // this audit, which then reported `home, about … will 404` on a live `tower` still
+                // serving both 200 (2026-09-24). Only a particle that READS and is empty qualifies — one
+                // that cannot be read keeps the finding, as it does at the reader.
+                if ($this->compile->holdsEmptyDocument($entry)) {
+                    $excludedEmpty++;
+
+                    continue;
+                }
+
                 $stale[] = (string) $entry->slug;
 
                 continue;
@@ -128,7 +142,15 @@ class BeamUxArtifactAudit implements DoctorAudit
                 $artifacts,
                 $stale,
                 $unsupported,
-                new ArtifactCoverage($total, $covered, $excludedStructural, $excludedPointer, $unsupportedCount),
+                new ArtifactCoverage(
+                    $total,
+                    $covered,
+                    $excludedStructural,
+                    $excludedPointer,
+                    $unsupportedCount,
+                    empty: $excludedEmpty,
+                    stale: count($stale),
+                ),
             ),
             $this->orphanFinding($orphans, $orphaned),
         ];

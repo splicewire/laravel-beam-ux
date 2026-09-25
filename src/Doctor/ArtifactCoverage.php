@@ -28,11 +28,21 @@ class ArtifactCoverage
         public int $structural,
         public int $pointer,
         public int $unsupported,
+        /** Bound to a particle that holds an EMPTY document — cleared, or restored to never-authored. */
+        public int $empty = 0,
+        /** Has a body and no artifact compiled from it: the audit's FINDING, and a bucket like any other. */
+        public int $stale = 0,
     ) {}
 
+    /**
+     * ⚠️ `empty` is an exclusion for the same reason `pointer` is (d033815): the compiler retires the
+     * artifact of an empty document and the public reader addresses the page as unauthored, so it
+     * serves 200 with the host's own default. Counting it as a missing artifact was a fourth reader
+     * of that property re-learning it — measured on the live `tower` starter, 2026-09-24.
+     */
     public function excluded(): int
     {
-        return $this->structural + $this->pointer;
+        return $this->structural + $this->pointer + $this->empty;
     }
 
     /**
@@ -57,7 +67,7 @@ class ArtifactCoverage
      */
     public function unaccounted(): int
     {
-        return $this->total - $this->covered - $this->excluded() - $this->unsupported;
+        return $this->total - $this->covered - $this->excluded() - $this->unsupported - $this->stale;
     }
 
     /** Whether the buckets sum to `total` — the arithmetic this class exists to state rather than assume. */
@@ -109,6 +119,13 @@ class ArtifactCoverage
             $sentence .= "; {$this->unsupported} in a format the bound compiler does not handle";
         }
 
+        // The FINDING bucket. It was once counted in `total` and nowhere else, so every genuine stale
+        // page also printed the "counted in no bucket" residual below — the self-check firing on the
+        // one path it does not describe (untouched-7-G1-TOWER-INSTALLER-RERUN.log, 2026-09-24).
+        if ($this->stale > 0) {
+            $sentence .= "; {$this->stale} with no current artifact";
+        }
+
         if (! $this->reconciles()) {
             $residual = $this->unaccounted();
 
@@ -133,6 +150,11 @@ class ArtifactCoverage
 
         if ($this->pointer > 0) {
             $reasons[] = "{$this->pointer} nav pointer(s) with no particle — no body was ever written";
+        }
+
+        if ($this->empty > 0) {
+            $reasons[] = "{$this->empty} page(s) holding an empty document — cleared or never authored, ".
+                'served as unauthored';
         }
 
         return implode('; ', $reasons);

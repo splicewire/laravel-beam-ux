@@ -61,6 +61,16 @@ class CompileEntriesCommand extends Command
                     continue;
                 }
 
+                // `forEntry()` returns null WITHOUT throwing for a particle holding an empty document
+                // (d033815: no body is no artifact). Counting that as `compiled` printed a path to a file
+                // that does not exist, on the very command the artifact audit prescribes.
+                if (! $compile->artifacts()->has($entry)) {
+                    $this->components->warn("{$entry->slug}: empty document — nothing to compile (cleared, or never authored).");
+                    $skipped++;
+
+                    continue;
+                }
+
                 $this->components->info("{$entry->slug} → {$compile->artifacts()->path($entry)}");
                 $compiled++;
             } catch (CompilationFailed $e) {
