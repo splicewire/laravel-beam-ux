@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Publish;
 
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
@@ -11,12 +12,14 @@ use Rushing\Versioning\Contracts\VersionStore;
 use Rushing\Versioning\Models\Version;
 use Schemastud\DataSchemas\Migration\AcceptanceGate;
 use Splicewire\Beam\Models\BeamParticle;
+use Splicewire\Beam\Revisions\RevisionRecorder;
 use Splicewire\Beam\Schema\Contracts\SchemaTargetResolver;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
+use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Data\EntryPublicationData;
 use Splicewire\Beam\Ux\Data\EntryVersionData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -210,6 +213,94 @@ class EntryPublication
         $minted = $this->versions->snapshot($fresh, $label ?? "restore of {$version->readableVersion()}");
 
         return $this->state($entry->refresh(), $this->pinAndCompile($entry, $minted));
+    }
+
+    /**
+     * **Clear** the entry: remove its body and return it to the unauthored state — `particle_id` null,
+     * no publication pin, no placed mirror file, no compiled artifact. The one act that removes content;
+     * {@see \Splicewire\Beam\Ux\Particle\EntryBodyClearOp} is its wire door.
+     *
+     * It is not "save an empty body". That stays a legitimate authored act — the particle stays bound,
+     * `[]` is recorded and published, and the mirror writes the empty file the author chose. A clear
+     * takes the binding away, so every reader (the public page, the doctor, the reader's
+     * {@see CompileEntryBody::holdsEmptyDocument()} branch) sees an entry nobody has authored.
+     *
+     * ## What is kept, and why the particle row is NOT deleted
+     *
+     * History lives on the particle: every version is keyed by the particle's id
+     * (`versionable_id`), and the working HEAD is a column on it. Deleting the row would orphan or cascade
+     * away every recorded body, which is exactly the history a clear must not lose. So the clear is
+     * recorded on BOTH sides of the binding and destroys nothing:
+     *
+     *  1. **the particle's version history** gains a final version labelled `cleared` (or the caller's
+     *     label), freezing the body being removed — including an unpublished draft, which would otherwise
+     *     exist only in a working copy nobody can reach any more. The baseline runs first, so an entry
+     *     that predates versioning gets its live body recorded as well;
+     *  2. **the entry's revision log** (beam-core's {@see RevisionRecorder}, the same log an entry's
+     *     soft-delete/restore is recorded in) gains a `cleared` revision whose pre-image is the binding —
+     *     `particle_id` and `published_version`. That is what makes the unbound particle findable from
+     *     the entry, and `RevisionRecorder::revert()` puts the binding back; a reverted entry recompiles
+     *     with `splicewire:beam:ux:compile` or its next publish.
+     *
+     * The particle row itself is left in place, unreferenced, which is the price of keeping its history.
+     *
+     * ## Workflows: a clear is a publish, and it does not touch the marking
+     *
+     * It changes what readers are served the moment it returns, so it takes the PUBLISH gate — the op
+     * declares the same `ux.author` entitlement `save-body`, `publish`, `restore` and the workflow
+     * `transition` op all declare. It deliberately does not move `workflow_marking`: that axis decides
+     * whether the entry is visible AT ALL, this one decides which body a visible entry serves (see this
+     * class's header). A workflow-managed page that is `published` stays published and reads as the
+     * unauthored page (the host's own default, or the nav pointer); taking it out of view is the
+     * workflow's `unpublish`/`archive` transition, through the workflow's own door. There is no "staged
+     * clear" because nothing in the entry can hold one: a draft is a version of a BOUND particle, and a
+     * clear is precisely the removal of that binding.
+     *
+     * Idempotent: an entry that is already unbound reports its (empty) state and removes nothing — for
+     * such an entry a file at the placement path, if any, was not written by a publish of this entry and
+     * may be disk-authored source (`RegisterEntriesFromDisk` registers unbound rows over exactly those
+     * files).
+     */
+    public function clear(BeamUxEntry $entry, ?string $label = null, ?Model $actor = null): EntryPublicationData
+    {
+        if ($entry->particle_id === null) {
+            return $this->state($entry);
+        }
+
+        // Resolved BEFORE the unbind, while the entry still describes the file that publishing it wrote.
+        $mirrorPath = $this->placements->resolve($entry)->pathFor($entry);
+        $hasPin = Schema::hasColumn($entry->getTable(), 'published_version');
+
+        $entry->getConnection()->transaction(function () use ($entry, $label, $actor, $hasPin): void {
+            $this->baseline($entry);
+            $entry->unsetRelation('particle');
+
+            $particle = $this->recordsVersions() ? $this->particle($entry) : null;
+
+            if ($particle !== null) {
+                $this->versions->snapshot($particle, $label ?? 'cleared');
+            }
+
+            $before = ['particle_id' => (string) $entry->particle_id];
+
+            if ($hasPin) {
+                $before['published_version'] = $this->publishedVersionId($entry);
+            }
+
+            $after = array_map(static fn (): null => null, $before);
+
+            $entry->forceFill($after)->save();
+            $entry->unsetRelation('particle');
+
+            app(RevisionRecorder::class)->record($entry, $before, $after, 'cleared', actor: $actor);
+        });
+
+        // The two projections follow the source of record, as every publish's do: the placed file a
+        // publish wrote, and every artifact addressed under this entry.
+        $this->mirror->remove($mirrorPath);
+        app(EntryArtifactStore::class)->forget($entry);
+
+        return $this->state($entry->refresh());
     }
 
     /**

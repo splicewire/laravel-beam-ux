@@ -58,4 +58,20 @@ class PlacedDiskMirror
 
         return true;
     }
+
+    /**
+     * Delete the entry's mirror file at `$path` — the projection of a CLEARED entry, which has no body
+     * at all. Distinct from {@see mirror()} with an empty body on purpose: an author may save an empty
+     * document, and that writes an empty file they chose to have; only
+     * {@see \Splicewire\Beam\Ux\Publish\EntryPublication::clear()} removes the file. No-op when no disk is
+     * configured or nothing is there. Returns whether a file was removed.
+     */
+    public function remove(string $path): bool
+    {
+        if ($this->disk === null || $path === '' || ! $this->disk->exists($path)) {
+            return false;
+        }
+
+        return $this->disk->delete($path);
+    }
 }
