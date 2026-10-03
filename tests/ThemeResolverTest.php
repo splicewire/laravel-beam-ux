@@ -103,7 +103,7 @@ class ThemeResolverTest extends TestCase
     {
         $theme = $this->resolver()->resolve();
 
-        $this->assertSame('#4F7CFF', $theme['canvas']['accent']);
+        $this->assertSame('#14803f', $theme['canvas']['accent']);
         $this->assertSame('#f4f4f5', $theme['shell']['surface']);
         $this->assertSame('#FFFFFF', $theme['site']['background']);
     }
@@ -150,7 +150,7 @@ class ThemeResolverTest extends TestCase
         $theme = $this->resolver()->resolve();
 
         $this->assertIsArray($theme);
-        $this->assertSame('#4F7CFF', $theme['canvas']['accent']);
+        $this->assertSame('#14803f', $theme['canvas']['accent']);
     }
 
     public function test_tenant_absent_returns_central_resolved_values_unchanged(): void
@@ -161,7 +161,7 @@ class ThemeResolverTest extends TestCase
 
         $this->assertSame('#FF0000', $theme['canvas']['accent']);
         // Untouched fields still fall through to the package default.
-        $this->assertSame('#3A63E0', $theme['canvas']['accentHover']);
+        $this->assertSame('#0f5f2e', $theme['canvas']['accentHover']);
     }
 
     public function test_missing_central_table_does_not_hide_the_tenant_theme(): void
@@ -200,7 +200,7 @@ class ThemeResolverTest extends TestCase
         // ...but a central-only key survives (tenant didn't touch it, no full-object clobber).
         $this->assertSame('#AA0000', $theme['canvas']['accentHover']);
         // And package defaults still fill everything neither tier touched.
-        $this->assertSame('#22C7B8', $theme['canvas']['editAccent']);
+        $this->assertSame('#35d07a', $theme['canvas']['editAccent']);
     }
 
     public function test_it_never_throws_even_when_the_central_connection_is_configured_but_unmigrated(): void
@@ -210,7 +210,7 @@ class ThemeResolverTest extends TestCase
         // writeThemeEntry() ever migrates 'central'); this test names the invariant explicitly.
         $theme = $this->resolver()->resolve();
 
-        $this->assertSame('#4F7CFF', $theme['canvas']['accent']);
+        $this->assertSame('#14803f', $theme['canvas']['accent']);
     }
 
     /**
@@ -237,7 +237,7 @@ class ThemeResolverTest extends TestCase
         $resolver = $this->resolver();
         $theme = $resolver->resolve();
 
-        $this->assertSame('#4F7CFF', $theme['canvas']['accent']);
+        $this->assertSame('#14803f', $theme['canvas']['accent']);
 
         Exceptions::assertReported(QueryException::class);
         Exceptions::assertReportedCount(1);
@@ -256,7 +256,7 @@ class ThemeResolverTest extends TestCase
         $resolver = $this->resolver();
         $theme = $resolver->resolve();
 
-        $this->assertSame('#4F7CFF', $theme['canvas']['accent']);
+        $this->assertSame('#14803f', $theme['canvas']['accent']);
 
         Exceptions::assertNothingReported();
         $this->assertNull($resolver->lastFailure());
@@ -278,7 +278,7 @@ class ThemeResolverTest extends TestCase
 
         // Degrades to PACKAGE defaults, not to the central-resolved value — the whole cascade is one
         // unit and a broken tier voids it; the report is what stops that reading as "no theme".
-        $this->assertSame('#4F7CFF', $theme['canvas']['accent']);
+        $this->assertSame('#14803f', $theme['canvas']['accent']);
         Exceptions::assertReportedCount(1);
         $this->assertSame('tenant:default', $resolver->lastFailure()?->entry);
     }

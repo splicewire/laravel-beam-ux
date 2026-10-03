@@ -17,6 +17,8 @@ use Splicewire\Beam\Ux\Theme\ThemeResolver;
  * `canvas` mirrors `splicewire/beam`'s `CanvasTheme` TS interface (`packages/beam/beam-ux/src/canvas/css.ts`)
  * exactly — 9 colors + 2 font families — with `DEFAULT_CANVAS_THEME`'s values as JSON Schema
  * defaults (the package-shipped neutral theme, not any one host's override).
+ * Those defaults are the app's own tokens (beam-ux `tokens.css`, light: `--beam-green`, the `--beam-rail` panels), so the
+ * editor chrome reads as the app it sits in (launch ticket 05 item 4).
  *
  * `shell` mirrors the fleet-shared `--shell-*` custom-property set
  * (`@schemastud/mainframe/os/shell.css`) — names/order fixed per the umbrella GOAL's guardrail,
@@ -67,15 +69,15 @@ class ThemeSchemas
             'description' => 'The beam-ux visual editor canvas palette (CanvasTheme: 9 colors + 2 font families).',
             'additionalProperties' => false,
             'properties' => [
-                'accent' => self::color('Primary accent (selection outline, active toggles, save button).', '#4F7CFF'),
-                'accentHover' => self::color('Accent hover (save button hover).', '#3A63E0'),
-                'editAccent' => self::color('Editable-text (contenteditable) outline.', '#22C7B8'),
-                'canvas' => self::color('The canvas surface (the live page background).', '#FFFFFF'),
-                'ink' => self::color('Ink / body text on the canvas.', '#1A1A1A'),
-                'panelBg' => self::color('Panel (bar / palette / inspector) background.', '#1C1C1E'),
-                'rootBg' => self::color('Editor root backdrop (behind the panels, in window mode).', '#131315'),
-                'panelFg' => self::color('Primary panel text.', '#E6E6E6'),
-                'muted' => self::color('Muted panel text (hints, labels).', '#8A8A8A'),
+                'accent' => self::color('Primary accent (selection outline, active toggles, save button).', '#14803f'),
+                'accentHover' => self::color('Accent hover (save button hover).', '#0f5f2e'),
+                'editAccent' => self::color('Editable-text (contenteditable) outline.', '#35d07a'),
+                'canvas' => self::color('The canvas surface (the live page background).', '#ffffff'),
+                'ink' => self::color('Ink / body text on the canvas.', '#2e2c26'),
+                'panelBg' => self::color('Panel (bar / palette / inspector) background.', '#11201a'),
+                'rootBg' => self::color('Editor root backdrop (behind the panels, in window mode).', '#0d1a14'),
+                'panelFg' => self::color('Primary panel text.', '#eaf6ee'),
+                'muted' => self::color('Muted panel text (hints, labels).', '#83998c'),
                 'fontBody' => self::font('Font family for body/panel chrome.', 'system-ui, sans-serif'),
                 'fontMono' => self::font('Font family for code/mono chrome.', 'ui-monospace, monospace'),
             ],

@@ -348,7 +348,7 @@ class BeamUxEntryDataTest extends TestCase
 
         $this->assertSame(app(ThemeResolver::class)->resolve(), $body);
         // Not blank — a real starting point (the resolved defaults), never an empty {canvas:{},...}.
-        $this->assertSame('#4F7CFF', $body['canvas']['accent']);
+        $this->assertSame('#14803f', $body['canvas']['accent']);
     }
 }
 

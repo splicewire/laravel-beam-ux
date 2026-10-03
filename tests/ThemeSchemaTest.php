@@ -73,8 +73,32 @@ class ThemeSchemaTest extends TestCase
 
         $this->assertSame(ThemeSchemas::CANVAS_ID, $schema['$id']);
         $this->assertCount(11, $schema['properties']);
-        $this->assertSame('#4F7CFF', $schema['properties']['accent']['default']);
         $this->assertSame('system-ui, sans-serif', $schema['properties']['fontBody']['default']);
+    }
+
+    /**
+     * The canvas defaults are the app's own tokens (beam-ux `tokens.css`, light), the same values as the editor's
+     * `DEFAULT_CANVAS_THEME` (whose css.test.ts reads them off tokens.css), so the editor chrome reads as the app it sits in
+     * rather than a blue, monospace third product (launch ticket 05 item 4). Hex, because the theme editor's colour
+     * fields hold `#rrggbb`.
+     */
+    public function test_canvas_defaults_are_the_app_tokens(): void
+    {
+        $defaults = array_map(fn (array $p) => $p['default'], $this->fileRegistry()->get(ThemeSchemas::CANVAS_ID)['properties']);
+
+        $this->assertSame([
+            'accent' => '#14803f',
+            'accentHover' => '#0f5f2e',
+            'editAccent' => '#35d07a',
+            'canvas' => '#ffffff',
+            'ink' => '#2e2c26',
+            'panelBg' => '#11201a',
+            'rootBg' => '#0d1a14',
+            'panelFg' => '#eaf6ee',
+            'muted' => '#83998c',
+            'fontBody' => 'system-ui, sans-serif',
+            'fontMono' => 'ui-monospace, monospace',
+        ], $defaults);
     }
 
     public function test_shell_schema_has_ten_shell_custom_properties(): void
