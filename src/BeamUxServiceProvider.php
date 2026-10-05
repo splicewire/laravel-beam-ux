@@ -36,6 +36,7 @@ use Splicewire\Beam\Ux\Data\BeamUxEntryData;
 use Splicewire\Beam\Ux\Data\MirrorStatusRowData;
 use Splicewire\Beam\Ux\Data\SitemapHealthRowData;
 use Splicewire\Beam\Ux\Database\Seeders\BeamUxSeeder;
+use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
@@ -133,6 +134,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // ADDITIVE (`Relation::morphMap`), NEVER `enforceMorphMap`: a beam-composing host has many
         // models on class-string morphs. Mirrors {@see \Splicewire\Beam\BeamServiceProvider}.
         Relation::morphMap(['beam_ux_entry' => BeamUxEntry::class]);
+
+        // UX-08c: the read ability the Developer-zone diagnostics declare (who may update entries; Root passes).
+        DiagnosticsAbility::define();
 
         // `BeamUxEntry` binds its authoring-API authorization HERE, in the package that owns the model
         // (api-surface-coherence 147; the shape 135 landed for beam's `Hook`). Until this line existed

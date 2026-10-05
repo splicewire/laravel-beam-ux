@@ -10,6 +10,7 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
+use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
 use Splicewire\Beam\Ux\Filters\ProjectedExact;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Sitemap\EntryEntitlementGate;
@@ -40,6 +41,8 @@ use Splicewire\Beam\Ux\Type\UxType;
     icon: 'globe',
     section: 'ops',
     readOnly: true,
+    // UX-08c: a member reads entries but not this machinery; see DiagnosticsAbility.
+    policy: DiagnosticsAbility::NAME,
 )]
 #[TypeScript]
 class SitemapHealthRowData extends BeamData
