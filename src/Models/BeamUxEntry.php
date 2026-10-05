@@ -206,6 +206,11 @@ class BeamUxEntry extends Model implements WorkflowManaged
         'workflow_version',
         // Publication aspect: the version the PUBLIC artifact was compiled from ({@see EntryPublication}).
         'published_version',
+        // Provenance aspect (DOCS-06, ADR-0215): `origin` (cms | disk:<path> | package:<vendor/name>)
+        // and `asserted_hash` (the title+body hash the origin last wrote). Together they tell a
+        // pristine row from an edited one — see {@see \Splicewire\Beam\Ux\Provenance\Provenance}.
+        'origin',
+        'asserted_hash',
     ];
 
     protected $attributes = [
@@ -280,6 +285,15 @@ class BeamUxEntry extends Model implements WorkflowManaged
 
             if (($entry->realms === null || $entry->realms === []) && $entry->realm !== null) {
                 $entry->realms = [$entry->realm];
+            }
+
+            // DOCS-06 (ADR-0215): a row created outside the seed/import paths — an editor save — is
+            // `cms` by default. The seeders pass an explicit `package:`/`disk:` origin that overrides
+            // this. Guarded on the column so a host that has not run the DOCS-06 migration is
+            // unaffected (the package's hasColumn-tolerance convention).
+            if ($entry->origin === null
+                && \Illuminate\Support\Facades\Schema::hasColumn($entry->getTable(), 'origin')) {
+                $entry->origin = \Splicewire\Beam\Ux\Provenance\Provenance::CMS;
             }
         });
 

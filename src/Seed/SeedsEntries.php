@@ -56,6 +56,7 @@ trait SeedsEntries
         array $attributes = [],
         UxFormat $format = UxFormat::Mdx,
         ?string $namespace = null,
+        ?string $origin = null,
     ): ?BeamUxEntry {
         if (! $this->canSeed()) {
             return null;
@@ -80,7 +81,7 @@ trait SeedsEntries
         // `splicewire:beam:seed` was refused by the write gate, and the second — with the gate fixed —
         // reported success while quietly skipping the two rows the first run had stranded. A failure that
         // makes the retry a no-op is worse than a failure that leaves nothing behind.
-        $entry = DB::transaction(function () use ($slug, $format, $namespace, $attributes, $source): BeamUxEntry {
+        $entry = DB::transaction(function () use ($slug, $format, $namespace, $attributes, $source, $origin): BeamUxEntry {
             // BORN PUBLISHED, and this is what makes the OTB promise true rather than nearly true.
             // `WorkflowMarkingPublishGate` treats a workflow-managed entry as public only at the
             // published marking, and a freshly-created row's `workflow_marking` is NULL — so on any host
@@ -92,12 +93,20 @@ trait SeedsEntries
             // Overridable, because it sits in the DEFAULTS that `$attributes` merges over: a contributor
             // seeding genuinely draft content passes its own marking, and create-only means a host that
             // later unpublishes the row is never overwritten by a re-seed.
+            // DOCS-06: stamp provenance LAST so `origin` + `asserted_hash` are authoritative over
+            // $attributes. A seeded row's origin is its package (the caller passes `package:<vendor>`;
+            // falls back to this package's seed machinery), and the hash is taken over the source the
+            // seed asserts, so a later host edit is detectable by `docs.diverged`. No-ops pre-migration.
             $entry = BeamUxEntry::create(array_merge([
                 'slug' => $slug,
                 'type' => UxType::Page,
                 'format' => $format,
                 'namespace' => $namespace,
-            ], BeamUxEntry::publishedMarkingAttributes(), $attributes));
+            ], BeamUxEntry::publishedMarkingAttributes(), $attributes, \Splicewire\Beam\Ux\Provenance\Provenance::stamp(
+                $origin ?? \Splicewire\Beam\Ux\Provenance\Provenance::package('splicewire/laravel-beam-ux'),
+                $attributes['title'] ?? null,
+                $source,
+            )));
 
             $written = app(StorageDriverResolver::class)
                 ->resolve($entry)
