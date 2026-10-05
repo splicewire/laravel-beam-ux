@@ -128,7 +128,7 @@ class IaInvariantsTest extends TestCase
         $this->app->make(FrameNavContributor::class)->contributeNav('tenant');
     }
 
-    public function test_where_the_host_is_not_being_built_a_host_breach_is_reported_and_pruned_not_thrown(): void
+    public function test_in_production_a_host_breach_is_reported_and_pruned_not_thrown(): void
     {
         // Production's default (`beam.ux.ia.throw` is off there): route mounting differs by environment, so a link
         // valid where the host was built may be unmounted here, and that must not take down every page.
