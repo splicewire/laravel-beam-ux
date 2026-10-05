@@ -273,6 +273,30 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         $this->assertContains('kit/notes.txt', $result['ignored']);
     }
 
+    public function test_ignore_globs_keep_a_file_out_of_both_the_import_and_the_plan(): void
+    {
+        // docs-walkthrough DOCS-05: a declared source's `ignore` globs (beam-docs-satellite 54's `fragments/auth-note`
+        // hazard: an include-only file under the scan root imported as a row and poisoned the chrome audit). `**` crosses
+        // directories, `*` does not, and scan() and plan() honour the same list so the audit cannot disagree.
+        $this->writeFile('docs/page/intro.mdx', "# Intro\n");
+        $this->writeFile('fragments/page/auth-note.mdx', "# Auth note\n");
+        $this->writeFile('docs/drafts/page/wip.mdx', "# WIP\n");
+        $ignore = ['fragments/**', 'docs/drafts/*/wip.mdx'];
+        $batch = $this->app->make(RegisterEntriesFromDisk::class);
+
+        $plan = $batch->plan($this->root, null, $ignore);
+        $this->assertSame(['docs/page/intro.mdx'], $plan['unregistered']);
+        $this->assertSame(['docs/drafts/page/wip.mdx', 'fragments/page/auth-note.mdx'], $plan['ignored']);
+
+        $result = $batch->scan($this->root, null, null, $ignore);
+        $this->assertSame(['intro'], array_map(fn (BeamUxEntry $e) => $e->slug, $result['created']));
+        $this->assertContains('fragments/page/auth-note.mdx', $result['ignored']);
+        $this->assertSame(1, BeamUxEntry::count());
+
+        // `*` stops at a slash: the same glob one level shallower ignores nothing.
+        $this->assertSame([], $batch->plan($this->root, null, ['docs/*/wip.mdx'])['ignored']);
+    }
+
     public function test_update_from_newer_is_off_by_default_a_newer_disk_file_does_not_flow_back(): void
     {
         config()->set('beam.ux.update_from_newer.enabled', false);

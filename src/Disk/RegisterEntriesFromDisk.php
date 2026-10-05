@@ -93,7 +93,7 @@ class RegisterEntriesFromDisk
      *
      * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, ignored: array<int, string>, failed: array<string, string>, unresolved: array<int, string>, recognized: int}
      */
-    public function scan(string $root, ?BeamUxEntry $under = null, ?UxType $default = null): array
+    public function scan(string $root, ?BeamUxEntry $under = null, ?UxType $default = null, array $ignore = []): array
     {
         $root = rtrim($root, '/');
 
@@ -119,7 +119,7 @@ class RegisterEntriesFromDisk
         foreach ($this->files($root) as $absolute) {
             $relative = ltrim(substr($absolute, strlen($root)), '/');
 
-            if (! $this->disk->recognizes($relative)) {
+            if (self::ignores($ignore, $relative) || ! $this->disk->recognizes($relative)) {
                 $ignored[] = $relative;
 
                 continue;
@@ -612,7 +612,7 @@ class RegisterEntriesFromDisk
      *
      * @return array{matched: list<string>, unregistered: list<string>, ignored: list<string>, unresolved: list<string>}
      */
-    public function plan(string $root, ?UxType $default = null): array
+    public function plan(string $root, ?UxType $default = null, array $ignore = []): array
     {
         $plan = ['matched' => [], 'unregistered' => [], 'ignored' => [], 'unresolved' => []];
         $root = rtrim($root, '/');
@@ -622,7 +622,7 @@ class RegisterEntriesFromDisk
 
         foreach ($this->files($root) as $absolute) {
             $relative = ltrim(substr($absolute, strlen($root)), '/');
-            $envelope = $this->disk->recognizes($relative) ? $this->disk->envelopeForPath($relative) : null;
+            $envelope = ! self::ignores($ignore, $relative) && $this->disk->recognizes($relative) ? $this->disk->envelopeForPath($relative) : null;
             if ($envelope === null) {
                 $plan['ignored'][] = $relative;
 
@@ -639,6 +639,30 @@ class RegisterEntriesFromDisk
 
             return $paths;
         }, $plan);
+    }
+
+    /**
+     * Whether `$relative` (a path under the scan root) matches one of a source's `ignore` globs (docs-walkthrough DOCS-05).
+     * `**` crosses directories, `*` and `?` stay within one segment; an ignored file is reported `ignored`, never imported.
+     *
+     * @param  list<string>  $globs
+     */
+    public static function ignores(array $globs, string $relative): bool
+    {
+        foreach ($globs as $glob) {
+            $pattern = preg_replace_callback('/\*\*|\*|\?|[^*?]+/', fn (array $m): string => match ($m[0]) {
+                '**' => '.*',
+                '*' => '[^/]*',
+                '?' => '[^/]',
+                default => preg_quote($m[0], '#'),
+            }, ltrim((string) $glob, '/'));
+
+            if (preg_match('#^'.$pattern.'$#', $relative) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
