@@ -2,6 +2,8 @@
 
 namespace Splicewire\Beam\Ux\Tests\Ia;
 
+use Illuminate\Support\Facades\Log;
+use Mockery;
 use Illuminate\Support\Facades\Route;
 use Rushing\DataNav\InvocableNavItem;
 use Rushing\DataNav\NavLink;
@@ -124,6 +126,35 @@ class IaInvariantsTest extends TestCase
         $this->expectExceptionMessageMatches('#I1 tenant /operator/tenants#');
 
         $this->app->make(FrameNavContributor::class)->contributeNav('tenant');
+    }
+
+    public function test_where_the_host_is_not_being_built_a_host_breach_is_reported_and_pruned_not_thrown(): void
+    {
+        // Production's default (`beam.ux.ia.throw` is off there): route mounting differs by environment, so a link
+        // valid where the host was built may be unmounted here, and that must not take down every page.
+        config(['beam.ux.ia.throw' => false]);
+        Log::spy();
+        $this->hostNav('tenant', [
+            NavLink::make(title: 'Dashboard', href: '/dashboard'),
+            NavLink::make(title: 'Operator', href: '/operator/tenants'),
+        ]);
+
+        $block = $this->app->make(FrameNavContributor::class)->contributeNav('tenant');
+
+        $this->assertSame(['/dashboard'], $this->hrefs($block));
+        // Loud, not silent: an error-level line naming the host, the realm and the pruned node.
+        Log::shouldHaveReceived('error')->with(Mockery::on(
+            fn (string $message): bool => str_contains($message, 'tenant rail at localhost') && str_contains($message, 'I1 tenant /operator/tenants'),
+        ), Mockery::any())->once();
+    }
+
+    public function test_the_invariants_throw_by_default_everywhere_but_production(): void
+    {
+        $invariants = $this->app->make(IaInvariants::class);
+        $this->assertTrue($invariants->throws());
+
+        $this->app['env'] = 'production';
+        $this->assertFalse($invariants->throws());
     }
 
     public function test_i1_a_package_rail_node_crossing_into_another_realm_is_pruned(): void

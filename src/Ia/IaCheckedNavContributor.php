@@ -14,7 +14,8 @@ use Splicewire\Beam\Ux\Frame\FrameNavContribution;
  *
  * Whose tree it is decides the answer, by the split {@see FrameNavContribution} already draws: when the package's own
  * contributor builds the package's {@see DeclaredSectionNavigation}, the tree is package-contributed and a breaking
- * node is pruned; otherwise the host wrote it and the invariants throw.
+ * node is pruned; otherwise the host wrote it and {@see IaInvariants::enforce()} throws (outside production) or reports
+ * and prunes (in production).
  */
 class IaCheckedNavContributor implements FrameNavContributor
 {
@@ -41,7 +42,7 @@ class IaCheckedNavContributor implements FrameNavContributor
         if ($this->contributedByThePackage($realm)) {
             $block['nav'] = $this->invariants->prune($realm, $block['nav']);
         } else {
-            $this->invariants->assert($realm, $block['nav']);
+            $block['nav'] = $this->invariants->enforce($realm, $block['nav']);
         }
 
         return $block;

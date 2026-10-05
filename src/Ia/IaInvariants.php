@@ -55,6 +55,47 @@ class IaInvariants
     }
 
     /**
+     * Whether a host-authored breach throws. It does where the host is being built: every environment but production,
+     * where the guard tests and the author see it. In production route mounting can differ from where the host was built
+     * (custody, flags, the sides a host plays), so a link valid there may be unmounted here, and one such link must not
+     * take down every page that renders the rail. `beam.ux.ia.throw` overrides either way.
+     */
+    public function throws(): bool
+    {
+        return (bool) config('beam.ux.ia.throw', ! app()->isProduction());
+    }
+
+    /**
+     * Hold a host-authored tree to the invariants: throw where {@see throws()}, otherwise report the breach at error level
+     * (naming the host, the realm and each node) and hand back the tree without the breaking nodes, so a pruned link never
+     * vanishes silently.
+     *
+     * @param  array<string, mixed>  $nav
+     * @param  list<string>  $crossings
+     * @return array<string, mixed>
+     *
+     * @throws IaInvariantViolation
+     */
+    public function enforce(string $realm, array $nav, array $crossings = []): array
+    {
+        $violations = $this->violations($realm, $nav, $crossings);
+
+        if ($violations === []) {
+            return $nav;
+        }
+
+        $violation = new IaInvariantViolation($realm, $violations, self::host());
+
+        if ($this->throws()) {
+            throw $violation;
+        }
+
+        report($violation);
+
+        return $this->prune($realm, $nav, $crossings);
+    }
+
+    /**
      * Throw when a host-authored tree breaks an invariant.
      *
      * @param  array<string, mixed>  $nav
@@ -67,7 +108,7 @@ class IaInvariants
         $violations = $this->violations($realm, $nav, $crossings);
 
         if ($violations !== []) {
-            throw new IaInvariantViolation($realm, $violations);
+            throw new IaInvariantViolation($realm, $violations, self::host());
         }
     }
 
@@ -84,6 +125,14 @@ class IaInvariants
         $kept = $this->keep(self::items($nav), [], $realm, $crossings);
 
         return array_is_list($nav) ? $kept : [...$nav, 'items' => $kept];
+    }
+
+    /** The host whose rail this is: the request's, else the configured app URL's. */
+    protected static function host(): string
+    {
+        $request = app()->bound('request') ? app('request') : null;
+
+        return $request?->getHost() ?: (string) parse_url((string) config('app.url'), PHP_URL_HOST);
     }
 
     /**
