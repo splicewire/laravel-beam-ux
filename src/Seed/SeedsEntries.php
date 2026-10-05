@@ -68,7 +68,17 @@ trait SeedsEntries
             ->first();
 
         if ($existing !== null) {
-            return $existing;
+            // DOCS-06 (ADR-0215 §2): no longer unconditionally create-once. A pristine package:/disk:
+            // row whose origin changed is re-asserted from this source; an edited row is kept and left
+            // for docs.diverged; a cms row is untouched. Placement is never re-asserted. No-op pre-migration.
+            app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->reassert(
+                $existing,
+                $attributes['title'] ?? null,
+                $source,
+                $origin ?? \Splicewire\Beam\Ux\Provenance\Provenance::package('splicewire/laravel-beam-ux'),
+            );
+
+            return $existing->refresh();
         }
 
         // ATOMIC, and the create-never-update rule above is exactly why. The row and its body are two

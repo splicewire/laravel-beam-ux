@@ -103,6 +103,7 @@ class RegisterEntriesFromDisk
 
         $created = [];
         $skipped = [];
+        $reasserted = [];
         $ignored = [];
 
         $unresolved = [];
@@ -111,7 +112,7 @@ class RegisterEntriesFromDisk
         if (! is_dir($root)) {
             $failed = $this->failures;
 
-            return compact('created', 'skipped', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
+            return compact('created', 'skipped', 'reasserted', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
         }
 
         $recognized = [];
@@ -172,7 +173,7 @@ class RegisterEntriesFromDisk
         if ($unresolved !== []) {
             $failed = $this->failures;
 
-            return compact('created', 'skipped', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
+            return compact('created', 'skipped', 'reasserted', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
         }
 
         foreach ($recognized as $index => [$absolute, $relative, $envelope]) {
@@ -190,7 +191,17 @@ class RegisterEntriesFromDisk
                 // Remembered even though nothing is written: a re-run over a partially-imported tree must
                 // still resolve children onto the parent that is already there.
                 $this->seen[$this->key($envelope['namespace'], $envelope['slug'])] = $existing;
-                $skipped[] = $relative;
+                // DOCS-06 (ADR-0215 §2): re-assert instead of blindly skipping. A pristine package:/disk:
+                // row whose source changed is rewritten from this file; a disk origin outranks a package
+                // stub (DOC-5), so a host file supersedes a pristine package row at the same coordinate.
+                // An edited row is left for docs.diverged; cms is untouched. No-op pre-migration.
+                $src = (string) file_get_contents($absolute);
+                $title = $this->containmentFor($src, $relative, $envelope)['title'] ?? null;
+                if (app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->reassert($existing, $title, $src, \Splicewire\Beam\Ux\Provenance\Provenance::disk($relative))) {
+                    $reasserted[] = $relative;
+                } else {
+                    $skipped[] = $relative;
+                }
 
                 continue;
             }
@@ -200,7 +211,7 @@ class RegisterEntriesFromDisk
 
         $failed = $this->failures;
 
-        return compact('created', 'skipped', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
+        return compact('created', 'skipped', 'reasserted', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
     }
 
     /**
