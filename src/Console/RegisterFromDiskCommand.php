@@ -39,7 +39,8 @@ class RegisterFromDiskCommand extends Command
     protected $signature = 'splicewire:beam:ux:register-from-disk
         {path : The directory to scan for un-registered body files}
         {--under= : Public path or entry id of the entry scan-root files hang from (default: the realm root)}
-        {--type= : The UxType for files whose directory does not name one (layout|template|page|component|theme)}';
+        {--type= : The UxType for files whose directory does not name one (layout|template|page|component|theme)}
+        {--dry-run : Report which files are already registered and which would be, and write nothing}';
 
     protected $description = 'Register on-disk BeamUx bodies (every format) not yet in the DB; infer type+namespace+containment from path; run S9 draft inference at import.';
 
@@ -94,6 +95,10 @@ class RegisterFromDiskCommand extends Command
         // constructor-injected `WriteGate` — before the rebind happens, so the permissive binding lands
         // behind an object graph that already closed over the old gate and the import is refused anyway.
         // A container rebind only reaches what has not been constructed yet.
+        if ($this->option('dry-run')) {
+            return $this->dryRun($path, $type);
+        }
+
         $result = $this->asSystemWriter(
             fn () => $this->laravel->make(RegisterEntriesFromDisk::class)->scan($path, $under, $type),
         );
@@ -139,6 +144,28 @@ class RegisterFromDiskCommand extends Command
         ));
 
         return ($result['failed'] ?? []) === [] ? self::SUCCESS : self::FAILURE;
+    }
+
+    /**
+     * `--dry-run` (docs-walkthrough DOCS-01): the import's own plan, read-only. Names every file that would register
+     * and every file scan() would refuse for want of a `type`; writes nothing.
+     */
+    private function dryRun(string $path, ?UxType $type): int
+    {
+        $plan = $this->laravel->make(RegisterEntriesFromDisk::class)->plan($path, $type);
+
+        foreach ($plan['unregistered'] as $relative) {
+            $this->components->twoColumnDetail($relative, in_array($relative, $plan['unresolved'], true) ? '<fg=red>would refuse: no type</>' : '<fg=yellow>would register</>');
+        }
+        $this->components->info(sprintf(
+            '%d matched · %d would register · %d ignored (not a body format) · %d without a type. Nothing was written.',
+            count($plan['matched']),
+            count($plan['unregistered']),
+            count($plan['ignored']),
+            count($plan['unresolved']),
+        ));
+
+        return self::SUCCESS;
     }
 
     /**

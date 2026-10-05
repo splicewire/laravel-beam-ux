@@ -604,6 +604,44 @@ class RegisterEntriesFromDisk
     }
 
     /**
+     * What {@see scan()} would do under `$root`, without writing: each recognized file (relative path) is either
+     * `matched` (a row already holds its envelope's `namespace` + `slug`) or `unregistered`; `ignored` is not a body
+     * format; `unresolved` has no inferrable `type` and no `$default` (scan() would refuse the whole tree for it).
+     * The same files, envelopes and idempotency key as scan(), so `register-from-disk --dry-run` and the
+     * `docs.unregistered` audit cannot disagree with the importer (docs-walkthrough DOCS-01, DOC-3).
+     *
+     * @return array{matched: list<string>, unregistered: list<string>, ignored: list<string>, unresolved: list<string>}
+     */
+    public function plan(string $root, ?UxType $default = null): array
+    {
+        $plan = ['matched' => [], 'unregistered' => [], 'ignored' => [], 'unresolved' => []];
+        $root = rtrim($root, '/');
+        if (! is_dir($root)) {
+            return $plan;
+        }
+
+        foreach ($this->files($root) as $absolute) {
+            $relative = ltrim(substr($absolute, strlen($root)), '/');
+            $envelope = $this->disk->recognizes($relative) ? $this->disk->envelopeForPath($relative) : null;
+            if ($envelope === null) {
+                $plan['ignored'][] = $relative;
+
+                continue;
+            }
+            if ($envelope['type'] === null && $default === null) {
+                $plan['unresolved'][] = $relative;
+            }
+            $plan[$this->existing($envelope) === null ? 'unregistered' : 'matched'][] = $relative;
+        }
+
+        return array_map(function (array $paths): array {
+            sort($paths);
+
+            return $paths;
+        }, $plan);
+    }
+
+    /**
      * The record a derived envelope already resolves to (the idempotency key: `namespace` + `slug`), or
      * null when nothing is registered there yet.
      *

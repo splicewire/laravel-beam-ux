@@ -53,6 +53,41 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_plan_reports_matched_and_unregistered_files_and_writes_nothing(): void
+    {
+        // docs-walkthrough DOCS-01 (DOC-3): the read-only half of the import. It walks the same files with the same
+        // envelope and idempotency key as scan(), so the docs.unregistered audit and --dry-run agree with the importer.
+        $this->writeFile('docs/page/build.mdx', "# Build\n");
+        $this->writeFile('docs/build/page/intro.mdx', "# Intro\n");
+        $this->writeFile('docs/build/page/deploy.mdx', "# Deploy\n");
+        $this->writeFile('docs/notes.txt', 'not a body format');
+        BeamUxEntry::create(['slug' => 'build', 'namespace' => 'docs', 'type' => 'page']);
+        $before = BeamUxEntry::count();
+
+        $plan = $this->app->make(RegisterEntriesFromDisk::class)->plan($this->root);
+
+        $this->assertSame(['docs/page/build.mdx'], $plan['matched']);
+        $this->assertSame(['docs/build/page/deploy.mdx', 'docs/build/page/intro.mdx'], $plan['unregistered']);
+        $this->assertSame(['docs/notes.txt'], $plan['ignored']);
+        $this->assertSame([], $plan['unresolved']);
+        $this->assertSame($before, BeamUxEntry::count());
+    }
+
+    public function test_register_from_disk_dry_run_names_what_it_would_register_and_writes_nothing(): void
+    {
+        $this->writeFile('docs/page/build.mdx', "# Build\n");
+        $this->writeFile('docs/build/page/intro.mdx', "# Intro\n");
+        BeamUxEntry::create(['slug' => 'build', 'namespace' => 'docs', 'type' => 'page']);
+        $before = BeamUxEntry::count();
+
+        $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root, '--dry-run' => true])
+            ->expectsOutputToContain('docs/build/page/intro.mdx')
+            ->expectsOutputToContain('1 matched · 1 would register · 0 ignored')
+            ->assertSuccessful();
+
+        $this->assertSame($before, BeamUxEntry::count());
+    }
+
     public function test_register_from_disk_is_format_aware_infers_from_path_and_drafts_only_components(): void
     {
         // A `.tsx` component and an `.mdx` page — both register (format-aware, not tsx-only).
