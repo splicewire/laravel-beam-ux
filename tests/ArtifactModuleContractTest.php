@@ -132,6 +132,30 @@ class ArtifactModuleContractTest extends TestCase
         $this->assertStringContainsString('Body text.', $code);
     }
 
+    /**
+     * D-T5 (docs-walkthrough §6.1, rule DOC-10), RED FIRST as a ratchet (DOCS-03): no MDX comment body reaches a
+     * compiled artifact. Today `compile.mjs` passes comment-only expressions through, so the marker leaks; that known
+     * violation is listed with the ticket that removes it (DOCS-04: strip comment-only expressions). An exact match
+     * passes. When DOCS-04 lands, the leak is gone, this entry is STALE and the test fails until the entry is deleted,
+     * so the list only shrinks.
+     */
+    public function test_no_mdx_comment_body_reaches_a_compiled_artifact_ratchet(): void
+    {
+        $this->requireToolchain();
+        $known = ['D-T5 compile-fixture SECRET-MARKER' => 'DOCS-04: strip comment-only expressions from the compile'];
+
+        $code = $this->compile("{/* SECRET-MARKER */}\n# Hi\n");
+        $found = str_contains($code, 'SECRET-MARKER') ? ['D-T5 compile-fixture SECRET-MARKER' => 'the artifact carries the comment body'] : [];
+
+        fwrite(STDERR, "\nD-T5 ratchet: ".count($found).' found, '.count($known)." listed\n".implode("\n", array_map(
+            fn ($id) => (isset($found[$id]) ? '  known  ' : '  STALE  ').$id.'  →  '.$known[$id],
+            array_keys($known),
+        ))."\n");
+
+        $this->assertSame([], array_keys(array_diff_key($found, $known)), 'A new comment leak: a regression, or the ratchet lacks an entry.');
+        $this->assertSame([], array_keys(array_diff_key($known, $found)), 'Stale D-T5 entry: the compile strips the comment now, so delete the entry.');
+    }
+
     private function compile(string $source): string
     {
         $entry = new BeamUxEntry([
