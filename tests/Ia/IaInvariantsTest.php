@@ -3,8 +3,8 @@
 namespace Splicewire\Beam\Ux\Tests\Ia;
 
 use Illuminate\Support\Facades\Log;
-use Mockery;
 use Illuminate\Support\Facades\Route;
+use Mockery;
 use Rushing\DataNav\InvocableNavItem;
 use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavRegistry;
