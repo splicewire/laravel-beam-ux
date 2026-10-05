@@ -13,8 +13,9 @@ use Illuminate\Support\Facades\Schema;
  * `docs.diverged` audit. This class is the one place that spells the origin vocabulary, the
  * precedence order, and the hash, so the seed path, the import path, and the audit agree.
  *
- * Report-only in this slice: nothing here mutates a row. The pristine re-assert (rewriting a stale
- * pristine row from its origin) is the ADR-0215 follow-on and is deliberately NOT implemented here.
+ * This class is pure: it only spells the origin vocabulary, the precedence order and the hash, and
+ * mutates nothing. The pristine re-assert that acts on them lives in {@see Reasserter}; the
+ * `docs.diverged` audit that merely reports a diverged row is genuinely report-only.
  */
 final class Provenance
 {
