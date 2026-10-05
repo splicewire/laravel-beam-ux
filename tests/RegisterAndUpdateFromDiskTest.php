@@ -295,6 +295,11 @@ class RegisterAndUpdateFromDiskTest extends TestCase
 
         // `*` stops at a slash: the same glob one level shallower ignores nothing.
         $this->assertSame([], $batch->plan($this->root, null, ['docs/*/wip.mdx'])['ignored']);
+
+        // `**/` matches zero or more directories, as in .gitignore, so it also catches a top-level file (build.qa).
+        $this->assertTrue(RegisterEntriesFromDisk::ignores(['**/auth-note.mdx'], 'auth-note.mdx'));
+        $this->assertTrue(RegisterEntriesFromDisk::ignores(['**/auth-note.mdx'], 'fragments/page/auth-note.mdx'));
+        $this->assertFalse(RegisterEntriesFromDisk::ignores(['**/auth-note.mdx'], 'fragments/page/auth-note.mdx.bak'));
     }
 
     public function test_update_from_newer_is_off_by_default_a_newer_disk_file_does_not_flow_back(): void

@@ -643,14 +643,16 @@ class RegisterEntriesFromDisk
 
     /**
      * Whether `$relative` (a path under the scan root) matches one of a source's `ignore` globs (docs-walkthrough DOCS-05).
-     * `**` crosses directories, `*` and `?` stay within one segment; an ignored file is reported `ignored`, never imported.
+     * `**` crosses directories (a leading `**` plus slash also matches zero of them, as in .gitignore), `*` and `?` stay
+     * within one segment; an ignored file is reported `ignored`, never imported.
      *
      * @param  list<string>  $globs
      */
     public static function ignores(array $globs, string $relative): bool
     {
         foreach ($globs as $glob) {
-            $pattern = preg_replace_callback('/\*\*|\*|\?|[^*?]+/', fn (array $m): string => match ($m[0]) {
+            $pattern = preg_replace_callback('/\*\*\/|\*\*|\*|\?|[^*?]+/', fn (array $m): string => match ($m[0]) {
+                '**/' => '(?:.*/)?',
                 '**' => '.*',
                 '*' => '[^/]*',
                 '?' => '[^/]',
