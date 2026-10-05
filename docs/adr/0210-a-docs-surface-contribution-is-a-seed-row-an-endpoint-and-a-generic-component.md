@@ -180,6 +180,13 @@ them into one seeder, moving their config gates from the registration to inside 
 rule for any contributor with more than one thing to seed, and it is worth knowing before writing one:
 **compose within your step; never register twice.**
 
+## Amendment (docs-walkthrough OQ-D3, owner ruling 2026-10-05): "site-owned from creation" means placement (amends §6)
+
+A contributed seed row's placement (`segment`, `parent_id`, `access`, `workflow_marking`) is site-owned
+from creation, as §6 says. Its body and title follow the contributing package while the row is pristine,
+and become the site's once it edits them. The rest of §6 (the inline "not installed" state, the doctor's
+orphan report, the headless skip) is unchanged. See **ADR-0215**.
+
 ## Consequences
 
 - The MCP reference page becomes: one seed row (beam-mcp), one JSON route (beam-mcp), one generic

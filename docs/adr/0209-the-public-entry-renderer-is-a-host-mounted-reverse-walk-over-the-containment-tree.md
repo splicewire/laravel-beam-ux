@@ -431,6 +431,13 @@ This is ticket 07's rule at one more remove. That ticket found the artifact was 
 output but never as a module something loaded; here it was verified as a response but never as a
 response a **returning** browser asks for.
 
+## Amendment (docs-walkthrough OQ-D3, owner ruling 2026-10-05): origins and pristine re-assertion (amends §11)
+
+§11's create-once holds only for `cms` rows. A row seeded by a package or imported from disk records its
+`origin` and `asserted_hash`, and it re-asserts from that origin while nobody has edited it. An edited row
+is kept and reported as `docs.diverged`. §11's "without `--force`" named an option that does not exist,
+and it is withdrawn. The decision and its rule-11 sweep are **ADR-0215**.
+
 ## Alternatives rejected
 
 - **A materialized `resolved_path` column** — one indexed lookup instead of a walk, but a second source
