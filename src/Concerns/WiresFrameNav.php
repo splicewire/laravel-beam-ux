@@ -7,6 +7,7 @@ use Rushing\DataNav\NavRegistry;
 use Rushing\Popcorn\Concerns\Chained;
 use Schemastud\Frame\Contracts\FrameNavContributor;
 use Schemastud\Frame\Contracts\ResourceRegistry;
+use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
@@ -18,6 +19,7 @@ use Splicewire\Beam\Ux\Frame\NavSectionProjector;
 use Splicewire\Beam\Ux\Frame\RouteContextPlan;
 use Splicewire\Beam\Ux\Ia\IaCheckedNavContributor;
 use Splicewire\Beam\Ux\Ia\IaInvariants;
+use Splicewire\Beam\Ux\Ia\Invariants\DeveloperSeatsLiveInTheDeveloperZone;
 use Splicewire\Beam\Ux\Ia\Invariants\HrefJoinsAMountedRoute;
 use Splicewire\Beam\Ux\Ia\Invariants\RailStaysInItsRealm;
 
@@ -63,9 +65,10 @@ trait WiresFrameNav
             $this->app->bind(FrameNavContributor::class, FrameNavContribution::class);
         }
 
-        // M5 (ux-walkthrough UX-06): the IA invariants. I2 (UX-08) and I3 (UX-09) join through `with()`.
+        // M5 (ux-walkthrough UX-06): the IA invariants. I2 joined with UX-08; I3 (UX-09) joins the same way.
         $this->app->bind(IaInvariants::class, fn ($app): IaInvariants => new IaInvariants([
             $app->make(RailStaysInItsRealm::class),
+            $app->make(DeveloperSeatsLiveInTheDeveloperZone::class),
             $app->make(HrefJoinsAMountedRoute::class),
         ]));
 
@@ -168,6 +171,7 @@ trait WiresFrameNav
                     key: 'authoring', realm: $realm, label: 'Authoring',
                     icon: 'FileText', href: '/authoring', order: 30,
                     entitlement: null, permission: null,
+                audience: NavAudience::Product,
                 ),
                 by: 'splicewire/laravel-beam-ux',
             );
@@ -177,6 +181,7 @@ trait WiresFrameNav
                     key: 'ops', realm: $realm, label: 'Ops',
                     icon: 'Server', href: '/ops', order: 80,
                     entitlement: null, permission: null,
+                audience: NavAudience::Developer,
                 ),
                 by: 'splicewire/laravel-beam-ux',
             );

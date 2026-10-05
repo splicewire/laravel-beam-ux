@@ -10,6 +10,7 @@ use Rushing\DataNav\NavRegistry;
 use Rushing\DataNav\NavTree;
 use Schemastud\Frame\Registry\RouteContextEntry;
 use Splicewire\Beam\Dashboard\RealmDashboard;
+use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Ux\Frame\DeclaredSectionNavigation;
@@ -57,6 +58,7 @@ class DeclaredSectionNavigationTest extends TestCase
                 key: $key, realm: $realm, label: ucfirst($key),
                 icon: 'Calendar', href: '/'.$key, order: $order,
                 entitlement: null, permission: null,
+            audience: NavAudience::Product,
             ),
             by: 'splicewire/laravel-beam-'.$key,
         );
@@ -174,7 +176,7 @@ class DeclaredSectionNavigationTest extends TestCase
             new NavSection(
                 key: $key, realm: 'tenant', label: 'Platform',
                 icon: 'Server', href: '/'.$key, order: 10,
-                entitlement: null, permission: null, static: $static,
+                entitlement: null, permission: null, audience: NavAudience::Product, static: $static,
             ),
             by: 'app',
         );

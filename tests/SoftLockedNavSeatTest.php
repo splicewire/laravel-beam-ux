@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Foundation\Auth\User;
 use Rushing\DataNav\NavContext;
 use Rushing\DataNav\NavRegistry;
+use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSeatLock;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
@@ -61,6 +62,7 @@ class SoftLockedNavSeatTest extends TestCase
                 order: 10,
                 entitlement: $entitlement,
                 permission: $permission,
+                audience: NavAudience::Product,
                 lock: $lock,
             ),
             by: 'splicewire/laravel-beam-'.$key,

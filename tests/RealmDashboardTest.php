@@ -20,6 +20,7 @@ use Schemastud\Frame\FrameServiceProvider;
 use Schemastud\Frame\Registry\ResourceDefinition;
 use Spatie\LaravelData\Data;
 use Splicewire\Beam\Dashboard\RealmDashboard;
+use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Particle\Backing\StreamsRecords;
@@ -107,7 +108,7 @@ class RealmDashboardTest extends TestCase
 
         // A seat for `platform` in the operator realm, so "nav-seated" has something to be true of.
         $this->app->make(NavSectionRegistry::class)->register(
-            new NavSection(key: 'platform', realm: 'operator', label: 'Platform', icon: 'Server', href: '/platform', order: 10, entitlement: null, permission: null),
+            new NavSection(key: 'platform', realm: 'operator', label: 'Platform', icon: 'Server', href: '/platform', order: 10, entitlement: null, permission: null, audience: NavAudience::Product),
             by: self::class,
         );
 
@@ -117,6 +118,7 @@ class RealmDashboardTest extends TestCase
             new NavSection(
                 key: 'people', realm: 'operator', label: 'People', icon: 'Users', href: '/people', order: 20,
                 entitlement: null, permission: null,
+                audience: NavAudience::Product,
                 static: [['title' => 'Members', 'href' => '/operator/members', 'routeName' => 'members.index']],
             ),
             by: self::class,
@@ -280,6 +282,7 @@ class RealmDashboardTest extends TestCase
             new NavSection(
                 key: 'vault', realm: 'operator', label: 'Vault', icon: 'Archive', href: '/vault', order: 30,
                 entitlement: null, permission: null,
+                audience: NavAudience::Product,
                 static: [
                     ['title' => 'Zulu', 'href' => '/operator/zulu', 'routeName' => 'zulu.index'],
                     ['title' => 'Alpha', 'href' => '/operator/alpha', 'routeName' => 'alpha.index'],
@@ -584,6 +587,7 @@ class RealmDashboardTest extends TestCase
             new NavSection(
                 key: 'ahead', realm: 'operator', label: 'Ahead', icon: 'Star', href: '/ahead', order: -1,
                 entitlement: null, permission: null,
+                audience: NavAudience::Product,
                 static: [['title' => 'Gizmos', 'href' => '/operator/gizmos', 'routeName' => 'gizmos.index']],
             ),
             by: self::class,

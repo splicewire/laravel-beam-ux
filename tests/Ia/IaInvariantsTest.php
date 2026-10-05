@@ -10,6 +10,7 @@ use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavRegistry;
 use Rushing\DataNav\NavTree;
 use Schemastud\Frame\Contracts\FrameNavContributor;
+use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Ux\Frame\DeclaredSectionNavigation;
@@ -72,7 +73,7 @@ class IaInvariantsTest extends TestCase
         $this->app->make(NavSectionRegistry::class)->register(
             new NavSection(
                 key: 'platform', realm: $realm, label: 'Platform', icon: 'Server', href: $href, order: 10,
-                entitlement: null, permission: null, static: $static,
+                entitlement: null, permission: null, audience: NavAudience::Product, static: $static,
             ),
             by: 'pkg',
         );
@@ -278,7 +279,7 @@ class IaInvariantsTest extends TestCase
 
     public function test_a_section_header_holding_children_is_a_label_and_a_childless_one_is_a_link(): void
     {
-        $header = InvocableNavItem::make(title: 'Ops', invocable: 'frame.resources', routeName: 'ops.section', href: '/ops');
+        $header = InvocableNavItem::make(title: 'Gizmos', invocable: 'frame.resources', routeName: 'gizmos.section', href: '/gizmos');
         $nav = NavTree::make([
             $header->stamped(active: false, activeTrail: false, children: [NavLink::make(title: 'Tenants', href: '/operator/tenants')]),
         ])->toArray();
@@ -286,7 +287,7 @@ class IaInvariantsTest extends TestCase
 
         $invariants = $this->app->make(IaInvariants::class);
         $this->assertSame([], $invariants->violations('operator', $nav));
-        $this->assertSame(['I1 operator /ops', 'I4 operator /ops'], array_keys($invariants->violations('operator', $lone)));
+        $this->assertSame(['I1 operator /gizmos', 'I4 operator /gizmos'], array_keys($invariants->violations('operator', $lone)));
     }
 
     public function test_every_violation_is_reported_at_once(): void

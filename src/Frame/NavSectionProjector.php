@@ -12,6 +12,7 @@ use Rushing\DataNav\NavNode;
 use Schemastud\Frame\Contracts\ResourceRegistry;
 use Splicewire\Beam\Authorization\ResourceVisibility;
 use Splicewire\Beam\Dashboard\RealmDashboard;
+use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
@@ -88,6 +89,9 @@ use Throwable;
  */
 class NavSectionProjector
 {
+    /** The one top-level node the Developer zone's seats gather under (M4). */
+    public const DEVELOPER_SEAT = 'developer.section';
+
     /** The `#[Hidden]` meta key marking a node as package-contributed rather than host-spelled. */
     public const CONTRIBUTED = 'beam.nav.contributed';
 
@@ -140,7 +144,7 @@ class NavSectionProjector
         foreach ($this->sections->for($realm) as $section) {
             $static = $this->withoutTheLeafsOwnRow($section->static, $leafHref, $hrefs, $authored);
 
-            $entries[] = [$section->order, $section->key, $this->seat($section, $context?->user, $static)];
+            $entries[] = [$section->order, $section->key, $this->seat($section, $context?->user, $static), $section->audience];
         }
 
         if ($authored !== null) {
@@ -151,7 +155,42 @@ class NavSectionProjector
 
         usort($entries, fn (array $a, array $b): int => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
 
-        return array_map(fn (array $entry): NavNode => $entry[2], $entries);
+        return $this->zoned($entries);
+    }
+
+    /**
+     * The partition (ux-walkthrough M4, UX-08): every top-level node is drawn in the rail (`zone: primary`) except the
+     * `developer` seats, which gather in their declared order under ONE last node, `developer.section`, drawn in the
+     * Developer zone (`zone: meta`). The node is a group header, so the invariants read it as a label, and an empty one
+     * is dropped with the other empty contributed seats.
+     *
+     * Each seat goes by its OWN declaration: two seats may share a key (a host's and a package's), and only the one
+     * declared `developer` belongs in the Developer zone. The dashboard leaf carries no audience and is product.
+     *
+     * @param  list<array{0: int, 1: string, 2: NavNode, 3?: NavAudience}>  $entries  in projection order
+     * @return array<int, NavNode>
+     */
+    private function zoned(array $entries): array
+    {
+        $primary = [];
+        $meta = [];
+
+        foreach ($entries as $entry) {
+            $node = $entry[2];
+            if (($entry[3] ?? NavAudience::Product) === NavAudience::Developer) {
+                $meta[] = $node;
+            } else {
+                $primary[] = $node->inZone('primary');
+            }
+        }
+
+        if ($meta !== []) {
+            $primary[] = NavLink::make(title: 'Developer', icon: 'Code', routeName: self::DEVELOPER_SEAT)
+                ->inZone('meta')
+                ->stamped(active: false, activeTrail: false, children: $meta);
+        }
+
+        return $primary;
     }
 
     /**
