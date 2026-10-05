@@ -254,7 +254,10 @@ class FrameRouteContextProjectionTest extends TestCase
 
     public function test_the_package_binds_the_plug_so_a_host_writes_no_controller(): void
     {
-        $this->assertInstanceOf(FrameNavContribution::class, $this->app->make(FrameNavContributor::class));
+        // Wrapped in the IA invariants' decorator (UX-06), which hands every call to the package's contributor.
+        $port = $this->app->make(FrameNavContributor::class);
+        $this->assertInstanceOf(\Splicewire\Beam\Ux\Ia\IaCheckedNavContributor::class, $port);
+        $this->assertInstanceOf(FrameNavContribution::class, $port->inner());
     }
 
     public function test_the_plan_the_package_binds_is_empty_because_every_list_in_it_is_host_ia(): void

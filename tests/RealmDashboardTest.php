@@ -84,6 +84,15 @@ class RealmDashboardTest extends TestCase
         ]);
     }
 
+    /**
+     * The operator surface, mounted as a host mounts its SPA shell: one GET answering every path under the realm.
+     * The nav's leaves are SPA routes, and the IA invariants' I4 (UX-06) asks the router whether each one is served.
+     */
+    protected function defineRoutes($router): void
+    {
+        $router->get('operator/{path?}', fn () => 'operator shell')->where('path', '.*');
+    }
+
     protected function setUp(): void
     {
         parent::setUp();

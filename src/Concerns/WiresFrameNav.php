@@ -16,6 +16,10 @@ use Splicewire\Beam\Ux\Frame\FrameNavContribution;
 use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
 use Splicewire\Beam\Ux\Frame\NavSectionProjector;
 use Splicewire\Beam\Ux\Frame\RouteContextPlan;
+use Splicewire\Beam\Ux\Ia\IaCheckedNavContributor;
+use Splicewire\Beam\Ux\Ia\IaInvariants;
+use Splicewire\Beam\Ux\Ia\Invariants\HrefJoinsAMountedRoute;
+use Splicewire\Beam\Ux\Ia\Invariants\RailStaysInItsRealm;
 
 /**
  * One concern of {@see BeamUxServiceProvider}: the `nav` + `routeContext` half of
@@ -58,6 +62,21 @@ trait WiresFrameNav
         if (config('beam.ux.frame_nav.enabled', true)) {
             $this->app->bind(FrameNavContributor::class, FrameNavContribution::class);
         }
+
+        // M5 (ux-walkthrough UX-06): the IA invariants. I2 (UX-08) and I3 (UX-09) join through `with()`.
+        $this->app->bind(IaInvariants::class, fn ($app): IaInvariants => new IaInvariants([
+            $app->make(RailStaysInItsRealm::class),
+            $app->make(HrefJoinsAMountedRoute::class),
+        ]));
+
+        // `extend`, not a second `bind`: an extender survives the host's own later `bind()`, so whatever
+        // contributor a host binds is still wrapped, and the invariants judge its output.
+        $this->app->extend(
+            FrameNavContributor::class,
+            fn (FrameNavContributor $inner, $app): FrameNavContributor => $inner instanceof IaCheckedNavContributor
+                ? $inner
+                : new IaCheckedNavContributor($inner, $app->make(IaInvariants::class), $app->make(NavRegistry::class)),
+        );
     }
 
     /**
