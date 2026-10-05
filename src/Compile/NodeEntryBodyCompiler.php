@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Compile;
 
+use Illuminate\Support\Facades\Log;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Symfony\Component\Process\Exception\ProcessFailedException;
@@ -25,6 +26,9 @@ class NodeEntryBodyCompiler implements EntryBodyCompiler
 {
     /** The formats `compile.mjs` knows how to turn into an ES module. `css` is a theme body, not a page. */
     public const FORMATS = [UxFormat::Mdx->value, UxFormat::Tsx->value];
+
+    /** @var list<array{rule: string, line: int, message: string}> */
+    private array $lastWarnings = [];
 
     public function __construct(
         private string $binary = 'node',
@@ -84,6 +88,22 @@ class NodeEntryBodyCompiler implements EntryBodyCompiler
             throw CompilationFailed::for($entry, 'the compile script returned no `code`.');
         }
 
+        // DOC-15 warnings (a hard-wrapped list marker): reported, never a refusal.
+        $this->lastWarnings = array_values(array_filter((array) ($decoded['warnings'] ?? []), 'is_array'));
+        foreach ($this->lastWarnings as $warning) {
+            Log::warning('beam-ux compile: '.$entry->slug.' '.($warning['message'] ?? ($warning['rule'] ?? 'warning')));
+        }
+
         return $decoded['code'];
+    }
+
+    /**
+     * The warnings the last compile reported (DOC-15), each `{rule, line, message}`.
+     *
+     * @return list<array{rule: string, line: int, message: string}>
+     */
+    public function lastWarnings(): array
+    {
+        return $this->lastWarnings;
     }
 }

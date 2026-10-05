@@ -142,7 +142,8 @@ class ArtifactModuleContractTest extends TestCase
     public function test_no_mdx_comment_body_reaches_a_compiled_artifact_ratchet(): void
     {
         $this->requireToolchain();
-        $known = ['D-T5 compile-fixture SECRET-MARKER' => 'DOCS-04: strip comment-only expressions from the compile'];
+        // DOCS-04 strips comment-only expressions, so nothing is known to leak any more.
+        $known = [];
 
         $code = $this->compile("{/* SECRET-MARKER */}\n# Hi\n");
         $found = str_contains($code, 'SECRET-MARKER') ? ['D-T5 compile-fixture SECRET-MARKER' => 'the artifact carries the comment body'] : [];
@@ -154,6 +155,45 @@ class ArtifactModuleContractTest extends TestCase
 
         $this->assertSame([], array_keys(array_diff_key($found, $known)), 'A new comment leak: a regression, or the ratchet lacks an entry.');
         $this->assertSame([], array_keys(array_diff_key($known, $found)), 'Stale D-T5 entry: the compile strips the comment now, so delete the entry.');
+    }
+
+    /** DOC-10 (DOCS-04): a comment inside text is stripped too, and a real expression is untouched. */
+    public function test_comment_only_expressions_are_stripped_and_real_ones_kept(): void
+    {
+        $this->requireToolchain();
+
+        $code = $this->compile("Hello {/* INLINE-MARKER */} world {1 + 1}.\n\n{/*\n  FLOW-MARKER spanning lines\n*/}\n");
+
+        $this->assertStringNotContainsString('INLINE-MARKER', $code);
+        $this->assertStringNotContainsString('FLOW-MARKER', $code);
+        $this->assertMatchesRegularExpression('/1\s*\+\s*1/', $code, 'A real expression must survive the strip.');
+    }
+
+    /**
+     * DOC-15 (DOCS-04): a list whose first item starts on the line directly after a paragraph line is a WARN, computed
+     * on the AST, never a refusal. The pair: the hard-wrapped shape of the two real hits warns; the same text fenced
+     * (the `rag-faithfulness-measured.mdx:71` false positive) does not, and nor does a list after a blank line.
+     */
+    public function test_a_hard_wrapped_list_marker_is_a_warning_not_a_refusal(): void
+    {
+        $this->requireToolchain();
+
+        $compiler = new NodeEntryBodyCompiler(workingDirectory: $this->toolchainRoot);
+        $entry = new BeamUxEntry(['slug' => 'hard-wrap', 'type' => UxType::Page, 'format' => UxFormat::Mdx]);
+
+        $code = $compiler->compile($entry, "Install the starter and run the installer, which also\n+ publishes the config\n+ runs the migrations\n");
+        $this->assertNotSame('', $code, 'A warning never refuses the compile.');
+        $this->assertSame(['hard-wrapped-list'], array_column($compiler->lastWarnings(), 'rule'));
+        $this->assertSame(2, $compiler->lastWarnings()[0]['line']);
+
+        $compiler->compile($entry, "```text\nA paragraph line that is fenced\n+ is not a list\n```\n");
+        $this->assertSame([], $compiler->lastWarnings(), 'Fenced text is not a list.');
+
+        $compiler->compile($entry, "A paragraph.\n\n+ a real list\n+ after a blank line\n");
+        $this->assertSame([], $compiler->lastWarnings(), 'A list after a blank line is not hard-wrapped.');
+
+        $compiler->compile($entry, "- resources/css\n  - app.css\n  - theme.css\n- resources/js\n");
+        $this->assertSame([], $compiler->lastWarnings(), 'A nested list under its item is ordinary Markdown, not hard-wrapped.');
     }
 
     private function compile(string $source): string

@@ -98,10 +98,58 @@ const asModule = (functionBody) => `export default function (runtime) {\n${funct
  */
 const stripFrontmatter = (source) => source.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
 
-const compileMdx = async (source, slug, root) => {
+/**
+ * DOC-10 (docs-walkthrough DOCS-04): an author's MDX comment (a braced block comment) is not content. MDX keeps a comment-only
+ * expression in the program, so its body shipped in every public artifact. This drops each expression whose
+ * whole value is a comment, flow or inline; an expression with any code in it is untouched. No new dependency:
+ * a plain walk over the mdast children.
+ */
+const COMMENT_ONLY = /^\s*(?:\/\*[\s\S]*?\*\/\s*|\/\/[^\n]*\n?\s*)+$/
+const isCommentOnly = (node) =>
+  (node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression') && COMMENT_ONLY.test(node.value ?? '')
+
+const stripCommentExpressions = () => (tree) => {
+  const walk = (node) => {
+    if (!Array.isArray(node.children)) return
+    node.children = node.children.filter((child) => !isCommentOnly(child))
+    node.children.forEach(walk)
+  }
+  walk(tree)
+}
+
+/**
+ * DOC-15: a list whose first item starts on the line directly after a paragraph line is reported as a WARNING,
+ * computed on the AST (a fenced block is `code`, never a `list`), never a refusal. The wrapped form is valid
+ * CommonMark, so the compile still succeeds.
+ */
+const warnHardWrappedLists = (warnings) => () => (tree) => {
+  const walk = (node) => {
+    if (!Array.isArray(node.children)) return
+    node.children.forEach((child, i) => {
+      // Inside a list item, a sub-list directly under the item's own line is ordinary nesting.
+      const previous = node.type === 'listItem' ? undefined : node.children[i - 1]
+      if (
+        child.type === 'list' &&
+        previous?.type === 'paragraph' &&
+        child.position?.start.line === (previous.position?.end.line ?? -2) + 1
+      ) {
+        warnings.push({
+          rule: 'hard-wrapped-list',
+          line: child.position.start.line,
+          message: `line ${child.position.start.line}: a list starts directly after a paragraph line, so a wrapped "+ " or "- " became a list. Join the line, or put a blank line before the list.`,
+        })
+      }
+      walk(child)
+    })
+  }
+  walk(tree)
+}
+
+const compileMdx = async (source, slug, root, warnings) => {
   const { compile } = await load('@mdx-js/mdx', root)
 
   const compiled = await compile(stripFrontmatter(source), {
+    remarkPlugins: [stripCommentExpressions, warnHardWrappedLists(warnings)],
     jsx: false,
     jsxRuntime: 'automatic',
     jsxImportSource: 'react',
@@ -170,9 +218,10 @@ const main = async () => {
   }
 
   let code
+  const warnings = []
   try {
     if (format === 'mdx') {
-      code = await compileMdx(source, slug, root)
+      code = await compileMdx(source, slug, root, warnings)
     } else if (format === 'tsx') {
       code = await compileTsx(source, slug, root)
     } else {
@@ -182,7 +231,7 @@ const main = async () => {
     fail(`beam-ux compile: ${slug} failed to compile — ${error.message}`)
   }
 
-  process.stdout.write(JSON.stringify({ code }))
+  process.stdout.write(JSON.stringify({ code, warnings }))
 }
 
 main().catch((error) => fail(`beam-ux compile: ${error.stack ?? error.message}`))
