@@ -104,9 +104,17 @@ const stripFrontmatter = (source) => source.replace(/^---\r?\n[\s\S]*?\r?\n---\r
  * whole value is a comment, flow or inline; an expression with any code in it is untouched. No new dependency:
  * a plain walk over the mdast children.
  */
-const COMMENT_ONLY = /^\s*(?:\/\*[\s\S]*?\*\/\s*|\/\/[^\n]*\n?\s*)+$/
-const isCommentOnly = (node) =>
-  (node.type === 'mdxFlowExpression' || node.type === 'mdxTextExpression') && COMMENT_ONLY.test(node.value ?? '')
+// Decided on the PARSED expression: a comment-only one has an empty estree program body (its comments sit in
+// `estree.comments`), so `{/* a */ code /* b */}` keeps its code. The text fallback, used only when no estree is
+// attached, matches block comments that cannot span a `*/`, for the same reason.
+const COMMENT_ONLY = /^\s*(?:\/\*(?:(?!\*\/)[\s\S])*\*\/\s*|\/\/[^\n]*(?:\n\s*|$))+$/
+const isCommentOnly = (node) => {
+  if (node.type !== 'mdxFlowExpression' && node.type !== 'mdxTextExpression') return false
+  const estree = node.data?.estree
+  if (estree && Array.isArray(estree.body)) return estree.body.length === 0
+
+  return COMMENT_ONLY.test(node.value ?? '')
+}
 
 const stripCommentExpressions = () => (tree) => {
   const walk = (node) => {

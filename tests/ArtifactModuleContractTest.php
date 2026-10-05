@@ -167,6 +167,10 @@ class ArtifactModuleContractTest extends TestCase
         $this->assertStringNotContainsString('INLINE-MARKER', $code);
         $this->assertStringNotContainsString('FLOW-MARKER', $code);
         $this->assertMatchesRegularExpression('/1\s*\+\s*1/', $code, 'A real expression must survive the strip.');
+
+        // review-r1: code between two comments is code, so the expression stays.
+        $mixed = $this->compile("{/* a */ KEPT_CODE /* b */}\n");
+        $this->assertStringContainsString('KEPT_CODE', $mixed, 'Code between two comments must not be stripped.');
     }
 
     /**
