@@ -233,12 +233,20 @@ class RegisterEntriesFromDisk
         // arriving invisible is the import not happening. Overridable from frontmatter, so importing
         // genuine drafts stays possible.
         $entry = DB::transaction(function () use ($envelope, $source, $relative): BeamUxEntry {
+            // DOCS-06: resolve containment first so its title feeds the asserted hash, then stamp
+            // provenance LAST — `origin = disk:<relative>` (a host file) and the title+body hash the
+            // import asserts, so a later host edit is detectable by `docs.diverged`. No-ops pre-migration.
+            $containment = $this->containmentFor($source, $relative, $envelope);
             $entry = BeamUxEntry::create(array_merge([
                 'slug' => $envelope['slug'],
                 'type' => $envelope['type'],
                 'namespace' => $envelope['namespace'],
                 'format' => $envelope['format'],
-            ], BeamUxEntry::publishedMarkingAttributes(), $this->containmentFor($source, $relative, $envelope)));
+            ], BeamUxEntry::publishedMarkingAttributes(), $containment, \Splicewire\Beam\Ux\Provenance\Provenance::stamp(
+                \Splicewire\Beam\Ux\Provenance\Provenance::disk($relative),
+                $containment['title'] ?? null,
+                $source,
+            )));
 
             // The body rides the beam-core StorageDriver (ParticleWriter under the default Stacked
             // driver) — the batch selects the driver, beam-core does the versioned write. Every

@@ -101,6 +101,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 // beam-ux before this pass gets the column from here, a fresh one from the create,
                 // and each no-ops for the other.
                 'shared/add_published_version_to_beam_ux_entries_table',
+                // Provenance columns (`origin`, `asserted_hash`) — DOCS-06 / ADR-0215. An ALTER beside
+                // the create for the same reason as its siblings; nullable, so it changes no existing row.
+                'shared/add_provenance_to_beam_ux_entries_table',
             ]);
     }
 
