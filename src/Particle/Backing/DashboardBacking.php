@@ -23,7 +23,7 @@ use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Particle\Registry\ResourceRegistryBacking;
 use Splicewire\Beam\Realm\RealmRegistry;
 use Splicewire\Beam\Ux\Data\DashboardCardRowData;
-use Splicewire\Beam\Ux\Frame\FrameNavContribution;
+use Schemastud\Frame\Contracts\FrameNavContributor;
 use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
 use Splicewire\Beam\Ux\Frame\RouteContextProjector;
 use Throwable;
@@ -299,7 +299,7 @@ class DashboardBacking implements Unpaged
     private function rail(Container $container): RailLeaves
     {
         try {
-            $nav = $container->make(FrameNavContribution::class)->contributeNav($this->realm);
+            $nav = $container->make(FrameNavContributor::class)->contributeNav($this->realm);
         } catch (Throwable $e) {
             report($e);
 

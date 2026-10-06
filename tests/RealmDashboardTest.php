@@ -324,6 +324,29 @@ class RealmDashboardTest extends TestCase
         $this->assertSame(['Zulu' => 6, 'Alpha' => 7, 'Charlie' => 8], array_intersect_key($byLabel, array_flip(['Zulu', 'Alpha', 'Charlie'])));
     }
 
+    /**
+     * ux-walkthrough UX-13 (T1 dashboard-backing-concrete): the dashboard reads the rail through the FrameNavContributor
+     * PORT, the decorated (IA-checked) one the manifest serves, not the concrete contribution. A host that binds its own
+     * contributor gets dashboard tiles from it.
+     */
+    public function test_the_tiles_come_from_the_bound_frame_nav_contributor_port(): void
+    {
+        $this->app->bind(\Schemastud\Frame\Contracts\FrameNavContributor::class, fn () => new class implements \Schemastud\Frame\Contracts\FrameNavContributor
+        {
+            public function contributeNav(?string $realm): ?array
+            {
+                return ['nav' => ['items' => [['title' => 'Host rail', 'href' => '/operator/host', 'routeName' => null, 'children' => [
+                    ['title' => 'From the port', 'href' => '/operator/from-the-port', 'routeName' => null, 'children' => []],
+                ]]]], 'routeContext' => []];
+            }
+        });
+
+        $this->actingAs($this->staff());
+        $tiles = array_values(array_filter($this->rows(), fn (array $row): bool => $row['context'] === 'nav'));
+
+        $this->assertSame(['From the port'], array_column($tiles, 'label'));
+    }
+
     public function test_a_member_without_the_realm_entitlement_is_refused_by_the_realm_gate(): void
     {
         $this->actingAs($this->member());
