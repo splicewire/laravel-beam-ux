@@ -110,6 +110,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
     public function packageRegistered(): void
     {
+        // DOCS-06b: the templates the provenance backfill may match an unstamped row against; packages register theirs.
+        $this->app->singleton(\Splicewire\Beam\Ux\Provenance\ProvenanceTemplates::class);
+
         // Merge `config('beam.ux.*')`. Both keys OUTLIVED the retired `Route::beamUxEntries()` macro
         // they were introduced for (ADR-0214 §6, as amended): `api_root` positions beam core's Scribe
         // OpenAPI extraction window, `route_name` names the public-entry artifact route
