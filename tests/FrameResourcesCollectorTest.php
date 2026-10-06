@@ -79,6 +79,11 @@ class FrameResourcesCollectorTest extends TestCase
         // Registration order is deliberately NOT the expected order: `plans` and `packs` share
         // navOrder 2 and are registered Plans-then-Packs while their labels sort Packs-then-Plans,
         // so the label tiebreak is what decides and registration order cannot be mistaken for it.
+        //
+        // Each is a REAL policy-less model whose declared row scope is its read gate ({@see OpenFixtureModel}),
+        // the population the list admits to every reader. A phantom backing class (`Acme\\Particles\\…`, until
+        // 2026-10-06) cannot build its authorization bases, and since laravel-beam 65f7761 a read whose bases
+        // throw fails CLOSED, so every seat here vanished for a reason no assertion names (APP-15 PROOF).
         foreach ([
             // key        label        section     navOrder  routeName
             ['tenants', 'Tenants', 'platform', 1, 'tenants.index'],
@@ -89,8 +94,9 @@ class FrameResourcesCollectorTest extends TestCase
         ] as [$key, $label, $section, $navOrder, $routeName]) {
             $registry->register(new ParticleResource(
                 key: $key,
-                backing: 'Acme\\Particles\\'.ucfirst($key),
+                backing: OpenFixtureModel::class,
                 data: CollectorFixtureData::class,
+                scope: OpenFixtureModel::rowScope(...),
                 label: $label,
                 section: $section,
                 navOrder: $navOrder,
@@ -318,8 +324,9 @@ class FrameResourcesCollectorTest extends TestCase
 
         $this->app->make(ParticleResourceRegistry::class)->register(new ParticleResource(
             key: 'orphan',
-            backing: 'Acme\\Particles\\Orphan',
+            backing: OpenFixtureModel::class,
             data: CollectorFixtureData::class,
+            scope: OpenFixtureModel::rowScope(...),
             label: 'Orphan',
             section: 'platform',
             navOrder: 5,
@@ -468,6 +475,21 @@ class ModelLessFixtureFeed implements \Splicewire\Beam\Particle\Backing\StreamsR
     public function records(array $filters, ?string $cursor, int $perPage): \Illuminate\Contracts\Pagination\CursorPaginator
     {
         return new \Illuminate\Pagination\CursorPaginator([], $perPage);
+    }
+}
+
+/**
+ * A model-backed fixture that binds NO policy and whose resource declares a row scope: the population whose row scope
+ * is its read gate, so the collector lists it to every reader and the ordering, realm and href assertions have seats to
+ * judge. Unscoped, a policy-less model is not listed (no allowance admits it and Laravel denies the undefined viewAny).
+ */
+class OpenFixtureModel extends \Illuminate\Database\Eloquent\Model
+{
+    protected $table = 'open_fixtures';
+
+    public static function rowScope(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
+    {
+        return $query->whereNotNull('open_fixtures.owner_id');
     }
 }
 
