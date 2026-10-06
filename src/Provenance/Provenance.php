@@ -99,6 +99,9 @@ final class Provenance
      * `docs.diverged` and the re-assert read. A codec may re-encode on write (CssBodyCodec regenerates its header),
      * so the raw source is not what is stored. Hashing the raw source made such a row read "edited" the moment it
      * was seeded, and it never re-asserted again (DOCS-06, lead 03:01Z). Every asserted hash goes through this.
+     *
+     * It requires a DETERMINISTIC round trip: a codec whose encode stamps a timestamp or anything random would make
+     * every row read edited. A codec author must keep encode(decode(x)) stable (review-r1).
      */
     public static function asStored(BodyCodec $codec, string $source): string
     {
