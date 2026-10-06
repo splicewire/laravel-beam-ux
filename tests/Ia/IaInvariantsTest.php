@@ -94,6 +94,14 @@ class IaInvariantsTest extends TestCase
     }
 
     /** @return list<string> every href in a contributed nav block, depth-first */
+    private function declareOperatorSection(string $key): void
+    {
+        $this->app->make(NavSectionRegistry::class)->register(new NavSection(
+            key: $key, realm: 'operator', label: ucfirst($key), icon: 'Square', href: '/'.$key, order: 10,
+            entitlement: null, permission: null, audience: NavAudience::Product,
+        ), by: 'test');
+    }
+
     private function hrefs(?array $block): array
     {
         $out = [];
@@ -173,11 +181,17 @@ class IaInvariantsTest extends TestCase
 
     public function test_i1_an_href_inside_the_rails_own_realm_passes_including_the_longest_base(): void
     {
-        $this->hostNav('operator', [NavLink::make(title: 'Tenants', href: '/operator/tenants')]);
+        // In a declared task section, which an operator row needs (I3).
+        $this->declareOperatorSection('tenants');
+        $this->hostNav('operator', [
+            NavLink::make(title: 'Tenants', routeName: 'tenants.section')->stamped(active: false, activeTrail: false, children: [
+                NavLink::make(title: 'Tenants', href: '/operator/tenants'),
+            ]),
+        ]);
 
         $block = $this->app->make(FrameNavContributor::class)->contributeNav('operator');
 
-        $this->assertSame(['/operator/tenants'], $this->hrefs($block));
+        $this->assertSame(['/operator/tenants'], array_values(array_filter($this->hrefs($block))));
     }
 
     public function test_i4_a_host_href_that_joins_no_mounted_get_route_throws(): void
@@ -279,6 +293,7 @@ class IaInvariantsTest extends TestCase
 
     public function test_a_section_header_holding_children_is_a_label_and_a_childless_one_is_a_link(): void
     {
+        $this->declareOperatorSection('gizmos');
         $header = InvocableNavItem::make(title: 'Gizmos', invocable: 'frame.resources', routeName: 'gizmos.section', href: '/gizmos');
         $nav = NavTree::make([
             $header->stamped(active: false, activeTrail: false, children: [NavLink::make(title: 'Tenants', href: '/operator/tenants')]),
@@ -287,7 +302,8 @@ class IaInvariantsTest extends TestCase
 
         $invariants = $this->app->make(IaInvariants::class);
         $this->assertSame([], $invariants->violations('operator', $nav));
-        $this->assertSame(['I1 operator /gizmos', 'I4 operator /gizmos'], array_keys($invariants->violations('operator', $lone)));
+        // A childless header is a link, and at the top level an operator link sits in no task section either (I3).
+        $this->assertSame(['I1 operator /gizmos', 'I3 operator /gizmos', 'I4 operator /gizmos'], array_keys($invariants->violations('operator', $lone)));
     }
 
     public function test_every_violation_is_reported_at_once(): void

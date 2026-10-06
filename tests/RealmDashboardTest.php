@@ -331,11 +331,16 @@ class RealmDashboardTest extends TestCase
      */
     public function test_the_tiles_come_from_the_bound_frame_nav_contributor_port(): void
     {
+        // The host's section is a declared task section, which an operator row needs (I3).
+        $this->app->make(NavSectionRegistry::class)->register(new NavSection(
+            key: 'host', realm: 'operator', label: 'Host rail', icon: 'Square', href: '/operator/host', order: 10,
+            entitlement: null, permission: null, audience: NavAudience::Product,
+        ), by: 'test');
         $this->app->bind(\Schemastud\Frame\Contracts\FrameNavContributor::class, fn () => new class implements \Schemastud\Frame\Contracts\FrameNavContributor
         {
             public function contributeNav(?string $realm): ?array
             {
-                return ['nav' => ['items' => [['title' => 'Host rail', 'href' => '/operator/host', 'routeName' => null, 'children' => [
+                return ['nav' => ['items' => [['title' => 'Host rail', 'href' => '/operator/host', 'routeName' => 'host.section', 'children' => [
                     ['title' => 'From the port', 'href' => '/operator/from-the-port', 'routeName' => null, 'children' => []],
                 ]]]], 'routeContext' => []];
             }

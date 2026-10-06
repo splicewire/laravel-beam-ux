@@ -20,6 +20,7 @@ use Splicewire\Beam\Ux\Frame\RouteContextPlan;
 use Splicewire\Beam\Ux\Ia\IaCheckedNavContributor;
 use Splicewire\Beam\Ux\Ia\IaInvariants;
 use Splicewire\Beam\Ux\Ia\Invariants\DeveloperSeatsLiveInTheDeveloperZone;
+use Splicewire\Beam\Ux\Ia\Invariants\RowsSitInOneTaskSection;
 use Splicewire\Beam\Ux\Ia\Invariants\HrefJoinsAMountedRoute;
 use Splicewire\Beam\Ux\Ia\Invariants\RailStaysInItsRealm;
 
@@ -65,10 +66,11 @@ trait WiresFrameNav
             $this->app->bind(FrameNavContributor::class, FrameNavContribution::class);
         }
 
-        // M5 (ux-walkthrough UX-06): the IA invariants. I2 joined with UX-08; I3 (UX-09) joins the same way.
+        // M5 (ux-walkthrough UX-06): the IA invariants. I2 joined with UX-08, I3 with UX-09.
         $this->app->bind(IaInvariants::class, fn ($app): IaInvariants => new IaInvariants([
             $app->make(RailStaysInItsRealm::class),
             $app->make(DeveloperSeatsLiveInTheDeveloperZone::class),
+            $app->make(RowsSitInOneTaskSection::class),
             $app->make(HrefJoinsAMountedRoute::class),
         ]));
 
