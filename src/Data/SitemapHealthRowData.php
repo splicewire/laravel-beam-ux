@@ -36,7 +36,7 @@ use Splicewire\Beam\Ux\Type\UxType;
 #[ParticleResource(
     key: 'beam-ux-sitemap-health',
     backing: BeamUxEntry::class,
-    label: 'Sitemap',
+    label: 'Sitemap health',
     group: 'Ops',
     icon: 'globe',
     section: 'ops',
