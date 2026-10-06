@@ -9,6 +9,7 @@ use Splicewire\Beam\Ux\Access\EntryAccessResolver;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Http\Controllers\EntryArtifactController;
 use Splicewire\Beam\Ux\Http\Controllers\PublicEntryController;
+use Splicewire\Beam\Ux\Http\EntryPageProps;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
 use Splicewire\Beam\Ux\Http\InertiaEntryRenderer;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
@@ -48,6 +49,9 @@ trait WiresPublicSurface
         ));
 
         $this->app->bind(EntryRenderer::class, InertiaEntryRenderer::class);
+        // The props a package contributes for the layout it owns (DOCS-12). One instance, so a contribution made at boot
+        // reaches every request; empty unless a package registers one.
+        $this->app->singleton(EntryPageProps::class, fn () => new EntryPageProps);
     }
 
     /**

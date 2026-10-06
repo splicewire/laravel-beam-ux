@@ -9,6 +9,7 @@ use Splicewire\Beam\Ux\Containment\ChromeEntryResolver;
 use Splicewire\Beam\Ux\Containment\ChromeResolver;
 use Splicewire\Beam\Ux\Containment\NavProjector;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
+use Splicewire\Beam\Ux\Http\EntryPageProps;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -46,6 +47,7 @@ class PublicEntryController
         private NavProjector $nav,
         private EntryRenderer $renderer,
         private ChromeEntryResolver $chromeEntries,
+        private EntryPageProps $pageProps,
         private ChromeResolver $chrome = new ChromeResolver,
     ) {}
 
@@ -154,6 +156,8 @@ class PublicEntryController
             // round trip. `withNav: false` at mount time is the escape hatch for a host that caches
             // and injects its own.
             'nav' => $withNav ? $this->nav->project($realm, $actor)->toArray() : null,
+            // Props the package owning this page's layout contributes (DOCS-12): none unless one is registered.
+            ...$this->pageProps->for($chrome['layout'], $entry, $chain, $actor),
         ], );
 
         if ($this->gate->isRestricted($chain)) {

@@ -17,6 +17,7 @@ use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Http\Controllers\PublicEntryController;
+use Splicewire\Beam\Ux\Http\EntryPageProps;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -289,6 +290,46 @@ class PublicEntryRendererTest extends TestCase
 
         // The address is servable by the same macro's artifact route, not merely well-formed.
         $this->get($url)->assertOk();
+    }
+
+    /*
+     * docs-walkthrough DOCS-12 (DM4): a package contributes page props for the layout it owns. A page whose resolved
+     * layout is that layout carries them; any other page carries nothing new, so a host with no contributor sees today's
+     * payload exactly. The contributor gets the gated containment chain and the actor, never a re-walk.
+     */
+    public function test_a_layout_contributor_adds_props_only_to_pages_resolving_to_its_layout(): void
+    {
+        $root = BeamUxEntry::rootFor();
+        $docs = $this->page('docs', ['segment' => 'docs', 'parent_id' => $root->getKey(), 'layout' => 'DocsLayout']);
+        $this->page('guide', ['segment' => 'guide', 'parent_id' => $docs->getKey()]);
+        $this->page('about', ['segment' => 'about', 'parent_id' => $root->getKey()]);
+
+        $this->app->make(EntryPageProps::class)->contribute('DocsLayout', fn (BeamUxEntry $entry, array $chain) => [
+            'docsChrome' => ['page' => $entry->slug, 'depth' => count($chain)],
+        ]);
+
+        $this->assertSame(['page' => 'guide', 'depth' => 3], $this->get('/docs/guide')->json('props.docsChrome'));
+        $this->assertNull($this->get('/about')->json('props.docsChrome'));
+    }
+
+    public function test_a_contributor_cannot_overwrite_a_core_prop(): void
+    {
+        $root = BeamUxEntry::rootFor();
+        $this->page('docs', ['segment' => 'docs', 'parent_id' => $root->getKey(), 'layout' => 'DocsLayout']);
+        $this->app->make(EntryPageProps::class)->contribute('DocsLayout', fn () => ['entry' => 'hijacked']);
+
+        $this->withoutExceptionHandling();
+        $this->expectException(\LogicException::class);
+
+        $this->get('/docs');
+    }
+
+    public function test_with_no_contributor_the_payload_is_exactly_the_core_props(): void
+    {
+        $root = BeamUxEntry::rootFor();
+        $this->page('docs', ['segment' => 'docs', 'parent_id' => $root->getKey(), 'layout' => 'DocsLayout']);
+
+        $this->assertSame(['entry', 'artifact', 'chrome', 'nav'], array_keys($this->get('/docs')->json('props')));
     }
 
     public function test_a_chrome_name_that_is_not_a_nestable_entry_carries_no_address(): void
