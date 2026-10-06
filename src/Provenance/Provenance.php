@@ -81,7 +81,7 @@ final class Provenance
      *
      * @return array{origin?: string, asserted_hash?: string}
      */
-    public static function stamp(string $origin, ?string $title, string $body, ?BodyCodec $codec = null): array
+    public static function stamp(string $origin, ?string $title, string $body, BodyCodec $codec): array
     {
         if (! Schema::hasColumn('beam_ux_entries', 'origin')) {
             return [];
@@ -89,7 +89,8 @@ final class Provenance
 
         return [
             'origin' => $origin,
-            'asserted_hash' => self::hash($title, $codec === null ? $body : self::asStored($codec, $body)),
+            // Required, not optional: hashing the raw source is what made a re-encoded row read 'edited' at birth.
+            'asserted_hash' => self::hash($title, self::asStored($codec, $body)),
         ];
     }
 
