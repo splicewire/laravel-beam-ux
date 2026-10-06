@@ -39,8 +39,17 @@ trait WiresStorage
         // A scratch run's file root (row 13355b04): applied while booting, after the config merge and before any disk
         // singleton below resolves, so the body mirror, the artifacts and the placement mirror all land under it.
         $this->app->booting(function (): void {
-            $root = config('beam.ux.scratch_storage_root');
+            // The process environment as a fallback (review-r1): under a cached config the env() in config/beam/ux.php is
+            // never read, so an exported root would be ignored silently and the rehearsal would write storage/ again.
+            $root = config('beam.ux.scratch_storage_root') ?: (getenv('BEAM_SCRATCH_STORAGE_ROOT') ?: null);
             if (! is_string($root) || $root === '') {
+                return;
+            }
+            // Never in production (build.qa): a stray env line would send every body mirror and artifact to a temp dir,
+            // content that seems to save and is gone after a reboot. Ignored, and said once in the log.
+            if ($this->app->isProduction()) {
+                \Illuminate\Support\Facades\Log::warning('BEAM_SCRATCH_STORAGE_ROOT is set in production and was ignored; beam-ux keeps its configured disks.');
+
                 return;
             }
             config([
