@@ -675,6 +675,22 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         $this->assertSame(\Splicewire\Beam\Ux\Provenance\Provenance::disk('docs/page/install.mdx'), $row->origin);
     }
 
+    public function test_a_bundle_under_its_own_root_keeps_the_docs_namespace_so_a_move_preserves_coordinates(): void
+    {
+        // DOCS-15 (B) + guard: the tower bundle lives at resources/docs-bundle/docs/**, scanned from
+        // resources/docs-bundle, so a file docs/page/build.mdx lands at (namespace 'docs', slug 'build') —
+        // byte-identical to the flagship's resources/js/content scan. This parity is what lets the
+        // provenance-move re-stamp a moved row IN PLACE at the same coordinate instead of duplicating it.
+        $this->writeFile('docs/page/build.mdx', "# Build\n");
+        $this->writeFile('docs/page/using.mdx', "# Using\n");
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $this->assertCount(2, $result['created']);
+        $this->assertNotNull(BeamUxEntry::query()->where('namespace', 'docs')->where('slug', 'build')->first());
+        $this->assertNotNull(BeamUxEntry::query()->where('namespace', 'docs')->where('slug', 'using')->first());
+    }
+
     private function migrateProvenance(): void
     {
         $ux = dirname((new \ReflectionClass(BeamUxEntry::class))->getFileName(), 3);
