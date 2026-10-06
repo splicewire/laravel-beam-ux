@@ -40,7 +40,7 @@ final class ProvenanceBackfill
      *
      * @param  list<array{path?: string, ignore?: list<string>}>  $diskSources  `beam.docs.sources`-shaped
      * @param  array<string, list<string>>  $diskHistory  relative path => sha256 of each recorded prior version as stored
-     * @return list<array{id: string, namespace: ?string, slug: string, title: ?string, origin: ?string, via: string}>
+     * @return list<array{id: string, namespace: ?string, slug: string, title: ?string, origin: ?string, via: string, tokens: array<string, string>}>
      */
     public function plan(array $diskSources, array $diskHistory = []): array
     {
@@ -56,7 +56,7 @@ final class ProvenanceBackfill
             if ($stored === null) {
                 continue;
             }
-            [$origin, $via] = $this->match($entry, $stored, $files, $diskHistory);
+            [$origin, $via, $tokens] = $this->match($entry, $stored, $files, $diskHistory);
             $plan[] = [
                 'id' => (string) $entry->getKey(),
                 'namespace' => $entry->namespace,
@@ -64,6 +64,7 @@ final class ProvenanceBackfill
                 'title' => $entry->title,
                 'origin' => $origin,
                 'via' => $via,
+                'tokens' => $tokens,
             ];
         }
 
@@ -102,7 +103,7 @@ final class ProvenanceBackfill
     /**
      * @param  array<string, array{relative: string, absolute: string}>  $files
      * @param  array<string, list<string>>  $history
-     * @return array{0: ?string, 1: string}
+     * @return array{0: ?string, 1: string, 2: array<string, string>}
      */
     private function match(BeamUxEntry $entry, string $stored, array $files, array $history): array
     {
@@ -111,20 +112,21 @@ final class ProvenanceBackfill
 
         if ($file !== null) {
             if (Provenance::asStored($codec, (string) file_get_contents($file['absolute'])) === $stored) {
-                return [Provenance::disk($file['relative']), 'disk file'];
+                return [Provenance::disk($file['relative']), 'disk file', []];
             }
             if (in_array(hash('sha256', $stored), $history[$file['relative']] ?? [], true)) {
-                return [Provenance::disk($file['relative']), 'disk history'];
+                return [Provenance::disk($file['relative']), 'disk history', []];
             }
         }
 
         foreach ($this->templates->at($entry->namespace, (string) $entry->slug) as $template) {
-            if (ProvenanceMatcher::matches($template->template, $stored, $codec)) {
-                return [$template->origin, $template->label];
+            $tokens = ProvenanceMatcher::captures($template->template, $stored, $codec);
+            if ($tokens !== null) {
+                return [$template->origin, $template->label, $tokens];
             }
         }
 
-        return [null, 'no match'];
+        return [null, 'no match', []];
     }
 
     /**

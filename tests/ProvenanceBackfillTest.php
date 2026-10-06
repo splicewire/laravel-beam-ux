@@ -63,6 +63,8 @@ class ProvenanceBackfillTest extends TestCase
 
         $plan = $this->backfill()->plan([]);
         $this->assertSame([['docs-mcp', Provenance::package('splicewire/laravel-beam-mcp'), 'mcp prior']], $this->verdicts($plan));
+        // review-r1: the dry run shows each token's captured value, so a person can see it is machine-written.
+        $this->assertSame(['endpoint_url' => 'https://host.test/mcp'], $plan[0]['tokens']);
         $this->assertSame(1, $this->backfill()->apply($plan));
 
         $row->refresh();
