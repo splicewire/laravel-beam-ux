@@ -298,6 +298,11 @@ class DashboardBacking implements Unpaged
      */
     private function rail(Container $container): RailLeaves
     {
+        // A host with frame nav switched off binds no contributor: no rail, and nothing to report on every render (build.qa).
+        if (! $container->bound(FrameNavContributor::class)) {
+            return new RailLeaves([]);
+        }
+
         try {
             $nav = $container->make(FrameNavContributor::class)->contributeNav($this->realm);
         } catch (Throwable $e) {
