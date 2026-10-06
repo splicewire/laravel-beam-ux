@@ -36,6 +36,23 @@ trait WiresStorage
     #[Chained('register', order: 60)]
     protected function registerStorage(): void
     {
+        // A scratch run's file root (row 13355b04): applied while booting, after the config merge and before any disk
+        // singleton below resolves, so the body mirror, the artifacts and the placement mirror all land under it.
+        $this->app->booting(function (): void {
+            $root = config('beam.ux.scratch_storage_root');
+            if (! is_string($root) || $root === '') {
+                return;
+            }
+            config([
+                'filesystems.disks.beam-scratch' => ['driver' => 'local', 'root' => $root, 'throw' => false],
+                'beam.ux.storage.disk' => 'beam-scratch',
+                'beam.ux.compile.disk' => 'beam-scratch',
+            ]);
+            if ((string) config('beam.ux.storage.mirror_disk') !== '') {
+                config(['beam.ux.storage.mirror_disk' => 'beam-scratch']);
+            }
+        });
+
         $this->app->singleton(StorageDriverResolver::class, function ($app) {
             // Resolved PER WRITE, not captured: this resolver is a singleton, and a captured writer
             // pins whichever WriteGate was bound when it was first resolved. `AsSystemWriter` rebinds

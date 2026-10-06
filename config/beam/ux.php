@@ -156,6 +156,15 @@ return [
     ],
 
     /*
+    | A scratch run's file root (integrator row 13355b04). Set `BEAM_SCRATCH_STORAGE_ROOT` beside a scratch database (the
+    | `splicewire:beam:dev:isolated-test-db` env) and every disk beam-ux writes, the body mirror (`storage.disk`), the
+    | compiled artifacts (`compile.disk`) and a configured placement mirror (`storage.mirror_disk`), resolves to a local
+    | disk under it, so a rehearsal of a seed writes nothing into the checkout's `storage/`. Top-level so a host that
+    | publishes its own `storage` block still gets it. Unset (the default) changes nothing.
+    */
+    'scratch_storage_root' => env('BEAM_SCRATCH_STORAGE_ROOT'),
+
+    /*
     |--------------------------------------------------------------------------
     | Public site renderer (ADR-0209 — the host-mounted mount)
     |--------------------------------------------------------------------------
