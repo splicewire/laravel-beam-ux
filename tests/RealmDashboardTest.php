@@ -158,7 +158,7 @@ class RealmDashboardTest extends TestCase
 
         // Countable and mounted, but neither seated nor declared: not on the dashboard.
         $registry->register(new ParticleResource(
-            key: 'unseated', backing: DashGizmo::class, data: DashGizmoData::class, label: 'Unseated', navOrder: 0, readOnly: true,
+            key: 'unseated', backing: DashGizmo::class, data: DashPlainData::class, label: 'Unseated', navOrder: 0, readOnly: true,
         ), by: self::class);
 
         // Unseated but declares `overview`: opted in, and drawn in the overview context.
@@ -214,6 +214,46 @@ class RealmDashboardTest extends TestCase
         $this->assertSame(RealmDashboard::OPEN_ABILITY, $registry->find('tenant-dashboard')->policy);
     }
 
+    public function test_dashboard_destinations_are_unique_and_undeclared_resources_are_tiles(): void
+    {
+        $this->app->make(ParticleResourceRegistry::class)->register(new ParticleResource(
+            key: 'gizmos', backing: DashGizmo::class, data: DashPlainData::class, label: 'Gizmos',
+            section: 'platform', navOrder: 2, readOnly: true,
+        ), by: self::class);
+        $this->actingAs($this->staff());
+        $rows = $this->rows();
+        $hrefs = array_column($rows, 'href');
+        $this->assertSame($hrefs, array_values(array_unique($hrefs)));
+        $gizmos = array_values(array_filter($rows, fn ($row) => $row['href'] === '/operator/gizmos'));
+        $this->assertCount(1, $gizmos);
+        $this->assertSame('nav', $gizmos[0]['context']);
+    }
+
+    public function test_developer_destinations_never_become_cards_or_tiles_and_duplicate_links_collapse(): void
+    {
+        $this->app->instance(\Schemastud\Frame\Contracts\FrameNavContributor::class, new class implements \Schemastud\Frame\Contracts\FrameNavContributor
+        {
+            public function contributeNav(?string $realm = null): array
+            {
+                return ['nav' => ['items' => [
+                    ['title' => 'Developer', 'routeName' => 'developer.section', 'zone' => 'meta', 'children' => [
+                        ['title' => 'Overview', 'href' => '/operator/optin', 'routeName' => 'optin.index'],
+                        ['title' => 'Gizmos', 'href' => '/operator/gizmos', 'routeName' => 'gizmos.index'],
+                        ['title' => 'Tool', 'href' => '/dev-tool'],
+                    ]],
+                    ['title' => 'Guide', 'href' => '/guide'],
+                    ['title' => 'Same guide', 'href' => '/guide'],
+                ]]];
+            }
+        });
+        $this->actingAs($this->staff());
+        $hrefs = array_column($this->rows(), 'href');
+        $this->assertNotContains('/operator/optin', $hrefs);
+        $this->assertNotContains('/operator/gizmos', $hrefs);
+        $this->assertNotContains('/dev-tool', $hrefs);
+        $this->assertSame(1, count(array_filter($hrefs, fn ($href) => $href === '/guide')));
+    }
+
     // ---------------------------------------------------------------- rows per actor
 
     public function test_a_staff_actor_sees_one_card_per_seated_or_opted_in_resource_in_nav_order_then_the_tiles(): void
@@ -259,10 +299,10 @@ class RealmDashboardTest extends TestCase
         $this->assertNotEmpty($tiles);
         $this->assertSame(count($rows) - 4, count($tiles));
         $this->assertSame(array_slice($rows, 4), $tiles, 'every tile is after every card');
-        $this->assertSame(['Streams', 'Gizmos', 'Declined', 'Hidden', 'Members'], array_column($tiles, 'label'));
+        $this->assertSame(['Declined', 'Hidden'], array_column($tiles, 'label'));
         // Index 0 of the walk is the dashboard's own leaf, which draws no tile.
-        $this->assertSame([1, 2, 3, 4, 5], array_column($tiles, 'navOrder'), 'a tile\'s navOrder is its rail index');
-        $this->assertSame('/operator/streams', array_column($tiles, 'href', 'label')['Streams']);
+        $this->assertSame([3, 4], array_column($tiles, 'navOrder'), 'a tile\'s navOrder is its rail index');
+        $this->assertSame('/operator/declined', array_column($tiles, 'href', 'label')['Declined']);
         $this->assertNull($tiles[0]['summary']);
         $this->assertNull($tiles[0]['resource']);
         $this->assertNotContains('/operator/dashboard', array_column($tiles, 'href'));
@@ -321,7 +361,7 @@ class RealmDashboardTest extends TestCase
 
         // And a card's number is the number its own tile carries — one rail position, read once.
         $byLabel = array_column(array_filter($rows, fn (array $row): bool => $row['context'] === 'nav'), 'navOrder', 'label');
-        $this->assertSame(['Zulu' => 6, 'Alpha' => 7, 'Charlie' => 8], array_intersect_key($byLabel, array_flip(['Zulu', 'Alpha', 'Charlie'])));
+        $this->assertSame([], array_intersect_key($byLabel, array_flip(['Zulu', 'Alpha', 'Charlie'])));
     }
 
     /**
@@ -649,6 +689,7 @@ class DashGizmo extends Model
     protected $guarded = [];
 }
 
+#[Summary]
 class DashGizmoData extends Data
 {
     public function __construct(public int $id = 0, public string $name = '') {}
@@ -734,4 +775,9 @@ class DashTeam implements \Splicewire\Beam\Accounts\Contracts\TeamContract
     {
         return [];
     }
+}
+
+class DashPlainData extends Data
+{
+    public function __construct(public int $id = 0, public string $name = '') {}
 }

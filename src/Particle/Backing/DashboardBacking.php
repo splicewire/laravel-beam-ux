@@ -8,6 +8,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Pagination\CursorPaginator as CursorPaginatorContract;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Pagination\CursorPaginator;
+use Schemastud\Frame\Contracts\FrameNavContributor;
 use Schemastud\Frame\Contracts\ResourceSummaryProvider;
 use Schemastud\Frame\Data\SummaryResponseData;
 use Schemastud\Frame\Registry\ResourceDefinition;
@@ -23,14 +24,13 @@ use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Particle\Registry\ResourceRegistryBacking;
 use Splicewire\Beam\Realm\RealmRegistry;
 use Splicewire\Beam\Ux\Data\DashboardCardRowData;
-use Schemastud\Frame\Contracts\FrameNavContributor;
 use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
 use Splicewire\Beam\Ux\Frame\RouteContextProjector;
 use Throwable;
 
 /**
  * One realm's dashboard as a resource — the cards of the realm's rail-seated resources, then the realm's
- * rail drawn as jump-to tiles, one {@see DashboardCardRowData} each (realm-dashboards ticket 04,
+ * remaining product rail destinations drawn as jump-to tiles, one {@see DashboardCardRowData} each (realm-dashboards ticket 04,
  * executing the otb-ui-frontier-sidebar DESIGN-01 ruling that a dashboard is a read-only resource).
  *
  * The template is {@see ResourceRegistryBacking}: model-less, streams-only, actor-filtered, in-memory
@@ -49,11 +49,11 @@ use Throwable;
  *  2. the host does not mount its list route (its route name names no leaf in the realm's router
  *     projection) — a package cannot 500 a host's dashboard by naming a resource the host never placed;
  *  3. it is not ON the dashboard ({@see DashboardParticipation::contextFor()} — the ONE rule, shared with
- *     beam's `DashboardTierAudit`): a leaf of the realm's rail resolves to it, or it declares
- *     `summary`/`overview`; `#[Summary(false)]` opts out;
+ *     beam's `DashboardTierAudit`): it declares `summary`/`overview` or has a seated custom
+ *     summary provider; rail presence alone makes a tile, and Developer leaves are excluded;
  *  4. its summary provider declines, or names no provider — an honest absence, never an invented zero.
  *
- * "The rail" is the PROJECTED navigation for this actor — `FrameNavContribution::contributeNav()`, the
+ * "The rail" is the PROJECTED navigation for this actor — the bound `FrameNavContributor::contributeNav()`, the
  * tree the rail renders — so a resource a host seats through a section's static children (the beam
  * starter's `users`/`teams`, which declare no `section:`) is on the dashboard exactly when it is in the
  * rail. The same walk yields the tiles, so a card and a tile cannot disagree about what the rail holds.
@@ -131,7 +131,8 @@ class DashboardBacking implements Unpaged
         }
 
         $rail = $this->rail($container);
-        $rows = [...$this->cards($container, $rail), ...$this->tiles($rail)];
+        $cards = $this->cards($container, $rail);
+        $rows = [...$cards, ...$this->tiles($rail, array_column($cards, 'href'))];
 
         // Nothing for this viewer: the one welcome row instead of an empty list — see DashboardWelcome.
         // A guest gets nothing (the dashboard's own gate refuses one before the socket reaches here).
@@ -167,6 +168,7 @@ class DashboardBacking implements Unpaged
         $hrefs = $this->hrefs($container);
 
         $cards = [];
+        $seen = [];
 
         foreach ($particles->keysForRealm($this->realm) as $key) {
             if (RealmDashboard::isKey($key, $this->realm) || ! $particles->find($key)?->isFramed()) {
@@ -185,7 +187,7 @@ class DashboardBacking implements Unpaged
 
             $href = $hrefs[ListRouteName::of($definition)] ?? null;
 
-            if ($href === null) {
+            if ($href === null || isset($seen[$href])) {
                 continue; // the host mounts no list route for it — drop, never throw
             }
 
@@ -201,6 +203,7 @@ class DashboardBacking implements Unpaged
                 continue;
             }
 
+            $seen[$href] = true;
             $cards[] = new DashboardCardRowData(
                 id: $context.':'.$key,
                 context: $context,
@@ -315,22 +318,25 @@ class DashboardBacking implements Unpaged
     }
 
     /**
-     * The rail as tiles — every leaf minus the dashboard's own, `navOrder` stamped with the leaf's walk
+     * The remaining product rail as tiles — excluding card hrefs and the dashboard's own, `navOrder` stamped with the leaf's walk
      * index so the tiles read in the rail's order. The seats themselves are headers, not destinations,
      * so they draw no tile.
      *
+     * @param  list<string>  $cardHrefs
      * @return list<DashboardCardRowData>
      */
-    private function tiles(RailLeaves $rail): array
+    private function tiles(RailLeaves $rail, array $cardHrefs): array
     {
         $own = RealmDashboard::routeNameFor($this->realm);
         $tiles = [];
+        $seen = array_fill_keys($cardHrefs, true);
 
         foreach ($rail->leaves as $leaf) {
-            if ($leaf->routeName === $own) {
+            if ($leaf->routeName === $own || $leaf->developer || isset($seen[$leaf->href])) {
                 continue;
             }
 
+            $seen[$leaf->href] = true;
             $tiles[] = new DashboardCardRowData(
                 id: DashboardCardRowData::CONTEXT_NAV.':'.($leaf->routeName ?? $leaf->href),
                 context: DashboardCardRowData::CONTEXT_NAV,
