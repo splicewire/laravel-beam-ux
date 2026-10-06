@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Provenance;
 
 use Illuminate\Support\Facades\Schema;
+use Splicewire\Beam\Ux\Codec\BodyCodec;
 
 /**
  * Entry provenance (DOCS-06 / DM2, ADR-0215).
@@ -80,7 +81,7 @@ final class Provenance
      *
      * @return array{origin?: string, asserted_hash?: string}
      */
-    public static function stamp(string $origin, ?string $title, string $body): array
+    public static function stamp(string $origin, ?string $title, string $body, ?BodyCodec $codec = null): array
     {
         if (! Schema::hasColumn('beam_ux_entries', 'origin')) {
             return [];
@@ -88,7 +89,18 @@ final class Provenance
 
         return [
             'origin' => $origin,
-            'asserted_hash' => self::hash($title, $body),
+            'asserted_hash' => self::hash($title, $codec === null ? $body : self::asStored($codec, $body)),
         ];
+    }
+
+    /**
+     * A source as the store hands it back: the codec's encode-then-decode round trip, which is exactly what
+     * `docs.diverged` and the re-assert read. A codec may re-encode on write (CssBodyCodec regenerates its header),
+     * so the raw source is not what is stored. Hashing the raw source made such a row read "edited" the moment it
+     * was seeded, and it never re-asserted again (DOCS-06, lead 03:01Z). Every asserted hash goes through this.
+     */
+    public static function asStored(BodyCodec $codec, string $source): string
+    {
+        return $codec->decode($codec->encode($source));
     }
 }

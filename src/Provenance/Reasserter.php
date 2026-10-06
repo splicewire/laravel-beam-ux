@@ -59,7 +59,8 @@ final class Reasserter
         }
 
         $newTitle = $title ?? $existing->title;
-        $newHash = Provenance::hash($newTitle, $source);
+        // Like with like: the new source as it WOULD be stored, the form the asserted hash was taken over.
+        $newHash = Provenance::hash($newTitle, Provenance::asStored($existing->codec(), $source));
         if ($newHash === (string) $existing->asserted_hash) {
             return false; // Pristine and the origin is unchanged: nothing to re-assert.
         }

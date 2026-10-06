@@ -257,6 +257,7 @@ class RegisterEntriesFromDisk
                 \Splicewire\Beam\Ux\Provenance\Provenance::disk($relative),
                 $containment['title'] ?? null,
                 $source,
+                app(\Splicewire\Beam\Ux\Codec\CodecRegistry::class)->for($envelope['format']),
             )));
 
             // The body rides the beam-core StorageDriver (ParticleWriter under the default Stacked

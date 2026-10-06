@@ -116,6 +116,7 @@ trait SeedsEntries
                 $origin ?? \Splicewire\Beam\Ux\Provenance\Provenance::package('splicewire/laravel-beam-ux'),
                 $attributes['title'] ?? null,
                 $source,
+                app(\Splicewire\Beam\Ux\Codec\CodecRegistry::class)->for($format),
             )));
 
             $written = app(StorageDriverResolver::class)
