@@ -646,6 +646,41 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         return trim((string) preg_replace('/\s+/', ' ', $out));
     }
 
+    public function test_a_package_declared_source_stamps_a_package_origin(): void
+    {
+        // docs-walkthrough DOCS-15 (DM2): the splicewire/tower docs bundle is a PACKAGE source, so its
+        // rows carry origin package:<vendor>, not disk: — the precondition for re-asserting from the package.
+        $this->migrateProvenance();
+        $this->writeFile('docs/page/install.mdx', "# Install\n\nRun composer setup.\n");
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)
+            ->scan($this->root, null, null, [], 'splicewire/tower');
+
+        $this->assertCount(1, $result['created']);
+        $row = BeamUxEntry::query()->where('slug', 'install')->firstOrFail();
+        $this->assertSame(\Splicewire\Beam\Ux\Provenance\Provenance::package('splicewire/tower'), $row->origin);
+    }
+
+    public function test_an_undeclared_disk_source_still_stamps_a_disk_origin(): void
+    {
+        // The package-default rule (rigs/launch/mission SPEC §Rules): every existing host disk source,
+        // which declares no package, keeps stamping disk:<relative> exactly as before.
+        $this->migrateProvenance();
+        $this->writeFile('docs/page/install.mdx', "# Install\n\nRun composer setup.\n");
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $this->assertCount(1, $result['created']);
+        $row = BeamUxEntry::query()->where('slug', 'install')->firstOrFail();
+        $this->assertSame(\Splicewire\Beam\Ux\Provenance\Provenance::disk('docs/page/install.mdx'), $row->origin);
+    }
+
+    private function migrateProvenance(): void
+    {
+        $ux = dirname((new \ReflectionClass(BeamUxEntry::class))->getFileName(), 3);
+        (require $ux.'/database/migrations/shared/add_provenance_to_beam_ux_entries_table.php.stub')->up();
+    }
+
     private function writeFile(string $relative, string $contents): void
     {
         $full = $this->root.'/'.$relative;

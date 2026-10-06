@@ -73,6 +73,14 @@ class RegisterEntriesFromDisk
     protected ?BeamUxEntry $under = null;
 
     /**
+     * The vendor name a PACKAGE source declares, for the current run. When set, registered rows are
+     * stamped `package:<vendor>` (DM2) instead of `disk:<relative>`. Null ⇒ a host disk source, which
+     * keeps stamping `disk:` exactly as today (the package-default rule, rigs/launch/mission SPEC §Rules:
+     * the change is behind an opt-in field, so every existing undeclared source is unchanged).
+     */
+    protected ?string $package = null;
+
+    /**
      * Scan `$root` and register every recognized-format file not yet in the DB. Returns the outcome:
      * the entries created, the disk-relative paths skipped as already-present, and the paths ignored as
      * an unrecognized (non-body) format.
@@ -93,13 +101,14 @@ class RegisterEntriesFromDisk
      *
      * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, ignored: array<int, string>, failed: array<string, string>, unresolved: array<int, string>, recognized: int}
      */
-    public function scan(string $root, ?BeamUxEntry $under = null, ?UxType $default = null, array $ignore = []): array
+    public function scan(string $root, ?BeamUxEntry $under = null, ?UxType $default = null, array $ignore = [], ?string $package = null): array
     {
         $root = rtrim($root, '/');
 
         $this->failures = [];
         $this->seen = [];
         $this->under = $under;
+        $this->package = $package;
 
         $created = [];
         $skipped = [];
@@ -197,7 +206,7 @@ class RegisterEntriesFromDisk
                 // An edited row is left for docs.diverged; cms is untouched. No-op pre-migration.
                 $src = (string) file_get_contents($absolute);
                 $title = $this->containmentFor($src, $relative, $envelope)['title'] ?? null;
-                if (app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->reassert($existing, $title, $src, \Splicewire\Beam\Ux\Provenance\Provenance::disk($relative))) {
+                if (app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->reassert($existing, $title, $src, $this->originFor($relative))) {
                     $reasserted[] = $relative;
                 } else {
                     $skipped[] = $relative;
@@ -227,6 +236,19 @@ class RegisterEntriesFromDisk
      *
      * @param  array{slug: string, type: ?string, namespace: ?string, format: string}  $envelope
      */
+    /**
+     * The origin a registered row is stamped with: a declared package source stamps `package:<vendor>`
+     * (DM2, for the splicewire/tower docs bundle), a plain host disk source stamps `disk:<relative>` as
+     * before. Both the create stamp and the re-assert's incoming origin read this, so DOC-5 precedence
+     * and `docs.diverged` see the same origin the seed will.
+     */
+    protected function originFor(string $relative): string
+    {
+        return $this->package !== null
+            ? \Splicewire\Beam\Ux\Provenance\Provenance::package($this->package)
+            : \Splicewire\Beam\Ux\Provenance\Provenance::disk($relative);
+    }
+
     protected function register(array $envelope, string $source, string $relative = ''): BeamUxEntry
     {
         // ATOMIC, for the reason `SeedsEntries::seedPage()` states and this method had to relearn: the row
@@ -254,7 +276,7 @@ class RegisterEntriesFromDisk
                 'namespace' => $envelope['namespace'],
                 'format' => $envelope['format'],
             ], BeamUxEntry::publishedMarkingAttributes(), $containment, \Splicewire\Beam\Ux\Provenance\Provenance::stamp(
-                \Splicewire\Beam\Ux\Provenance\Provenance::disk($relative),
+                $this->originFor($relative),
                 $containment['title'] ?? null,
                 $source,
                 app(\Splicewire\Beam\Ux\Codec\CodecRegistry::class)->for($envelope['format']),
