@@ -85,9 +85,11 @@ class DeclaredSectionNavigationTest extends TestCase
      */
     public function test_a_seat_is_named_so_the_validator_can_never_reject_it(): void
     {
-        $this->declare('ops', 'operator');
+        // A key no package seats: since laravel-beam 44ef9cb a same-key seat with other gates (beam-ux's own `ops` is a
+        // Developer seat) is refused rather than merged, and the naming is what this pins, not a collision.
+        $this->declare('gizmos', 'operator');
 
-        $this->assertSame('ops.section', $this->seatFor('operator', 'ops')->routeName);
+        $this->assertSame('gizmos.section', $this->seatFor('operator', 'gizmos')->routeName);
     }
 
     /** A realm no package targeted is empty, not an error. */
