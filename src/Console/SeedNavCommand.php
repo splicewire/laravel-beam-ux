@@ -33,11 +33,11 @@ class SeedNavCommand extends Command
         $rows = $source->resolve($namespace);
 
         if ($rows === []) {
-            $this->components->warn(
+            $this->components->error(
                 "No nav data for namespace [{$namespace}] — set config('beam.ux.nav'), author resources/beam-ux/nav.{yml,json}, or register entries with segment/realm/nav_order frontmatter first."
             );
 
-            return self::SUCCESS;
+            return self::FAILURE;
         }
 
         $provisionedRoots = [];

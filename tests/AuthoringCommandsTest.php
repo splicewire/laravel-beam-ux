@@ -96,6 +96,16 @@ class AuthoringCommandsTest extends TestCase
         $this->assertNotNull(BeamUxEntry::query()->where('namespace', 'realms')->where('slug', 'account')->first());
     }
 
+    public function test_seed_nav_fails_when_the_declared_source_resolves_no_rows(): void
+    {
+        Config::set('beam.ux.namespace', 'demo');
+        Config::set('beam.ux.nav', []);
+
+        $this->artisan('splicewire:beam:ux:seed-nav')
+            ->expectsOutputToContain('No nav data for namespace [demo]')
+            ->assertFailed();
+    }
+
     public function test_seed_nav_derives_from_entry_frontmatter_when_no_config_or_disk(): void
     {
         Config::set('beam.ux.namespace', 'demo');
