@@ -11,6 +11,7 @@ use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavNode;
 use Schemastud\Frame\Contracts\ResourceRegistry;
 use Splicewire\Beam\Authorization\ResourceVisibility;
+use Splicewire\Beam\Authorization\SeatGate;
 use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSection;
@@ -103,6 +104,7 @@ class NavSectionProjector
         private Gate $gate,
         private ParticleResourceRegistry $particles,
         private ResourceVisibility $visibility,
+        private SeatGate $seatGate,
         private RealmRegistry $realms,
         private Container $container,
     ) {}
@@ -341,14 +343,18 @@ class NavSectionProjector
         try {
             $definition = $this->particles->definition($key, $realm);
 
-            if (! $this->visibility->listable($definition, $user)) {
+            $routeName = RealmDashboard::routeNameFor($realm);
+            $resolution = $this->seatGate->resolve($routeName, $realm);
+
+            if ($resolution === null
+                ? ! $this->visibility->listable($definition, $user)
+                : ! $this->seatGate->allows($resolution, $user)) {
                 return [];
             }
         } catch (Throwable) {
             return [];
         }
 
-        $routeName = RealmDashboard::routeNameFor($realm);
         $href = $hrefs[$routeName] ?? null;
 
         if ($href === null) {
@@ -364,7 +370,10 @@ class NavSectionProjector
                 match: trim($href, '/'),
                 icon: $definition->nav->icon,
                 routeName: $routeName,
-            )->withMeta([self::CONTRIBUTED => true]),
+            )->withMeta(array_filter([
+                self::CONTRIBUTED => true,
+                SeatGate::META => $resolution,
+            ], fn (mixed $value): bool => $value !== null)),
         ]];
     }
 

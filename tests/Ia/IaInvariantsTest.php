@@ -10,9 +10,17 @@ use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavRegistry;
 use Rushing\DataNav\NavTree;
 use Schemastud\Frame\Contracts\FrameNavContributor;
+use Splicewire\Beam\Authorization\SeatGate;
+use Splicewire\Beam\Http\Particle\ParticleController;
+use Splicewire\Beam\Http\Particle\ParticleOperationController;
 use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
+use Splicewire\Beam\Particle\OperationKind;
+use Splicewire\Beam\Particle\ParticleOperation;
+use Splicewire\Beam\Particle\ParticleOperationRegistry;
+use Splicewire\Beam\Particle\ParticleResource;
+use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Ux\Frame\DeclaredSectionNavigation;
 use Splicewire\Beam\Ux\Frame\FrameNavContribution;
 use Splicewire\Beam\Ux\Frame\NavSectionProjector;
@@ -38,12 +46,13 @@ class IaInvariantsTest extends TestCase
 
     protected function defineRoutes($router): void
     {
-        Route::get('dashboard', fn () => 'dash')->name('dashboard');
-        Route::get('operator/tenants', fn () => 'tenants')->name('operator.tenants');
-        Route::get('settings/profile', fn () => 'profile')->name('settings.profile');
-        Route::get('projects/{project}', fn () => 'project')->name('projects.show');
+        Route::get('dashboard', fn () => 'dash')->name('dashboard')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
+        Route::get('operator/tenants', fn () => 'tenants')->name('operator.tenants')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
+        Route::get('settings/profile', fn () => 'profile')->name('settings.profile')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
+        Route::get('projects/{project}', fn () => 'project')->name('projects.show')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
         // The public site's entry route, mounted last as a host mounts it: it answers every other path.
-        Route::get('{path}', fn () => 'site entry')->where('path', '.*')->name('site.entry')->defaults('beamUxRealm', 'site');
+        Route::get('{path}', fn () => 'site entry')->where('path', '.*')->name('site.entry')
+            ->defaults('beamUxRealm', 'site')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
     }
 
     /** A host's own navigation for the realm: a host-authored tree. */
@@ -317,5 +326,83 @@ class IaInvariantsTest extends TestCase
             ['I1 tenant /operator/tenants', 'I4 tenant /reports'],
             array_keys($this->app->make(IaInvariants::class)->violations('tenant', $nav)),
         );
+    }
+
+    public function test_i6_resolves_resource_operation_named_route_and_explicit_open_arms(): void
+    {
+        $this->app->make(ParticleResourceRegistry::class)->register(new ParticleResource(
+            key: 'i6-resources',
+            backing: I6FeedBacking::class,
+            data: I6ResourceData::class,
+            frame: true,
+            readOnly: true,
+            showable: false,
+        ), ['tenant']);
+        Route::get('/i6-resources', fn () => [])->name('i6-resources.index')
+            ->defaults(ParticleController::RESOURCE, 'i6-resources');
+
+        $this->app->make(ParticleOperationRegistry::class)->register(new ParticleOperation(
+            resource: 'i6-resources', name: 'preview', kind: OperationKind::Read,
+            handle: fn () => [], ability: false,
+        ));
+        Route::get('/i6-resources/preview', fn () => [])->name('i6-resources.preview')
+            ->defaults(ParticleOperationController::RESOURCE, 'i6-resources')
+            ->defaults(ParticleOperationController::NAME, 'preview');
+
+        Route::get('/i6-admin', fn () => [])->middleware('can:i6.admin')->name('i6.admin');
+        Route::get('/i6-help', fn () => [])->name('i6.help')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
+
+        $nav = NavTree::make([
+            NavLink::make(title: 'Resources', href: '/i6-resources', routeName: 'i6-resources.index'),
+            NavLink::make(title: 'Preview', href: '/i6-resources/preview', routeName: 'i6-resources.preview'),
+            NavLink::make(title: 'Admin', href: '/i6-admin', routeName: 'i6.admin'),
+            NavLink::make(title: 'Help', href: '/i6-help', routeName: 'i6.help'),
+        ])->toArray();
+
+        $this->assertSame([], array_filter(
+            $this->app->make(IaInvariants::class)->violations('tenant', $nav),
+            fn (string $id): bool => str_starts_with($id, 'I6 '),
+            ARRAY_FILTER_USE_KEY,
+        ));
+    }
+
+    public function test_i6_a_host_seat_over_an_undeclared_gate_throws(): void
+    {
+        Route::get('/i6-ambient', fn () => [])->middleware('auth')->name('i6.ambient');
+        $nav = NavTree::make([
+            NavLink::make(title: 'Ambient', href: '/i6-ambient', routeName: 'i6.ambient'),
+        ])->toArray();
+
+        $this->expectException(IaInvariantViolation::class);
+        $this->expectExceptionMessageMatches('#I6 tenant /i6-ambient#');
+
+        $this->app->make(IaInvariants::class)->assert('tenant', $nav);
+    }
+
+    public function test_i6_a_package_seat_over_an_undeclared_gate_is_pruned(): void
+    {
+        Route::get('/i6-package-ambient', fn () => [])->middleware('auth')->name('i6.package-ambient');
+        $nav = NavTree::make([
+            NavLink::make(title: 'Ambient', href: '/i6-package-ambient', routeName: 'i6.package-ambient'),
+        ])->toArray();
+
+        $invariants = $this->app->make(IaInvariants::class);
+        $this->assertArrayHasKey('I6 tenant /i6-package-ambient', $invariants->violations('tenant', $nav));
+        $pruned = $invariants->prune('tenant', $nav);
+
+        $this->assertSame([], $pruned['items']);
+    }
+}
+
+class I6ResourceData extends \Spatie\LaravelData\Data
+{
+    public function __construct(public string $id = '') {}
+}
+
+class I6FeedBacking implements \Splicewire\Beam\Particle\Backing\StreamsRecords
+{
+    public function records(array $filters, ?string $cursor, int $perPage): \Illuminate\Contracts\Pagination\CursorPaginator
+    {
+        return new \Illuminate\Pagination\CursorPaginator([], $perPage);
     }
 }
