@@ -348,7 +348,7 @@ class NavSectionProjector
 
             if ($resolution === null
                 ? ! $this->visibility->listable($definition, $user)
-                : ! $this->seatGate->allows($resolution, $user)) {
+                : ! $this->seatGate->allows($resolution, $user, $realm)) {
                 return [];
             }
         } catch (Throwable) {

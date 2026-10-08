@@ -320,7 +320,7 @@ class FrameResourcesInvocable implements Invocable
         // final I6 pass still rejects/prunes that unresolved seat before it reaches a manifest.
         return $resolution === null
             ? $this->visibility->listable($def, $user)
-            : $this->seatGate->allows($resolution, $user);
+            : $this->seatGate->allows($resolution, $user, $realm);
     }
 
     /**

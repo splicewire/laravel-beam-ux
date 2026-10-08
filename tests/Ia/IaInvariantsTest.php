@@ -379,6 +379,22 @@ class IaInvariantsTest extends TestCase
         $this->app->make(IaInvariants::class)->assert('tenant', $nav);
     }
 
+    public function test_i6_accepts_a_spa_seat_resolved_from_its_backing_data_route(): void
+    {
+        Route::get('/i6-backing', fn () => [])->name('i6.backing')
+            ->defaults(SeatGate::OPEN_TO_MEMBERS, true);
+        Route::get('/i6-spa', fn () => [])->middleware('auth')->name('i6.spa');
+
+        $this->app->make(SeatGate::class)->backedBy('i6.spa', 'i6.backing');
+        $nav = NavTree::make([
+            NavLink::make(title: 'SPA page', href: '/i6-spa', routeName: 'i6.spa'),
+        ])->toArray();
+
+        $violations = $this->app->make(IaInvariants::class)->violations('tenant', $nav);
+
+        $this->assertArrayNotHasKey('I6 tenant /i6-spa', $violations);
+    }
+
     public function test_i6_a_package_seat_over_an_undeclared_gate_is_pruned(): void
     {
         Route::get('/i6-package-ambient', fn () => [])->middleware('auth')->name('i6.package-ambient');
