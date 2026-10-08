@@ -19,6 +19,7 @@ use Schemastud\Frame\Data\SummaryResponseData;
 use Schemastud\Frame\FrameServiceProvider;
 use Schemastud\Frame\Registry\ResourceDefinition;
 use Spatie\LaravelData\Data;
+use Splicewire\Beam\Authorization\SeatGate;
 use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSection;
@@ -91,7 +92,8 @@ class RealmDashboardTest extends TestCase
      */
     protected function defineRoutes($router): void
     {
-        $router->get('operator/{path?}', fn () => 'operator shell')->where('path', '.*');
+        $router->get('operator/{path?}', fn () => 'operator shell')->where('path', '.*')
+            ->defaults(SeatGate::OPEN_TO_MEMBERS, true);
     }
 
     protected function setUp(): void

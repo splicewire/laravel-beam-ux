@@ -4,6 +4,8 @@ namespace Splicewire\Beam\Ux\Tests;
 
 use Illuminate\Contracts\Auth\Access\Authorizable;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Rushing\DataNav\Contracts\NavExpander;
 use Rushing\DataNav\Contracts\NavMatcher;
 use Rushing\DataNav\InvocableNavItem;
@@ -171,7 +173,7 @@ class FrameResourcesCollectorTest extends TestCase
 
     public function test_a_policy_bound_resource_is_view_any_gated_and_a_policy_less_one_is_not(): void
     {
-        \Illuminate\Support\Facades\Gate::policy(GatedFixtureModel::class, DenyingViewAnyPolicy::class);
+        Gate::policy(GatedFixtureModel::class, DenyingViewAnyPolicy::class);
 
         $this->app->make(ParticleResourceRegistry::class)->register(new ParticleResource(
             key: 'gated',
@@ -217,7 +219,7 @@ class FrameResourcesCollectorTest extends TestCase
      */
     public function test_an_anonymous_reader_never_sees_more_than_an_authenticated_one(): void
     {
-        \Illuminate\Support\Facades\Gate::policy(GatedFixtureModel::class, DenyingViewAnyPolicy::class);
+        Gate::policy(GatedFixtureModel::class, DenyingViewAnyPolicy::class);
 
         $this->app->make(ParticleResourceRegistry::class)->register(new ParticleResource(
             key: 'gated',
@@ -252,7 +254,7 @@ class FrameResourcesCollectorTest extends TestCase
     public function test_a_model_less_resource_declaring_an_ability_is_listed_only_to_an_actor_holding_it(): void
     {
         $this->registerModelLess('queue', policy: 'queue.read');
-        \Illuminate\Support\Facades\Gate::define('queue.read', fn (\Illuminate\Foundation\Auth\User $user): bool => $user->getAuthIdentifier() === 7);
+        Gate::define('queue.read', fn (\Illuminate\Foundation\Auth\User $user): bool => $user->getAuthIdentifier() === 7);
 
         $this->assertNotContains('Queue', array_column($this->invoke('platform', 'operator', user: $this->actor(8)), 'title'));
         $this->assertContains('Queue', array_column($this->invoke('platform', 'operator', user: $this->actor(7)), 'title'));
@@ -278,7 +280,7 @@ class FrameResourcesCollectorTest extends TestCase
     {
         $this->registerModelLess('queue');
         $this->registerModelLess('gated-queue', policy: 'queue.read', label: 'Gated queue');
-        \Illuminate\Support\Facades\Gate::define('queue.read', fn (?\Illuminate\Foundation\Auth\User $user = null): bool => true);
+        Gate::define('queue.read', fn (?\Illuminate\Foundation\Auth\User $user = null): bool => true);
 
         $anonymous = array_column($this->invoke('platform', 'operator'), 'title');
 
@@ -393,6 +395,31 @@ class FrameResourcesCollectorTest extends TestCase
             ['Tenants', 'Packs', 'Plans', 'Hooks'],
             array_map(fn ($child): string => $child->title, $tree->items[0]->children()),
         );
+    }
+
+    public function test_the_resolved_route_gate_filters_a_child_and_never_reaches_the_wire(): void
+    {
+        Gate::define('guarded.view', fn ($user): bool => $user?->getAuthIdentifier() === 7);
+        Route::get('/operator/guarded', fn () => [])->middleware('can:guarded.view')->name('guarded.index');
+
+        $this->app->make(NavRegistry::class)->register('seat-gate', fn (): array => [
+            InvocableNavItem::make(
+                title: 'Platform',
+                invocable: FrameResourcesInvocable::NAME,
+                input: ['section' => 'none', 'realm' => 'operator', 'static' => [[
+                    'title' => 'Guarded', 'href' => '/operator/guarded', 'routeName' => 'guarded.index',
+                ]]],
+                routeName: 'platform.section',
+            ),
+        ]);
+
+        $registry = $this->app->make(NavRegistry::class);
+        $allowed = $registry->build('seat-gate', new NavContext(user: $this->actor(7), attributes: ['realm' => 'operator']));
+        $denied = $registry->build('seat-gate', new NavContext(user: $this->actor(8), attributes: ['realm' => 'operator']));
+
+        $this->assertSame(['Guarded'], array_map(fn ($child): string => $child->title, $allowed->items[0]->children()));
+        $this->assertSame([], $denied->items[0]->children());
+        $this->assertArrayNotHasKey('meta', $allowed->toArray()['items'][0]['children'][0]);
     }
 
     // ---------------------------------------------------------------- helpers

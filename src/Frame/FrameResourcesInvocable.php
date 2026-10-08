@@ -12,6 +12,7 @@ use Rushing\Popcorn\Contracts\Invocable;
 use Schemastud\Frame\Contracts\ResourceRegistry;
 use Schemastud\Frame\Registry\ResourceDefinition;
 use Splicewire\Beam\Authorization\ResourceVisibility;
+use Splicewire\Beam\Authorization\SeatGate;
 use Splicewire\Beam\Particle\ListRouteName;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
@@ -76,6 +77,7 @@ class FrameResourcesInvocable implements Invocable
         private ParticleResourceRegistry $particles,
         private RouteContextProjector $routes,
         private ResourceVisibility $visibility,
+        private SeatGate $seatGate,
     ) {}
 
     public function name(): string
@@ -123,7 +125,14 @@ class FrameResourcesInvocable implements Invocable
         // static authored order) and an undeclared `navOrder` still trails.
         usort($children, fn (array $a, array $b): int => $a['order'] <=> $b['order']);
 
-        return ['items' => array_map(fn (array $child): array => $child['link']->toArray(), $children)];
+        return ['items' => array_map(function (array $child) use ($realm): array {
+            $link = $child['link'];
+            $resolution = $this->seatGate->resolve((string) $link->routeName, $realm);
+
+            return $resolution === null
+                ? $link->toArray()
+                : [...$link->toArray(), 'meta' => [SeatGate::META => $resolution]];
+        }, $children)];
     }
 
     /**
@@ -183,7 +192,7 @@ class FrameResourcesInvocable implements Invocable
             $this->registry->all(),
             fn (ResourceDefinition $def): bool => $def->nav->section === $section
                 && $this->resourceInRealm($def->key, $realm)
-                && $this->resourceViewable($def, $user),
+                && $this->resourceViewable($def, $user, $realm),
         );
 
         usort($matches, function (ResourceDefinition $a, ResourceDefinition $b): int {
@@ -302,9 +311,16 @@ class FrameResourcesInvocable implements Invocable
      * Read posture only. A missing policy on a WRITE stays denied — one posture per kind, decided at the
      * declaration, not two per surface.
      */
-    private function resourceViewable(ResourceDefinition $def, ?Authenticatable $user): bool
+    private function resourceViewable(ResourceDefinition $def, ?Authenticatable $user, string $realm): bool
     {
-        return $this->visibility->listable($def, $user);
+        $resolution = $this->seatGate->resolve(ListRouteName::of($def), $realm);
+
+        // A bare package harness may project a resource catalog without mounting a host route. Keep
+        // the existing visibility answer here so the projector remains independently testable; the
+        // final I6 pass still rejects/prunes that unresolved seat before it reaches a manifest.
+        return $resolution === null
+            ? $this->visibility->listable($def, $user)
+            : $this->seatGate->allows($resolution, $user);
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Concerns;
 
+use Rushing\DataNav\NavGate;
 use Rushing\DataNav\NavInvocableRegistry;
 use Rushing\DataNav\NavRegistry;
 use Rushing\Popcorn\Concerns\Chained;
@@ -17,12 +18,14 @@ use Splicewire\Beam\Ux\Frame\FrameNavContribution;
 use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
 use Splicewire\Beam\Ux\Frame\NavSectionProjector;
 use Splicewire\Beam\Ux\Frame\RouteContextPlan;
+use Splicewire\Beam\Ux\Frame\SeatGateNavGateStage;
 use Splicewire\Beam\Ux\Ia\IaCheckedNavContributor;
 use Splicewire\Beam\Ux\Ia\IaInvariants;
 use Splicewire\Beam\Ux\Ia\Invariants\DeveloperSeatsLiveInTheDeveloperZone;
-use Splicewire\Beam\Ux\Ia\Invariants\RowsSitInOneTaskSection;
 use Splicewire\Beam\Ux\Ia\Invariants\HrefJoinsAMountedRoute;
 use Splicewire\Beam\Ux\Ia\Invariants\RailStaysInItsRealm;
+use Splicewire\Beam\Ux\Ia\Invariants\RowsSitInOneTaskSection;
+use Splicewire\Beam\Ux\Ia\Invariants\SeatResolvesOneGate;
 
 /**
  * One concern of {@see BeamUxServiceProvider}: the `nav` + `routeContext` half of
@@ -72,6 +75,7 @@ trait WiresFrameNav
             $app->make(DeveloperSeatsLiveInTheDeveloperZone::class),
             $app->make(RowsSitInOneTaskSection::class),
             $app->make(HrefJoinsAMountedRoute::class),
+            $app->make(SeatResolvesOneGate::class),
         ]));
 
         // `extend`, not a second `bind`: an extender survives the host's own later `bind()`, so whatever
@@ -123,6 +127,8 @@ trait WiresFrameNav
     #[Chained('boot', order: 55)]
     protected function bootFrameNavCollector(): void
     {
+        $this->app->make(NavGate::class)->through($this->app->make(SeatGateNavGateStage::class));
+
         if (! $this->app->bound(NavInvocableRegistry::class) || ! $this->app->bound(ResourceRegistry::class)) {
             return;
         }
@@ -173,7 +179,7 @@ trait WiresFrameNav
                     key: 'authoring', realm: $realm, label: 'Authoring',
                     icon: 'FileText', href: '/authoring', order: 30,
                     entitlement: null, permission: null,
-                audience: NavAudience::Product,
+                    audience: NavAudience::Product,
                 ),
                 by: 'splicewire/laravel-beam-ux',
             );
@@ -183,7 +189,7 @@ trait WiresFrameNav
                     key: 'ops', realm: $realm, label: 'Ops',
                     icon: 'Server', href: '/ops', order: 80,
                     entitlement: null, permission: null,
-                audience: NavAudience::Developer,
+                    audience: NavAudience::Developer,
                 ),
                 by: 'splicewire/laravel-beam-ux',
             );
