@@ -395,6 +395,19 @@ class IaInvariantsTest extends TestCase
         $this->assertArrayNotHasKey('I6 tenant /i6-spa', $violations);
     }
 
+    public function test_i6_rejects_a_route_that_declares_more_than_one_gate(): void
+    {
+        Route::get('/i6-ambiguous', fn () => [])->middleware(['auth', 'can:reports.view'])->name('i6.ambiguous')
+            ->defaults(SeatGate::OPEN_TO_MEMBERS, true);
+        $nav = NavTree::make([
+            NavLink::make(title: 'Ambiguous', href: '/i6-ambiguous', routeName: 'i6.ambiguous'),
+        ])->toArray();
+
+        $violations = $this->app->make(IaInvariants::class)->violations('tenant', $nav);
+
+        $this->assertArrayHasKey('I6 tenant /i6-ambiguous', $violations);
+    }
+
     public function test_i6_a_package_seat_over_an_undeclared_gate_is_pruned(): void
     {
         Route::get('/i6-package-ambient', fn () => [])->middleware('auth')->name('i6.package-ambient');
