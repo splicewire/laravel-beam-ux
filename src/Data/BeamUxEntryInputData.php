@@ -14,6 +14,7 @@ use Spatie\LaravelData\Attributes\Validation\In;
 use Spatie\LaravelData\Support\Validation\ValidationContext;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
+use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 
@@ -27,7 +28,7 @@ use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
  * active consumers, no composition mechanism exists yet), `title`, `slug` (client auto-slugifies from
  * `title`, human-editable before submit — this DTO just validates the final value), `realm`
  * (entitlement-gated against `Gate::allows("ux.{$realm}.author")`, never trusted as free text —
- * see {@see rules()}), `parent_id` (an existing entry's id, the placement picker).
+ * see {@see rules()}), `parentId` (an existing entry's id, the placement picker).
  *
  * **Auto-derived**: `namespace` is set to `''` on creation by `BeamUxEntryData::prepare()`
  * and omitted from this write map so updates retain their existing namespace (disk-only build-grouping — irrelevant to an
@@ -43,6 +44,8 @@ use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 #[Title('Entry')]
 class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
 {
+    use RejectsUnknownInputKeys;
+
     /** @var list<string> */
     public const CREATABLE_TYPES = ['page', 'component', 'theme'];
 
@@ -55,10 +58,10 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         public string $slug,
         #[Title('Realm'), Widget('combobox', options: ['suggestions' => ['site', 'operator', 'tenant', 'user']])]
         public string $realm,
-        #[Title('Parent'), ResourceRef('beam-ux-entry', value: 'id', label: 'title'), MapInputName('parent_id')]
-        public ?string $parent_id = null,
+        #[Title('Parent'), ResourceRef('beam-ux-entry', value: 'id', label: 'title'), MapInputName('parentId')]
+        public ?string $parentId = null,
         // Containment/nav fields (theme-entries-and-authoring provenance sweep, ux-demo-convergence
-        // 2026-09-12): `segment` and `nav_order` were never actually deferred by an owner ruling — the
+        // 2026-09-12): `segment` and `navOrder` were never actually deferred by an owner ruling — the
         // console form simply never carried them. `NavProjector::project()` already reads both LIVE off
         // the entry row (`nav_order` for sibling order, `segment` for the URL/whether the node is a nav
         // destination at all), so exposing them here is wiring an existing read to an existing write
@@ -66,8 +69,8 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         // nav link, children still splice through) — never rejected, only validated when present.
         #[Title('Segment')]
         public ?string $segment = null,
-        #[Title('Nav order'), MapInputName('nav_order')]
-        public ?int $nav_order = null,
+        #[Title('Nav order'), MapInputName('navOrder')]
+        public ?int $navOrder = null,
     ) {}
 
     /** Existing untitled rows open as an empty required field; identity and namespace stay server-owned. */
@@ -78,9 +81,9 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             title: $entry->title ?? '',
             slug: $entry->slug,
             realm: $entry->realm,
-            parent_id: $entry->parent_id,
+            parentId: $entry->parent_id,
             segment: $entry->segment,
-            nav_order: $entry->nav_order,
+            navOrder: $entry->nav_order,
         );
     }
 
@@ -105,7 +108,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
                     $fail('You are not entitled to author entries in this realm.');
                 }
             }],
-            'parent_id' => ['bail', 'nullable', 'uuid', 'exists:beam_ux_entries,id'],
+            'parentId' => ['bail', 'nullable', 'uuid', 'exists:beam_ux_entries,id'],
             // Mirrors the real DB constraint (`create_beam_ux_entries_table.php.stub`:
             // `unique index … on beam_ux_entries (parent_id, segment) where deleted_at is null`) —
             // ONE public URL per (parent, segment). Scoped to `parent_id`, not realm: the database
@@ -116,22 +119,22 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             // this for null/omitted segments — multiple pass-through siblings sharing a null segment is
             // the documented, permitted shape (ContainmentTest::test_unplaced_page_entries_without_a_segment_are_excluded_from_nav).
             'segment' => ['nullable', 'string', 'max:255', self::segmentUniqueRule($context)],
-            'nav_order' => ['nullable', 'integer'],
+            'navOrder' => ['nullable', 'integer'],
         ];
     }
 
     /**
      * Scoped like the `slug` rule above: same parent, excluding the persisted update target. The
-     * submitted `parent_id` uses an explicit input-name declaration and is normalized to the PHP
-     * property name in `ValidationContext::$fullPayload`, so the rule scopes through `parent_id` here
-     * rather than `request('parent_id')` — this DTO's own tests call `validateAndCreate()` with a bare
+     * submitted `parentId` uses an explicit input-name declaration and is normalized to the PHP
+     * property name in `ValidationContext::$fullPayload`, so the rule scopes through `parentId` here
+     * rather than `request('parentId')` — this DTO's own tests call `validateAndCreate()` with a bare
      * array, never through an HTTP request, and the two would silently diverge on any such caller.
      */
     private static function segmentUniqueRule(ValidationContext $context): Unique
     {
         $current = self::currentEntry();
         $payload = is_array($context->fullPayload) ? $context->fullPayload : [];
-        $parentId = $current !== null ? $current->parent_id : ($payload['parent_id'] ?? null);
+        $parentId = $current !== null ? $current->parent_id : ($payload['parentId'] ?? null);
 
         $rule = Rule::unique('beam_ux_entries')
             ->where('parent_id', $parentId)
@@ -166,9 +169,9 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             'title' => $this->title,
             'slug' => $this->slug,
             'realm' => $this->realm,
-            'parent_id' => $this->parent_id,
+            'parent_id' => $this->parentId,
             'segment' => $this->segment,
-            'nav_order' => $this->nav_order,
+            'nav_order' => $this->navOrder,
         ];
     }
 }
