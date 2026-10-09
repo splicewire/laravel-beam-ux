@@ -89,11 +89,11 @@ class BeamUxEntryDataTest extends TestCase
         $this->actingAs((new User)->forceFill(['id' => 1]));
         Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
         $schema = $this->getJson('/frame/resources/beam-ux-entry/schema')->assertOk()->json();
-        $this->assertSame(['type', 'title', 'slug', 'realm', 'parent_id', 'segment', 'nav_order'], array_keys($schema['properties']));
+        $this->assertSame(['type', 'title', 'slug', 'realm', 'parentId', 'segment', 'navOrder'], array_keys($schema['properties']));
         $this->assertNotContains('id', $schema['required']);
         $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $schema['properties']['type']['enum']);
         $this->assertSame('combobox', $schema['properties']['realm']['x-stud-widget']);
-        $this->assertArrayHasKey('x-stud-resource-ref', $schema['properties']['parent_id']);
+        $this->assertArrayHasKey('x-stud-resource-ref', $schema['properties']['parentId']);
     }
 
     public function test_mounted_create_generates_identity_and_body_and_edit_preserves_them(): void
@@ -136,10 +136,10 @@ class BeamUxEntryDataTest extends TestCase
             'title' => 'Child',
             'slug' => 'child',
             'realm' => 'site',
-            'parent_id' => 'missing-id',
+            'parentId' => 'missing-id',
         ])->assertUnprocessable()
-            ->assertJsonValidationErrors(['parent_id'])
-            ->assertJsonPath('errors.parent_id.0', 'The parent id field must be a valid UUID.');
+            ->assertJsonValidationErrors(['parentId'])
+            ->assertJsonPath('errors.parentId.0', 'The parent id field must be a valid UUID.');
     }
 
     #[DataProvider('inputMapperConfigurations')]
@@ -150,18 +150,36 @@ class BeamUxEntryDataTest extends TestCase
         Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
 
         $schema = $this->getJson('/frame/resources/beam-ux-entry/schema')->assertOk()->json();
-        $this->assertArrayHasKey('nav_order', $schema['properties']);
-        $this->assertArrayNotHasKey('navOrder', $schema['properties']);
+        $this->assertArrayHasKey('navOrder', $schema['properties']);
+        $this->assertArrayNotHasKey('nav_order', $schema['properties']);
 
         $response = $this->postJson('/frame/resources/beam-ux-entry', [
             'type' => 'page',
             'title' => 'Child',
             'slug' => 'child',
             'realm' => 'site',
-            'nav_order' => 'abc',
-        ])->assertUnprocessable()->assertJsonValidationErrors(['nav_order']);
+            'navOrder' => 'abc',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['navOrder']);
 
-        $this->assertSame(['nav_order'], array_keys($response->json('errors')));
+        $this->assertSame(['navOrder'], array_keys($response->json('errors')));
+    }
+
+    #[DataProvider('inputMapperConfigurations')]
+    public function test_mounted_create_rejects_the_retired_snake_case_wire_names(?string $inputMapper): void
+    {
+        $this->useInputMapper($inputMapper);
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+
+        $this->postJson('/frame/resources/beam-ux-entry', [
+            'type' => 'page',
+            'title' => 'Child',
+            'slug' => 'child',
+            'realm' => 'site',
+            'parent_id' => '00000000-0000-4000-8000-000000000000',
+            'nav_order' => 3,
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors(['parent_id', 'nav_order']);
     }
 
     public function test_mounted_create_scopes_segment_uniqueness_to_the_mapped_parent_id(): void
@@ -182,7 +200,7 @@ class BeamUxEntryDataTest extends TestCase
             'title' => 'Another guide',
             'slug' => 'another-guide',
             'realm' => 'site',
-            'parent_id' => $parent->id,
+            'parentId' => $parent->id,
             'segment' => 'guide',
         ])->assertUnprocessable()->assertJsonValidationErrors(['segment']);
     }
@@ -196,7 +214,7 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertSame('page', $data['type']);
         $this->assertSame('', $data['title']);
         $this->assertSame('untitled', $data['segment']);
-        $this->assertSame(4, $data['nav_order']);
+        $this->assertSame(4, $data['navOrder']);
         $this->assertSame($entry->id, $data['id']);
         $this->assertArrayNotHasKey('namespace', $data);
     }
@@ -311,11 +329,11 @@ class BeamUxEntryDataTest extends TestCase
             'slug' => 'songs',
             'realm' => 'site',
             'segment' => '/songs',
-            'nav_order' => 30,
+            'navOrder' => 30,
         ]);
 
         $this->assertSame('/songs', $data->segment);
-        $this->assertSame(30, $data->nav_order);
+        $this->assertSame(30, $data->navOrder);
         $this->assertSame('/songs', $data->toModelAttributes()['segment']);
         $this->assertSame(30, $data->toModelAttributes()['nav_order']);
     }
@@ -330,7 +348,7 @@ class BeamUxEntryDataTest extends TestCase
         ]);
 
         $this->assertNull($data->segment);
-        $this->assertNull($data->nav_order);
+        $this->assertNull($data->navOrder);
         $this->assertNull($data->toModelAttributes()['segment']);
         $this->assertNull($data->toModelAttributes()['nav_order']);
     }
@@ -365,7 +383,7 @@ class BeamUxEntryDataTest extends TestCase
             'slug' => 'second-post',
             'realm' => 'site',
             'segment' => 'first-post',
-            'parent_id' => $parent->id,
+            'parentId' => $parent->id,
         ]);
     }
 
@@ -381,7 +399,7 @@ class BeamUxEntryDataTest extends TestCase
             'slug' => 'b-intro',
             'realm' => 'site',
             'segment' => 'intro',
-            'parent_id' => $blogB->id,
+            'parentId' => $blogB->id,
         ]);
 
         $this->assertSame('intro', $data->segment);

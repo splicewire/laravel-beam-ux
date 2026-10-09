@@ -5,7 +5,7 @@ namespace Splicewire\Beam\Ux\Data;
 use Schemastud\DataSchemas\Contracts\SchemaIdentity;
 use Spatie\LaravelData\Attributes\MapInputName;
 use Spatie\LaravelData\Data;
-use Spatie\LaravelData\Mappers\SnakeCaseMapper;
+use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
 use Splicewire\Beam\Mdx\Frontmatter\Contracts\DeclaresFrontmatterFields;
 use Splicewire\Beam\Mdx\Frontmatter\Contracts\Frontmatter;
 use Splicewire\Beam\Mdx\Frontmatter\Contracts\HydratesFromFrontmatter;
@@ -16,20 +16,17 @@ use Splicewire\Beam\Mdx\Frontmatter\ParsedFrontmatter;
  * beam-ux's OWN frontmatter vocabulary (frontmatter-declaration-seam ticket 05) — the first real
  * consumer of the {@see Frontmatter} seam, and the demonstration of why the shape is per-consumer.
  *
- * The grammar is shared; this is not. `realm`, `segment`, `nav_order`, `nav_group` and
- * `workflow_marking` are **beam-ux's facts** — they name this package's containment model and its
+ * The grammar is shared; this is not. `realm`, `segment`, `navOrder`, `navGroup` and
+ * `workflowMarking` are **beam-ux's facts** — they name this package's containment model and its
  * entry columns. `laravel-beam-mdx` must not know about them, which is exactly why its shipped
  * `FrontmatterData` carries only `title`/`layout`/`template` (what the *format* owns) and everything
  * else rides `unknown()`.
  *
  * ## The mapper pin
  *
- * `#[MapInputName(SnakeCaseMapper::class)]` for the same reason `FrontmatterData` carries it: unpinned,
- * this class inherits `config('data.name_mapping_strategy.input')`, which the estate's hosts do not
- * agree on (`CamelCaseMapper` at three, `SnakeCaseMapper` at two, absent at 16 of 21 Herd roots). The
- * pin is belt-and-braces over {@see \Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser}, which already
- * canonicalizes to snake at the grammar; it defends the path where a caller hands `::from()` a raw
- * array that never went through the parser.
+ * Every multi-word field pins its package-owned camelCase wire name. This keeps the public shape
+ * independent of a host's global data mapper. {@see fromFrontmatter()} reads the parser's raw authored
+ * keys so the retired snake_case spellings do not become aliases through grammar canonicalization.
  *
  * ## What is deliberately NOT modelled
  *
@@ -41,24 +38,25 @@ use Splicewire\Beam\Mdx\Frontmatter\ParsedFrontmatter;
  * required here: whether a host has migrated them is a fact about the **host**, so it is an advisory
  * skip, never a validation failure on the declaration.
  */
-#[MapInputName(SnakeCaseMapper::class)]
 class EntryFrontmatterData extends Data implements DeclaresFrontmatterFields, Frontmatter, HydratesFromFrontmatter, RetainsUnknownFields, SchemaIdentity
 {
+    use RejectsUnknownInputKeys;
+
     /**
      * @param  array<string, string>  $leftovers  canonical keys this shape does not declare
      */
     public function __construct(
         public ?string $realm = null,
         public ?string $segment = null,
-        #[MapInputName('nav_order')]
-        public ?int $nav_order = null,
-        #[MapInputName('nav_group')]
-        public ?string $nav_group = null,
+        #[MapInputName('navOrder')]
+        public ?int $navOrder = null,
+        #[MapInputName('navGroup')]
+        public ?string $navGroup = null,
         public ?string $title = null,
         public ?string $layout = null,
         public ?string $template = null,
-        #[MapInputName('workflow_marking')]
-        public ?string $workflow_marking = null,
+        #[MapInputName('workflowMarking')]
+        public ?string $workflowMarking = null,
         public array $leftovers = [],
     ) {}
 
@@ -76,7 +74,7 @@ class EntryFrontmatterData extends Data implements DeclaresFrontmatterFields, Fr
     /** @return list<string> */
     public static function fieldNames(): array
     {
-        return ['realm', 'segment', 'nav_order', 'nav_group', 'title', 'layout', 'template', 'workflow_marking'];
+        return ['realm', 'segment', 'navOrder', 'navGroup', 'title', 'layout', 'template', 'workflowMarking'];
     }
 
     public static function fromFrontmatter(ParsedFrontmatter $parsed): static
@@ -84,8 +82,8 @@ class EntryFrontmatterData extends Data implements DeclaresFrontmatterFields, Fr
         $declared = array_flip(static::fieldNames());
 
         return static::from([
-            ...array_intersect_key($parsed->fields, $declared),
-            'leftovers' => array_diff_key($parsed->fields, $declared),
+            ...array_intersect_key($parsed->raw, $declared),
+            'leftovers' => array_diff_key($parsed->raw, $declared),
         ]);
     }
 
