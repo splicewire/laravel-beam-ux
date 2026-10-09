@@ -8,6 +8,8 @@ use Schemastud\Frame\Attributes\Column;
 use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\RowActions;
 use Schemastud\Frame\Attributes\Widget;
+use Spatie\LaravelData\Attributes\MapInputName;
+use Spatie\LaravelData\Attributes\MapOutputName;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
@@ -76,7 +78,8 @@ class BeamUxEntryData extends BeamData
         // A picker over OTHER beam-ux-entry rows (self-referential — the containment tree), not a
         // raw UUID paste. #[ResourceRef] fetches beam-ux-entry's own index for the option list.
         #[Title('Parent'), ResourceRef('beam-ux-entry', value: 'id', label: 'title')]
-        public ?string $parent_id,
+        #[MapInputName('parent_id'), MapOutputName('parentId')]
+        public ?string $parentId,
         // No #[Column] — not a table column, just carried on the wire so a client (the theme editor,
         // found live: a namespaced `theme` entry and a null-namespace `page` entry sharing one slug
         // resolved to the WRONG one server-side with no way for the client to disambiguate) can pass
@@ -89,7 +92,8 @@ class BeamUxEntryData extends BeamData
         #[Title('Segment')]
         public ?string $segment = null,
         #[Title('Nav order')]
-        public ?int $nav_order = null,
+        #[MapInputName('nav_order'), MapOutputName('navOrder')]
+        public ?int $navOrder = null,
     ) {}
 
     /** Default only a newly authored row; editing must preserve its disk namespace. */
