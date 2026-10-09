@@ -50,11 +50,14 @@ class EntryFrontmatterData extends Data implements DeclaresFrontmatterFields, Fr
     public function __construct(
         public ?string $realm = null,
         public ?string $segment = null,
+        #[MapInputName('nav_order')]
         public ?int $nav_order = null,
+        #[MapInputName('nav_group')]
         public ?string $nav_group = null,
         public ?string $title = null,
         public ?string $layout = null,
         public ?string $template = null,
+        #[MapInputName('workflow_marking')]
         public ?string $workflow_marking = null,
         public array $leftovers = [],
     ) {}

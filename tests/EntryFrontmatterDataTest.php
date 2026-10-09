@@ -3,11 +3,13 @@
 namespace Splicewire\Beam\Ux\Tests;
 
 use PHPUnit\Framework\Attributes\Test;
+use Rushing\Doctor\DoctorStatus;
 use Schemastud\DataSchemas\Contracts\SchemaIdentity;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
 use Splicewire\Beam\Mdx\Frontmatter\Contracts\Frontmatter;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterResolver;
+use Splicewire\Beam\Surgeon\WireNameDeclarationAudit;
 use Splicewire\Beam\Ux\Data\EntryFrontmatterData;
 
 /**
@@ -66,6 +68,18 @@ class EntryFrontmatterDataTest extends TestCase
 
         $this->assertSame(9, $data->nav_order);
         $this->assertSame('site', $data->realm);
+    }
+
+    #[Test]
+    public function each_multi_word_frontmatter_key_declares_its_own_wire_name(): void
+    {
+        $findings = (new WireNameDeclarationAudit(
+            [EntryFrontmatterData::class],
+            input: CamelCaseMapper::class,
+        ))->run();
+
+        $this->assertCount(1, $findings);
+        $this->assertSame(DoctorStatus::Pass, $findings[0]->status);
     }
 
     #[Test]
