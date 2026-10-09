@@ -137,7 +137,9 @@ class BeamUxEntryDataTest extends TestCase
             'slug' => 'child',
             'realm' => 'site',
             'parent_id' => 'missing-id',
-        ])->assertUnprocessable()->assertJsonValidationErrors(['parent_id']);
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors(['parent_id'])
+            ->assertJsonPath('errors.parent_id.0', 'The parent id field must be a valid UUID.');
     }
 
     #[DataProvider('inputMapperConfigurations')]

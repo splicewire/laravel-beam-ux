@@ -105,7 +105,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
                     $fail('You are not entitled to author entries in this realm.');
                 }
             }],
-            'parent_id' => ['nullable', 'string', 'exists:beam_ux_entries,id'],
+            'parent_id' => ['bail', 'nullable', 'uuid', 'exists:beam_ux_entries,id'],
             // Mirrors the real DB constraint (`create_beam_ux_entries_table.php.stub`:
             // `unique index … on beam_ux_entries (parent_id, segment) where deleted_at is null`) —
             // ONE public URL per (parent, segment). Scoped to `parent_id`, not realm: the database
