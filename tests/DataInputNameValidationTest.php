@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use ReflectionClass;
 use Spatie\LaravelData\Data;
@@ -11,13 +12,25 @@ use Spatie\LaravelData\Support\DataConfig;
 class DataInputNameValidationTest extends TestCase
 {
     #[Test]
-    public function every_package_validation_key_matches_its_resolved_input_name(): void
+    #[DataProvider('inputMapperConfigurations')]
+    public function every_package_validation_key_matches_its_resolved_input_name(?string $inputMapper): void
     {
+        config()->set('data.name_mapping_strategy.input', $inputMapper);
+        app(DataConfig::class)->reset();
         $classes = $this->dataClasses();
 
-        $this->assertSame(CamelCaseMapper::class, config('data.name_mapping_strategy.input'));
+        $this->assertSame($inputMapper, config('data.name_mapping_strategy.input'));
         $this->assertNotEmpty($classes);
         $this->assertSame([], $this->inputRuleNameMismatches($classes));
+    }
+
+    /** @return array<string, array{class-string|null}> */
+    public static function inputMapperConfigurations(): array
+    {
+        return [
+            'no global input mapper' => [null],
+            'global camel-case input mapper' => [CamelCaseMapper::class],
+        ];
     }
 
     /** @return list<class-string<Data>> */

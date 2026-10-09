@@ -8,7 +8,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Schemastud\Frame\FrameServiceProvider;
+use Spatie\LaravelData\Mappers\CamelCaseMapper;
+use Spatie\LaravelData\Support\DataConfig;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Ux\Data\BeamUxEntryData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryInputData;
@@ -86,11 +89,11 @@ class BeamUxEntryDataTest extends TestCase
         $this->actingAs((new User)->forceFill(['id' => 1]));
         Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
         $schema = $this->getJson('/frame/resources/beam-ux-entry/schema')->assertOk()->json();
-        $this->assertSame(['type', 'title', 'slug', 'realm', 'parentId', 'segment', 'navOrder'], array_keys($schema['properties']));
+        $this->assertSame(['type', 'title', 'slug', 'realm', 'parent_id', 'segment', 'nav_order'], array_keys($schema['properties']));
         $this->assertNotContains('id', $schema['required']);
         $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $schema['properties']['type']['enum']);
         $this->assertSame('combobox', $schema['properties']['realm']['x-stud-widget']);
-        $this->assertArrayHasKey('x-stud-resource-ref', $schema['properties']['parentId']);
+        $this->assertArrayHasKey('x-stud-resource-ref', $schema['properties']['parent_id']);
     }
 
     public function test_mounted_create_generates_identity_and_body_and_edit_preserves_them(): void
@@ -121,8 +124,10 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertSame($body, $driver->read($particleId)?->body);
     }
 
-    public function test_mounted_create_validates_the_mapped_parent_id(): void
+    #[DataProvider('inputMapperConfigurations')]
+    public function test_mounted_create_validates_the_documented_parent_id_on_every_host_shape(?string $inputMapper): void
     {
+        $this->useInputMapper($inputMapper);
         $this->actingAs((new User)->forceFill(['id' => 1]));
         Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
 
@@ -131,8 +136,24 @@ class BeamUxEntryDataTest extends TestCase
             'title' => 'Child',
             'slug' => 'child',
             'realm' => 'site',
-            'parentId' => 'missing-id',
-        ])->assertUnprocessable()->assertJsonValidationErrors(['parentId']);
+            'parent_id' => 'missing-id',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['parent_id']);
+    }
+
+    #[DataProvider('inputMapperConfigurations')]
+    public function test_mounted_create_validates_the_documented_nav_order_on_every_host_shape(?string $inputMapper): void
+    {
+        $this->useInputMapper($inputMapper);
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+
+        $this->postJson('/frame/resources/beam-ux-entry', [
+            'type' => 'page',
+            'title' => 'Child',
+            'slug' => 'child',
+            'realm' => 'site',
+            'nav_order' => 'abc',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['nav_order']);
     }
 
     public function test_mounted_create_scopes_segment_uniqueness_to_the_mapped_parent_id(): void
@@ -153,7 +174,7 @@ class BeamUxEntryDataTest extends TestCase
             'title' => 'Another guide',
             'slug' => 'another-guide',
             'realm' => 'site',
-            'parentId' => $parent->id,
+            'parent_id' => $parent->id,
             'segment' => 'guide',
         ])->assertUnprocessable()->assertJsonValidationErrors(['segment']);
     }
@@ -282,7 +303,7 @@ class BeamUxEntryDataTest extends TestCase
             'slug' => 'songs',
             'realm' => 'site',
             'segment' => '/songs',
-            'navOrder' => 30,
+            'nav_order' => 30,
         ]);
 
         $this->assertSame('/songs', $data->segment);
@@ -336,7 +357,7 @@ class BeamUxEntryDataTest extends TestCase
             'slug' => 'second-post',
             'realm' => 'site',
             'segment' => 'first-post',
-            'parentId' => $parent->id,
+            'parent_id' => $parent->id,
         ]);
     }
 
@@ -352,7 +373,7 @@ class BeamUxEntryDataTest extends TestCase
             'slug' => 'b-intro',
             'realm' => 'site',
             'segment' => 'intro',
-            'parentId' => $blogB->id,
+            'parent_id' => $blogB->id,
         ]);
 
         $this->assertSame('intro', $data->segment);
@@ -386,6 +407,22 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertSame(app(ThemeResolver::class)->resolve(), $body);
         // Not blank — a real starting point (the resolved defaults), never an empty {canvas:{},...}.
         $this->assertSame('#14803f', $body['canvas']['accent']);
+    }
+
+    /** @return array<string, array{class-string|null}> */
+    public static function inputMapperConfigurations(): array
+    {
+        return [
+            'no global input mapper' => [null],
+            'global camel-case input mapper' => [CamelCaseMapper::class],
+        ];
+    }
+
+    /** @param class-string|null $inputMapper */
+    private function useInputMapper(?string $inputMapper): void
+    {
+        config()->set('data.name_mapping_strategy.input', $inputMapper);
+        app(DataConfig::class)->reset();
     }
 }
 
