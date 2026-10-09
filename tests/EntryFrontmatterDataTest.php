@@ -80,6 +80,7 @@ class EntryFrontmatterDataTest extends TestCase
 
         $this->assertCount(1, $findings);
         $this->assertSame(DoctorStatus::Pass, $findings[0]->status);
+        $this->assertStringContainsString('1 documented wire-name exemption(s)', $findings[0]->detail);
     }
 
     #[Test]
