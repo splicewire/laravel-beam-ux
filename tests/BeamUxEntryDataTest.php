@@ -149,13 +149,19 @@ class BeamUxEntryDataTest extends TestCase
         $this->actingAs((new User)->forceFill(['id' => 1]));
         Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
 
-        $this->postJson('/frame/resources/beam-ux-entry', [
+        $schema = $this->getJson('/frame/resources/beam-ux-entry/schema')->assertOk()->json();
+        $this->assertArrayHasKey('nav_order', $schema['properties']);
+        $this->assertArrayNotHasKey('navOrder', $schema['properties']);
+
+        $response = $this->postJson('/frame/resources/beam-ux-entry', [
             'type' => 'page',
             'title' => 'Child',
             'slug' => 'child',
             'realm' => 'site',
             'nav_order' => 'abc',
         ])->assertUnprocessable()->assertJsonValidationErrors(['nav_order']);
+
+        $this->assertSame(['nav_order'], array_keys($response->json('errors')));
     }
 
     public function test_mounted_create_scopes_segment_uniqueness_to_the_mapped_parent_id(): void
