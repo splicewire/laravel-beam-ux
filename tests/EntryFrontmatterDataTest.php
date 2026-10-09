@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\Test;
 use Rushing\Doctor\DoctorStatus;
 use Schemastud\DataSchemas\Contracts\SchemaIdentity;
@@ -35,7 +36,7 @@ class EntryFrontmatterDataTest extends TestCase
     #[Test]
     public function it_claims_beam_ux_vocabulary_that_the_mdx_default_does_not(): void
     {
-        $this->assertContains('nav_order', EntryFrontmatterData::fieldNames());
+        $this->assertContains('navOrder', EntryFrontmatterData::fieldNames());
         $this->assertContains('realm', EntryFrontmatterData::fieldNames());
 
         // The point of per-consumer shapes: beam-ux's containment vocabulary must NOT leak into the
@@ -53,8 +54,8 @@ class EntryFrontmatterDataTest extends TestCase
 
         $data = EntryFrontmatterData::fromFrontmatter($parsed);
 
-        $this->assertSame(7, $data->nav_order);
-        $this->assertSame('Build', $data->nav_group);
+        $this->assertSame(7, $data->navOrder);
+        $this->assertSame('Build', $data->navGroup);
         $this->assertSame('account', $data->realm);
     }
 
@@ -64,9 +65,9 @@ class EntryFrontmatterDataTest extends TestCase
         // The only run that can prove a class-level pin: one where the ambient strategy says otherwise.
         config()->set('data.name_mapping_strategy.input', CamelCaseMapper::class);
 
-        $data = EntryFrontmatterData::from(['nav_order' => 9, 'realm' => 'site']);
+        $data = EntryFrontmatterData::from(['navOrder' => 9, 'realm' => 'site']);
 
-        $this->assertSame(9, $data->nav_order);
+        $this->assertSame(9, $data->navOrder);
         $this->assertSame('site', $data->realm);
     }
 
@@ -89,7 +90,7 @@ class EntryFrontmatterDataTest extends TestCase
         // unable to round-trip a file it did not fully understand.
         $parsed = (new FrontmatterParser)->parse("---\ntitle: T\nschemaType: Article\n---\nbody\n");
 
-        $this->assertSame(['schema_type' => 'Article'], EntryFrontmatterData::fromFrontmatter($parsed)->unknown());
+        $this->assertSame(['schemaType' => 'Article'], EntryFrontmatterData::fromFrontmatter($parsed)->unknown());
     }
 
     #[Test]
@@ -101,6 +102,17 @@ class EntryFrontmatterDataTest extends TestCase
         $shape = app(FrontmatterResolver::class)->hydrate($parsed);
 
         $this->assertInstanceOf(EntryFrontmatterData::class, $shape);
-        $this->assertSame(3, $shape->nav_order);
+        $this->assertSame(3, $shape->navOrder);
+    }
+
+    #[Test]
+    public function retired_snake_case_keys_are_not_aliases_for_the_declared_shape(): void
+    {
+        try {
+            EntryFrontmatterData::from(['nav_order' => 9, 'nav_group' => 'Build']);
+            $this->fail('Retired frontmatter wire names should be refused.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['nav_order', 'nav_group'], array_keys($exception->errors()));
+        }
     }
 }
