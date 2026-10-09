@@ -43,11 +43,6 @@ use Splicewire\Beam\Mdx\Frontmatter\ParsedFrontmatter;
  * skip, never a validation failure on the declaration.
  */
 #[MapInputName(SnakeCaseMapper::class)]
-#[WireNameExemption(
-    format: 'Beam authored frontmatter',
-    citation: 'ADR-0212 frontmatter declaration seam',
-    reason: 'The authoring grammar canonicalizes these persisted content keys to snake_case.',
-)]
 class EntryFrontmatterData extends Data implements DeclaresFrontmatterFields, Frontmatter, HydratesFromFrontmatter, RetainsUnknownFields, SchemaIdentity
 {
     /**
@@ -57,13 +52,28 @@ class EntryFrontmatterData extends Data implements DeclaresFrontmatterFields, Fr
         public ?string $realm = null,
         public ?string $segment = null,
         #[MapInputName('nav_order')]
+        #[WireNameExemption(
+            format: 'Beam authored frontmatter',
+            citation: 'ADR-0212 frontmatter declaration seam',
+            reason: 'The authoring grammar canonicalizes this persisted content key to snake_case.',
+        )]
         public ?int $nav_order = null,
         #[MapInputName('nav_group')]
+        #[WireNameExemption(
+            format: 'Beam authored frontmatter',
+            citation: 'ADR-0212 frontmatter declaration seam',
+            reason: 'The authoring grammar canonicalizes this persisted content key to snake_case.',
+        )]
         public ?string $nav_group = null,
         public ?string $title = null,
         public ?string $layout = null,
         public ?string $template = null,
         #[MapInputName('workflow_marking')]
+        #[WireNameExemption(
+            format: 'Beam authored frontmatter',
+            citation: 'ADR-0212 frontmatter declaration seam',
+            reason: 'The authoring grammar canonicalizes this persisted content key to snake_case.',
+        )]
         public ?string $workflow_marking = null,
         public array $leftovers = [],
     ) {}
