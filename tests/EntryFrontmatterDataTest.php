@@ -6,6 +6,7 @@ use PHPUnit\Framework\Attributes\Test;
 use Rushing\Doctor\DoctorStatus;
 use Schemastud\DataSchemas\Contracts\SchemaIdentity;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
+use Splicewire\Beam\Data\Attributes\WireNameExemption;
 use Splicewire\Beam\Mdx\Frontmatter\Contracts\Frontmatter;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterResolver;
@@ -73,6 +74,14 @@ class EntryFrontmatterDataTest extends TestCase
     #[Test]
     public function each_multi_word_frontmatter_key_declares_its_own_wire_name(): void
     {
+        $reflection = new \ReflectionClass(EntryFrontmatterData::class);
+
+        $this->assertSame([], $reflection->getAttributes(WireNameExemption::class));
+
+        foreach (['nav_order', 'nav_group', 'workflow_marking'] as $property) {
+            $this->assertCount(1, $reflection->getProperty($property)->getAttributes(WireNameExemption::class));
+        }
+
         $findings = (new WireNameDeclarationAudit(
             [EntryFrontmatterData::class],
             input: CamelCaseMapper::class,
@@ -80,7 +89,7 @@ class EntryFrontmatterDataTest extends TestCase
 
         $this->assertCount(1, $findings);
         $this->assertSame(DoctorStatus::Pass, $findings[0]->status);
-        $this->assertStringContainsString('1 documented wire-name exemption(s)', $findings[0]->detail);
+        $this->assertStringContainsString('3 documented wire-name exemption(s)', $findings[0]->detail);
     }
 
     #[Test]
