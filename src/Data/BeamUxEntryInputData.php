@@ -26,7 +26,7 @@ use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
  * active consumers, no composition mechanism exists yet), `title`, `slug` (client auto-slugifies from
  * `title`, human-editable before submit — this DTO just validates the final value), `realm`
  * (entitlement-gated against `Gate::allows("ux.{$realm}.author")`, never trusted as free text —
- * see {@see rules()}), `parent_id` (an existing entry's id, the placement picker).
+ * see {@see rules()}), `parentId` (an existing entry's id, the placement picker).
  *
  * **Auto-derived**: `namespace` is set to `''` on creation by `BeamUxEntryData::prepare()`
  * and omitted from this write map so updates retain their existing namespace (disk-only build-grouping — irrelevant to an
@@ -57,7 +57,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         #[Title('Parent'), ResourceRef('beam-ux-entry', value: 'id', label: 'title')]
         public ?string $parent_id = null,
         // Containment/nav fields (theme-entries-and-authoring provenance sweep, ux-demo-convergence
-        // 2026-09-12): `segment` and `nav_order` were never actually deferred by an owner ruling — the
+        // 2026-09-12): `segment` and `navOrder` were never actually deferred by an owner ruling — the
         // console form simply never carried them. `NavProjector::project()` already reads both LIVE off
         // the entry row (`nav_order` for sibling order, `segment` for the URL/whether the node is a nav
         // destination at all), so exposing them here is wiring an existing read to an existing write
@@ -104,7 +104,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
                     $fail('You are not entitled to author entries in this realm.');
                 }
             }],
-            'parent_id' => ['nullable', 'string', 'exists:beam_ux_entries,id'],
+            'parentId' => ['nullable', 'string', 'exists:beam_ux_entries,id'],
             // Mirrors the real DB constraint (`create_beam_ux_entries_table.php.stub`:
             // `unique index … on beam_ux_entries (parent_id, segment) where deleted_at is null`) —
             // ONE public URL per (parent, segment). Scoped to `parent_id`, not realm: the database
@@ -115,13 +115,14 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             // this for null/omitted segments — multiple pass-through siblings sharing a null segment is
             // the documented, permitted shape (ContainmentTest::test_unplaced_page_entries_without_a_segment_are_excluded_from_nav).
             'segment' => ['nullable', 'string', 'max:255', self::segmentUniqueRule($context)],
-            'nav_order' => ['nullable', 'integer'],
+            'navOrder' => ['nullable', 'integer'],
         ];
     }
 
     /**
      * Scoped like the `slug` rule above: same parent, excluding the persisted update target. The
-     * submitted `parent_id` comes from the validation payload itself (`ValidationContext::$fullPayload`)
+     * submitted `parentId` is normalized to the PHP property name in
+     * `ValidationContext::$fullPayload`, so the rule scopes through `parent_id` here
      * rather than `request('parent_id')` — this DTO's own tests call `validateAndCreate()` with a bare
      * array, never through an HTTP request, and the two would silently diverge on any such caller.
      */

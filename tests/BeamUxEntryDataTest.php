@@ -86,11 +86,11 @@ class BeamUxEntryDataTest extends TestCase
         $this->actingAs((new User)->forceFill(['id' => 1]));
         Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
         $schema = $this->getJson('/frame/resources/beam-ux-entry/schema')->assertOk()->json();
-        $this->assertSame(['type', 'title', 'slug', 'realm', 'parent_id', 'segment', 'nav_order'], array_keys($schema['properties']));
+        $this->assertSame(['type', 'title', 'slug', 'realm', 'parentId', 'segment', 'navOrder'], array_keys($schema['properties']));
         $this->assertNotContains('id', $schema['required']);
         $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $schema['properties']['type']['enum']);
         $this->assertSame('combobox', $schema['properties']['realm']['x-stud-widget']);
-        $this->assertArrayHasKey('x-stud-resource-ref', $schema['properties']['parent_id']);
+        $this->assertArrayHasKey('x-stud-resource-ref', $schema['properties']['parentId']);
     }
 
     public function test_mounted_create_generates_identity_and_body_and_edit_preserves_them(): void
@@ -119,6 +119,43 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertSame($particleId, $entry->particle_id);
         $this->assertSame('docs', $entry->namespace);
         $this->assertSame($body, $driver->read($particleId)?->body);
+    }
+
+    public function test_mounted_create_validates_the_mapped_parent_id(): void
+    {
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+
+        $this->postJson('/frame/resources/beam-ux-entry', [
+            'type' => 'page',
+            'title' => 'Child',
+            'slug' => 'child',
+            'realm' => 'site',
+            'parentId' => 'missing-id',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['parentId']);
+    }
+
+    public function test_mounted_create_scopes_segment_uniqueness_to_the_mapped_parent_id(): void
+    {
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+        $parent = BeamUxEntry::create(['namespace' => '', 'slug' => 'docs', 'type' => UxType::Page]);
+        BeamUxEntry::create([
+            'namespace' => '',
+            'slug' => 'existing',
+            'type' => UxType::Page,
+            'parent_id' => $parent->id,
+            'segment' => 'guide',
+        ]);
+
+        $this->postJson('/frame/resources/beam-ux-entry', [
+            'type' => 'page',
+            'title' => 'Another guide',
+            'slug' => 'another-guide',
+            'realm' => 'site',
+            'parentId' => $parent->id,
+            'segment' => 'guide',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['segment']);
     }
 
     public function test_mounted_edit_projects_enum_and_untitled_existing_entry_without_read_only_fields(): void
@@ -245,7 +282,7 @@ class BeamUxEntryDataTest extends TestCase
             'slug' => 'songs',
             'realm' => 'site',
             'segment' => '/songs',
-            'nav_order' => 30,
+            'navOrder' => 30,
         ]);
 
         $this->assertSame('/songs', $data->segment);
@@ -299,7 +336,7 @@ class BeamUxEntryDataTest extends TestCase
             'slug' => 'second-post',
             'realm' => 'site',
             'segment' => 'first-post',
-            'parent_id' => $parent->id,
+            'parentId' => $parent->id,
         ]);
     }
 
@@ -315,7 +352,7 @@ class BeamUxEntryDataTest extends TestCase
             'slug' => 'b-intro',
             'realm' => 'site',
             'segment' => 'intro',
-            'parent_id' => $blogB->id,
+            'parentId' => $blogB->id,
         ]);
 
         $this->assertSame('intro', $data->segment);

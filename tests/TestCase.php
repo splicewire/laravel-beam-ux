@@ -11,6 +11,7 @@ use Rushing\Versioning\VersioningServiceProvider;
 use Schemastud\DataSchemas\LaravelDataSchemasServiceProvider;
 use Spatie\Activitylog\ActivitylogServiceProvider;
 use Spatie\LaravelData\LaravelDataServiceProvider;
+use Spatie\LaravelData\Mappers\CamelCaseMapper;
 use Spatie\LaravelPackageTools\Package;
 use Splicewire\Beam\BeamServiceProvider;
 use Splicewire\Beam\Sitemap\BeamSitemapServiceProvider;
@@ -19,6 +20,12 @@ use Splicewire\Beam\Workflows\BeamWorkflowsServiceProvider;
 
 abstract class TestCase extends Orchestra
 {
+    protected function defineEnvironment($app): void
+    {
+        $app['config']->set('data.name_mapping_strategy.input', CamelCaseMapper::class);
+        $app['config']->set('data.structure_caching.enabled', false);
+    }
+
     /**
      * beam-ux boots on beam-core (its one required rung, ADR-0092 vendor seam).
      * The beam-core deps below are the same set beam-core's own TestCase declares — they are declared
