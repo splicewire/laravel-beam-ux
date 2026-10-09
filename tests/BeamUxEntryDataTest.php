@@ -419,7 +419,9 @@ class BeamUxEntryDataTest extends TestCase
         $data = BeamUxEntryData::from($entry);
 
         $this->assertSame('/about', $data->segment);
-        $this->assertSame(20, $data->nav_order);
+        $this->assertSame(20, $data->navOrder);
+        $this->assertArrayHasKey('navOrder', $data->toArray());
+        $this->assertArrayNotHasKey('nav_order', $data->toArray());
     }
 
     public function test_after_write_seeds_a_theme_entry_with_the_currently_resolved_theme(): void
