@@ -6,8 +6,8 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
-use Splicewire\Beam\Facades\Beam;
 use Schemastud\Frame\Attributes\Widget;
+use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Ux\Data\MirrorStatusRowData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
