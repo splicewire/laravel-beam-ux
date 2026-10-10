@@ -49,6 +49,10 @@ use Throwable;
  * about the deployment. Call the contributor, not this, from anything a host's request reaches —
  * and if you call this directly, resolve the realm yourself first.
  *
+ * `routeContext()` is the actor-facing projection and applies the same admission decision as the
+ * manifest. `hrefs()` is deliberately structural: hosts call it while registering routes, before a
+ * request actor exists, so filtering it would remove guarded routes from the application entirely.
+ *
  * ## It does not discover, contribute or auto-mount anything. A resource reaches a realm only by the
  * host's own realm membership list (`config('frame.realms')`, read through
  * {@see ParticleResourceRegistry::keysForRealm()}), and a resource-less page exists only because a
@@ -73,37 +77,13 @@ class RouteContextProjector
      */
     public function routeContext(string $realm, ?NavContext $context = null): array
     {
-        $definition = $this->realms->resolve($realm);
-        $guard = $definition->guard;
-        $keys = $this->particles->keysForRealm($realm);
-        $entries = [];
-
-        foreach ($this->registry->all() as $resource) {
-            if (! in_array($resource->key, $keys, true)) {
-                continue;
-            }
-
-            array_push($entries, ...$this->resourceLeaves($resource, $guard, $realm));
-        }
-
-        foreach ($this->plan->standaloneFor($definition) as $page) {
-            $entries[] = new RouteContextEntry(
-                routeName: $page['routeName'],
-                path: $page['path'],
-                shell: $page['shell'] ?? 'app',
-                // A standalone page inherits the realm's default guard unless it pins its own.
-                guard: $page['guard'] ?? $guard,
-                mounts: $page['mounts'],
-            );
-        }
-
         $context ??= new NavContext(
             user: request()->user(),
             request: request(),
             attributes: ['realm' => $realm],
         );
 
-        return $this->admittedRoutes($entries, $realm, $context);
+        return $this->admittedRoutes($this->entries($realm), $realm, $context);
     }
 
     /**
@@ -197,7 +177,7 @@ class RouteContextProjector
 
         $hrefs = [];
 
-        foreach ($this->routeContext($realm) as $entry) {
+        foreach ($this->entries($realm) as $entry) {
             $shell = $definition->central ? '' : ($this->plan->shellBases[$entry->shell] ?? '');
 
             $segments = array_filter(
@@ -209,6 +189,42 @@ class RouteContextProjector
         }
 
         return $hrefs;
+    }
+
+    /**
+     * Build the realm's structural route entries without consulting an actor. Hosts consume this
+     * list during route registration, before an HTTP request exists; actor admission belongs only
+     * to {@see routeContext()} when the manifest is projected for a viewer.
+     *
+     * @return array<int, RouteContextEntry>
+     */
+    private function entries(string $realm): array
+    {
+        $definition = $this->realms->resolve($realm);
+        $guard = $definition->guard;
+        $keys = $this->particles->keysForRealm($realm);
+        $entries = [];
+
+        foreach ($this->registry->all() as $resource) {
+            if (! in_array($resource->key, $keys, true)) {
+                continue;
+            }
+
+            array_push($entries, ...$this->resourceLeaves($resource, $guard, $realm));
+        }
+
+        foreach ($this->plan->standaloneFor($definition) as $page) {
+            $entries[] = new RouteContextEntry(
+                routeName: $page['routeName'],
+                path: $page['path'],
+                shell: $page['shell'] ?? 'app',
+                // A standalone page inherits the realm's default guard unless it pins its own.
+                guard: $page['guard'] ?? $guard,
+                mounts: $page['mounts'],
+            );
+        }
+
+        return $entries;
     }
 
     /**

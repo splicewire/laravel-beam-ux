@@ -661,6 +661,48 @@ class RealmDashboardTest extends TestCase
         $this->assertSame([], array_values(array_diff($routed, $advertised)), 'routeContext must not advertise a refused resource surface.');
     }
 
+    public function test_the_realm_blind_tenant_manifest_and_route_context_agree_for_owner_member_and_guest(): void
+    {
+        $this->app['config']->set('beam.ux.frame_nav.default_realm', 'tenant');
+        $this->app->make(ParticleResourceRegistry::class)->loadRealmMap([
+            'tenant' => ['gizmos', 'saved-filters'],
+        ]);
+
+        // Guest runs first because actingAs() deliberately persists for the remainder of a test.
+        foreach ([
+            'guest' => fn (): ?User => null,
+            'owner' => fn (): User => $this->staff(),
+            'member' => fn (): User => $this->member(),
+        ] as $principal => $resolveActor) {
+            $actor = $resolveActor();
+            $this->app['auth']->forgetGuards();
+            if ($actor !== null) {
+                $this->actingAs($actor);
+            }
+
+            $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+            $advertised = array_values(array_filter(
+                array_column($manifest['resources'], 'key'),
+                fn (string $key): bool => in_array('tenant', $this->app->make(ParticleResourceRegistry::class)->realmsFor($key), true),
+            ));
+            $routed = array_values(array_unique(array_filter(array_column($manifest['routeContext'], 'resource'))));
+
+            sort($advertised);
+            sort($routed);
+
+            $this->assertSame(
+                $advertised,
+                $routed,
+                "The realm-blind tenant manifest and its {$principal} route projection must advertise the same resources.",
+            );
+            $this->assertNotContains('saved-filters', $advertised);
+            $this->assertNotContains('saved-filters', $routed);
+            if ($principal !== 'guest') {
+                $this->assertNotEmpty($routed, "The seated tenant {$principal} must retain a populated realm-blind routeContext.");
+            }
+        }
+    }
+
     /**
      * Kind is not a sort input: the leaf enters `NavSection::compare()`'s `[order, key]` with its declared
      * `navOrder`, so a host seat that declares a lower order precedes it — and one at the same order
