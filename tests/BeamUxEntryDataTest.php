@@ -6,6 +6,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -13,6 +14,7 @@ use Schemastud\Frame\FrameServiceProvider;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
 use Spatie\LaravelData\Support\DataConfig;
 use Splicewire\Beam\Facades\Beam;
+use Splicewire\Beam\Facades\Particle;
 use Splicewire\Beam\Ux\Data\BeamUxEntryData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryInputData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -82,7 +84,26 @@ class BeamUxEntryDataTest extends TestCase
         // The default WriteGate delegates to the Laravel gate; grant create so afterWrite()'s body
         // write passes (same precedent as BeamUxEntryTest).
         Gate::define('create', fn ($user = null) => true);
+    }
 
+    public function test_the_central_index_lists_the_declared_population_for_a_viewany_holder(): void
+    {
+        $this->mountCentralIndex();
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+        BeamUxEntry::create(['namespace' => '', 'slug' => 'central', 'type' => UxType::Page]);
+
+        $this->getJson('/api/v1/beam-ux-entries')->assertOk()->assertJsonCount(1, 'data');
+    }
+
+    public function test_the_central_index_refuses_an_actor_without_viewany(): void
+    {
+        $this->mountCentralIndex();
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, DeniedEntryFormPolicy::class);
+        BeamUxEntry::create(['namespace' => '', 'slug' => 'central', 'type' => UxType::Page]);
+
+        $this->getJson('/api/v1/beam-ux-entries')->assertForbidden();
     }
 
     public function test_the_mounted_form_only_offers_writable_fields_and_keeps_declared_widgets(): void
@@ -453,6 +474,13 @@ class BeamUxEntryDataTest extends TestCase
         config()->set('data.name_mapping_strategy.input', $inputMapper);
         app(DataConfig::class)->reset();
     }
+
+    private function mountCentralIndex(): void
+    {
+        Route::prefix('api/v1')->group(
+            fn () => Particle::mount('beam-ux-entries', 'beam-ux-entry')->only(['index']),
+        );
+    }
 }
 
 class EntryFormPolicy
@@ -470,5 +498,13 @@ class EntryFormPolicy
     public function update(User $user): bool
     {
         return true;
+    }
+}
+
+class DeniedEntryFormPolicy
+{
+    public function viewAny(User $user): bool
+    {
+        return false;
     }
 }
