@@ -318,9 +318,11 @@ class FrameResourcesInvocable implements Invocable
         // A bare package harness may project a resource catalog without mounting a host route. Keep
         // the existing visibility answer here so the projector remains independently testable; the
         // final I6 pass still rejects/prunes that unresolved seat before it reaches a manifest.
-        return $resolution === null
-            ? $this->visibility->listable($def, $user)
-            : $this->seatGate->allows($resolution, $user, $realm);
+        if (! $this->visibility->listable($def, $user, $realm)) {
+            return false;
+        }
+
+        return $resolution === null || $this->seatGate->allows($resolution, $user, $realm);
     }
 
     /**
