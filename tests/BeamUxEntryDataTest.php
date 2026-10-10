@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +13,6 @@ use Schemastud\Frame\FrameServiceProvider;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
 use Spatie\LaravelData\Support\DataConfig;
 use Splicewire\Beam\Facades\Beam;
-use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Ux\Data\BeamUxEntryData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryInputData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -85,12 +83,6 @@ class BeamUxEntryDataTest extends TestCase
         // write passes (same precedent as BeamUxEntryTest).
         Gate::define('create', fn ($user = null) => true);
 
-        // This isolated package fixture mounts no tenant middleware. Under the
-        // conjunctive list-admission rule (integrator ruling 2026-10-10 02:43Z),
-        // make its intended all-entry population explicit rather than borrowing
-        // EntryFormPolicy::viewAny as a row boundary.
-        app(ParticleResourceRegistry::class)->get('beam-ux-entry')->scope =
-            static fn (Builder $query): Builder => $query->whereNotNull($query->getModel()->getQualifiedKeyName());
     }
 
     public function test_the_mounted_form_only_offers_writable_fields_and_keeps_declared_widgets(): void

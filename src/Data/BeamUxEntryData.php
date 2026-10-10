@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\Column;
@@ -95,6 +96,20 @@ class BeamUxEntryData extends BeamData
         #[MapInputName('nav_order'), MapOutputName('navOrder')]
         public ?int $navOrder = null,
     ) {}
+
+    /**
+     * Entries are a policy-gated catalog of every row on the mounted connection.
+     *
+     * The tenant Frame socket reaches the tenant connection, while the central
+     * authoring index deliberately reaches the default connection so it matches
+     * the public renderer. Declare that all-row population explicitly: under the
+     * conjunctive admission rule, `viewAny` identifies the actor and this scope
+     * identifies the rows; neither substitutes for the other.
+     */
+    public static function scope(Builder $query): Builder
+    {
+        return $query->whereNotNull($query->getModel()->getQualifiedKeyName());
+    }
 
     /** Default only a newly authored row; editing must preserve its disk namespace. */
     public static function prepare(Model $model, mixed $input, mixed $actor = null): void
