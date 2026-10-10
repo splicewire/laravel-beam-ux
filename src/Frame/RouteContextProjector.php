@@ -2,12 +2,16 @@
 
 namespace Splicewire\Beam\Ux\Frame;
 
+use Rushing\DataNav\NavContext;
 use Schemastud\Frame\Contracts\ResourceRegistry;
 use Schemastud\Frame\Registry\ResourceDefinition;
 use Schemastud\Frame\Registry\RouteContextEntry;
+use Splicewire\Beam\Authorization\ResourceVisibility;
+use Splicewire\Beam\Authorization\SeatGate;
 use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
+use Throwable;
 
 /**
  * Builds the router half of the frame manifest: the flat {@see RouteContextEntry}[] a client
@@ -67,7 +71,7 @@ class RouteContextProjector
      *
      * @return array<int, RouteContextEntry>
      */
-    public function routeContext(string $realm): array
+    public function routeContext(string $realm, ?NavContext $context = null): array
     {
         $definition = $this->realms->resolve($realm);
         $guard = $definition->guard;
@@ -93,7 +97,82 @@ class RouteContextProjector
             );
         }
 
-        return $entries;
+        $context ??= new NavContext(
+            user: request()->user(),
+            request: request(),
+            attributes: ['realm' => $realm],
+        );
+
+        return $this->admittedRoutes($entries, $realm, $context);
+    }
+
+    /**
+     * Project the router through the same listability and seat decisions as the manifest. A resource
+     * the manifest refuses must not retain a client route that can only issue the refused request.
+     *
+     * @param  array<int, RouteContextEntry>  $entries
+     * @return array<int, RouteContextEntry>
+     */
+    private function admittedRoutes(array $entries, string $realm, NavContext $context): array
+    {
+        $admitted = [];
+        $standalone = [];
+        $gates = app(SeatGate::class);
+        $visibility = app(ResourceVisibility::class);
+        $mountedRealm = $context->request?->route('realm');
+        $mountedRealm = is_string($mountedRealm) && $mountedRealm !== '' ? $mountedRealm : null;
+
+        try {
+            $definitions = collect($this->particles->definitions($realm))->keyBy('key');
+        } catch (Throwable) {
+            $definitions = collect();
+        }
+
+        foreach ($entries as $entry) {
+            if ($entry->resource === null) {
+                try {
+                    $resolution = $gates->resolve($entry->routeName, $realm);
+                    if ($resolution !== null) {
+                        $standalone[$entry->routeName] = $gates->allows($resolution, $context->user, $realm);
+                    }
+                } catch (Throwable) {
+                    $standalone[$entry->routeName] = false;
+                }
+
+                continue;
+            }
+
+            if ($entry->mounts !== 'list') {
+                continue;
+            }
+
+            $resource = $definitions->get($entry->resource);
+            if ($resource !== null) {
+                try {
+                    $admitted[$entry->resource] = $visibility->listable($resource, $context->user, $mountedRealm);
+                } catch (Throwable) {
+                    $admitted[$entry->resource] = false;
+                }
+
+                continue;
+            }
+
+            try {
+                $resolution = $gates->resolve($entry->routeName, $realm);
+                if ($resolution !== null) {
+                    $admitted[$entry->resource] = $gates->allows($resolution, $context->user, $realm);
+                }
+            } catch (Throwable) {
+                $admitted[$entry->resource] = false;
+            }
+        }
+
+        return array_values(array_filter(
+            $entries,
+            fn (RouteContextEntry $entry): bool => $entry->resource === null
+                ? ($standalone[$entry->routeName] ?? true)
+                : ($admitted[$entry->resource] ?? true),
+        ));
     }
 
     /**

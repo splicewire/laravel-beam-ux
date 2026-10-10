@@ -56,6 +56,12 @@ class FrameRouteContextProjectionTest extends TestCase
     {
         parent::setUp();
 
+        // Most projector examples exercise route grammar, not authorization. Keep their declared
+        // resources admitted; the focused refusal examples below replace this binding explicitly.
+        $visibility = \Mockery::mock(ResourceVisibility::class);
+        $visibility->shouldReceive('listable')->andReturnTrue();
+        $this->app->instance(ResourceVisibility::class, $visibility);
+
         // Registered on the PARTICLE registry, not on frame's port directly: realm membership is
         // read through `ParticleResourceRegistry::keysForRealm()`, which enumerates its OWN
         // entries. A fixture registered only on frame's composite is visible to `all()` and
@@ -263,6 +269,26 @@ class FrameRouteContextProjectionTest extends TestCase
         $this->assertNotEmpty($block['routeContext']);
     }
 
+    public function test_the_projector_omits_a_resource_the_manifest_will_not_advertise(): void
+    {
+        $visibility = \Mockery::mock(ResourceVisibility::class);
+        $visibility->shouldReceive('listable')
+            ->withArgs(fn ($definition, $actor, $realm): bool => $definition->key === 'circuits'
+                && $actor === null
+                && $realm === null)
+            ->once()
+            ->andReturnFalse();
+        $visibility->shouldReceive('listable')->andReturnTrue();
+        $this->app->instance(ResourceVisibility::class, $visibility);
+
+        $names = $this->routeNames($this->app->make(RouteContextProjector::class)->routeContext('tenant'));
+
+        $this->assertNotContains('circuits.index', $names);
+        $this->assertNotContains('circuits.create', $names);
+        $this->assertNotContains('circuits.edit', $names);
+        $this->assertContains('fragments.index', $names);
+    }
+
     public function test_a_denied_resolved_list_gate_removes_every_client_leaf_for_that_resource(): void
     {
         $this->app->bind(RouteContextPlan::class, fn (): RouteContextPlan => new RouteContextPlan(
@@ -280,7 +306,7 @@ class FrameRouteContextProjectionTest extends TestCase
                 ? $resolution
                 : null,
         );
-        $gates->shouldReceive('allows')->once()->with($resolution, null, 'tenant')->andReturnFalse();
+        $gates->shouldReceive('allows')->twice()->with($resolution, null, 'tenant')->andReturnFalse();
         $this->app->instance(SeatGate::class, $gates);
 
         $names = $this->routeNames(
