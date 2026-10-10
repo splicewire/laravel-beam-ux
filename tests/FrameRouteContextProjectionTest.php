@@ -4,6 +4,10 @@ namespace Splicewire\Beam\Ux\Tests;
 
 use Schemastud\Frame\Contracts\FrameNavContributor;
 use Schemastud\Frame\Contracts\ResourceRegistry;
+use Splicewire\Beam\Authorization\ResourceVisibility;
+use Splicewire\Beam\Authorization\SeatGate;
+use Splicewire\Beam\Authorization\SeatGateKind;
+use Splicewire\Beam\Authorization\SeatGateResolution;
 use Splicewire\Beam\Particle\ParticleResource;
 use Splicewire\Beam\Ux\Frame\FrameNavContribution;
 use Splicewire\Beam\Ux\Frame\RouteContextPlan;
@@ -245,11 +249,49 @@ class FrameRouteContextProjectionTest extends TestCase
 
     public function test_a_realm_with_no_registered_navigation_still_gets_its_router_table(): void
     {
+        $visibility = \Mockery::mock(ResourceVisibility::class);
+        $visibility->shouldReceive('listable')->andReturnTrue();
+        $this->app->instance(ResourceVisibility::class, $visibility);
+        $gates = \Mockery::mock(SeatGate::class);
+        $gates->shouldReceive('resolve')->andReturnNull();
+        $this->app->instance(SeatGate::class, $gates);
+
         $block = $this->app->make(FrameNavContribution::class)->contributeNav('tenant');
 
         $this->assertNotNull($block, 'Declining here would throw away the half that works — routeContext needs no navigation to exist.');
         $this->assertSame([], $block['nav']['items']);
         $this->assertNotEmpty($block['routeContext']);
+    }
+
+    public function test_a_denied_resolved_list_gate_removes_every_client_leaf_for_that_resource(): void
+    {
+        $this->app->bind(RouteContextPlan::class, fn (): RouteContextPlan => new RouteContextPlan(
+            scopedStandalone: [['routeName' => 'restricted.page', 'path' => 'restricted', 'mounts' => 'detail']],
+        ));
+        $visibility = \Mockery::mock(ResourceVisibility::class);
+        $visibility->shouldReceive('listable')->andReturnUsing(
+            fn ($definition): bool => $definition->key !== 'circuits',
+        );
+        $this->app->instance(ResourceVisibility::class, $visibility);
+        $resolution = new SeatGateResolution(SeatGateKind::Resource, null);
+        $gates = \Mockery::mock(SeatGate::class);
+        $gates->shouldReceive('resolve')->andReturnUsing(
+            fn (string $routeName, ?string $realm): ?SeatGateResolution => $routeName === 'restricted.page' && $realm === 'tenant'
+                ? $resolution
+                : null,
+        );
+        $gates->shouldReceive('allows')->once()->with($resolution, null, 'tenant')->andReturnFalse();
+        $this->app->instance(SeatGate::class, $gates);
+
+        $names = $this->routeNames(
+            $this->app->make(FrameNavContribution::class)->contributeNav('tenant')['routeContext'],
+        );
+
+        $this->assertNotContains('circuits.index', $names);
+        $this->assertNotContains('circuits.create', $names);
+        $this->assertNotContains('circuits.edit', $names);
+        $this->assertNotContains('restricted.page', $names);
+        $this->assertContains('fragments.index', $names, 'An unresolved route remains visible to I6/closure.');
     }
 
     public function test_the_package_binds_the_plug_so_a_host_writes_no_controller(): void

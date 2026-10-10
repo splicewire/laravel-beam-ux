@@ -9,7 +9,12 @@ use Rushing\DataNav\NavRegistry;
 use Rushing\DataNav\NavTree;
 use Rushing\Popcorn\Registries\Exceptions\RegistryMiss;
 use Schemastud\Frame\Contracts\FrameNavContributor;
+use Schemastud\Frame\Registry\RouteContextEntry;
+use Splicewire\Beam\Authorization\ResourceVisibility;
+use Splicewire\Beam\Authorization\SeatGate;
+use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
+use Throwable;
 
 /**
  * Fills frame's {@see FrameNavContributor} plug — so `/frame/manifest` carries `nav` and
@@ -62,8 +67,9 @@ class FrameNavContribution implements FrameNavContributor
             return null;
         }
 
-        $routeContext = $this->routes->routeContext($realm);
-        $nav = $this->navigation($realm);
+        $context = $this->context($realm);
+        $routeContext = $this->admittedRoutes($this->routes->routeContext($realm), $realm, $context);
+        $nav = $this->navigation($realm, $context);
 
         if ($this->navigations->tryResolve($realm) instanceof DeclaredSectionNavigation) {
             $nav = $this->pruneUnbound($routeContext, $nav);
@@ -83,10 +89,10 @@ class FrameNavContribution implements FrameNavContributor
      * {@see RegistryMiss} on an unknown key, and "this host registered no navigation" is exactly
      * the host-dependent answer that must not be fatal.
      */
-    protected function navigation(string $realm): NavTree
+    protected function navigation(string $realm, ?NavContext $context = null): NavTree
     {
         try {
-            return $this->navigations->build($realm, $this->context($realm));
+            return $this->navigations->build($realm, $context ?? $this->context($realm));
         } catch (RegistryMiss) {
             return NavTree::make([]);
         }
@@ -184,5 +190,73 @@ class FrameNavContribution implements FrameNavContributor
             request: $this->request,
             attributes: ['realm' => $realm],
         );
+    }
+
+    /**
+     * Project resource routes through the same resolved seat gate as their nav node. A denied list
+     * removes every client leaf for that resource; unresolved resources and standalone pages retain
+     * the host-authored route table so I6/closure can report them rather than silently erase them.
+     *
+     * @param  array<int, RouteContextEntry>  $entries
+     * @return array<int, RouteContextEntry>
+     */
+    private function admittedRoutes(array $entries, string $realm, NavContext $context): array
+    {
+        $admitted = [];
+        $standalone = [];
+        $gates = app(SeatGate::class);
+        $visibility = app(ResourceVisibility::class);
+
+        try {
+            $definitions = collect(app(ParticleResourceRegistry::class)->definitions($realm))->keyBy('key');
+        } catch (Throwable) {
+            $definitions = collect();
+        }
+
+        foreach ($entries as $entry) {
+            if ($entry->resource === null) {
+                try {
+                    $resolution = $gates->resolve($entry->routeName, $realm);
+                    if ($resolution !== null) {
+                        $standalone[$entry->routeName] = $gates->allows($resolution, $context->user, $realm);
+                    }
+                } catch (Throwable) {
+                    $standalone[$entry->routeName] = false;
+                }
+
+                continue;
+            }
+
+            if ($entry->mounts !== 'list') {
+                continue;
+            }
+
+            $definition = $definitions->get($entry->resource);
+            if ($definition !== null) {
+                try {
+                    $admitted[$entry->resource] = $visibility->listable($definition, $context->user);
+                } catch (Throwable) {
+                    $admitted[$entry->resource] = false;
+                }
+
+                continue;
+            }
+
+            try {
+                $resolution = $gates->resolve($entry->routeName, $realm);
+                if ($resolution !== null) {
+                    $admitted[$entry->resource] = $gates->allows($resolution, $context->user, $realm);
+                }
+            } catch (Throwable) {
+                $admitted[$entry->resource] = false;
+            }
+        }
+
+        return array_values(array_filter(
+            $entries,
+            fn (RouteContextEntry $entry): bool => $entry->resource === null
+                ? ($standalone[$entry->routeName] ?? true)
+                : ($admitted[$entry->resource] ?? true),
+        ));
     }
 }
