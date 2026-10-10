@@ -11,6 +11,7 @@ use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
 use Splicewire\Beam\Particle\ParticleResource as BeamParticleResource;
 use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
+use Splicewire\Beam\Ux\Diagnostics\DiagnosticsReadPolicy;
 use Splicewire\Beam\Ux\Filters\ProjectedExact;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
@@ -48,6 +49,7 @@ use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
     readOnly: true,
     // UX-08c: a member reads entries but not this machinery; see DiagnosticsAbility.
     policy: DiagnosticsAbility::NAME,
+    readPolicy: DiagnosticsReadPolicy::class,
     // Site-global entry machinery: the boundary is global and DiagnosticsAbility is its authority arm (ruling c353ac01).
     readBoundary: BeamParticleResource::READ_BOUNDARY_GLOBAL,
 )]

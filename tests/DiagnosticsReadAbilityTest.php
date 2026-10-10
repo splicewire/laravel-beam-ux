@@ -12,6 +12,7 @@ use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Ux\Data\MirrorStatusRowData;
 use Splicewire\Beam\Ux\Data\SitemapHealthRowData;
 use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
+use Splicewire\Beam\Ux\Diagnostics\DiagnosticsReadPolicy;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
@@ -27,6 +28,7 @@ class DiagnosticsReadAbilityTest extends TestCase
             $declaration = (new ReflectionClass($data))->getAttributes(ParticleResource::class)[0]->newInstance();
 
             $this->assertSame(DiagnosticsAbility::NAME, $declaration->policy, "{$data} declares the diagnostics ability");
+            $this->assertSame(DiagnosticsReadPolicy::class, $declaration->readPolicy, "{$data} owns its projection read decision");
         }
     }
 
@@ -70,7 +72,9 @@ class DiagnosticsReadAbilityTest extends TestCase
 
     public function test_an_operator_reads_the_diagnostics_with_no_realm_placement_and_a_member_is_refused(): void
     {
-        Gate::policy(BeamUxEntry::class, ViewAnyDiagnosticsEntryPolicy::class);
+        // The backing model's policy deliberately refuses everyone. These projections own a narrower,
+        // explicit authority and must not broaden ordinary BeamUxEntry reads merely to admit operators.
+        Gate::policy(BeamUxEntry::class, DenyingDiagnosticsEntryPolicy::class);
         Gate::define('beam-ux-entry.update', fn (DiagnosticsActor $user): bool => false);
         Gate::define('entitlement:os.operate', fn (DiagnosticsActor $user): bool => $user->role === 'operator');
         $guard = app(ResourceReadGuard::class);
@@ -86,11 +90,11 @@ class DiagnosticsReadAbilityTest extends TestCase
     }
 }
 
-class ViewAnyDiagnosticsEntryPolicy
+class DenyingDiagnosticsEntryPolicy
 {
     public function viewAny(mixed $user): bool
     {
-        return $user !== null;
+        return false;
     }
 }
 
