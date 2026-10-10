@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Splicewire\Beam\Facades\Beam;
+use Schemastud\Frame\Attributes\Widget;
 use Splicewire\Beam\Ux\Data\MirrorStatusRowData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
@@ -89,6 +90,32 @@ class MirrorStatusRowDataTest extends TestCase
 
         $this->assertSame('mirror-disabled', $row->state);
         $this->assertFalse($row->exists);
+    }
+
+    /**
+     * C02 (TC04): the DECLARATION owns the mirror-status display label. The `state` column is a badge
+     * that supplies "Mirror disabled" for the `mirror-disabled` value, while the WIRE value the host
+     * filters/sorts on stays the opaque `mirror-disabled` token — the operator page must not special-case
+     * it. Red before the `#[Widget('badge', …)]` declaration (no Widget attribute, no supplied label).
+     */
+    public function test_the_state_column_declares_the_mirror_disabled_display_label_while_the_wire_value_stays_opaque(): void
+    {
+        $widgets = (new \ReflectionProperty(MirrorStatusRowData::class, 'state'))->getAttributes(Widget::class);
+        $this->assertNotEmpty($widgets, 'the State column must declare a Widget that owns its display labels');
+
+        $widget = $widgets[0]->newInstance();
+        $this->assertSame('badge', $widget->name);
+        $this->assertSame(
+            'Mirror disabled',
+            $widget->options['labels']['mirror-disabled'] ?? null,
+            'MirrorStatusRowData must supply the "Mirror disabled" label for the mirror-disabled state',
+        );
+
+        // The supplied label is presentation only: the wire value is unchanged (asserted via a real
+        // projection in test_a_saved_entry_degrades_to_mirror_disabled; restated here for the contract).
+        $this->assertSame('mirror-disabled', MirrorStatusRowData::project(
+            BeamUxEntry::create(['slug' => 'beam-c02', 'type' => 'page', 'namespace' => null, 'particle_id' => (string) Str::uuid()]),
+        )->state);
     }
 
     private function configureMirrorDisk(): void
