@@ -661,17 +661,23 @@ class RealmDashboardTest extends TestCase
         $this->assertSame([], array_values(array_diff($routed, $advertised)), 'routeContext must not advertise a refused resource surface.');
     }
 
-    public function test_the_realm_blind_tenant_manifest_and_route_context_agree_for_owner_member_and_guest(): void
+    public function test_the_realm_blind_tenant_manifest_and_route_context_agree_for_owner_member_staff_and_guest(): void
     {
         $this->app['config']->set('beam.ux.frame_nav.default_realm', 'tenant');
         $this->app->make(ParticleResourceRegistry::class)->loadRealmMap([
             'tenant' => ['gizmos', 'saved-filters'],
         ]);
+        $team = new DashTeam(roles: [
+            70 => \Splicewire\Beam\Accounts\Enums\Role::Owner,
+            8 => \Splicewire\Beam\Accounts\Enums\Role::Member,
+        ]);
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => $team);
 
         // Guest runs first because actingAs() deliberately persists for the remainder of a test.
         foreach ([
             'guest' => fn (): ?User => null,
-            'owner' => fn (): User => $this->staff(),
+            'staff' => fn (): User => $this->staff(),
+            'owner' => fn (): User => $this->member()->forceFill(['id' => 70]),
             'member' => fn (): User => $this->member(),
         ] as $principal => $resolveActor) {
             $actor = $resolveActor();
@@ -697,7 +703,12 @@ class RealmDashboardTest extends TestCase
             );
             $this->assertNotContains('saved-filters', $advertised);
             $this->assertNotContains('saved-filters', $routed);
-            if ($principal !== 'guest') {
+            if (in_array($principal, ['owner', 'member'], true)) {
+                $this->assertSame(
+                    \Splicewire\Beam\Accounts\Enums\Role::from($principal),
+                    $team->memberRole($actor),
+                    "The {$principal} fixture must really hold that tenant role.",
+                );
                 $this->assertNotEmpty($routed, "The seated tenant {$principal} must retain a populated realm-blind routeContext.");
             }
         }
@@ -804,12 +815,17 @@ class DashWritesThenThrowsSummaryProvider implements ResourceSummaryProvider
 /** The smallest team: seats the listed user ids as members. Only `memberRole()` is read here. */
 class DashTeam implements \Splicewire\Beam\Accounts\Contracts\TeamContract
 {
-    /** @param  list<int>  $seats */
-    public function __construct(private array $seats) {}
+    /**
+     * @param  list<int>  $seats
+     * @param  array<int, \Splicewire\Beam\Accounts\Enums\Role>  $roles
+     */
+    public function __construct(private array $seats = [], private array $roles = []) {}
 
     public function memberRole(\Illuminate\Contracts\Auth\Authenticatable $user): ?\Splicewire\Beam\Accounts\Enums\Role
     {
-        return in_array($user->getAuthIdentifier(), $this->seats, true) ? \Splicewire\Beam\Accounts\Enums\Role::Member : null;
+        $key = $user->getAuthIdentifier();
+
+        return $this->roles[$key] ?? (in_array($key, $this->seats, true) ? \Splicewire\Beam\Accounts\Enums\Role::Member : null);
     }
 
     public function teamKey(): int|string
