@@ -87,6 +87,12 @@ class DiagnosticsReadAbilityTest extends TestCase
             $this->assertTrue($guard->inspectReadFor($resource, request(), new DiagnosticsActor(['role' => 'member']))->denied(), "{$key}: a member is refused");
             $this->assertTrue($guard->inspectReadFor($resource, request(), null)->denied(), "{$key}: a guest is refused");
         }
+
+        $entry = app(ParticleResourceRegistry::class)->get('beam-ux-entry');
+        $this->assertTrue(
+            $guard->inspectReadFor($entry, request(), new DiagnosticsActor(['role' => 'operator']))->denied(),
+            'the diagnostics authority does not widen the ordinary entry resource',
+        );
     }
 }
 
