@@ -10,7 +10,7 @@ use Splicewire\Beam\Ux\Data\SitemapHealthRowData;
 
 /**
  * ux-walkthrough IA-10/IA-11 (UX-09): the Developer zone's rows are glossary nouns, and a rail label is its page's h1:
- * Files · Git repos · Sitemap health. The resources were labelled "Sitemap" and "Git Repos".
+ * Mirror status · Git repos · Sitemap health. The resources were labelled "Files", "Sitemap" and "Git Repos".
  */
 class DeveloperZoneLabelsTest extends TestCase
 {
@@ -18,7 +18,7 @@ class DeveloperZoneLabelsTest extends TestCase
     {
         $label = fn (string $class): string => (new ReflectionClass($class))->getAttributes(ParticleResource::class)[0]->newInstance()->label;
 
-        $this->assertSame('Files', $label(MirrorStatusRowData::class));
+        $this->assertSame('Mirror status', $label(MirrorStatusRowData::class));
         $this->assertSame('Git repos', $label(GitRepoData::class));
         $this->assertSame('Sitemap health', $label(SitemapHealthRowData::class));
     }
