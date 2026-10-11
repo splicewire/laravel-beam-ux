@@ -302,6 +302,24 @@ class FrameRouteContextProjectionTest extends TestCase
         $this->assertArrayHasKey('tenant-dashboard.index', $projector->hrefs('tenant'));
     }
 
+    public function test_structural_route_context_matches_hrefs_without_changing_actor_admission(): void
+    {
+        $visibility = \Mockery::mock(ResourceVisibility::class);
+        $visibility->shouldReceive('listable')->andReturnFalse();
+        $this->app->instance(ResourceVisibility::class, $visibility);
+
+        $projector = $this->app->make(RouteContextProjector::class);
+        $structuralNames = $this->routeNames($projector->structuralRouteContext('tenant'));
+        $hrefNames = array_keys($projector->hrefs('tenant'));
+
+        sort($structuralNames);
+        sort($hrefNames);
+
+        $this->assertNotEmpty($structuralNames);
+        $this->assertSame($hrefNames, $structuralNames);
+        $this->assertSame([], $projector->routeContext('tenant'));
+    }
+
     public function test_a_denied_resolved_list_gate_removes_every_client_leaf_for_that_resource(): void
     {
         $this->app->bind(RouteContextPlan::class, fn (): RouteContextPlan => new RouteContextPlan(

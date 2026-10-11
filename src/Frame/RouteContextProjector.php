@@ -83,7 +83,7 @@ class RouteContextProjector
             attributes: ['realm' => $realm],
         );
 
-        return $this->admittedRoutes($this->entries($realm), $realm, $context);
+        return $this->admittedRoutes($this->structuralRouteContext($realm), $realm, $context);
     }
 
     /**
@@ -177,7 +177,7 @@ class RouteContextProjector
 
         $hrefs = [];
 
-        foreach ($this->entries($realm) as $entry) {
+        foreach ($this->structuralRouteContext($realm) as $entry) {
             $shell = $definition->central ? '' : ($this->plan->shellBases[$entry->shell] ?? '');
 
             $segments = array_filter(
@@ -198,7 +198,7 @@ class RouteContextProjector
      *
      * @return array<int, RouteContextEntry>
      */
-    private function entries(string $realm): array
+    public function structuralRouteContext(string $realm): array
     {
         $definition = $this->realms->resolve($realm);
         $guard = $definition->guard;
