@@ -18,7 +18,7 @@ use Splicewire\Beam\Ux\Placement\PlacementResolver;
 use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
 
 /**
- * The Frame resource declaration for the "Files" tool (mirror-status-ui ticket 01) — one row per
+ * The Frame resource declaration for the "Mirror status" tool (mirror-status-ui ticket 01) — one row per
  * `BeamUxEntry`, decorated with its resolved mirror path and {@see MirrorGitStatus} verdict. The
  * SAME zero-glue `ParticleResource` tier {@see \Splicewire\Beam\Ux\Data\BeamUxEntryData} and
  * {@see \Splicewire\Beam\Data\GitRepoData} use — `readOnly: true` because nothing writes a
@@ -42,7 +42,7 @@ use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
 #[ParticleResource(
     key: 'beam-ux-mirror-status',
     backing: BeamUxEntry::class,
-    label: 'Files',
+    label: 'Mirror status',
     group: 'Ops',
     icon: 'git-branch',
     section: 'ops',
