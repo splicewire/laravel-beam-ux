@@ -14,6 +14,7 @@ use Rushing\DataNav\NavGate;
 use Rushing\DataNav\NavInvocableRegistry;
 use Rushing\DataNav\NavRegistry;
 use Schemastud\Frame\Contracts\ResourceRegistry;
+use Splicewire\Beam\Authorization\ModelOrOperatorReadPolicy;
 use Splicewire\Beam\Particle\ParticleResource;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
@@ -59,7 +60,7 @@ class FrameResourcesCollectorTest extends TestCase
         // something to exclude. Without an asymmetry a collector that ignored the realm entirely
         // passes.
         $app['config']->set('frame.realms', [
-            'operator' => ['tenants', 'plans', 'packs', 'hooks'],
+            'operator' => ['tenants', 'plans', 'packs', 'fixture-hooks'],
             'tenant' => ['audit'],
         ]);
     }
@@ -91,7 +92,9 @@ class FrameResourcesCollectorTest extends TestCase
             ['tenants', 'Tenants', 'platform', 1, 'tenants.index'],
             ['plans', 'Plans', 'platform', 2, 'plans.index'],
             ['packs', 'Packs', 'platform', 2, 'packs.index'],
-            ['hooks', 'Hooks', 'platform', null, 'hooks.index'],
+            // This is an ordering fixture, not Beam's real hooks resource. A distinct key keeps the
+            // fixture from replacing hooks' declared ModelOrOperatorReadPolicy.
+            ['fixture-hooks', 'Hooks', 'platform', null, 'hooks.index'],
             ['audit', 'Audit', 'platform', 1, 'audit.index'],
         ] as [$key, $label, $section, $navOrder, $routeName]) {
             $registry->register(new ParticleResource(
@@ -108,6 +111,14 @@ class FrameResourcesCollectorTest extends TestCase
     }
 
     // ---------------------------------------------------------------- the merged sort
+
+    public function test_the_ordering_fixture_does_not_replace_hooks_read_authority(): void
+    {
+        $this->assertSame(
+            ModelOrOperatorReadPolicy::class,
+            $this->app->make(ParticleResourceRegistry::class)->find('hooks')?->readPolicy,
+        );
+    }
 
     public function test_one_merged_sort_orders_resources_and_statics_together(): void
     {
