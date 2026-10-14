@@ -102,9 +102,9 @@ class EntrySitemapSourceTest extends TestCase
         // A public site-realm page (default realm = site, ADR-0165) belongs in the sitemap.
         BeamUxEntry::create(['slug' => 'about', 'type' => UxType::Page, 'segment' => '/about']);
 
-        // An auth-realm page (the login/register flow) is NOT public content, and on a satellite host
-        // its URL is frequently unrouted (sites-sweep P7: audiostud's sitemap.xml listed the unrouted
-        // /register). The public sitemap must exclude it — every sitemap URL must answer 200 signed-out.
+        // An auth-realm page (the login/register flow) is NOT public, site-routable content, and on a
+        // satellite host its URL is frequently unrouted (sites-sweep P7: audiostud's sitemap.xml listed
+        // the unrouted /register). The public sitemap feed (site membership) must exclude it.
         BeamUxEntry::create([
             'slug' => 'register', 'type' => UxType::Page, 'segment' => '/register',
             'realm' => 'auth', 'realms' => ['auth'],

@@ -336,13 +336,6 @@ class BeamUxEntry extends Model implements WorkflowManaged
     }
 
     /**
-     * The one canonical root entry for a realm — auto-provisioned on first ask (find-or-create), so
-     * every configured realm resolves exactly one root without a seeder (ticket 03): the top of the
-     * containment chain, and the coarse grant anchor a host's authority model grants `manage` on.
-     * Identified structurally by the reserved `realms` build namespace + the realm as its slug — that
-     * pair is already unique (`unique(namespace, slug)`), so no extra marker column is needed.
-     */
-    /**
      * Is this entry reachable under `$realm` — a MEMBER of it per the flat `realms` list (ADR-0165 /
      * ticket 03), the same semantic the DB-side `whereJsonContains('realms', $realm)` scope uses?
      * Reachability is MEMBERSHIP, not the primary `realm`: an entry primary in another realm but a
@@ -354,6 +347,13 @@ class BeamUxEntry extends Model implements WorkflowManaged
         return in_array($realm, (array) ($this->realms ?? []), true);
     }
 
+    /**
+     * The one canonical root entry for a realm — auto-provisioned on first ask (find-or-create), so
+     * every configured realm resolves exactly one root without a seeder (ticket 03): the top of the
+     * containment chain, and the coarse grant anchor a host's authority model grants `manage` on.
+     * Identified structurally by the reserved `realms` build namespace + the realm as its slug — that
+     * pair is already unique (`unique(namespace, slug)`), so no extra marker column is needed.
+     */
     public static function rootFor(string $realm = self::REALM_SITE): self
     {
         return static::query()->firstOrCreate(
