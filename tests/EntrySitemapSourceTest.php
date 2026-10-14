@@ -97,6 +97,29 @@ class EntrySitemapSourceTest extends TestCase
         $this->assertNotContains('https://example.test/members', $urls, 'gated content must never leak into the sitemap');
     }
 
+    public function test_it_excludes_entries_outside_the_public_site_realm(): void
+    {
+        // A public site-realm page (default realm = site, ADR-0165) belongs in the sitemap.
+        BeamUxEntry::create(['slug' => 'about', 'type' => UxType::Page, 'segment' => '/about']);
+
+        // An auth-realm page (the login/register flow) is NOT public content, and on a satellite host
+        // its URL is frequently unrouted (sites-sweep P7: audiostud's sitemap.xml listed the unrouted
+        // /register). The public sitemap must exclude it — every sitemap URL must answer 200 signed-out.
+        BeamUxEntry::create([
+            'slug' => 'register', 'type' => UxType::Page, 'segment' => '/register',
+            'realm' => 'auth', 'realms' => ['auth'],
+        ]);
+
+        $urls = $this->urlsFrom($this->app->make(EntrySitemapSource::class));
+
+        $this->assertContains('https://example.test/about', $urls);
+        $this->assertNotContains(
+            'https://example.test/register',
+            $urls,
+            'an auth-realm page is not public content and must stay out of the sitemap',
+        );
+    }
+
     /**
      * @return list<string>
      */

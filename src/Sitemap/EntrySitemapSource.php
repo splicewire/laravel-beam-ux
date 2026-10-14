@@ -72,14 +72,15 @@ class EntrySitemapSource implements LiveSitemapSource
     }
 
     /**
-     * The fine route gate: the entry must resolve to a concrete, non-root
-     * containment URL. A page with no segment anywhere in its chain resolves to
-     * bare `/` — that is the home index, addressable, so it is allowed; but an
-     * entry with no containment placement at all (no realm membership) is not a
-     * public page and is skipped.
+     * The fine route gate: the entry must be a placed page rooted in the PUBLIC `site` realm
+     * (ADR-0165 — `site` is the public content/URL plane). An entry rooted in auth/account/operator/
+     * tenant/user is not a public page: its URL is either gated or, on a satellite host, not routed
+     * at all (sites-sweep P7 — audiostud's sitemap listed the unrouted `/register`, an auth-realm
+     * page). Restricting to the public realm keeps every emitted URL a routed public page that
+     * answers 200 signed-out. `realms` must be non-empty so the entry actually has a placement.
      */
     private function routable(BeamUxEntry $entry): bool
     {
-        return $entry->realm !== null && ! empty($entry->realms);
+        return $entry->realm === BeamUxEntry::REALM_SITE && ! empty($entry->realms);
     }
 }
