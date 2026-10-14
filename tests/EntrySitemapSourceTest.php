@@ -120,6 +120,34 @@ class EntrySitemapSourceTest extends TestCase
         );
     }
 
+    public function test_it_includes_a_site_member_even_when_its_primary_realm_differs(): void
+    {
+        // Reachability is MEMBERSHIP in the flat `realms` list, not the primary `realm`: an entry
+        // primary in another realm but a MEMBER of `site` is reachable publicly and belongs in the feed.
+        $entry = BeamUxEntry::create([
+            'slug' => 'shared', 'type' => UxType::Page, 'segment' => '/shared',
+            'realm' => 'operator', 'realms' => ['operator', 'site'],
+        ]);
+
+        $urls = $this->urlsFrom($this->app->make(EntrySitemapSource::class));
+
+        $this->assertContains('https://example.test'.$entry->url(), $urls, 'a site MEMBER belongs in the feed even if its primary realm is not site');
+    }
+
+    public function test_it_excludes_a_site_primary_entry_whose_realms_omit_site(): void
+    {
+        // The dual: a `site`-primary row whose `realms` does NOT contain `site` is not site-reachable
+        // and must stay out — a primary-realm check would wrongly emit it.
+        $entry = BeamUxEntry::create([
+            'slug' => 'orphan', 'type' => UxType::Page, 'segment' => '/orphan',
+            'realm' => 'site', 'realms' => ['auth'],
+        ]);
+
+        $urls = $this->urlsFrom($this->app->make(EntrySitemapSource::class));
+
+        $this->assertNotContains('https://example.test'.$entry->url(), $urls, 'a site-primary entry whose realms omit site is not in the feed');
+    }
+
     /**
      * @return list<string>
      */

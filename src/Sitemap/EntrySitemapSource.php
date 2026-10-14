@@ -72,15 +72,17 @@ class EntrySitemapSource implements LiveSitemapSource
     }
 
     /**
-     * The fine route gate: the entry must be a placed page rooted in the PUBLIC `site` realm
-     * (ADR-0165 — `site` is the public content/URL plane). An entry rooted in auth/account/operator/
-     * tenant/user is not a public page: its URL is either gated or, on a satellite host, not routed
-     * at all (sites-sweep P7 — audiostud's sitemap listed the unrouted `/register`, an auth-realm
-     * page). Restricting to the public realm keeps every emitted URL a routed public page that
-     * answers 200 signed-out. `realms` must be non-empty so the entry actually has a placement.
+     * The fine route gate: the entry must be a public page — a MEMBER of the public `site` realm
+     * (ADR-0165, the public content/URL plane), read from the flat `realms` list, NOT the primary
+     * `realm`. Reachability is membership: an entry primary in another realm but a member of `site`
+     * is site-reachable and belongs in the feed, while a `site`-primary entry whose `realms` omits
+     * `site` does not. An entry not in `site` is not public — its URL is gated or, on a satellite,
+     * not routed at all (sites-sweep P7: audiostud's sitemap listed the unrouted `/register`, an
+     * auth-realm page). This keeps the feed to public `site` pages; it does not by itself guarantee a
+     * 2xx (a public `site` page may still 302 signed-out — e.g. audiostud `/studio`).
      */
     private function routable(BeamUxEntry $entry): bool
     {
-        return $entry->realm === BeamUxEntry::REALM_SITE && ! empty($entry->realms);
+        return $entry->isReachableIn(BeamUxEntry::REALM_SITE);
     }
 }

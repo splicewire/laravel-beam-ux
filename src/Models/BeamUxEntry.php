@@ -342,6 +342,18 @@ class BeamUxEntry extends Model implements WorkflowManaged
      * Identified structurally by the reserved `realms` build namespace + the realm as its slug — that
      * pair is already unique (`unique(namespace, slug)`), so no extra marker column is needed.
      */
+    /**
+     * Is this entry reachable under `$realm` — a MEMBER of it per the flat `realms` list (ADR-0165 /
+     * ticket 03), the same semantic the DB-side `whereJsonContains('realms', $realm)` scope uses?
+     * Reachability is MEMBERSHIP, not the primary `realm`: an entry primary in another realm but a
+     * member of `site` is site-reachable, and a `site`-primary entry whose `realms` omits `site` is
+     * not. The shared predicate for the public sitemap feed and its diagnostics parity.
+     */
+    public function isReachableIn(string $realm): bool
+    {
+        return in_array($realm, (array) ($this->realms ?? []), true);
+    }
+
     public static function rootFor(string $realm = self::REALM_SITE): self
     {
         return static::query()->firstOrCreate(

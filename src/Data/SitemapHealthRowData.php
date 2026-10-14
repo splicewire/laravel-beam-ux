@@ -74,7 +74,10 @@ class SitemapHealthRowData extends BeamData
 
     public static function project(BeamUxEntry $model): self
     {
-        $routable = $model->realm !== null && ! empty($model->realms) && $model->type === UxType::Page;
+        // Parity with EntrySitemapSource::routable(): public-site MEMBERSHIP (flat `realms`), not the
+        // primary `realm` — otherwise an auth-only entry reports indexed=true in diagnostics while
+        // the feed (correctly) omits it. Shared predicate: BeamUxEntry::isReachableIn().
+        $routable = $model->isReachableIn(BeamUxEntry::REALM_SITE) && $model->type === UxType::Page;
         $published = app(EntryPublishGate::class)->isPublished($model);
         $entitled = app(EntryEntitlementGate::class)->isPublic($model);
 

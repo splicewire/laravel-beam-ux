@@ -44,6 +44,26 @@ class SitemapHealthRowDataTest extends TestCase
         $this->assertNotNull($row->url);
     }
 
+    public function test_an_auth_only_entry_is_not_routable_or_indexed_matching_the_feed(): void
+    {
+        // Parity with EntrySitemapSource: public reachability is MEMBERSHIP of `site`, not the primary
+        // `realm`. An auth-only entry (not a `site` member) must report routable=false / indexed=false,
+        // or diagnostics would claim indexed=true while the feed (correctly) omits it.
+        $entry = BeamUxEntry::create([
+            'slug' => 'register',
+            'type' => 'page',
+            'namespace' => null,
+            'realm' => 'auth',
+            'realms' => ['auth'],
+            'segment' => '/register',
+        ]);
+
+        $row = SitemapHealthRowData::project($entry);
+
+        $this->assertFalse($row->routable, 'an auth-only entry is not a public site page');
+        $this->assertFalse($row->indexed, 'diagnostics must match the feed — not indexed');
+    }
+
     public function test_a_non_page_type_is_not_routable_and_not_indexed(): void
     {
         $entry = BeamUxEntry::create([
