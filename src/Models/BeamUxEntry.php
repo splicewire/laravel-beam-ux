@@ -12,6 +12,7 @@ use Rushing\PermissionCascade\Attributes\UseCascadePolicy;
 use Rushing\PermissionCascade\Concerns\HasVisibility;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Revisions\RevisionRecorder;
+use Splicewire\Beam\Storage\ConnectionAwareStorageDriver;
 use Splicewire\Beam\Storage\DeletableStorageDriver;
 use Splicewire\Beam\Ux\Access\EntryAccessGate;
 use Splicewire\Beam\Ux\Access\Right;
@@ -422,9 +423,10 @@ class BeamUxEntry extends Model implements WorkflowManaged
      * stack holding one) leaves the body whole rather than removing part of it.
      *
      * Both the holder check and the delete run on THIS entry's connection. `EntryPromoter` binds a central
-     * particle to an `on('central')` entry while the default connection is a tenant's; the particle driver
-     * resolves the default connection, so the delete runs with this entry's connection as the default for
-     * its duration (build-qa 947dd76f).
+     * particle to an `on('central')` entry while the default connection is a tenant's, so the driver is
+     * bound to the entry's connection ({@see ConnectionAwareStorageDriver}) rather than the process default
+     * being changed, which concurrent work could observe (build-qa 947dd76f, R2). A driver that cannot be
+     * bound leaves an entry on a non-default connection alone.
      */
     public function forgetBody(): void
     {
@@ -443,32 +445,19 @@ class BeamUxEntry extends Model implements WorkflowManaged
         }
 
         $driver = app(StorageDriverResolver::class)->resolve($this);
+        $own = $this->getConnectionName();
+
+        if ($driver instanceof ConnectionAwareStorageDriver) {
+            $driver = $driver->onConnection($own);
+        } elseif ($own !== null && $own !== app('db')->getDefaultConnection()) {
+            return;
+        }
+
         if (! $driver instanceof DeletableStorageDriver || ! $driver->canDelete()) {
             return;
         }
 
-        $this->onOwnConnection(fn () => $driver->delete((string) $key));
-    }
-
-    /** Run `$callback` with this entry's connection as the default connection, restoring it after. */
-    protected function onOwnConnection(callable $callback): void
-    {
-        $db = app('db');
-        $own = $this->getConnectionName();
-        $previous = $db->getDefaultConnection();
-
-        if ($own === null || $own === $previous) {
-            $callback();
-
-            return;
-        }
-
-        $db->setDefaultConnection($own);
-        try {
-            $callback();
-        } finally {
-            $db->setDefaultConnection($previous);
-        }
+        $driver->delete((string) $key);
     }
 
     /**

@@ -131,9 +131,16 @@ class EntryForceDeleteBodyTest extends TestCase
         $this->particleRow(null, $id);
         $entry = $this->page('promoted', $id, self::CENTRAL);
         $default = DB::getDefaultConnection();
+        // The interleaving control: whatever else runs while the particle is deleted (another fiber, an
+        // Octane request) must still see the process default, so the delete may not swap it, even briefly.
+        $seen = [];
+        BeamParticle::deleting(function () use (&$seen): void {
+            $seen[] = DB::getDefaultConnection();
+        });
 
         $entry->forceDelete();
 
+        $this->assertSame([$default], $seen, 'the default connection changed while the central body was deleted');
         $this->assertSame($default, DB::getDefaultConnection(), 'the default connection was not restored');
         $this->assertSame(0, $this->particleCount(self::CENTRAL, $id), 'the central particle stayed behind');
         $this->assertSame(1, $this->particleCount(null, $id), 'a same-id particle on the default connection was deleted');
@@ -163,6 +170,17 @@ class EntryForceDeleteBodyTest extends TestCase
         $doomed->forceDelete();
 
         $this->assertSame(0, $this->particleCount(self::CENTRAL, $id), 'a holder on the default connection decided the central delete');
+    }
+
+    /** A driver that cannot be bound to the entry's connection cannot reach its body there, so it is left. */
+    public function test_an_unbindable_driver_leaves_a_central_entrys_body_alone(): void
+    {
+        $driver = $this->recordingDefault();
+        $entry = $this->page('promoted', 'particle-central', self::CENTRAL);
+
+        $entry->forceDelete();
+
+        $this->assertSame([], $driver->deleted, 'an unbound driver deleted on the default connection');
     }
 
     private function recordingDefault(): DeletionRecordingDriver
