@@ -418,7 +418,13 @@ class BeamUxEntry extends Model implements WorkflowManaged
      *
      * Leaves the body when another entry, live or soft-deleted, still references the same particle: every
      * binding path mints its own, so that is not expected, but deleting it would take a survivor's body.
-     * A driver that cannot delete (a host's plain {@see \Splicewire\Beam\Storage\StorageDriver}) is a no-op.
+     * A driver that cannot fully delete (a host's plain {@see \Splicewire\Beam\Storage\StorageDriver}, or a
+     * stack holding one) leaves the body whole rather than removing part of it.
+     *
+     * Both the holder check and the delete run on THIS entry's connection. `EntryPromoter` binds a central
+     * particle to an `on('central')` entry while the default connection is a tenant's; the particle driver
+     * resolves the default connection, so the delete runs with this entry's connection as the default for
+     * its duration (build-qa 947dd76f).
      */
     public function forgetBody(): void
     {
@@ -427,7 +433,8 @@ class BeamUxEntry extends Model implements WorkflowManaged
             return;
         }
 
-        $shared = static::withTrashed()
+        // Without global scopes: a holder hidden from the current actor still holds the body.
+        $shared = $this->newQueryWithoutScopes()
             ->where('particle_id', $key)
             ->whereKeyNot($this->getKey())
             ->exists();
@@ -436,8 +443,31 @@ class BeamUxEntry extends Model implements WorkflowManaged
         }
 
         $driver = app(StorageDriverResolver::class)->resolve($this);
-        if ($driver instanceof DeletableStorageDriver) {
-            $driver->delete((string) $key);
+        if (! $driver instanceof DeletableStorageDriver || ! $driver->canDelete()) {
+            return;
+        }
+
+        $this->onOwnConnection(fn () => $driver->delete((string) $key));
+    }
+
+    /** Run `$callback` with this entry's connection as the default connection, restoring it after. */
+    protected function onOwnConnection(callable $callback): void
+    {
+        $db = app('db');
+        $own = $this->getConnectionName();
+        $previous = $db->getDefaultConnection();
+
+        if ($own === null || $own === $previous) {
+            $callback();
+
+            return;
+        }
+
+        $db->setDefaultConnection($own);
+        try {
+            $callback();
+        } finally {
+            $db->setDefaultConnection($previous);
         }
     }
 
