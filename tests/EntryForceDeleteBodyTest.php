@@ -10,12 +10,15 @@ use Illuminate\Support\Facades\Storage;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Storage\DeletableStorageDriver;
+use Splicewire\Beam\Storage\ParticleStorageDriver;
+use Splicewire\Beam\Storage\StackedStorageDriver;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Lifecycle\EntryPromoter;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Tests\Fixtures\Tag as FixtureTag;
 use Splicewire\Beam\Ux\Type\UxType;
+use Splicewire\Beam\Write\ParticleWriter;
 
 /**
  * A force-deleted entry takes its stored body with it.
@@ -181,6 +184,29 @@ class EntryForceDeleteBodyTest extends TestCase
         $entry->forceDelete();
 
         $this->assertSame([], $driver->deleted, 'an unbound driver deleted on the default connection');
+    }
+
+    /**
+     * A default stack holding a deletable tier that is not connection-aware (as a host's DB-backed tier
+     * might be) cannot be bound to `central`, so a central entry's body is left whole on every tier rather
+     * than deleted on central by one tier and on the default by another (build-qa R3 HIGH).
+     */
+    public function test_a_mixed_stack_leaves_a_central_entrys_body_whole(): void
+    {
+        $unaware = new DeletionRecordingDriver;
+        $this->app->forgetInstance(StorageDriverResolver::class);
+        app(StorageDriverResolver::class)->register(StorageDriverResolver::DEFAULT, new StackedStorageDriver(
+            new ParticleStorageDriver(fn () => app(ParticleWriter::class)),
+            $unaware,
+        ));
+        $id = '01a00000-0000-7000-8000-00000000c0e1';
+        $this->particleRow(self::CENTRAL, $id);
+        $entry = $this->page('promoted', $id, self::CENTRAL);
+
+        $entry->forceDelete();
+
+        $this->assertSame([], $unaware->deleted, 'the unaware tier deleted on the default connection');
+        $this->assertSame(1, $this->particleCount(self::CENTRAL, $id), 'the central particle went while another tier could not follow');
     }
 
     private function recordingDefault(): DeletionRecordingDriver
