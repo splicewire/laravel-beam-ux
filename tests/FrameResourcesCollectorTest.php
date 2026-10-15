@@ -228,10 +228,11 @@ class FrameResourcesCollectorTest extends TestCase
      * logged-in user, over an endpoint anyone can reach — and the collector's own docblock claims
      * secure-by-omission three lines above the arm that did it.
      *
-     * A null actor cannot satisfy a `viewAny` policy, so it is denied exactly as a real actor failing
-     * that policy is. Anonymous is now bounded above by authenticated. A model-backed resource with no
-     * `viewAny` policy stays public (its row scope is its read gate). A resource with NO model used to
-     * stay public too, by an arm that returned before this rule could run; it no longer does — see
+     * A null actor is denied by a `viewAny` that does not admit guests, exactly as a real actor failing
+     * that policy is. Anonymous is now bounded above by authenticated. The shared fixture seats stay listed
+     * to anonymous only because their bound {@see OpenFixturePolicy} explicitly admits a guest; a row scope
+     * alone no longer admits anyone (laravel-beam 01abf93). A resource with NO model used to stay public
+     * too, by an arm that returned before this rule could run; it no longer does — see
      * {@see test_an_anonymous_reader_is_never_shown_a_model_less_resource()}.
      */
     public function test_an_anonymous_reader_never_sees_more_than_an_authenticated_one(): void
@@ -303,7 +304,8 @@ class FrameResourcesCollectorTest extends TestCase
 
         $this->assertNotContains('Queue', $anonymous);
         $this->assertNotContains('Gated queue', $anonymous);
-        // The model-backed, policy-less seats beside them are unchanged for the same reader.
+        // The model-backed seats beside them, admitted by their bound permissive viewAny, are unchanged
+        // for the same reader.
         $this->assertSame(['Tenants', 'Packs', 'Plans', 'Hooks'], $anonymous);
     }
 
@@ -562,7 +564,10 @@ class DenyingViewAnyPolicy
     }
 }
 
-/** An actor that denies everything, so a seat surviving proves the gate was never consulted. */
+/**
+ * An actor whose own can() denies everything, so a seat surviving proves the collector asked that seat's bound
+ * policy ({@see OpenFixturePolicy}'s permissive viewAny) rather than an unconditional can() on the actor.
+ */
 class DenyingUser implements Authenticatable, Authorizable
 {
     public function can($abilities, $arguments = []): bool
