@@ -83,10 +83,14 @@ class FrameResourcesCollectorTest extends TestCase
         // navOrder 2 and are registered Plans-then-Packs while their labels sort Packs-then-Plans,
         // so the label tiebreak is what decides and registration order cannot be mistaken for it.
         //
-        // Each is a REAL policy-less model whose declared row scope is its read gate ({@see OpenFixtureModel}),
-        // the population the list admits to every reader. A phantom backing class (`Acme\\Particles\\…`, until
-        // 2026-10-06) cannot build its authorization bases, and since laravel-beam 65f7761 a read whose bases
-        // throw fails CLOSED, so every seat here vanished for a reason no assertion names (APP-15 PROOF).
+        // Each is a REAL model with a declared row scope AND an explicit policy whose viewAny admits every
+        // reader ({@see OpenFixtureModel}, {@see OpenFixturePolicy}), so the list admits it to anyone. Both are
+        // needed: since laravel-beam 01abf93 (2026-10-13) a row scope is the population, never the authority —
+        // a policy-less scoped model falls through to an undefined viewAny and every seat here vanished again.
+        // Before that, a phantom backing class (`Acme\\Particles\\…`, until 2026-10-06) could not build its
+        // authorization bases and laravel-beam 65f7761's fail-closed read hid them the same way (APP-15 PROOF).
+        Gate::policy(OpenFixtureModel::class, OpenFixturePolicy::class);
+
         foreach ([
             // key        label        section     navOrder  routeName
             ['tenants', 'Tenants', 'platform', 1, 'tenants.index'],
@@ -182,7 +186,7 @@ class FrameResourcesCollectorTest extends TestCase
         $this->assertSame(['Audit'], $this->titles('platform', 'tenant'));
     }
 
-    public function test_a_policy_bound_resource_is_view_any_gated_and_a_policy_less_one_is_not(): void
+    public function test_each_seat_is_gated_by_its_own_bound_view_any_not_by_the_actors_can(): void
     {
         Gate::policy(GatedFixtureModel::class, DenyingViewAnyPolicy::class);
 
@@ -202,11 +206,13 @@ class FrameResourcesCollectorTest extends TestCase
 
         $titles = $this->invoke('platform', 'operator', user: new DenyingUser);
 
-        // Secure by omission for the resource that BINDS a policy…
+        // Secure by omission for the resource whose bound policy DENIES viewAny…
         $this->assertNotContains('Gated', array_column($titles, 'title'));
-        // …and NOT for the ones that do not. Laravel denies an ability nobody defined, so an
-        // unconditional `can()` here hid every scope-gated seat as a wrong ABSENCE (measured at the
-        // flagship 2026-09-02) — an absence a reader cannot tell from a permissions denial.
+        // …and listed for the ones whose bound policy ADMITS it, although this actor's own can() refuses
+        // everything: the collector asks each seat's policy, never an unconditional can(), which hid every
+        // scope-gated seat as a wrong ABSENCE (measured at the flagship 2026-09-02). Until laravel-beam
+        // 01abf93 these seats were policy-less and their row scope admitted them; a scope is now never the
+        // authority, so they bind {@see OpenFixturePolicy}.
         $this->assertSame(['Tenants', 'Packs', 'Plans', 'Hooks'], array_column($titles, 'title'));
     }
 
@@ -517,9 +523,10 @@ class ModelLessFixtureFeed implements \Splicewire\Beam\Particle\Backing\StreamsR
 }
 
 /**
- * A model-backed fixture that binds NO policy and whose resource declares a row scope: the population whose row scope
- * is its read gate, so the collector lists it to every reader and the ordering, realm and href assertions have seats to
- * judge. Unscoped, a policy-less model is not listed (no allowance admits it and Laravel denies the undefined viewAny).
+ * A model-backed fixture whose resource declares a row scope (the population) and whose model binds
+ * {@see OpenFixturePolicy} (the authority), so the collector lists it to every reader and the ordering, realm and href
+ * assertions have seats to judge. Either half alone is not listed: the scope never authenticates a read (laravel-beam
+ * 01abf93), and an unscoped model's population is undeclared.
  */
 class OpenFixtureModel extends \Illuminate\Database\Eloquent\Model
 {
@@ -528,6 +535,15 @@ class OpenFixtureModel extends \Illuminate\Database\Eloquent\Model
     public static function rowScope(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
     {
         return $query->whereNotNull('open_fixtures.owner_id');
+    }
+}
+
+/** The fixture seats' declared authority: any reader, a guest included, may list them. */
+class OpenFixturePolicy
+{
+    public function viewAny(mixed $user = null): bool
+    {
+        return true;
     }
 }
 
