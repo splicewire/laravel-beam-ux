@@ -12,6 +12,7 @@ use Rushing\PermissionCascade\Attributes\UseCascadePolicy;
 use Rushing\PermissionCascade\Concerns\HasVisibility;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Revisions\RevisionRecorder;
+use Splicewire\Beam\Storage\DeletableStorageDriver;
 use Splicewire\Beam\Ux\Access\EntryAccessGate;
 use Splicewire\Beam\Ux\Access\Right;
 use Splicewire\Beam\Ux\Codec\BodyCodec;
@@ -24,6 +25,7 @@ use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\Models\Concerns\HasFacets;
 use Splicewire\Beam\Ux\Sitemap\SiloVisibilityEntitlementGate;
 use Splicewire\Beam\Ux\Sitemap\WorkflowMarkingPublishGate;
+use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 use Splicewire\Beam\Workflows\Type\Concerns\WorkflowManaged as WorkflowManagedTrait;
 use Splicewire\Beam\Workflows\Type\Contracts\WorkflowManaged;
@@ -313,6 +315,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
                 // (beam-docs-satellite 66). A soft delete deliberately keeps it: that entry can be
                 // restored, and its artifact is still addressed by the version it was compiled at.
                 app(EntryArtifactStore::class)->forget($entry);
+                $entry->forgetBody();
 
                 return;
             }
@@ -402,6 +405,40 @@ class BeamUxEntry extends Model implements WorkflowManaged
     public function particle(): BelongsTo
     {
         return $this->belongsTo(BeamParticle::class, 'particle_id');
+    }
+
+    /**
+     * Remove this entry's stored body — the particle row and every projection its storage driver wrote
+     * (the default stack's disk-mirror file) — once the entry itself is gone for good. Called from the
+     * force-delete branch of `deleted` only: a soft-deleted entry can be restored and keeps its body.
+     *
+     * Unlike {@see \Splicewire\Beam\Ux\Publish\EntryPublication::clear()}, which keeps the particle so the
+     * entry's revision log can still reach its history, nothing addresses this body after a force delete;
+     * leaving it is the orphan ux-demo-convergence step 2 measured (one row + file per console probe).
+     *
+     * Leaves the body when another entry, live or soft-deleted, still references the same particle: every
+     * binding path mints its own, so that is not expected, but deleting it would take a survivor's body.
+     * A driver that cannot delete (a host's plain {@see \Splicewire\Beam\Storage\StorageDriver}) is a no-op.
+     */
+    public function forgetBody(): void
+    {
+        $key = $this->particle_id;
+        if ($key === null || $key === '') {
+            return;
+        }
+
+        $shared = static::withTrashed()
+            ->where('particle_id', $key)
+            ->whereKeyNot($this->getKey())
+            ->exists();
+        if ($shared) {
+            return;
+        }
+
+        $driver = app(StorageDriverResolver::class)->resolve($this);
+        if ($driver instanceof DeletableStorageDriver) {
+            $driver->delete((string) $key);
+        }
     }
 
     /**
