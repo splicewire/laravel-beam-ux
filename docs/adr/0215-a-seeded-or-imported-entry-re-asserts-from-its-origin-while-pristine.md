@@ -35,10 +35,14 @@ better one. Two hosts on the same release show different landing pages because o
 
 Two columns on `beam_ux_entries` (docs-walkthrough DM2):
 
-- `origin`, one of three:
+- `origin`, one of four:
   - `package:<vendor/name>`: seeded by a package's `SeedStep`;
   - `disk:<path>`: imported from a file;
+  - `pack:<slug>`: copied into a tenant's Hosted site by a Scaffold Pack;
   - `cms`: authored in the editor.
+
+  **Amended 2026-10-14 (ADR-0227 decision 2):** `pack:` is the fourth origin. §2's pristine rule applies to it
+  as it does to `package:` and `disk:`.
 - `asserted_hash`: the hash of the body and title the origin last wrote, taken **after** interpolation
   (so a seed-time fact that changes counts as a change).
 

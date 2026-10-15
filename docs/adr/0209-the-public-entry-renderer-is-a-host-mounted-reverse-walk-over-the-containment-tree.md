@@ -99,6 +99,9 @@ headless-installable without inventing a package boundary to protect it.
 The public renderer ignores that and walks `site` — the only realm with `routeBase: '/'` and
 `guard: null`. `operator`, `tenant`, and `user` are guarded application surfaces served by Frame's SPA
 route generator. A public URL resolving into a guarded realm's tree is a leak shaped like a feature.
+
+**Amended 2026-10-14 (ADR-0227 decision 4):** the walk reads the tree of the domain's owner: central rows on a
+central domain, and the tenant's rows on a tenant's site domain (`splicewire/tower` ADR-0008).
 The macro accepts a realm argument, so this is widenable; `site` is the default and the only shipped
 case.
 
