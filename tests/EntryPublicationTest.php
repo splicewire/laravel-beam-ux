@@ -152,6 +152,52 @@ class EntryPublicationTest extends TestCase
         $this->assertSame(1, $this->versionRows($entry));
     }
 
+    public function test_a_central_entry_under_a_tenant_default_rolls_its_snapshot_back_with_a_failed_pin_and_a_retry_pins(): void
+    {
+        // review-r1 R3 (2026-10-16): the supported central-entry shape, where EntryPromoter keeps the entry and its
+        // particle on `central` while the default connection is a tenant's. baseline()'s transaction is on the entry's
+        // connection; the version store wrote the version on the DEFAULT one, outside it, so a failed pin kept the
+        // version and the row read as a draft forever. Needs rushing/laravel-versioning with record-connection versions.
+        config(['database.connections.central' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '', 'foreign_key_constraints' => true]]);
+        $this->createTables('central');
+
+        \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
+        // Built the way EntryPromoter builds one: the particle written with its own central connection, then the entry.
+        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(
+            (new \Splicewire\Beam\Models\BeamParticle)->setConnection('central'),
+            self::BODY_ONE,
+        );
+        $entry = BeamUxEntry::on('central')->create(['slug' => 'central-home', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site', 'particle_id' => $particle->id]);
+        $this->assertSame('central', $entry->getConnectionName());
+        $this->assertSame(1, \DB::connection('central')->table(Beam::table('particles'))->count(), 'the body left the entry connection');
+
+        $failPin = true;
+        BeamUxEntry::updating(function (BeamUxEntry $row) use (&$failPin) {
+            if ($failPin && $row->isDirty('published_version')) {
+                $failPin = false;
+
+                throw new \RuntimeException('simulated failure saving the publication pin');
+            }
+        });
+
+        try {
+            app(EntryPublication::class)->baseline($entry);
+            $this->fail('a failed pin save was swallowed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated failure saving the publication pin', $e->getMessage());
+        }
+
+        $this->assertSame(0, \DB::connection('central')->table(Beam::table('versions'))->count(), 'the snapshot outlived the failed pin on central');
+        $this->assertSame(0, \DB::table(Beam::table('versions'))->count(), 'the snapshot outlived the failed pin on the tenant default');
+        $this->assertNull($entry->fresh()->published_version);
+
+        app(EntryPublication::class)->baseline($entry->fresh());
+
+        $this->assertNotNull($entry->fresh()->published_version, 'a retry could not repair the central row');
+        $this->assertSame(1, \DB::connection('central')->table(Beam::table('versions'))->count());
+        $this->assertSame(0, \DB::table(Beam::table('versions'))->count());
+    }
+
     public function test_restoring_rolls_forward_into_a_draft_and_the_reader_keeps_the_published_body(): void
     {
         // ADR-0225 decision 5: Restore applies the frozen snapshot to the working copy and mints a new version, and does
@@ -444,9 +490,9 @@ class EntryPublicationTest extends TestCase
             ->count();
     }
 
-    private function createTables(): void
+    private function createTables(?string $connection = null): void
     {
-        Schema::create('beam_ux_entries', function (Blueprint $table) {
+        Schema::connection($connection)->create('beam_ux_entries', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->uuid('particle_id')->nullable()->index();
             $table->string('slug')->index();
@@ -472,7 +518,7 @@ class EntryPublicationTest extends TestCase
             $table->unique(['namespace', 'slug']);
         });
 
-        Schema::create(Beam::table('particles'), function (Blueprint $table) {
+        Schema::connection($connection)->create(Beam::table('particles'), function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('schema_ref')->nullable()->index();
             $table->string('schema_id')->nullable()->index();
@@ -484,7 +530,7 @@ class EntryPublicationTest extends TestCase
             $table->timestamps();
         });
 
-        Schema::create(Beam::table('versions'), function (Blueprint $table) {
+        Schema::connection($connection)->create(Beam::table('versions'), function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('versionable_type');
             $table->string('versionable_id');
