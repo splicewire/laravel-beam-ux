@@ -102,6 +102,10 @@ class EntryBodySaveOp
 
         $publication->assertStorable($model, $input->body);
 
+        // ADR-0225 decision 2: a save is its own publish, and a publish needs the version store. Refuse
+        // BEFORE the write, so a host missing the store keeps the working copy it had.
+        $publication->requireVersionStore();
+
         // The BASELINE goes first, before the write: it records the body that is currently live as this
         // entry's first version, and the write is about to destroy it. Without that, the body a reader
         // was served up to this moment would exist nowhere, and `restore` on the very next edit would

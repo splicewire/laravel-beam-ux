@@ -159,19 +159,21 @@ class EntryPublication
      */
     public function publish(BeamUxEntry $entry, ?string $label = null): EntryPublicationData
     {
-        $this->baseline($entry);
-
-        $particle = $this->recordsVersions() ? $this->particle($entry) : null;
-
-        if ($particle === null) {
-            if ($entry->particle_id !== null) {
-                // No version store here: publish is then what it has always been — mirror the body and
-                // compile it at the unpinned address. See {@see recordsVersions()}.
-                return $this->state($entry, $this->mirrorAndCompile($entry));
-            }
-
+        if ($entry->particle_id === null) {
             // Nothing has ever been written to this entry, so there is no body to publish. Reporting the
             // empty state is the honest answer; minting an empty version would manufacture history.
+            return $this->state($entry);
+        }
+
+        // ADR-0225 decision 2: the pin is required wherever the editor is mounted. The pin-less branch
+        // that mirrored and compiled at the unpinned address is deleted; a host without the version
+        // store refuses here, naming the fix, instead of publishing outside the entry's one history.
+        $this->requireVersionStore();
+        $this->baseline($entry);
+
+        $particle = $this->particle($entry);
+
+        if ($particle === null) {
             return $this->state($entry);
         }
 
@@ -317,10 +319,13 @@ class EntryPublication
             return null;
         }
 
-        $particle = $this->recordsVersions() ? $this->particle($entry) : null;
+        // ADR-0225 decision 2: no pin-less publish. See {@see publish()}.
+        $this->requireVersionStore();
+
+        $particle = $this->particle($entry);
 
         if ($particle === null) {
-            return $this->mirrorAndCompile($entry);
+            return null;
         }
 
         return $this->pinAndCompile($entry, $this->versionForWorkingCopy($particle, $label ?? 'published'));
@@ -450,7 +455,7 @@ class EntryPublication
      * A publish-gate claim this package cannot verify is exactly the shape that reads green while the
      * table is absent, so the refusal states what it checked rather than "versioning unavailable".
      */
-    private function requireVersionStore(): void
+    public function requireVersionStore(): void
     {
         if ($this->recordsVersions()) {
             return;

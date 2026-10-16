@@ -319,25 +319,34 @@ class EntryPublicationTest extends TestCase
         $this->assertFalse($restored->draftPending);
     }
 
-    public function test_a_host_without_the_version_store_still_saves_and_publishes_exactly_as_before(): void
+    public function test_a_host_without_the_version_store_refuses_to_publish_and_names_the_fix(): void
     {
-        // Found by this package's own suite, which hand-builds its schema: the moment a save recorded a
-        // version, every test file that had never heard of `beam_versions` errored — and so would every
-        // host mid-way through publishing the migrations. The pre-pin contract has to survive its
-        // absence, because it was the whole contract for years.
+        // ADR-0225 decision 2: the pin is required wherever the editor is mounted. The pin-less branch
+        // that used to mirror and compile at the unpinned address is gone; a save-body or publish on a
+        // host missing the store refuses, naming both missing halves and the command that fixes it.
         $entry = $this->pageWithUnversionedBody(self::BODY_ONE);
+        $artifactBefore = $this->artifacts()->read($entry->fresh());
         Schema::drop(Beam::table('versions'));
 
-        $payload = EntryBodySaveOp::handle($entry->fresh(), $this->saveRequest(self::BODY_TWO), actor: null);
+        try {
+            EntryBodySaveOp::handle($entry->fresh(), $this->saveRequest(self::BODY_TWO), actor: null);
+            $this->fail('save-body published pin-less on a host without the version store');
+        } catch (\RuntimeException $e) {
+            $this->assertMatchesRegularExpression('/beam-ux-migrations/', $e->getMessage());
+            $this->assertMatchesRegularExpression('/beam_versions|versions\] table/', $e->getMessage());
+        }
+        // Refused BEFORE the write: the working copy is still the body that was live.
+        $this->assertSame(self::BODY_ONE, $entry->fresh()->particle->getAttribute('payload'));
 
-        $this->assertNull($payload['compileError']);
-        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
-        $this->assertNull($entry->fresh()->getAttribute('published_version'));
-
-        // And the capability that genuinely cannot work says so, rather than publishing a draft.
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessageMatches('/beam-ux-migrations/');
-        app(EntryPublication::class)->recordDraft($entry->fresh(), self::BODY_ONE);
+        $this->expectExceptionMessageMatches('/vendor:publish/');
+        try {
+            app(EntryPublication::class)->publish($entry->fresh());
+        } finally {
+            // Nothing moved: the reader keeps exactly the artifact it had.
+            $this->assertSame($artifactBefore, $this->artifacts()->read($entry->fresh()));
+            $this->assertNull($entry->fresh()->getAttribute('published_version'));
+        }
     }
 
     private function artifacts(): EntryArtifactStore

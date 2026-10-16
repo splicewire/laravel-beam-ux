@@ -1,0 +1,64 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\Schema;
+use Rushing\Versioning\Models\Version;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Publish\EntryPublication;
+
+/**
+ * The BASELINE: give every already-written entry a Publication Pin, inside `migrate`.
+ *
+ * ADR-0225 decision 2 makes the pin required wherever the editor is mounted: a publish with no version
+ * store refuses instead of mirroring at the unpinned address. An entry written before the pin existed has
+ * a body and no pin, so without this step there would be a window, between deploying the package and
+ * someone next publishing each entry, in which the pin is required but missing (launch ticket 00,
+ * orch-lead 2026-10-16 16:57Z: the baseline runs INSIDE the migration, not as a separate step).
+ *
+ * Each pin-less entry with a body gets exactly what {@see EntryPublication::baseline()} gives it at its
+ * first draft: its current body frozen as version 1, pinned, and compiled at the pinned address. The body
+ * is the one already on the page, so a reader sees nothing change.
+ *
+ * A SEPARATE migration from `add_published_version_to_beam_ux_entries_table` on purpose: hosts that
+ * already ran that one (or got the column from the `create` stub) will never run it again, and they are
+ * exactly the hosts whose existing entries need this.
+ *
+ * Idempotent: `baseline()` is a no-op for an entry that is already pinned or already has history, so a
+ * re-run (or a run on a fresh database with no entries) changes nothing.
+ */
+return new class extends Migration
+{
+    public function up(): void
+    {
+        if (! Schema::hasTable('beam_ux_entries') || ! Schema::hasColumn('beam_ux_entries', 'published_version')) {
+            return;
+        }
+
+        $pinless = BeamUxEntry::query()->whereNull('published_version')->whereNotNull('particle_id');
+
+        if (! $pinless->exists()) {
+            return;
+        }
+
+        $versions = (new Version)->getTable();
+
+        if (! Schema::hasTable($versions)) {
+            throw new RuntimeException(sprintf(
+                'beam-ux cannot baseline %d pin-less entr%s: the [%s] version table is missing. '
+                .'Publish and run the migrations, then migrate again: '
+                .'`php artisan vendor:publish --tag=beam-migrations --tag=beam-ux-migrations && php artisan migrate`.',
+                $count = $pinless->count(), $count === 1 ? 'y' : 'ies', $versions,
+            ));
+        }
+
+        $publication = app(EntryPublication::class);
+
+        $pinless->orderBy('id')->each(fn (BeamUxEntry $entry) => $publication->baseline($entry));
+    }
+
+    public function down(): void
+    {
+        // Pins are data, not schema: rolling back leaves every entry pointing at its baseline version,
+        // which is still the body on the page. The column's own migration owns its removal.
+    }
+};

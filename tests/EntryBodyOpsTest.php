@@ -413,6 +413,9 @@ class EntryBodyOpsTest extends TestCase
             $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
+            // The Publication Pin: save-body is its own publish, and since ADR-0225 decision 2 a publish
+            // requires the version store (the pin-less fallback is gone).
+            $table->uuid('published_version')->nullable();
             $table->timestamps();
             $table->softDeletes();
             $table->unique(['namespace', 'slug']);
@@ -428,6 +431,18 @@ class EntryBodyOpsTest extends TestCase
             $table->json('meta')->nullable();
             $table->string('source_tier')->default('local')->index();
             $table->timestamps();
+        });
+
+        Schema::create(Beam::table('versions'), function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->string('versionable_type');
+            $table->string('versionable_id');
+            $table->unsignedInteger('version');
+            $table->json('snapshot');
+            $table->string('label')->nullable();
+            $table->uuid('created_by')->nullable();
+            $table->timestamps();
+            $table->unique(['versionable_type', 'versionable_id', 'version']);
         });
     }
 }

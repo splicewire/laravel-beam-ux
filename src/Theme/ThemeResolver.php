@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Theme;
 
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Schema;
+use Rushing\Versioning\Models\Version;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Schema\ThemeSchemas;
@@ -224,11 +225,24 @@ class ThemeResolver
         }
     }
 
+    /** @var array<string, bool> Per-connection "this tier can pin" memo; the resolver runs on every page. */
+    private array $pinCapable = [];
+
     /**
-     * The entry's body — read directly off its {@see BeamParticle}'s `payload` (NOT through
-     * `StorageDriverResolver`/`ParticleStorageDriver`, which resolve the CURRENT default connection
-     * with no cross-connection awareness; a theme read has no file-placement/disk-mirror concern
-     * either, so the driver precedence machinery would be pure overhead here).
+     * The body a READER is served: the entry's Publication Pin, never its working copy (launch ticket 00,
+     * 2026-10-15 21:40Z; ADR-0225 decision 2). Read directly off the {@see BeamParticle} and its pinned
+     * {@see Version} (NOT through `StorageDriverResolver`/`ParticleStorageDriver`, which resolve the
+     * CURRENT default connection with no cross-connection awareness; a theme read has no
+     * file-placement/disk-mirror concern either).
+     *
+     *  - A tier that cannot pin (no `published_version` column, or no version table) is a host that has
+     *    not migrated: its working copy is what readers have always been served, so it still is. The
+     *    doctor's version-store audit names such hosts.
+     *  - A pin serves that version's body. A pin naming no row serves nothing rather than the working
+     *    copy, which may be an unpublished draft.
+     *  - No pin and no history: an entry written before the pin existed. Its working copy IS the live
+     *    body (the baseline migration pins it), so it is served.
+     *  - No pin but history: drafts that were never published. Nothing is served.
      *
      * @return array<string, mixed>
      */
@@ -242,6 +256,43 @@ class ThemeResolver
             ? BeamParticle::on($connection)->find($entry->particle_id)
             : BeamParticle::find($entry->particle_id);
 
-        return is_array($particle?->payload) ? $particle->payload : [];
+        if ($particle === null) {
+            return [];
+        }
+
+        $working = is_array($particle->payload) ? $particle->payload : [];
+
+        if (! $this->canPin($connection)) {
+            return $working;
+        }
+
+        $versions = $connection !== null ? Version::on($connection) : Version::query();
+        $pin = $entry->getAttribute('published_version');
+
+        if ($pin !== null && $pin !== '') {
+            $snapshot = $versions->find((string) $pin)?->snapshot;
+
+            return is_array($snapshot['payload'] ?? null) ? $snapshot['payload'] : [];
+        }
+
+        $hasHistory = $versions
+            ->where('versionable_type', $particle->getMorphClass())
+            ->where('versionable_id', (string) $particle->getKey())
+            ->exists();
+
+        return $hasHistory ? [] : $working;
+    }
+
+    private function canPin(?string $connection): bool
+    {
+        $key = $connection ?? '';
+
+        if (! array_key_exists($key, $this->pinCapable)) {
+            $schema = Schema::connection($connection);
+            $this->pinCapable[$key] = $schema->hasColumn('beam_ux_entries', 'published_version')
+                && $schema->hasTable((new Version)->getTable());
+        }
+
+        return $this->pinCapable[$key];
     }
 }

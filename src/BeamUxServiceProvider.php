@@ -44,6 +44,7 @@ use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxReachabilityAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxRouteShadowAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxThemeResolutionAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxVersionStoreAudit;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Query\BeamUxEntryResourceQuery;
 use Splicewire\Beam\Write\ParticleWriter;
@@ -102,6 +103,11 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 // beam-ux before this pass gets the column from here, a fresh one from the create,
                 // and each no-ops for the other.
                 'shared/add_published_version_to_beam_ux_entries_table',
+                // The BASELINE (ADR-0225 decision 2; launch ticket 00, 2026-10-16): pins every already-written
+                // entry to its live body inside `migrate`, so the pin is never required-but-missing. A
+                // separate file because hosts that already ran the ALTER (or got the column from the create)
+                // will never run it again. Idempotent.
+                'shared/baseline_beam_ux_entry_publication_pins',
                 // Provenance columns (`origin`, `asserted_hash`) — DOCS-06 / ADR-0215. An ALTER beside
                 // the create for the same reason as its siblings; nullable, so it changes no existing row.
                 'shared/add_provenance_to_beam_ux_entries_table',
@@ -218,6 +224,14 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxReachabilityAudit::class,
+            );
+
+            // ADR-0225 decision 2: the Publication Pin is required wherever the entry editor is mounted, and
+            // a missing version table or `published_version` column fails at INSTALL. Mounted is read from
+            // the route table; a host that mounts no entry history op passes.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxVersionStoreAudit::class,
             );
         }
 
