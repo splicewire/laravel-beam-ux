@@ -20,6 +20,8 @@ use Splicewire\Beam\Ux\Codec\BodyCodec;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
+use Splicewire\Beam\Ux\Body\BodyKind;
+use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
 use Splicewire\Beam\Ux\Format\BodyStyle;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
@@ -521,6 +523,33 @@ class BeamUxEntry extends Model implements WorkflowManaged
     public function codec(): BodyCodec
     {
         return app(CodecRegistry::class)->for($this->format ?? self::defaultFormatFor($this->type));
+    }
+
+    /**
+     * ADR-0228 d1 — the declared {@see BodyKind} of this entry's body. A theme is a **form**; a component
+     * is **source** (central; ADR-0231 later adds an Authored-Component blocks path, not EP-05); any other
+     * type is **blocks** when its codec carries a JsonDoc ({@see AcceptsJsonDoc} — a `tsx` page) and
+     * **source** otherwise (an `mdx` page, until editor-parity ticket 15 decides).
+     *
+     * This is the entry's DECLARATION, read off its `type` and `format` — never sniffed from the stored
+     * body. That is what d1 retires: `array_is_list` / `JsonDocShape::is` stop being the discriminator,
+     * and `AcceptsJsonDoc` comes to mean exactly "this kind is blocks".
+     */
+    public function bodyKind(): BodyKind
+    {
+        $type = $this->type instanceof UxType
+            ? $this->type
+            : ($this->type !== null ? UxType::tryFrom((string) $this->type) : null);
+
+        if ($type === UxType::Theme) {
+            return BodyKind::Form;
+        }
+
+        if ($type === UxType::Component) {
+            return BodyKind::Source;
+        }
+
+        return $this->codec() instanceof AcceptsJsonDoc ? BodyKind::Blocks : BodyKind::Source;
     }
 
     /** `format`'s type-aware default (`creating()` stamps this in; `codec()` mirrors it as a fallback
