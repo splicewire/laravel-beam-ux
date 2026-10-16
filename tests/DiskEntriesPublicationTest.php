@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -154,58 +153,131 @@ class DiskEntriesPublicationTest extends TestCase
         $this->assertNull($this->guide(), 'a refused registration left a row behind');
     }
 
+    public function test_a_changed_source_on_rescan_publishes_a_new_version_and_the_artifact_follows_the_pin(): void
+    {
+        // review-r1 (2026-10-16): a pristine row whose disk source changed is re-asserted. That rewrote the body and
+        // force-compiled it under the OLD pin, so the served artifact no longer matched the published version.
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+        $first = (string) $this->guide()->published_version;
+
+        $this->writeGuide("# Guide\n\nChanged on disk.\n");
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $entry = $this->guide();
+        $this->assertContains('page/guide.mdx', $result['reasserted']);
+        $this->assertNotSame($first, (string) $entry->published_version, 'a changed source left the pin on the old version');
+        $this->assertSame(2, $this->versionRows($entry));
+        $this->assertFalse(app(EntryPublication::class)->state($entry)->draftPending);
+        $this->assertStringContainsString('Changed on disk.', (string) app(EntryArtifactStore::class)->read($entry));
+    }
+
+    public function test_a_changed_source_without_the_version_store_refuses_before_touching_the_row(): void
+    {
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+        $before = $this->guide();
+        $body = app(\Splicewire\Beam\Ux\Storage\StorageDriverResolver::class)->resolve($before)->read((string) $before->particle_id)?->body;
+        Schema::drop(Beam::table('versions'));
+        $this->writeGuide("# Guide\n\nChanged on disk.\n");
+
+        try {
+            $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+            $this->fail('a re-assert wrote with no version store to publish it');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('vendor:publish --tag=beam-migrations --tag=beam-ux-migrations', $e->getMessage());
+        }
+
+        $after = $this->guide();
+        $this->assertSame((string) $before->asserted_hash, (string) $after->asserted_hash, 'the provenance hash moved');
+        $this->assertSame($body, app(\Splicewire\Beam\Ux\Storage\StorageDriverResolver::class)->resolve($after)->read((string) $after->particle_id)?->body, 'the body was rewritten');
+    }
+
+    public function test_hydrating_an_empty_entry_is_born_published(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'guide', 'type' => 'page', 'format' => 'mdx', 'title' => 'Guide']);
+
+        $this->assertTrue($this->app->make(RegisterEntriesFromDisk::class)->hydrateEmpty($entry, "# Guide\n\nHydrated.\n"));
+
+        $this->assertNotNull($entry->fresh()->published_version, 'a hydrated entry was left without a Publication Pin');
+        $this->assertSame(1, $this->versionRows($entry));
+        $this->assertStringContainsString('Hydrated.', (string) app(EntryArtifactStore::class)->read($entry->fresh()));
+    }
+
+    public function test_a_failure_while_pinning_a_hydration_rolls_it_back_and_a_retry_hydrates(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'guide', 'type' => 'page', 'format' => 'mdx', 'title' => 'Guide']);
+        $this->failNextPinSave();
+
+        try {
+            $this->app->make(RegisterEntriesFromDisk::class)->hydrateEmpty($entry, "# Guide\n\nHydrated.\n");
+            $this->fail('a failure while pinning a hydration was swallowed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated failure saving the publication pin', $e->getMessage());
+        }
+
+        $this->assertNull($entry->fresh()->particle_id, 'a failed hydration left a body behind');
+        $this->assertSame(0, (int) \DB::table(Beam::table('versions'))->count());
+
+        $this->assertTrue($this->app->make(RegisterEntriesFromDisk::class)->hydrateEmpty($entry->fresh(), "# Guide\n\nHydrated.\n"));
+        $this->assertNotNull($entry->fresh()->published_version);
+    }
+
+    public function test_hydrating_an_entry_that_already_has_a_body_changes_nothing(): void
+    {
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+        $entry = $this->guide();
+        $pin = (string) $entry->published_version;
+
+        $this->assertFalse($this->app->make(RegisterEntriesFromDisk::class)->hydrateEmpty($entry, "# Other\n"));
+
+        $this->assertSame($pin, (string) $entry->fresh()->published_version);
+        $this->assertSame(1, $this->versionRows($entry));
+    }
+
+    public function test_a_compile_failure_on_registration_is_collected_while_the_entry_is_still_published(): void
+    {
+        $this->app->singleton(EntryBodyCompiler::class, fn () => new FailingDiskCompiler);
+        $this->app->forgetInstance(CompileEntryBody::class);
+        $this->app->forgetInstance(RegisterEntriesFromDisk::class);
+        FailingDiskCompiler::$attempts = 0;
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $entry = $this->guide();
+        $this->assertNotNull($entry->published_version, 'a compile failure unpinned the entry');
+        $this->assertSame(1, $this->versionRows($entry));
+        $this->assertSame(1, FailingDiskCompiler::$attempts, 'the entry was compiled more than once');
+        $this->assertArrayHasKey('page/guide.mdx', $result['failed']);
+        $this->assertStringContainsString('no toolchain here', $result['failed']['page/guide.mdx']);
+    }
+
+    private function writeGuide(string $body): void
+    {
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\n---\n\n".$body);
+    }
+
+    private function failNextPinSave(): void
+    {
+        $failPin = true;
+        BeamUxEntry::updating(function (BeamUxEntry $row) use (&$failPin) {
+            if ($failPin && $row->isDirty('published_version')) {
+                $failPin = false;
+
+                throw new \RuntimeException('simulated failure saving the publication pin');
+            }
+        });
+    }
+
     private function createTables(): void
     {
-        Schema::create('beam_ux_entries', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('particle_id')->nullable()->index();
-            $table->string('slug')->index();
-            $table->string('title')->nullable();
-            $table->string('schema_ref')->nullable()->index();
-            $table->string('facade_ref')->nullable();
-            $table->string('type')->index();
-            $table->string('format')->default('tsx')->index();
-            $table->string('body_style')->nullable();
-            $table->string('namespace')->nullable()->index();
-            $table->string('placement_ref')->nullable();
-            $table->string('driver_ref')->nullable();
-            $table->string('residency_mode')->default('context-following')->index();
-            $table->string('realm')->default('site')->index();
-            $table->json('realms')->nullable();
-            $table->uuid('parent_id')->nullable()->index();
-            $table->string('segment')->nullable();
-            $table->unsignedInteger('nav_order')->nullable();
-            $table->string('workflow_marking')->nullable()->index();
-            $table->string('workflow_version')->nullable();
-            $table->uuid('published_version')->nullable();
-            $table->timestamps();
-            $table->softDeletes();
-            $table->unique(['namespace', 'slug']);
-        });
-
-        Schema::create(Beam::table('particles'), function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('schema_ref')->nullable()->index();
-            $table->string('schema_id')->nullable()->index();
-            $table->string('migration_status')->nullable()->index();
-            $table->string('head_version')->nullable();
-            $table->json('payload')->nullable();
-            $table->json('meta')->nullable();
-            $table->string('source_tier')->default('local')->index();
-            $table->timestamps();
-        });
-
-        Schema::create(Beam::table('versions'), function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->string('versionable_type');
-            $table->string('versionable_id');
-            $table->unsignedInteger('version');
-            $table->json('snapshot');
-            $table->string('label')->nullable();
-            $table->uuid('created_by')->nullable();
-            $table->timestamps();
-            $table->unique(['versionable_type', 'versionable_id', 'version']);
-        });
+        // The shipped migrations, so the fixture is a migrated host (provenance included, which the re-assert path reads).
+        $ux = dirname(__DIR__).'/database/migrations/shared/';
+        $beam = dirname((new \ReflectionClass(BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/';
+        foreach (['create_beam_ux_entries_table', 'add_provenance_to_beam_ux_entries_table', 'add_published_version_to_beam_ux_entries_table'] as $stub) {
+            (require $ux.$stub.'.php.stub')->up();
+        }
+        foreach (['create_beam_particles_table', 'create_beam_versions_table'] as $stub) {
+            (require $beam.$stub.'.php.stub')->up();
+        }
     }
 }
 
@@ -220,5 +292,23 @@ class DiskFakeCompiler implements EntryBodyCompiler
     public function compile(BeamUxEntry $entry, string $source): string
     {
         return '/* compiled */ export default () => '.json_encode($source);
+    }
+}
+
+/** A compiler that always fails, counting its attempts. */
+class FailingDiskCompiler implements EntryBodyCompiler
+{
+    public static int $attempts = 0;
+
+    public function handles(BeamUxEntry $entry): bool
+    {
+        return true;
+    }
+
+    public function compile(BeamUxEntry $entry, string $source): string
+    {
+        self::$attempts++;
+
+        throw \Splicewire\Beam\Ux\Compile\CompilationFailed::for($entry, 'no toolchain here');
     }
 }
