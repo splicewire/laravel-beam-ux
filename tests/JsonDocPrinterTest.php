@@ -252,6 +252,26 @@ class JsonDocPrinterTest extends TestCase
         $this->assertStringNotContainsString('style', $out);
     }
 
+    public function test_a_block_carries_a_stable_id_that_the_printer_leaves_out_of_source(): void
+    {
+        // ADR-0228 d3: every block has a stable UUIDv7 id (as in blockdoc); the TSX printer leaves ids
+        // out of source, and the id round-trips on the typed node.
+        $id = '0192f0a0-0000-7000-8000-000000000001';
+        $doc = [[
+            'kind' => 'block', 'id' => $id, 'name' => 'div', 'isComponent' => false, 'dynamic' => false,
+            'props' => [], 'children' => [['kind' => 'text', 'value' => 'hi']],
+        ]];
+
+        // The id is carried on the typed node (a declared field, not a stripped array key)...
+        $node = \Splicewire\Beam\Ux\JsonDoc\JsonNode::from($doc[0]);
+        $this->assertInstanceOf(\Splicewire\Beam\Ux\JsonDoc\JsonBlockNode::class, $node);
+        $this->assertSame($id, $node->id);
+
+        // ...but never appears in the printed source (ids live in the body, not the .tsx).
+        $this->assertStringNotContainsString($id, JsonDocPrinter::print($doc));
+        $this->assertSame('<div>hi</div>;', JsonDocPrinter::print($doc));
+    }
+
     public function test_golden_a_rich_document_prints_byte_for_byte(): void
     {
         // ADR-0228 d2: the printer now consumes the hydrated JsonNode tree, not raw array keys. This

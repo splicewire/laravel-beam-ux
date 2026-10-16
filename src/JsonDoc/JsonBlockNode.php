@@ -9,8 +9,8 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 /**
  * ADR-0228 d2 — a block node: a JSX element (or a fragment, `name` null), its props, its children and
  * whether it is a component / dynamically bound. The twin of `json.ts`'s `JsonBlock`. `children` is a
- * recursive {@see JsonNode} list, so the morph union is self-referential. The Block Style (`style`
- * layers, ADR-0003) and the stable id (d3) are later slices — not fields here in EP-05.
+ * recursive {@see JsonNode} list, so the morph union is self-referential. The stable `id` (d3) is added
+ * here in EP-06; the Block Style (`style` layers, ADR-0003/d4) is still a later slice.
  */
 #[TypeScript]
 class JsonBlockNode extends JsonNode
@@ -27,6 +27,12 @@ class JsonBlockNode extends JsonNode
         #[DataCollectionOf(JsonNode::class)]
         public array $children,
         public bool $dynamic,
+        // ADR-0228 d3: a block's stable UUIDv7 id (as in blockdoc). The TSX printer leaves it out of
+        // source; wherever source comes back in, the Node TSX Lens reattaches it against the Working Head
+        // by content (NodeIdRematcher, d9). Nullable with a null default so a body authored before this
+        // slice, and the canvas's own pre-id nodes, still hydrate — the rematch is what makes the invariant
+        // ("every block has an id") hold in practice, not the shape.
+        public ?string $id = null,
         // Pin the generated TS discriminant to the literal `'block'` (the arm's `kind` is always that),
         // not the base's `string`: otherwise a bare JsonBlockNode is not assignable to the JsonNode
         // union and the client guards (isJsonBlock, …) fail to typecheck. The morph discriminator stays
