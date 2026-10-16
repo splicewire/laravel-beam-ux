@@ -2,6 +2,8 @@
 
 namespace Splicewire\Beam\Ux\Manifest;
 
+use Schemastud\Blockdoc\Contracts\ManifestNodeSource;
+use Schemastud\Blockdoc\Schema\ManifestBuilder;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
@@ -19,9 +21,30 @@ final class ManifestProfileResolver
     /**
      * @return array<string, mixed> a v1 manifest with an `x-admits-code` flag the save check reads.
      */
-    public function resolve(BeamUxEntry $entry): array
+    public function resolve(BeamUxEntry $entry, string $profile = 'content'): array
     {
-        return HtmlManifestProfile::manifest() + [
+        $base = HtmlManifestProfile::manifest();
+        $nodes = $base['nodes'];
+
+        // Compose the host's placeable `#[NodeType]` components onto the HTML base through the bound
+        // ManifestNodeSource, when the host declares one (the flagship realm-bind is 07a's later host
+        // step). Ordered-array composition (ADR-0112): the host profile may NOT redeclare a base name.
+        $source = app()->bound(ManifestNodeSource::class) ? app(ManifestNodeSource::class) : null;
+        if ($source !== null && in_array($profile, $source->profiles(), true)) {
+            $have = array_column($nodes, 'name');
+            foreach ((new ManifestBuilder($source))->build($profile)['nodes'] as $node) {
+                if (! in_array($node['name'], $have, true)) {
+                    $nodes[] = $node;
+                }
+            }
+        }
+
+        return [
+            'profile' => $base['profile'],
+            'version' => 1,
+            'doc' => $base['doc'],
+            'nodes' => $nodes,
+            'marks' => $base['marks'],
             'x-admits-code' => $this->residency->isCentralResident($entry),
         ];
     }
