@@ -67,8 +67,9 @@ class ThemeResolver
      * `tenant_x.beam_ux_entries`, a *different physical relation* from `public.beam_ux_entries`. This
      * is the pin whose removal changes behaviour; the tower ones are behaviourally redundant until a
      * tenant is isolated database-per-tenant or the `,public` suffix is dropped. That distinction is
-     * structural and survives every row count. Full mechanism, measured at `~/Herd/splicewire-app`:
-     * `App\Vault\TenancyVaultContextGuard`'s docblock at the flagship.
+     * structural and survives every row count. Full mechanism (measured 2026-08-31 at the flagship):
+     * `Splicewire\Beam\Tenancy\Vault\TenancyVaultContextGuard`'s docblock — beam-tenancy's default
+     * binding since host-binding-seam 02, where the measurement moved with the class.
      *
      * The counterfactual is also the dangerous signature: unpinning here raises no exception at all.
      * The central tier would simply stop contributing to `resolve()`'s deep-merge and the site would
