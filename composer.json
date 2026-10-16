@@ -28,6 +28,7 @@
         "rushing/laravel-schema-convergence": "*",
         "rushing/laravel-versioning": "*",
         "rushing/php-popcorn": "dev-main",
+        "schemastud/laravel-blockdoc": "*",
         "schemastud/laravel-data-schemas": "*",
         "schemastud/laravel-frame": "*",
         "splicewire/laravel-beam": "*",
@@ -136,6 +137,10 @@
         {
             "type": "git",
             "url": "https://github.com/stephenr85/laravel-popcorn.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/laravel-blockdoc.git"
         },
         {
             "type": "git",
