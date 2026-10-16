@@ -251,4 +251,60 @@ class JsonDocPrinterTest extends TestCase
 
         $this->assertStringNotContainsString('style', $out);
     }
+
+    public function test_golden_a_rich_document_prints_byte_for_byte(): void
+    {
+        // ADR-0228 d2: the printer now consumes the hydrated JsonNode tree, not raw array keys. This
+        // golden pins the full output byte-for-byte across every feature at once — scalar + string +
+        // expression props, a slash-safe URL, an escaped text leaf, an inline leaf, a component island,
+        // an opaque node re-emitted verbatim, a fragment root, multi-root statement terminators, and the
+        // module's island destructure + single-fragment wrap — so the typed refactor cannot drift.
+        $doc = [
+            ['kind' => 'block', 'name' => 'section', 'isComponent' => false, 'dynamic' => false,
+                'props' => [
+                    ['name' => 'id', 'kind' => 'string', 'value' => 'hero'],
+                    ['name' => 'cols', 'kind' => 'number', 'value' => 3],
+                    ['name' => 'live', 'kind' => 'boolean', 'value' => true],
+                    ['name' => 'open', 'kind' => 'boolean-shorthand', 'value' => true],
+                    ['name' => 'href', 'kind' => 'string', 'value' => 'https://x.test/a'],
+                    ['name' => 'onClick', 'kind' => 'expression', 'value' => 'go'],
+                ],
+                'children' => [
+                    ['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'A < B']]],
+                    ['kind' => 'block', 'name' => 'Hero', 'isComponent' => true, 'dynamic' => false, 'props' => [], 'children' => []],
+                    ['kind' => 'opaque', 'reason' => 'map', 'source' => '{xs.map(x => <li>{x}</li>)}'],
+                ]],
+            ['kind' => 'block', 'name' => null, 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []],
+        ];
+
+        $expectedPrint = implode("\n", [
+            '<section id="hero" cols={3} live={true} open href="https://x.test/a" onClick={go}>',
+            "  <h2>A {'<'} B</h2>",
+            '  <Hero />',
+            '  {xs.map(x => <li>{x}</li>)}',
+            '</section>;',
+            '<></>;',
+        ]);
+
+        $this->assertSame($expectedPrint, JsonDocPrinter::print($doc));
+
+        $expectedModule = implode("\n", [
+            'export default function Page({ components = {} }) {',
+            '  const { Hero} = components;',
+            '  return (',
+            '    <>',
+            '      <section id="hero" cols={3} live={true} open href="https://x.test/a" onClick={go}>',
+            "        <h2>A {'<'} B</h2>",
+            '        <Hero />',
+            '        {xs.map(x => <li>{x}</li>)}',
+            '      </section>',
+            '      <></>',
+            '    </>',
+            '  );',
+            '}',
+            '',
+        ]);
+
+        $this->assertSame($expectedModule, JsonDocPrinter::printModule($doc));
+    }
 }
