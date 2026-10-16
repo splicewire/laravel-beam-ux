@@ -11,6 +11,8 @@ use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
 use Splicewire\Beam\Ux\JsonDoc\JsonNode;
+use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
+use Splicewire\Beam\Ux\Manifest\ProfileLegality;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -111,6 +113,11 @@ class EntryBodySaveOp
         // an arbitrary particle payload is not a canvas document and is stored verbatim.
         self::assertCanvasBodyWellFormed($input->body);
 
+        // ADR-0228 d8 / ux-0227 d1: a canvas body must be admitted by the realm's resolved Manifest
+        // Profile — refusing an unknown block, illegal containment, or (for a tenant-owned entry) code,
+        // by node id + path. Runs after the well-formed pass so the tree is known hydratable first.
+        self::assertBodyAdmittedByProfile($model, $input->body);
+
         // ADR-0225 decision 2: a save is its own publish, and a publish needs the version store. Refuse
         // BEFORE the write, so a host missing the store keeps the working copy it had.
         $publication->requireVersionStore();
@@ -166,6 +173,25 @@ class EntryBodySaveOp
                 'body' => 'This document has a node the canvas editor cannot read ('.$e->getMessage().').',
             ]);
         }
+    }
+
+    /**
+     * Refuse a canvas body the realm's resolved Manifest Profile does not admit (EP-07a c / ux-0227 d1),
+     * as a 422 on `body` naming each offending node by id + path. Runs only for a JsonDoc-shaped body.
+     * The profile's `x-admits-code` follows the entry's RESIDENCY ({@see ManifestProfileResolver}), so a
+     * tenant-owned entry refuses code even when an operator is the one saving. EP-06 d8 narrows this to
+     * only the nodes a save adds or changes (by id); for now the whole body is checked.
+     *
+     * @param  array<int|string, mixed>  $body
+     */
+    private static function assertBodyAdmittedByProfile(BeamUxEntry $model, array $body): void
+    {
+        if (! JsonDocShape::is($body)) {
+            return;
+        }
+
+        $profile = app(ManifestProfileResolver::class)->resolve($model);
+        app(ProfileLegality::class)->assert($body, $profile);
     }
 
     /**
