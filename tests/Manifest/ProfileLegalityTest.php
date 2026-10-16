@@ -88,4 +88,32 @@ class ProfileLegalityTest extends TestCase
 
         $this->assertSame([], $this->violations($body, $this->profile(false)));
     }
+
+    public function test_a_child_under_a_void_element_is_refused_by_containment(): void
+    {
+        // <img> is a leaf (admitsChildCategories []), so any child is illegal.
+        $body = [$this->block('img', 'i1', [$this->block('span', 's1', [])])];
+
+        $v = $this->violations($body, $this->profile(true));
+        $joined = implode("\n", $v);
+        $this->assertStringContainsString('s1', $joined);
+        $this->assertStringContainsString('not admitted', $joined);
+    }
+
+    public function test_bare_text_at_the_root_is_refused(): void
+    {
+        $body = [['kind' => 'text', 'value' => 'loose text']];
+
+        $v = $this->violations($body, $this->profile(true));
+        $this->assertNotEmpty($v);
+        $this->assertStringContainsString('text', implode("\n", $v));
+    }
+
+    public function test_a_fragment_is_a_transparent_containment_wrapper(): void
+    {
+        // A fragment (name null) holding a <div> at the root is legal: the div is checked against the root.
+        $body = [['kind' => 'block', 'name' => null, 'isComponent' => false, 'props' => [], 'children' => [$this->block('div', 'd1', [])], 'dynamic' => false, 'id' => 'f1']];
+
+        $this->assertSame([], $this->violations($body, $this->profile(true)));
+    }
 }
