@@ -2,6 +2,13 @@
 
 namespace Splicewire\Beam\Ux\Codec;
 
+use Splicewire\Beam\Ux\JsonDoc\JsonBlockNode;
+use Splicewire\Beam\Ux\JsonDoc\JsonNode;
+use Splicewire\Beam\Ux\JsonDoc\JsonOpaqueNode;
+use Splicewire\Beam\Ux\JsonDoc\JsonProp;
+use Splicewire\Beam\Ux\JsonDoc\JsonTextNode;
+use Splicewire\Beam\Ux\JsonDoc\PropKind;
+
 /**
  * A **PHP port** of `@splicewire/beam-ux/blockdoc/json.ts`'s `jsonToTsx()` — the pure, Babel-free
  * `JsonNode[]` → TSX-source printer the canvas editor's own client-side "Source" toggle already uses.
@@ -10,9 +17,11 @@ namespace Splicewire\Beam\Ux\Codec;
  * server-side half: {@see TsxBodyCodec::decode()} calls it for a blockdoc-shaped body (`PlacedDiskMirror`'s
  * materialize-on-save path runs entirely server-side, so it can't reach the JS printer directly).
  *
- * A `JsonNode` here is a plain associative array (the particle payload's raw decoded JSON), discriminated
- * by `kind`: `'block'` (`name`/`isComponent`/`props`/`children`/`dynamic`), `'text'` (`value`), or
- * `'opaque'` (`source`, carried verbatim — a sealed dynamic island the static lens couldn't decompose).
+ * ADR-0228 d2: the printer no longer hand-mirrors the raw array keys. It HYDRATES the particle payload
+ * through the declared {@see JsonNode} morph union and reads the typed tree — `$block->name`,
+ * `$prop->kind`, `$text->value` — so the shape it consumes is the same declared one the TypeScript and
+ * JSON Schema are generated from, and a drift between the two can no longer pass silently. The output is
+ * unchanged, byte for byte (its golden test pins that).
  */
 class JsonDocPrinter
 {
@@ -25,14 +34,16 @@ class JsonDocPrinter
      * a multi-root document (the normal shape for a real page: several top-level sections) needs an
      * explicit statement terminator between roots to stay re-parseable by
      * `@splicewire/beam-ux/blockdoc`'s `parse()`. Mirrors the identical fix in that package's own JS
-     * printer, `jsonToTsx()` (`blockdoc/json.ts`) — found live: this package's materialize-on-save
-     * disk mirror was producing files that the JS-side parser couldn't actually re-parse.
+     * printer, `jsonToTsx()` (`blockdoc/json.ts`).
      *
      * @param  array<int, array<string, mixed>>  $doc
      */
     public static function print(array $doc, int $depth = 0): string
     {
-        return implode("\n", array_map(fn (array $n) => self::printNode($n, $depth).';', $doc));
+        return implode("\n", array_map(
+            fn (JsonNode $n) => self::printNode($n, $depth).';',
+            self::hydrate($doc),
+        ));
     }
 
     /**
@@ -41,17 +52,10 @@ class JsonDocPrinter
      *
      * {@see print()} deliberately emits bare JSX STATEMENTS, because its consumer is the disk mirror and
      * `@splicewire/beam-ux/blockdoc`'s `parse()` has to read that file back. The COMPILER's consumer is
-     * different and irreconcilable with it: `EntryArtifactController` serves a module that
-     * `<EntryBody>` imports and calls, reading `default` off what it returns. Bare statements are a
-     * valid file and an empty module — esbuild compiles them, nothing is exported, and the reader gets
-     * a module with no `default`.
-     *
-     * Measured on beam.test 2026-09-11 (G2-BEAM-AUTHOR-ENTRY): an owner authored `/`, Save reported
-     * "Saved" truthfully, the artifact compiled and was served 200 — and it was
-     * `export default function (runtime) { … return module.exports; }` with an empty `module.exports`,
-     * so the reader rendered the "not compiled yet" state over a body that had compiled fine. A
-     * canvas-authored page had never been renderable; nothing failed anywhere, which is why it took a
-     * browser to find.
+     * different and irreconcilable with it: `EntryArtifactController` serves a module that `<EntryBody>`
+     * imports and calls, reading `default` off what it returns. Bare statements are a valid file and an
+     * empty module — esbuild compiles them, nothing is exported, and the reader gets a module with no
+     * `default` (G2-BEAM-AUTHOR-ENTRY, beam.test 2026-09-11).
      *
      * One fragment and not one statement per root: adjacent roots are the normal shape for a real page,
      * and a `return` takes one expression.
@@ -66,17 +70,17 @@ class JsonDocPrinter
             return "export default function Page() {\n  return null;\n}\n";
         }
 
-        $body = implode("\n", array_map(fn (array $n) => self::printNode($n, 3, module: true), $doc));
-        $islands = self::componentNames($doc);
+        $nodes = self::hydrate($doc);
+
+        $body = implode("\n", array_map(fn (JsonNode $n) => self::printNode($n, 3, module: true), $nodes));
+        $islands = self::componentNamesOf($nodes);
 
         // Island names are BARE IDENTIFIERS in the printed JSX, and an artifact imports nothing — so
         // they have to come from somewhere. `<EntryBody>` already hands a compiled body its host
         // registry on a `components` prop (the compiler runs without `providerImportSource`, ADR-0209),
         // and this is the line that connects the two: the canvas resolves `<DemoHero>` through its
-        // `CanvasConfig` registry, and the artifact resolves the SAME name through the SAME map.
-        //
-        // Measured on beam.test 2026-09-11: without it the saved page threw `DemoHero is not defined`
-        // and took the whole page down — not just the body.
+        // `CanvasConfig` registry, and the artifact resolves the SAME name through the SAME map
+        // (beam.test 2026-09-11: without it a saved page threw `DemoHero is not defined`).
         $destructure = $islands === []
             ? ''
             : '  const { '.implode(', ', $islands)."} = components;\n";
@@ -97,53 +101,72 @@ class JsonDocPrinter
      */
     public static function componentNames(array $doc): array
     {
+        return self::componentNamesOf(self::hydrate($doc));
+    }
+
+    /**
+     * Hydrate the raw particle payload (decoded JSON) through the declared {@see JsonNode} union. Each
+     * root resolves to its arm by `kind`, and `props`/`children` hydrate recursively as `JsonProp[]` /
+     * `JsonNode[]`, so the rest of the printer reads a typed tree, not array keys.
+     *
+     * @param  array<int, array<string, mixed>>  $doc
+     * @return list<JsonNode>
+     */
+    private static function hydrate(array $doc): array
+    {
+        return array_map(
+            fn (array $node): JsonNode => JsonNode::from($node),
+            array_values($doc),
+        );
+    }
+
+    /**
+     * @param  list<JsonNode>  $nodes
+     * @return list<string>
+     */
+    private static function componentNamesOf(array $nodes): array
+    {
         $found = [];
 
         $walk = function (array $nodes) use (&$walk, &$found): void {
             foreach ($nodes as $node) {
-                if (! is_array($node)) {
+                if (! $node instanceof JsonBlockNode) {
                     continue;
                 }
 
-                $name = $node['name'] ?? null;
-
-                if (($node['isComponent'] ?? false) === true && is_string($name) && $name !== '') {
-                    $found[$name] = true;
+                if ($node->isComponent && is_string($node->name) && $node->name !== '') {
+                    $found[$node->name] = true;
                 }
 
-                $walk((array) ($node['children'] ?? []));
+                $walk($node->children);
             }
         };
 
-        $walk($doc);
+        $walk($nodes);
 
         return array_keys($found);
     }
 
-    /** @param  array<string, mixed>  $node */
-    private static function printNode(array $node, int $depth, bool $module = false): string
+    private static function printNode(JsonNode $node, int $depth, bool $module = false): string
     {
         $pad = str_repeat(self::INDENT, $depth);
-        $kind = $node['kind'] ?? null;
 
-        if ($kind === 'text') {
-            return $pad.self::escapeText(trim((string) ($node['value'] ?? '')));
+        if ($node instanceof JsonTextNode) {
+            return $pad.self::escapeText(trim($node->value));
         }
 
-        if ($kind === 'opaque') {
-            return $pad.(string) ($node['source'] ?? '');
+        if ($node instanceof JsonOpaqueNode) {
+            return $pad.$node->source;
         }
 
-        $isFragment = ($node['name'] ?? null) === null;
-        $tag = (string) ($node['name'] ?? '');
-        /** @var array<int, array<string, mixed>> $props */
-        $props = (array) ($node['props'] ?? []);
-        $attrs = implode('', array_map(fn (array $prop) => self::printProp($prop, $module), $props));
+        /** @var JsonBlockNode $node */
+        $isFragment = $node->name === null;
+        $tag = (string) ($node->name ?? '');
+        $attrs = implode('', array_map(fn (JsonProp $prop) => self::printProp($prop, $module), $node->props));
         $open = $isFragment ? '<>' : "<{$tag}{$attrs}>";
         $close = $isFragment ? '</>' : "</{$tag}>";
 
-        /** @var array<int, array<string, mixed>> $children */
-        $children = (array) ($node['children'] ?? []);
+        $children = $node->children;
 
         if (count($children) === 0) {
             // A fragment always uses the paired form; a self-closing element otherwise.
@@ -153,19 +176,21 @@ class JsonDocPrinter
         // A leaf (text-only children) prints inline for readability + stable round-trip.
         if (self::isLeafText($children)) {
             $inner = implode('', array_map(
-                fn (array $c) => self::escapeText(trim((string) ($c['value'] ?? ''))),
+                fn (JsonNode $c) => self::escapeText(trim($c instanceof JsonTextNode ? $c->value : '')),
                 $children,
             ));
 
             return "{$pad}{$open}{$inner}{$close}";
         }
 
-        $kids = implode("\n", array_map(fn (array $c) => self::printNode($c, $depth + 1, $module), $children));
+        $kids = implode("\n", array_map(fn (JsonNode $c) => self::printNode($c, $depth + 1, $module), $children));
 
         return "{$pad}{$open}\n{$kids}\n{$pad}{$close}";
     }
 
-    /** @param  array<int, array<string, mixed>>  $children */
+    /**
+     * @param  list<JsonNode>  $children
+     */
     private static function isLeafText(array $children): bool
     {
         if (count($children) === 0) {
@@ -173,7 +198,7 @@ class JsonDocPrinter
         }
 
         foreach ($children as $c) {
-            if (($c['kind'] ?? null) !== 'text') {
+            if (! $c instanceof JsonTextNode) {
                 return false;
             }
         }
@@ -182,37 +207,35 @@ class JsonDocPrinter
     }
 
     /**
-     * @param  array<string, mixed>  $p
      * @param  bool  $module  printing for {@see printModule()} (an executable artifact) rather than for
      *                        the disk mirror. The only difference is `style`, and it is not cosmetic:
      *                        JSX source may carry `style="max-width:900px"` and React REFUSES a string
      *                        at runtime (minified error #62), killing the page. The canvas has always
-     *                        parsed it — `blockToProps` runs the body's style through `parseStyle` — so
-     *                        an artifact that does not is the lens that disagrees. Measured on beam.test
-     *                        2026-09-11. The mirror keeps the string: that file is read back by
-     *                        `blockdoc`'s `parse()`, which expects the authored attribute.
+     *                        parsed it, so an artifact that does not is the lens that disagrees
+     *                        (beam.test 2026-09-11). The mirror keeps the string: that file is read back
+     *                        by `blockdoc`'s `parse()`, which expects the authored attribute.
      */
-    private static function printProp(array $p, bool $module = false): string
+    private static function printProp(JsonProp $p, bool $module = false): string
     {
-        $name = (string) ($p['name'] ?? '');
-        $value = $p['value'] ?? '';
+        $name = $p->name;
+        $value = $p->value;
 
-        if ($module && $name === 'style' && ($p['kind'] ?? 'string') === 'string') {
+        if ($module && $name === 'style' && $p->kind === PropKind::StringValue) {
             $parsed = self::parseStyle((string) $value);
 
             return $parsed === [] ? '' : ' style={'.json_encode($parsed, JSON_UNESCAPED_SLASHES).'}';
         }
 
-        return match ($p['kind'] ?? 'string') {
-            'boolean-shorthand' => " {$name}",
+        return match ($p->kind) {
+            PropKind::BooleanShorthand => " {$name}",
             // UNESCAPED_SLASHES: matches JS's `JSON.stringify` (which never escapes `/`) — plain PHP
             // `json_encode` escapes it by default, which would otherwise diverge from the client-side
-            // printer's output for any URL-bearing prop (href, src, …), the most common expression shape.
-            'string' => " {$name}=".json_encode((string) $value, JSON_UNESCAPED_SLASHES),
-            'number' => " {$name}={{$value}}",
-            'boolean' => " {$name}={".($value ? 'true' : 'false').'}',
-            // 'expression' (and any unknown kind, degrade-not-fabricate): `value` is the source text
-            // with `{…}` already stripped by the lens; re-wrap it.
+            // printer's output for any URL-bearing prop (href, src, …).
+            PropKind::StringValue => " {$name}=".json_encode((string) $value, JSON_UNESCAPED_SLASHES),
+            PropKind::NumberValue => " {$name}={{$value}}",
+            PropKind::BooleanValue => " {$name}={".($value ? 'true' : 'false').'}',
+            // Expression (and, defensively, any later-added kind): `value` is the source text with `{…}`
+            // already stripped by the lens; re-wrap it.
             default => ' '.$name.'={'.trim((string) $value).'}',
         };
     }
