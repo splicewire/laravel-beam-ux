@@ -350,7 +350,13 @@ class EntryPublication
             return;
         }
 
-        $this->pinAndCompile($entry, $this->versions->snapshot($particle, 'baseline'));
+        // ONE transaction for the snapshot and the pin (review-r1, 2026-10-16). The snapshot commits a version and moves
+        // HEAD; if the pin save (or the mirror) then failed on its own, the row was left history-bearing and pin-less,
+        // which every later baseline() reads as an unpublished draft and skips, so it could never be repaired. Rolled
+        // back together, a failure leaves the row exactly as it was and a retry pins it.
+        $entry->getConnection()->transaction(
+            fn () => $this->pinAndCompile($entry, $this->versions->snapshot($particle, 'baseline')),
+        );
     }
 
     /**

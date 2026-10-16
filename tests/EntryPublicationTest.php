@@ -120,6 +120,38 @@ class EntryPublicationTest extends TestCase
         $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
     }
 
+    public function test_a_baseline_that_fails_after_its_snapshot_rolls_the_snapshot_back_and_a_retry_pins(): void
+    {
+        // review-r1 R2 (seeded pages, 2026-10-16): baseline() snapshotted (committing a version and HEAD), THEN saved the
+        // pin. A failure in between left a history-bearing, pin-less row, which every later baseline() treats as an
+        // unpublished draft and skips, forever. The failure here lands on the pin save, AFTER the snapshot.
+        $entry = $this->pageWithUnversionedBody(self::BODY_ONE);
+        $failPin = true;
+        BeamUxEntry::updating(function (BeamUxEntry $row) use (&$failPin) {
+            if ($failPin && $row->isDirty('published_version')) {
+                $failPin = false;
+
+                throw new \RuntimeException('simulated failure saving the publication pin');
+            }
+        });
+
+        try {
+            app(EntryPublication::class)->baseline($entry->fresh());
+            $this->fail('a failed pin save was swallowed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated failure saving the publication pin', $e->getMessage());
+        }
+
+        $this->assertSame(0, $this->versionRows($entry), 'the snapshot outlived the failed pin: the row now reads as a draft');
+        $this->assertNull($entry->fresh()->published_version);
+
+        // The retry is not a no-op: the row still has no history, so baseline() pins it.
+        app(EntryPublication::class)->baseline($entry->fresh());
+
+        $this->assertNotNull($entry->fresh()->published_version, 'a retry could not repair the row');
+        $this->assertSame(1, $this->versionRows($entry));
+    }
+
     public function test_restoring_rolls_forward_into_a_draft_and_the_reader_keeps_the_published_body(): void
     {
         // ADR-0225 decision 5: Restore applies the frozen snapshot to the working copy and mints a new version, and does
