@@ -29,10 +29,17 @@ Applied to a Hosted site, restyling the central site would restyle every tenant 
    and edits text and literal props. Code lives in components the host or a package ships, and a tenant that needs its
    own code has a Connected site. A tenant's own components are block compositions, never TSX source. Central entries
    are unchanged.
+   *Amended by ADR-0233 decision 6 (2026-10-16): a Hosted site's pages have no File Language, so no MDX reaches a
+   tenant's save and the MDX-expression clause has nothing left to refuse. The profile flag stays the rule's one reader
+   (ADR-0228 decision 7).*
 2. **A pack copy carries `origin = pack:<slug>` and re-asserts while pristine.** This is ADR-0215 §1's fourth origin,
    and §2 applies to it unchanged. Re-applying the pack rewrites a copy whose body and title still hash to
    `asserted_hash`, and it never overwrites an edited copy. The divergence audit reports an edited copy whose pack source
    has since changed, and it names the pack. Placement is never re-asserted.
+   *Extended 2026-10-16 (`splicewire/tower docs/adr/0009-a-starter-sites-schemas-travel-re-minted-on-each-new-tenants-own-origin-with-their-sample-records.md`
+   decisions 6 and 7): the registered schemas a pack carries with a starter site re-assert while pristine, a schema
+   staying pristine while its latest version is a pack copy, and so do its sample Records. A Record the tenant deleted is
+   never re-created.*
 3. **A Hosted site's theme skips the central tier.** On a site domain, the `site` slice resolves package default → the
    tenant's theme row, which is itself a pack copy. The central row keeps applying to the app's `shell` and `canvas`
    slices. Restyling the central site never restyles a tenant's site.

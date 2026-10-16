@@ -151,6 +151,10 @@ row, no artifact) or an **authored entry** whose body compiles to its own artifa
 page's. The client imports the page artifact and its layout artifact and nests them. Resolution order:
 registered name first, then entry.
 
+*Amended by ADR-0231 decisions 11 and 14 (2026-10-15): component entries compose at render the same way, layout,
+template and component entries compile, and a layout or template with a blocks body marks its hole with an unnamed
+Slot.*
+
 ### 8. Nav grouping is `nav_group`, the word the other registries already use
 
 Grouping was built twice and never on the containment tree: `@schemastud/nav`'s `NavNode` carries

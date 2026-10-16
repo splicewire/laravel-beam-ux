@@ -134,6 +134,11 @@ This ADR fixes **placement**. Gate *semantics* — what "published" means for a 
 `Mdx::isVisible`'s preview allowlist survives — are settled separately (beam-docs-satellite ticket 15,
 reconciling the entry gate stack against ADR-0122).
 
+**Amended 2026-10-16 (ADR-0236 decisions 8 to 11):** the publish gate tests every page on the chain, so a hidden page
+hides the pages under it, as `NavProjector` already did. A path that no visible page answers is looked up among the
+site's Redirects before the uniform 404. A Redirect answers only a reader who may read its target, so a denied page and
+an absent one still look the same, and the lookup runs on every path headed for the 404 so the timing stays uniform.
+
 ### 6. Inertia, with a host-supplied page name
 
 The renderer returns an Inertia response, mirroring the incumbent `GuardedGuideController`. Server-
@@ -176,6 +181,12 @@ surfaces months later in someone's performance audit.
 This accepts a Node process at **save** time in production. That is a real deploy-topology commitment
 and is made deliberately: every beam-ux host already needs Node to build assets, and compiling where
 content changes (rare) rather than where content is read (constant) is the cheaper half of the trade.
+
+**Amended 2026-10-15 (ADR-0232 decision 7):** ADR-0225 decision 3 had moved compiling to Publish, with the artifact
+following the Publication Pin. Compiling is on save again, now into each version's own address (the compiler
+generation and the version id), and an entry keeps several artifacts: its Publication Pin's, its Working Head's and
+those of its versions in open Releases. The public artifact route serves only the pinned one. A draft's artifact is
+served only to a Preview, through its own route, `no-store, private`. No read path compiles.
 
 ### 8. Guarded entries get artifacts too — a refinement of ADR-0122
 
@@ -244,6 +255,9 @@ in this ADR removes the macros.
 - **Server-side rendering becomes a live question for public content hosts.** Entries render
   client-side like everything else, and Inertia SSR is off by default. For a public documentation or
   marketing site that is an SEO exposure. It is a host-level decision, deliberately out of scope here.
+  *Amended by ADR-0234 decision 1 (2026-10-16): the head no longer needs SSR. The renderer composes each page's head
+  (title, description, canonical URL, social tags and Structured Data) on the server, the root template prints it on
+  the first load, and Inertia's server head keeps it current. SSR stays a host's decision for body content.*
 - **Layout/template composition stops being speculative.** A docs-only renderer needed none; a whole
   site of page entries needs shared chrome per section. `type` ∈ {layout, template} becomes near-term
   work rather than a held-open axis.

@@ -28,8 +28,16 @@ UI), for enterprise site editing where an author needs to see and schedule chang
    goes live together. Publishing one entry is a Release of one. It is a `#[ParticleResource]` in this package, bound to
    a workflow (draft, in review, approved, scheduled, published). Scheduling is a scheduled `publish` transition through
    `@splicewire/beam-workflows`' `WorkflowActionForm`.
+   *Amended by ADR-0232 decision 3 (2026-10-15): a member may instead be a Take-down, with no version. Its entry's
+   `unpublish` transition fires when the Release publishes.*
 2. **Publishing a Release moves every member's Publication Pin in one transaction,** then mirrors and compiles each
    member, as ADR-0225 decision 3 does for one entry.
+   *Amended by ADR-0232 decisions 1, 2 and 7 (2026-10-15): publishing also writes each member's guest-facing fields to
+   its row, with the Release's URL changes checked together, and moves pins onto artifacts compiled at Save. Mirroring
+   and any missing compile read each member's fixed version, not its working copy.*
+   *Amended by ADR-0236 decisions 2, 4 and 7 (2026-10-16): publishing also leaves a Redirect at every URL the Release
+   takes away, to the page that was there or to a Take-down's target, and removes any Redirect at a URL it puts a page
+   on.*
 3. **Git records what was published.** Where the mirror disk sits inside a git working copy, publishing a Release makes
    **one commit** named for the Release, containing only its members' mirror files. The commit is built through a
    private index (`GIT_INDEX_FILE`), so a developer's staging area is never read or changed. Each published version
@@ -66,7 +74,7 @@ UI), for enterprise site editing where an author needs to see and schedule chang
   UI is built.
 - Publish in the editor becomes "publish a Release of one", so one path serves the single entry and the batch.
 - Previewing a Release before it goes live needs the public renderer to serve unpublished versions to reviewers. That
-  is its own decision (editor-parity ticket 14).
+  is its own decision (editor-parity ticket 14), made in ADR-0232.
 
 ## Considered and not taken
 
