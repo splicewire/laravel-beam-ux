@@ -21,8 +21,9 @@ class BeamUxEntrySourceInputData extends BeamData
 {
     public function __construct(
         #[Description(
-            'The raw source text to persist — the author\'s editor buffer. The entry\'s codec encodes it '.
-            'into the stored body (for a tsx page the server lowers it to blocks, ADR-0228 d9). `present` '.
+            'The raw source text to persist — the author\'s editor buffer for a Source-kind entry (a '.
+            'component, an mdx page). The entry\'s codec encodes it into the stored body. A Blocks-kind '.
+            'entry (a tsx page) is refused here; it is authored as a JsonDoc through save-body. `present` '.
             'allows the empty string, which clears the source.'
         )]
         public string $source,

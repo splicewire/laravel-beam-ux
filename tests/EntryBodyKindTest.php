@@ -75,6 +75,17 @@ class EntryBodyKindTest extends TestCase
         $this->assertSame(BodyKind::Source, $entry->bodyKind());
     }
 
+    public function test_a_form_theme_uses_the_css_codec_whatever_its_format_column_says(): void
+    {
+        // ADR-0228 d1 (review MED-1): a theme is a form, written through CssBodyCodec "whatever its
+        // format column says". Live audiostud's theme is format=tsx; without this, codec() resolves
+        // TsxBodyCodec and save-form mirrors a `.tsx` — a canvas printer over a token object.
+        $theme = BeamUxEntry::create(['slug' => 'beam', 'type' => 'theme', 'format' => 'tsx', 'namespace' => 'theme']);
+
+        $this->assertSame(BodyKind::Form, $theme->bodyKind());
+        $this->assertInstanceOf(\Splicewire\Beam\Ux\Codec\CssBodyCodec::class, $theme->codec());
+    }
+
     public function test_blocks_is_exactly_the_accepts_json_doc_codec_for_a_page(): void
     {
         // The consequence ADR-0228 records: AcceptsJsonDoc means "this kind is blocks".

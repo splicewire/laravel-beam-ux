@@ -522,6 +522,15 @@ class BeamUxEntry extends Model implements WorkflowManaged
      */
     public function codec(): BodyCodec
     {
+        // ADR-0228 d1: a theme is a Form-kind entry, written through CssBodyCodec "whatever its format
+        // column says" — a `format=tsx` theme must not resolve the canvas codec and mirror a `.tsx` over
+        // its `{canvas,site}` token object (review MED-1; live audiostud's theme is format=tsx). The
+        // check is on `type` directly, not `bodyKind()`, because `bodyKind()` resolves a page/component
+        // kind THROUGH `codec()`, so routing a theme back through `bodyKind()` here would recurse.
+        if ($this->type === UxType::Theme) {
+            return app(CodecRegistry::class)->for(UxFormat::Css);
+        }
+
         return app(CodecRegistry::class)->for($this->format ?? self::defaultFormatFor($this->type));
     }
 
