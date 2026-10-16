@@ -82,6 +82,50 @@ class SeededEntryPublicationTest extends TestCase
         $this->assertSame(0, BeamUxEntry::query()->where('slug', 'guide')->count(), 'a refused seed left a row behind');
     }
 
+    public function test_a_failure_while_pinning_surfaces_leaves_no_row_and_a_rerun_seeds_the_page(): void
+    {
+        // review-r1, 2026-10-16: the create and body commit, then the pin fails, and nothing may be left stranded.
+        FailingOncePublication::$fail = true;
+        $this->app->bind(EntryPublication::class, FailingOncePublication::class);
+
+        try {
+            (new PageSeedingSeeder)->seed('guide', "# Guide\n\nSeeded body.");
+            $this->fail('a failure while pinning was swallowed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated failure while pinning', $e->getMessage());
+        }
+
+        $this->assertSame(0, BeamUxEntry::query()->where('slug', 'guide')->count(), 'a failed publication left a pin-less row');
+
+        // The retry is not a no-op: it seeds the page, born published.
+        $entry = (new PageSeedingSeeder)->seed('guide', "# Guide\n\nSeeded body.");
+        $this->assertNotNull($entry->fresh()->published_version);
+    }
+
+    public function test_a_rerun_repairs_a_pinless_seeded_row_that_has_no_history(): void
+    {
+        // A row a seed left pin-less (seeded before pages were born published): a body, no pin, no history.
+        $entry = BeamUxEntry::create(['slug' => 'guide', 'type' => 'page', 'format' => 'mdx', 'title' => 'Guide']);
+        app(EntryPublication::class)->write($entry, $entry->codec()->encode("# Guide\n\nSeeded body."));
+        $this->assertNull($entry->fresh()->published_version);
+
+        (new PageSeedingSeeder)->seed('guide', "# Guide\n\nSeeded body.");
+
+        $this->assertNotNull($entry->fresh()->published_version, 'a re-seed left a pin-less row pin-less');
+        $this->assertStringContainsString('Seeded body.', (string) app(EntryArtifactStore::class)->read($entry->fresh()));
+    }
+
+    public function test_a_rerun_never_publishes_a_pinless_row_that_has_history_it_is_an_unpublished_draft(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'guide', 'type' => 'page', 'format' => 'mdx', 'title' => 'Guide']);
+        app(EntryPublication::class)->write($entry, $entry->codec()->encode("# Guide\n\nA draft."));
+        app(\Rushing\Versioning\Contracts\VersionStore::class)->snapshot(\Splicewire\Beam\Models\BeamParticle::find($entry->fresh()->particle_id), 'draft');
+
+        (new PageSeedingSeeder)->seed('guide', "# Guide\n\nSeeded body.");
+
+        $this->assertNull($entry->fresh()->published_version, 'a re-seed published an unpublished draft');
+    }
+
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {
@@ -158,5 +202,22 @@ class SeedingFakeCompiler implements EntryBodyCompiler
     public function compile(BeamUxEntry $entry, string $source): string
     {
         return '/* compiled */ export default () => '.json_encode($source);
+    }
+}
+
+/** Fails the first publishWritten() it is asked for, then behaves normally. */
+class FailingOncePublication extends EntryPublication
+{
+    public static bool $fail = true;
+
+    public function publishWritten(BeamUxEntry $entry, ?string $label = null): ?string
+    {
+        if (self::$fail) {
+            self::$fail = false;
+
+            throw new \RuntimeException('simulated failure while pinning');
+        }
+
+        return parent::publishWritten($entry, $label);
     }
 }

@@ -79,6 +79,12 @@ trait SeedsEntries
                 $origin ?? \Splicewire\Beam\Ux\Provenance\Provenance::package('splicewire/laravel-beam-ux'),
             );
 
+            // RETRY REPAIRS (ADR-0225 decision 2). A row a seed left without a Publication Pin (seeded before pages were
+            // born published, or by a run that failed while pinning) is pinned here, so re-running the seeder recovers it.
+            // baseline() only pins a written body with NO history: a row that has history but no pin is an unpublished
+            // draft, and this never publishes it. A no-op where the version store is absent or the row is pinned.
+            app(EntryPublication::class)->baseline($existing->refresh());
+
             return $existing->refresh();
         }
 
@@ -99,7 +105,9 @@ trait SeedsEntries
         $publication = app(EntryPublication::class);
         $publication->requireVersionStore();
 
-        $entry = DB::transaction(function () use ($slug, $format, $namespace, $attributes, $source, $origin): BeamUxEntry {
+        // The create, the body write AND the publication share one transaction: a failure while pinning rolls the row
+        // back too, so a failed seed leaves nothing behind and the next run seeds the page from scratch.
+        return DB::transaction(function () use ($slug, $format, $namespace, $attributes, $source, $origin, $publication): BeamUxEntry {
             // BORN PUBLISHED, and this is what makes the OTB promise true rather than nearly true.
             // `WorkflowMarkingPublishGate` treats a workflow-managed entry as public only at the
             // published marking, and a freshly-created row's `workflow_marking` is NULL — so on any host
@@ -136,21 +144,21 @@ trait SeedsEntries
                 $entry->save();
             }
 
-            return $entry;
-        });
-
-        // Pin the written body and compile it at the pinned address: what a reader is served from now on. A body the
-        // entry's storage driver does not keep as a particle has no version to pin, so it compiles as it always did.
-        try {
+            // Pin the written body and compile it at the pinned address: what a reader is served from now on. A failure
+            // to pin propagates and rolls the row back (EntryPublication already tolerates a compile failure, returning
+            // it rather than throwing).
             $publication->publishWritten($entry->refresh(), 'seeded');
 
+            // A body the entry's storage driver doesn't keep as a particle has no version to pin: it compiles as it always
+            // did, and only THAT compile's failure is tolerated (reported by BeamUxArtifactAudit).
             if ($entry->refresh()->getAttribute('published_version') === null) {
-                app(CompileEntryBody::class)->forEntry($entry, $source, force: true);
+                try {
+                    app(CompileEntryBody::class)->forEntry($entry, $source, force: true);
+                } catch (CompilationFailed) {
+                }
             }
-        } catch (CompilationFailed) {
-            // Reported by BeamUxArtifactAudit; see the docblock above for why this one is not fatal.
-        }
 
-        return $entry->refresh();
+            return $entry->refresh();
+        });
     }
 }
