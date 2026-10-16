@@ -7,6 +7,7 @@ use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
@@ -91,6 +92,13 @@ trait SeedsEntries
         // `splicewire:beam:seed` was refused by the write gate, and the second — with the gate fixed —
         // reported success while quietly skipping the two rows the first run had stranded. A failure that
         // makes the retry a no-op is worse than a failure that leaves nothing behind.
+        // BORN PUBLISHED (ADR-0225 decision 2): a seeded page gets its Publication Pin when it is created. Seeders run
+        // after `migrate`, so the baseline migration never sees these rows; without this they stayed pin-less, and
+        // EP-08's editor refuses to mount where the pin is missing. Refuses with the remedy, before any row is written,
+        // on a host without the version store (launch row qitem-20261016214321-d6aa335c).
+        $publication = app(EntryPublication::class);
+        $publication->requireVersionStore();
+
         $entry = DB::transaction(function () use ($slug, $format, $namespace, $attributes, $source, $origin): BeamUxEntry {
             // BORN PUBLISHED, and this is what makes the OTB promise true rather than nearly true.
             // `WorkflowMarkingPublishGate` treats a workflow-managed entry as public only at the
@@ -131,8 +139,14 @@ trait SeedsEntries
             return $entry;
         });
 
+        // Pin the written body and compile it at the pinned address: what a reader is served from now on. A body the
+        // entry's storage driver does not keep as a particle has no version to pin, so it compiles as it always did.
         try {
-            app(CompileEntryBody::class)->forEntry($entry->refresh(), $source, force: true);
+            $publication->publishWritten($entry->refresh(), 'seeded');
+
+            if ($entry->refresh()->getAttribute('published_version') === null) {
+                app(CompileEntryBody::class)->forEntry($entry, $source, force: true);
+            }
         } catch (CompilationFailed) {
             // Reported by BeamUxArtifactAudit; see the docblock above for why this one is not fatal.
         }

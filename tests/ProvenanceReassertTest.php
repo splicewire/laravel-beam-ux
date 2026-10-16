@@ -28,6 +28,11 @@ class ProvenanceReassertTest extends TestCase
         $ux = dirname((new \ReflectionClass(BeamUxEntry::class))->getFileName(), 3);
         (require $ux.'/database/migrations/shared/create_beam_ux_entries_table.php.stub')->up();
         (require $ux.'/database/migrations/shared/add_provenance_to_beam_ux_entries_table.php.stub')->up();
+        // A migrated host: seedPage() publishes through EntryPublication, which needs the version store and the pin
+        // (ADR-0225 decision 2; seeded pages are born published).
+        (require $ux.'/database/migrations/shared/add_published_version_to_beam_ux_entries_table.php.stub')->up();
+        (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_versions_table.php.stub')->up();
+        (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_particles_table.php.stub')->up();
 
         $this->driver = new ReassertMemoryDriver;
         $this->app->instance(StorageDriverResolver::class, (new StorageDriverResolver)->register(StorageDriverResolver::DEFAULT, $this->driver));
