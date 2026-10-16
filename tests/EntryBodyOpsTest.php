@@ -19,6 +19,7 @@ use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
 use Splicewire\Beam\Ux\Particle\EntryBodyShowOp;
+use Splicewire\Beam\Ux\Particle\EntrySourceSaveOp;
 use Splicewire\Beam\Ux\Schema\ThemeSchemas;
 use Splicewire\Beam\Ux\Workflow\EntryWorkflowShowOp;
 use Splicewire\Beam\Ux\Workflow\EntryWorkflowTransitionOp;
@@ -422,6 +423,44 @@ class EntryBodyOpsTest extends TestCase
         $this->assertFalse($artifacts->has($entry->fresh()), 'an empty body leaves no artifact behind');
         $this->assertNull($this->app->make(CompileEntryBody::class)->sourceFor($entry->fresh()));
         $this->assertSame([], EntryBodyShowOp::handle($entry->fresh(), new Request, actor: null)->body);
+    }
+
+    public function test_save_source_writes_the_encoded_source_on_a_source_kind_entry_and_round_trips(): void
+    {
+        // ADR-0228 d10 Source input: a Source-kind entry (mdx) is authored as text; the `{ source }` write
+        // runs it through the codec and stores the body, and the read op decodes it straight back.
+        $entry = BeamUxEntry::create(['slug' => 'docs', 'type' => 'page', 'format' => 'mdx', 'namespace' => null]);
+
+        $payload = EntrySourceSaveOp::handle(
+            $entry,
+            Request::create('/beam-ux-entries/'.$entry->id.'/save-source', 'POST', ['source' => "---\ntitle: Docs\n---\n# Docs\n\nReal source."]),
+            actor: null,
+        );
+
+        $this->assertNotSame('', $payload['key']);
+        $envelope = EntryBodyShowOp::handle($entry->fresh(), new Request, actor: null);
+        $this->assertSame('mdx', $envelope->format);
+        $this->assertStringContainsString('Real source.', (string) $envelope->source);
+    }
+
+    public function test_save_source_refuses_a_blocks_entry_as_a_422_naming_its_kind(): void
+    {
+        // The split d10 makes: a Blocks-kind entry (tsx) has save-body's typed JsonDoc, not a source write.
+        $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        try {
+            EntrySourceSaveOp::handle(
+                $entry,
+                Request::create('/x', 'POST', ['source' => 'export default () => <div/>;']),
+                actor: null,
+            );
+            $this->fail('a source write was accepted on a blocks entry');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('source', $e->errors());
+            $this->assertStringContainsString('blocks', $e->errors()['source'][0]);
+        }
+
+        $this->assertNull($entry->fresh()->particle_id);
     }
 
     private function saveRequest(BeamUxEntry $entry, array $body): Request
