@@ -9,17 +9,22 @@ use Illuminate\Validation\ValidationException;
  * body and refuses each node the realm's resolved Manifest Profile does not admit, naming the node by
  * **id + path** in a single 422 on `body`.
  *
- * This increment enforces:
+ * Enforced:
  *   - **unknown name** — a block whose JSX tag (`name`) is not an entry of the profile. A registered
  *     component is simply a profile entry, so an *unregistered* component falls here too (ux-0227 d1:
  *     "a tenant author places registered components"). A fragment (`name === null`) is a transparent
  *     wrapper and carries no name of its own.
- *   - **code, when `x-admits-code: false`** (ux-0227 d1) — an **opaque node** (it carries verbatim code
- *     in its `source`) and an **expression prop** (`PropKind::Expression`). A `dynamic` flag is not code
- *     unless it carries executable source, which this shape does not; registered components are allowed.
+ *   - **containment** — a node must sit under a parent that admits its category. The root's admitted
+ *     set is the profile's `doc.admitsChildCategories` (`null` = unconstrained, `[]` = leaf); a block's
+ *     children are checked against its own `admitsChildCategories`. A text node is admitted only where
+ *     its parent's `admitsText` is true. A fragment is transparent: its children are checked against
+ *     the fragment's own parent.
+ *   - **code, when `x-admits-code: false`** (ux-0227 d1) — an **opaque node** (verbatim code in its
+ *     `source`) and an **expression prop** (`PropKind::Expression`). A `dynamic` flag is not code unless
+ *     it carries executable source, which this shape does not; registered components are allowed.
  *
- * Containment (a child's category admitted by its parent) and the per-node `attrsSchema` land in the
- * next increment; EP-06 d8 narrows the walk to only the nodes a save adds or changes (by id).
+ * The per-node `attrsSchema` (opis) lands in the next increment; EP-06 d8 narrows the walk to only the
+ * nodes a save adds or changes (by id).
  */
 final class ProfileLegality
 {
@@ -32,10 +37,12 @@ final class ProfileLegality
     public function assert(array $body, array $profile): void
     {
         $admitsCode = (bool) ($profile['x-admits-code'] ?? true);
-        $known = array_column($profile['nodes'] ?? [], 'name');
+        $entries = array_column($profile['nodes'] ?? [], null, 'name');
+        $docAdmits = $profile['doc']['admitsChildCategories'] ?? null;
 
         $violations = [];
-        $this->walk($body, '', $known, $admitsCode, $violations);
+        // The document root admits its declared categories and never bare text.
+        $this->walk($body, '', $entries, $admitsCode, $docAdmits, false, $violations);
 
         if ($violations !== []) {
             throw ValidationException::withMessages(['body' => $violations]);
@@ -44,10 +51,11 @@ final class ProfileLegality
 
     /**
      * @param  array<int, array<string, mixed>>  $nodes
-     * @param  list<string>                      $known
-     * @param  list<string>                      $violations
+     * @param  array<string, array<string, mixed>>  $entries        name => v1 node entry
+     * @param  list<string>|null                  $parentAdmits   categories the parent admits (null = unconstrained)
+     * @param  list<string>                       $violations
      */
-    private function walk(array $nodes, string $prefix, array $known, bool $admitsCode, array &$violations): void
+    private function walk(array $nodes, string $prefix, array $entries, bool $admitsCode, ?array $parentAdmits, bool $parentAdmitsText, array &$violations): void
     {
         foreach ($nodes as $i => $node) {
             $path = $prefix === '' ? (string) $i : "$prefix.$i";
@@ -61,17 +69,26 @@ final class ProfileLegality
                 continue;
             }
 
+            if ($kind === 'text') {
+                if (! $parentAdmitsText) {
+                    $violations[] = $this->message($path, null, 'has text where the parent admits none');
+                }
+
+                continue;
+            }
+
             if ($kind !== 'block') {
-                continue; // a text node carries no name, props, or children to check
+                continue;
             }
 
             $id = $node['id'] ?? null;
             $name = $node['name'] ?? null;
 
-            // Unknown name: a named block whose tag is not an entry of the profile (an unregistered
-            // component lands here). A fragment (name === null) is a transparent wrapper.
-            if ($name !== null && ! in_array($name, $known, true)) {
-                $violations[] = $this->message($path, $id, "uses the unknown block '$name', which is not in this profile");
+            // A fragment is a transparent wrapper: its children are checked against ITS parent.
+            if ($name === null) {
+                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $parentAdmits, $parentAdmitsText, $violations);
+
+                continue;
             }
 
             if (! $admitsCode) {
@@ -83,7 +100,24 @@ final class ProfileLegality
                 }
             }
 
-            $this->walk($node['children'] ?? [], $path, $known, $admitsCode, $violations);
+            $entry = $entries[$name] ?? null;
+
+            if ($entry === null) {
+                // Unknown name: an unregistered block. Don't cascade containment onto its children.
+                $violations[] = $this->message($path, $id, "uses the unknown block '$name', which is not in this profile");
+                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, null, true, $violations);
+
+                continue;
+            }
+
+            // Containment: the parent must admit this node's category (null parent = unconstrained).
+            $category = $entry['category'] ?? null;
+            if ($parentAdmits !== null && ($category === null || ! in_array($category, $parentAdmits, true))) {
+                $admitted = $parentAdmits === [] ? 'nothing' : implode(', ', $parentAdmits);
+                $violations[] = $this->message($path, $id, "block '$name' (category '$category') is not admitted here (the parent admits: $admitted)");
+            }
+
+            $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $entry['admitsChildCategories'] ?? null, (bool) ($entry['admitsText'] ?? false), $violations);
         }
     }
 
