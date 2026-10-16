@@ -29,6 +29,7 @@ class ThemeResolverPublicationPinTest extends TestCase
             $table->uuid('id')->primary();
             $table->uuid('particle_id')->nullable()->index();
             $table->string('slug')->index();
+            $table->string('title')->nullable();
             $table->string('type')->index();
             $table->string('format')->default('tsx')->index();
             $table->string('namespace')->nullable()->index();
@@ -130,5 +131,33 @@ class ThemeResolverPublicationPinTest extends TestCase
         $this->themeEntry(['canvas' => ['accent' => '#555555']]);
 
         $this->assertSame('#555555', (new ThemeResolver)->resolve()['canvas']['accent']);
+    }
+
+    public function test_the_starters_theme_seeder_shape_renders_on_a_fresh_install(): void
+    {
+        // Exactly what the starters' byte-identical ThemeSeeder does on a fresh database (after migrate,
+        // so the baseline migration found no entries to pin): a particle written directly, no pin, no
+        // history. It must render (launch, orch-lead 2026-10-16 17:14Z; tots EP-01 moves the seeder).
+        $particle = BeamParticle::create(['payload' => ['canvas' => ['accent' => '#666666']]]);
+        BeamUxEntry::updateOrCreate(
+            ['namespace' => ThemeResolver::NAMESPACE, 'slug' => ThemeResolver::SLUG],
+            ['type' => UxType::Theme, 'title' => 'Theme', 'particle_id' => $particle->id],
+        );
+
+        $this->assertSame('#666666', (new ThemeResolver)->resolve()['canvas']['accent']);
+    }
+
+    public function test_reseeding_a_theme_the_baseline_already_pinned_moves_only_the_working_copy(): void
+    {
+        // Documents the consequence for EP-01: once the theme is pinned (the baseline migration on an
+        // existing host), the seeder's direct payload update is a working-copy change, so readers keep
+        // the pinned body until it is published. The seeder must publish through EntryPublication.
+        $entry = $this->themeEntry(['canvas' => ['accent' => '#777777']]);
+        app(EntryPublication::class)->baseline($entry->fresh());
+        $this->assertNotNull($entry->fresh()->getAttribute('published_version'));
+
+        BeamParticle::where('id', $entry->particle_id)->update(['payload' => ['canvas' => ['accent' => '#888888']]]);
+
+        $this->assertSame('#777777', (new ThemeResolver)->resolve()['canvas']['accent']);
     }
 }
