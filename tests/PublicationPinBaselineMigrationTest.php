@@ -17,9 +17,11 @@ use Splicewire\Beam\Ux\Theme\ThemeResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
- * The baseline runs INSIDE `migrate` (launch ticket 00, orch-lead 2026-10-16 16:57Z): every entry that
- * already has a body gets its Publication Pin from the same migrate that makes the pin required, so
- * there is no window in which the pin is required but missing. Idempotent; a fresh database no-ops.
+ * The baseline runs INSIDE `migrate` (launch ticket 00, orch-lead 2026-10-16 16:57Z): every LEGACY written entry
+ * with NO particle history gets its Publication Pin from the same migrate that makes the pin required, so there is
+ * no window in which the pin is required but missing. An entry with history but no pin holds an unpublished draft
+ * and is deliberately left unpinned (test_an_entry_with_history_but_no_pin_stays_unpinned_and_unserved).
+ * Idempotent; a fresh database no-ops.
  */
 class PublicationPinBaselineMigrationTest extends TestCase
 {
@@ -62,7 +64,7 @@ class PublicationPinBaselineMigrationTest extends TestCase
         return (int) \DB::table(Beam::table('versions'))->count();
     }
 
-    public function test_every_pinless_entry_with_a_body_is_pinned_to_a_baseline_of_its_live_body(): void
+    public function test_every_legacy_written_entry_with_no_history_is_pinned_to_a_baseline_of_its_live_body(): void
     {
         $this->createTables();
         $a = $this->pinlessEntry();

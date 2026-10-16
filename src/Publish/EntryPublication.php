@@ -442,7 +442,9 @@ class EntryPublication
      * and refuses out loud with the remedy, BEFORE it writes. There is no unpinned fallback: a host
      * mid-way through either migration fails closed until it has migrated, and
      * {@see \Splicewire\Beam\Ux\Doctor\BeamUxVersionStoreAudit} names it before an author finds out.
-     * Callers that only READ (the baseline and clearing an entry) treat false as "nothing to snapshot".
+     * The baseline and clearing an entry TOLERATE a false here: they do write (a baseline version and pin, a
+     * cleared entry) when the store exists, and without it they skip the snapshot and pin rather than refuse,
+     * and neither publishes through an unpinned fallback.
      */
     public function recordsVersions(): bool
     {
