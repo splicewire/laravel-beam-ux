@@ -34,6 +34,11 @@ class RegisterAndUpdateFromDiskTest extends TestCase
     {
         parent::setUp();
         $this->createTables();
+        // A migrated host: register-from-disk publishes through EntryPublication, which needs the version store and the pin
+        // (ADR-0225 decision 2; disk-registered entries are born published).
+        (require dirname(__DIR__).'/database/migrations/shared/add_published_version_to_beam_ux_entries_table.php.stub')->up();
+        (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_versions_table.php.stub')->up();
+        (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_particles_table.php.stub')->up();
 
         $this->root = sys_get_temp_dir().'/beamux-disk-'.uniqid();
         mkdir($this->root, 0777, true);
