@@ -167,10 +167,10 @@ class EntryBodyOpsTest extends TestCase
         $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
 
         $payload = EntryBodySaveOp::handle($entry, $this->saveRequest($entry, [
-            ['kind' => 'block', 'tag' => 'h2', 'children' => [['kind' => 'text', 'value' => 'Authored']]],
+            ['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Authored']]],
         ]), actor: null);
 
-        $this->assertSame('h2', EntryBodySaveOp::respond($payload, $entry->fresh())->body[0]['tag']);
+        $this->assertSame('h2', EntryBodySaveOp::respond($payload, $entry->fresh())->body[0]['name']);
     }
 
     public function test_a_css_theme_entry_also_refuses_a_json_doc_body(): void
@@ -184,6 +184,64 @@ class EntryBodyOpsTest extends TestCase
         EntryBodySaveOp::handle($theme, $this->saveRequest($theme, [
             ['kind' => 'block', 'tag' => 'div', 'children' => []],
         ]), actor: null);
+    }
+
+    public function test_a_mixed_block_text_opaque_json_doc_hydrates_through_the_declared_union(): void
+    {
+        // ADR-0228 d2: save-body hydrates the canvas body through the JsonNode union, so a well-formed
+        // document carrying every arm — a block with a prop and nested children, a text leaf, and a
+        // sealed opaque island — saves cleanly onto a codec that accepts one.
+        $entry = BeamUxEntry::create(['slug' => 'mixed', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        $doc = [[
+            'kind' => 'block', 'name' => 'section', 'isComponent' => false, 'dynamic' => false,
+            'props' => [['name' => 'id', 'kind' => 'string', 'value' => 'hero']],
+            'children' => [
+                ['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Title']]],
+                ['kind' => 'opaque', 'reason' => 'map', 'source' => '{items.map((i) => <li>{i}</li>)}'],
+            ],
+        ]];
+
+        $payload = EntryBodySaveOp::handle($entry, $this->saveRequest($entry, $doc), actor: null);
+
+        $this->assertSame('section', EntryBodySaveOp::respond($payload, $entry->fresh())->body[0]['name']);
+    }
+
+    public function test_save_refuses_a_json_doc_node_with_an_unknown_kind_as_a_422_not_a_500(): void
+    {
+        // ADR-0228 d2: a node whose `kind` is not an arm of the union is a malformed canvas document. The
+        // refusal must be the same clean 422 the wire gives, never an uncaught 500 (the hydrator's
+        // CannotCreateAbstractClass), and nothing may be written.
+        $entry = BeamUxEntry::create(['slug' => 'bad-kind', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        try {
+            EntryBodySaveOp::handle($entry, $this->saveRequest($entry, [
+                ['kind' => 'wormhole', 'name' => 'div', 'children' => []],
+            ]), actor: null);
+            $this->fail('a node with an unknown kind was accepted');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('body', $e->errors());
+        }
+
+        $this->assertNull($entry->fresh()->particle_id);
+    }
+
+    public function test_save_refuses_a_malformed_json_doc_node_as_a_422_not_a_500(): void
+    {
+        // ADR-0228 d2: a node of a known kind but a broken shape (a block whose `children` is not a list
+        // of nodes) is refused the same way — the hydrator's type error becomes a 422, not a 500.
+        $entry = BeamUxEntry::create(['slug' => 'bad-shape', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        try {
+            EntryBodySaveOp::handle($entry, $this->saveRequest($entry, [
+                ['kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => 'not-a-list'],
+            ]), actor: null);
+            $this->fail('a malformed node was accepted');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('body', $e->errors());
+        }
+
+        $this->assertNull($entry->fresh()->particle_id);
     }
 
     public function test_the_envelope_carries_the_format_and_the_decoded_source_for_a_non_json_doc_body(): void
@@ -203,7 +261,7 @@ class EntryBodyOpsTest extends TestCase
 
         $tsx = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
         EntryBodySaveOp::handle($tsx, $this->saveRequest($tsx, [
-            ['kind' => 'block', 'tag' => 'h2', 'children' => [['kind' => 'text', 'value' => 'Hi']]],
+            ['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Hi']]],
         ]), actor: null);
 
         $canvas = EntryBodyShowOp::handle($tsx->fresh(), new Request, actor: null);

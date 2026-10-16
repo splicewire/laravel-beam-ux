@@ -4,10 +4,13 @@ namespace Splicewire\Beam\Ux\Particle;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
+use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
+use Splicewire\Beam\Ux\JsonDoc\JsonNode;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -102,6 +105,12 @@ class EntryBodySaveOp
 
         $publication->assertStorable($model, $input->body);
 
+        // ADR-0228 decision 2: a canvas body is a declared JsonNode tree. Hydrate it through that union
+        // so a document the editor could not read is refused with the SAME clean 422 as any other bad
+        // input, never an uncaught 500 from deep in the hydrator. Runs only for a JsonDoc-shaped body;
+        // an arbitrary particle payload is not a canvas document and is stored verbatim.
+        self::assertCanvasBodyWellFormed($input->body);
+
         // ADR-0225 decision 2: a save is its own publish, and a publish needs the version store. Refuse
         // BEFORE the write, so a host missing the store keeps the working copy it had.
         $publication->requireVersionStore();
@@ -123,6 +132,40 @@ class EntryBodySaveOp
             // who never opens the draft affordance sees no difference, and gains a history.
             'compileError' => $publication->publishWritten($model->refresh()),
         ];
+    }
+
+    /**
+     * Refuse a canvas document the declared {@see JsonNode} union cannot read, as a 422 on `body`.
+     *
+     * Only a JsonDoc-shaped body ({@see JsonDocShape} — a non-empty list of `kind`-tagged nodes) is a
+     * canvas document. An arbitrary particle payload (an mdx `{frontmatter,content}` map, a theme token
+     * object, a cleared `[]`) is not a JsonNode tree and is stored verbatim, exactly as before.
+     *
+     * The hydration is a VALIDATION pass, not a transform: the op persists the ORIGINAL `$body` array,
+     * so a node's key order and any descriptive extras round-trip untouched. Hydrating proves every node
+     * resolves to an arm of the union (a known `kind`) and satisfies its shape — a node with an unknown
+     * `kind` or a malformed field surfaces as Spatie's own exception, which this remaps to the one 422
+     * the wire contract promises rather than letting a 500 escape.
+     *
+     * @param  array<int|string, mixed>  $body
+     */
+    private static function assertCanvasBodyWellFormed(array $body): void
+    {
+        if (! JsonDocShape::is($body)) {
+            return;
+        }
+
+        try {
+            foreach ($body as $node) {
+                JsonNode::from($node);
+            }
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            throw ValidationException::withMessages([
+                'body' => 'This document has a node the canvas editor cannot read ('.$e->getMessage().').',
+            ]);
+        }
     }
 
     /**
