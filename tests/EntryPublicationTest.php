@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use ReflectionClass;
 use Splicewire\Beam\Facades\Beam;
+use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
@@ -119,8 +120,10 @@ class EntryPublicationTest extends TestCase
         $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
     }
 
-    public function test_restoring_rolls_forward_and_publishes_so_a_reader_gets_the_restored_body(): void
+    public function test_restoring_rolls_forward_into_a_draft_and_the_reader_keeps_the_published_body(): void
     {
+        // ADR-0225 decision 5: Restore applies the frozen snapshot to the working copy and mints a new version, and does
+        // NOT publish. Rolling back the live page takes Restore and then Publish (review-r1, launch L3, 2026-10-16).
         $entry = $this->publishedPage(self::BODY_ONE);
         $publication = app(EntryPublication::class);
         $publication->recordDraft($entry->fresh(), self::BODY_TWO);
@@ -131,13 +134,21 @@ class EntryPublicationTest extends TestCase
 
         $state = $publication->restore($entry->fresh(), $first->readable);
 
-        // FORWARD: the history grew, the restored version is still in it, and HEAD is the new row.
+        // FORWARD: the history grew, the restored version is still in it, and HEAD is the new row: a DRAFT.
         $this->assertCount(3, $state->versions);
         $this->assertSame("restore of {$first->readable}", $state->versions[0]->label);
         $this->assertTrue($state->versions[0]->isHead);
-        $this->assertTrue($state->versions[0]->isPublished);
-        $this->assertFalse($state->draftPending);
+        $this->assertFalse($state->versions[0]->isPublished, 'a restore published the restored body');
+        $this->assertTrue($state->draftPending);
+        $this->assertSame($published->publishedVersion, $state->publishedVersion, 'a restore moved the publication pin');
 
+        // The reader still gets the published body; the working copy is the restored one.
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
+        $this->assertStringNotContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
+        $this->assertSame(self::BODY_ONE, BeamParticle::find($entry->fresh()->particle_id)->payload);
+
+        // Publish is what moves the reader.
+        $publication->publish($entry->fresh());
         $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
         $this->assertStringNotContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
     }
@@ -158,7 +169,12 @@ class EntryPublicationTest extends TestCase
 
         $publication->restore($entry->fresh(), $empty->readable);
 
-        $this->assertNull($this->artifacts()->read($entry->fresh()), 'an empty restore left a module behind');
+        // ADR-0225 decision 5: the restore is a draft, so the reader keeps the published body until Publish.
+        $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
+
+        $publication->publish($entry->fresh());
+
+        $this->assertNull($this->artifacts()->read($entry->fresh()), 'an empty restore, published, left a module behind');
     }
 
     public function test_an_immediate_save_still_publishes_and_now_records_the_history_it_never_had(): void
@@ -315,8 +331,9 @@ class EntryPublicationTest extends TestCase
             Request::create('/x', 'POST', ['ref' => $published->versions[array_key_last($published->versions)]->readable]),
             actor: null,
         );
-        $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
-        $this->assertFalse($restored->draftPending);
+        // ADR-0225 decision 5: a draft; the reader keeps the published body (Two).
+        $this->assertTrue($restored->draftPending);
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
     }
 
     public function test_a_host_without_the_version_store_refuses_to_publish_and_names_the_fix(): void

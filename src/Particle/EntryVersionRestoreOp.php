@@ -12,13 +12,13 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 
 /**
- * `POST /beam-ux-entries/{id}/restore` — roll the entry forward to a recorded version and publish it.
+ * `POST /beam-ux-entries/{id}/restore` — roll the entry forward to a recorded version, as a DRAFT.
  *
  * Forward, never back. The frozen snapshot is applied onto the working copy and a NEW version of the
  * result is recorded, so the history the author is looking at is appended to rather than rewritten —
- * `rushing/laravel-versioning`'s own documented restore shape. The restored body is then published, which
- * is the part a record-agnostic restore cannot do: the pin moves, the disk mirror follows, and the
- * artifact is recompiled, so a guest reads the restored body on their next load.
+ * `rushing/laravel-versioning`'s own documented restore shape. It does not publish (ADR-0225 decision 5):
+ * the pin, the disk mirror and the artifact stay on the published version, so a guest keeps reading it
+ * until `publish`. Rolling back the live page is Restore and then Publish.
  *
  * A ref that names no version of THIS entry is a 422 on `ref`, not a 404 on the entry: the entry exists
  * and the request is well-formed, the named version simply is not one of its own — and scoping the

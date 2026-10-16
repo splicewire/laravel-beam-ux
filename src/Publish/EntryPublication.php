@@ -183,15 +183,14 @@ class EntryPublication
     }
 
     /**
-     * Roll the entry FORWARD to a recorded version and publish the result.
+     * Roll the entry FORWARD to a recorded version, as a DRAFT (ADR-0225 decision 5).
      *
      * Forward, never back: the store applies the frozen snapshot onto the working copy and moves HEAD to
      * it, and a fresh version of the result is then recorded, so history is appended to rather than
-     * rewound — `rushing/laravel-versioning`'s own documented restore shape, and
-     * `splicewire/laravel-beam-versioning`'s controller makes the same pair of moves. What is added here
-     * is the fourth step that a record-agnostic restore cannot know about: the restored body is
-     * published, so the disk mirror and the compiled artifact follow it. A restore that moved the
-     * particle alone would leave the page serving a body nobody can produce again.
+     * rewound — `rushing/laravel-versioning`'s own documented restore shape. It does NOT publish: the
+     * Publication Pin, the disk mirror and the compiled artifact stay on the published version, so a guest
+     * keeps reading what they read before and `draftPending` is true. Rolling back the live page takes
+     * Restore and then {@see publish()}, which is the rule that only Publish changes what a guest sees.
      *
      * @throws ValidationException when no such version belongs to this entry
      */
@@ -211,10 +210,9 @@ class EntryPublication
 
         $this->versions->restore($particle, (string) $version->id);
 
-        $fresh = $this->requireParticle($entry->refresh());
-        $minted = $this->versions->snapshot($fresh, $label ?? "restore of {$version->readableVersion()}");
+        $this->versions->snapshot($this->requireParticle($entry->refresh()), $label ?? "restore of {$version->readableVersion()}");
 
-        return $this->state($entry->refresh(), $this->pinAndCompile($entry, $minted));
+        return $this->state($entry->refresh());
     }
 
     /**
@@ -437,7 +435,7 @@ class EntryPublication
      * either.
      *
      * **Where this returns false, nothing publishes (ADR-0225 decision 2: no pin-less publish).** Every
-     * door that would make a body live ({@see recordDraft()}, {@see publish()}, {@see publishWritten()},
+     * door that writes the entry's history ({@see recordDraft()}, {@see publish()}, {@see publishWritten()},
      * {@see restore()}, and the save op that ends in `publishWritten()`) calls {@see requireVersionStore()}
      * and refuses out loud with the remedy, BEFORE it writes. There is no unpinned fallback: a host
      * mid-way through either migration fails closed until it has migrated, and
