@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\JsonDoc;
 
 use Spatie\LaravelData\Attributes\DataCollectionOf;
+use Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 
 /**
@@ -26,7 +27,12 @@ class JsonBlockNode extends JsonNode
         #[DataCollectionOf(JsonNode::class)]
         public array $children,
         public bool $dynamic,
-        string $kind = 'block',
+        // Pin the generated TS discriminant to the literal `'block'` (the arm's `kind` is always that),
+        // not the base's `string`: otherwise a bare JsonBlockNode is not assignable to the JsonNode
+        // union and the client guards (isJsonBlock, …) fail to typecheck. The morph discriminator stays
+        // the base's #[PropertyForMorph] `kind`; this only narrows the GENERATED type of the arm.
+        #[LiteralTypeScriptType("'block'")]
+        public string $kind = 'block',
     ) {
         parent::__construct($kind);
     }
