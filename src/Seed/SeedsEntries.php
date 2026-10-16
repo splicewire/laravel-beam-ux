@@ -7,6 +7,7 @@ use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
@@ -78,6 +79,12 @@ trait SeedsEntries
                 $origin ?? \Splicewire\Beam\Ux\Provenance\Provenance::package('splicewire/laravel-beam-ux'),
             );
 
+            // RETRY REPAIRS (ADR-0225 decision 2). A row a seed left without a Publication Pin (seeded before pages were
+            // born published, or by a run that failed while pinning) is pinned here, so re-running the seeder recovers it.
+            // baseline() only pins a written body with NO history: a row that has history but no pin is an unpublished
+            // draft, and this never publishes it. A no-op where the version store is absent or the row is pinned.
+            app(EntryPublication::class)->baseline($existing->refresh());
+
             return $existing->refresh();
         }
 
@@ -91,7 +98,16 @@ trait SeedsEntries
         // `splicewire:beam:seed` was refused by the write gate, and the second — with the gate fixed —
         // reported success while quietly skipping the two rows the first run had stranded. A failure that
         // makes the retry a no-op is worse than a failure that leaves nothing behind.
-        $entry = DB::transaction(function () use ($slug, $format, $namespace, $attributes, $source, $origin): BeamUxEntry {
+        // BORN PUBLISHED (ADR-0225 decision 2): a seeded page gets its Publication Pin when it is created. Seeders run
+        // after `migrate`, so the baseline migration never sees these rows; without this they stayed pin-less, and
+        // EP-08's editor refuses to mount where the pin is missing. Refuses with the remedy, before any row is written,
+        // on a host without the version store (launch row qitem-20261016214321-d6aa335c).
+        $publication = app(EntryPublication::class);
+        $publication->requireVersionStore();
+
+        // The create, the body write AND the publication share one transaction: a failure while pinning rolls the row
+        // back too, so a failed seed leaves nothing behind and the next run seeds the page from scratch.
+        return DB::transaction(function () use ($slug, $format, $namespace, $attributes, $source, $origin, $publication): BeamUxEntry {
             // BORN PUBLISHED, and this is what makes the OTB promise true rather than nearly true.
             // `WorkflowMarkingPublishGate` treats a workflow-managed entry as public only at the
             // published marking, and a freshly-created row's `workflow_marking` is NULL — so on any host
@@ -128,15 +144,21 @@ trait SeedsEntries
                 $entry->save();
             }
 
-            return $entry;
+            // Pin the written body and compile it at the pinned address: what a reader is served from now on. A failure
+            // to pin propagates and rolls the row back (EntryPublication already tolerates a compile failure, returning
+            // it rather than throwing).
+            $publication->publishWritten($entry->refresh(), 'seeded');
+
+            // A body the entry's storage driver doesn't keep as a particle has no version to pin: it compiles as it always
+            // did, and only THAT compile's failure is tolerated (reported by BeamUxArtifactAudit).
+            if ($entry->refresh()->getAttribute('published_version') === null) {
+                try {
+                    app(CompileEntryBody::class)->forEntry($entry, $source, force: true);
+                } catch (CompilationFailed) {
+                }
+            }
+
+            return $entry->refresh();
         });
-
-        try {
-            app(CompileEntryBody::class)->forEntry($entry->refresh(), $source, force: true);
-        } catch (CompilationFailed) {
-            // Reported by BeamUxArtifactAudit; see the docblock above for why this one is not fatal.
-        }
-
-        return $entry->refresh();
     }
 }

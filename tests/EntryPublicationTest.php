@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use ReflectionClass;
 use Splicewire\Beam\Facades\Beam;
+use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
@@ -119,8 +120,88 @@ class EntryPublicationTest extends TestCase
         $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
     }
 
-    public function test_restoring_rolls_forward_and_publishes_so_a_reader_gets_the_restored_body(): void
+    public function test_a_baseline_that_fails_after_its_snapshot_rolls_the_snapshot_back_and_a_retry_pins(): void
     {
+        // review-r1 R2 (seeded pages, 2026-10-16): baseline() snapshotted (committing a version and HEAD), THEN saved the
+        // pin. A failure in between left a history-bearing, pin-less row, which every later baseline() treats as an
+        // unpublished draft and skips, forever. The failure here lands on the pin save, AFTER the snapshot.
+        $entry = $this->pageWithUnversionedBody(self::BODY_ONE);
+        $failPin = true;
+        BeamUxEntry::updating(function (BeamUxEntry $row) use (&$failPin) {
+            if ($failPin && $row->isDirty('published_version')) {
+                $failPin = false;
+
+                throw new \RuntimeException('simulated failure saving the publication pin');
+            }
+        });
+
+        try {
+            app(EntryPublication::class)->baseline($entry->fresh());
+            $this->fail('a failed pin save was swallowed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated failure saving the publication pin', $e->getMessage());
+        }
+
+        $this->assertSame(0, $this->versionRows($entry), 'the snapshot outlived the failed pin: the row now reads as a draft');
+        $this->assertNull($entry->fresh()->published_version);
+
+        // The retry is not a no-op: the row still has no history, so baseline() pins it.
+        app(EntryPublication::class)->baseline($entry->fresh());
+
+        $this->assertNotNull($entry->fresh()->published_version, 'a retry could not repair the row');
+        $this->assertSame(1, $this->versionRows($entry));
+    }
+
+    public function test_a_central_entry_under_a_tenant_default_rolls_its_snapshot_back_with_a_failed_pin_and_a_retry_pins(): void
+    {
+        // review-r1 R3 (2026-10-16): the supported central-entry shape, where EntryPromoter keeps the entry and its
+        // particle on `central` while the default connection is a tenant's. baseline()'s transaction is on the entry's
+        // connection; the version store wrote the version on the DEFAULT one, outside it, so a failed pin kept the
+        // version and the row read as a draft forever. Needs rushing/laravel-versioning with record-connection versions.
+        config(['database.connections.central' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '', 'foreign_key_constraints' => true]]);
+        $this->createTables('central');
+
+        \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
+        // Built the way EntryPromoter builds one: the particle written with its own central connection, then the entry.
+        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(
+            (new \Splicewire\Beam\Models\BeamParticle)->setConnection('central'),
+            self::BODY_ONE,
+        );
+        $entry = BeamUxEntry::on('central')->create(['slug' => 'central-home', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site', 'particle_id' => $particle->id]);
+        $this->assertSame('central', $entry->getConnectionName());
+        $this->assertSame(1, \DB::connection('central')->table(Beam::table('particles'))->count(), 'the body left the entry connection');
+
+        $failPin = true;
+        BeamUxEntry::updating(function (BeamUxEntry $row) use (&$failPin) {
+            if ($failPin && $row->isDirty('published_version')) {
+                $failPin = false;
+
+                throw new \RuntimeException('simulated failure saving the publication pin');
+            }
+        });
+
+        try {
+            app(EntryPublication::class)->baseline($entry);
+            $this->fail('a failed pin save was swallowed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated failure saving the publication pin', $e->getMessage());
+        }
+
+        $this->assertSame(0, \DB::connection('central')->table(Beam::table('versions'))->count(), 'the snapshot outlived the failed pin on central');
+        $this->assertSame(0, \DB::table(Beam::table('versions'))->count(), 'the snapshot outlived the failed pin on the tenant default');
+        $this->assertNull($entry->fresh()->published_version);
+
+        app(EntryPublication::class)->baseline($entry->fresh());
+
+        $this->assertNotNull($entry->fresh()->published_version, 'a retry could not repair the central row');
+        $this->assertSame(1, \DB::connection('central')->table(Beam::table('versions'))->count());
+        $this->assertSame(0, \DB::table(Beam::table('versions'))->count());
+    }
+
+    public function test_restoring_rolls_forward_into_a_draft_and_the_reader_keeps_the_published_body(): void
+    {
+        // ADR-0225 decision 5: Restore applies the frozen snapshot to the working copy and mints a new version, and does
+        // NOT publish. Rolling back the live page takes Restore and then Publish (review-r1, launch L3, 2026-10-16).
         $entry = $this->publishedPage(self::BODY_ONE);
         $publication = app(EntryPublication::class);
         $publication->recordDraft($entry->fresh(), self::BODY_TWO);
@@ -131,22 +212,31 @@ class EntryPublicationTest extends TestCase
 
         $state = $publication->restore($entry->fresh(), $first->readable);
 
-        // FORWARD: the history grew, the restored version is still in it, and HEAD is the new row.
+        // FORWARD: the history grew, the restored version is still in it, and HEAD is the new row: a DRAFT.
         $this->assertCount(3, $state->versions);
         $this->assertSame("restore of {$first->readable}", $state->versions[0]->label);
         $this->assertTrue($state->versions[0]->isHead);
-        $this->assertTrue($state->versions[0]->isPublished);
-        $this->assertFalse($state->draftPending);
+        $this->assertFalse($state->versions[0]->isPublished, 'a restore published the restored body');
+        $this->assertTrue($state->draftPending);
+        $this->assertSame($published->publishedVersion, $state->publishedVersion, 'a restore moved the publication pin');
 
+        // The reader still gets the published body; the working copy is the restored one.
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
+        $this->assertStringNotContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
+        $this->assertSame(self::BODY_ONE, BeamParticle::find($entry->fresh()->particle_id)->payload);
+
+        // Publish is what moves the reader.
+        $publication->publish($entry->fresh());
         $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
         $this->assertStringNotContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
     }
 
-    public function test_a_restore_onto_an_empty_document_retires_the_artifact_rather_than_serving_an_empty_module(): void
+    public function test_publishing_a_restored_empty_document_retires_the_artifact_rather_than_serving_an_empty_module(): void
     {
         // beam-ux d033815: a cleared document is no body, so the reader must read UNAUTHORED (no
-        // artifact at any address) rather than be handed a module that exports nothing. A restore is
-        // the second way to reach that state, and it must land in the same place as the first.
+        // artifact at any address) rather than be handed a module that exports nothing. Restoring an empty
+        // version only drafts it (ADR-0225 decision 5); PUBLISHING that draft is what retires the artifact,
+        // and it must land in the same place as publishing a cleared body directly.
         $entry = $this->publishedPage([]);
         $publication = app(EntryPublication::class);
         $cleared = $publication->publish($entry->fresh());
@@ -158,7 +248,12 @@ class EntryPublicationTest extends TestCase
 
         $publication->restore($entry->fresh(), $empty->readable);
 
-        $this->assertNull($this->artifacts()->read($entry->fresh()), 'an empty restore left a module behind');
+        // ADR-0225 decision 5: the restore is a draft, so the reader keeps the published body until Publish.
+        $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
+
+        $publication->publish($entry->fresh());
+
+        $this->assertNull($this->artifacts()->read($entry->fresh()), 'an empty restore, published, left a module behind');
     }
 
     public function test_an_immediate_save_still_publishes_and_now_records_the_history_it_never_had(): void
@@ -315,8 +410,9 @@ class EntryPublicationTest extends TestCase
             Request::create('/x', 'POST', ['ref' => $published->versions[array_key_last($published->versions)]->readable]),
             actor: null,
         );
-        $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
-        $this->assertFalse($restored->draftPending);
+        // ADR-0225 decision 5: a draft; the reader keeps the published body (Two).
+        $this->assertTrue($restored->draftPending);
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
     }
 
     public function test_a_host_without_the_version_store_refuses_to_publish_and_names_the_fix(): void
@@ -394,9 +490,9 @@ class EntryPublicationTest extends TestCase
             ->count();
     }
 
-    private function createTables(): void
+    private function createTables(?string $connection = null): void
     {
-        Schema::create('beam_ux_entries', function (Blueprint $table) {
+        Schema::connection($connection)->create('beam_ux_entries', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->uuid('particle_id')->nullable()->index();
             $table->string('slug')->index();
@@ -422,7 +518,7 @@ class EntryPublicationTest extends TestCase
             $table->unique(['namespace', 'slug']);
         });
 
-        Schema::create(Beam::table('particles'), function (Blueprint $table) {
+        Schema::connection($connection)->create(Beam::table('particles'), function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('schema_ref')->nullable()->index();
             $table->string('schema_id')->nullable()->index();
@@ -434,7 +530,7 @@ class EntryPublicationTest extends TestCase
             $table->timestamps();
         });
 
-        Schema::create(Beam::table('versions'), function (Blueprint $table) {
+        Schema::connection($connection)->create(Beam::table('versions'), function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('versionable_type');
             $table->string('versionable_id');
