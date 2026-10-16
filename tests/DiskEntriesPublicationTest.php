@@ -250,6 +250,90 @@ class DiskEntriesPublicationTest extends TestCase
         $this->assertStringContainsString('no toolchain here', $result['failed']['page/guide.mdx']);
     }
 
+    public function test_a_central_entry_under_a_tenant_default_hydrates_on_central_and_a_failed_pin_rolls_its_body_back(): void
+    {
+        // review-r1 R2 (2026-10-16): EntryPromoter's shape, an entry on `central` while the default is a tenant's. The
+        // hydration's transaction is on central; an unbound driver wrote the particle on the default, outside it.
+        $this->withCentral();
+        $entry = BeamUxEntry::on('central')->create(['slug' => 'guide', 'type' => 'page', 'format' => 'mdx', 'title' => 'Guide']);
+        $this->failNextPinSave();
+
+        try {
+            $this->app->make(RegisterEntriesFromDisk::class)->hydrateEmpty($entry, "# Guide\n\nHydrated.\n");
+            $this->fail('a failure while pinning a central hydration was swallowed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated failure saving the publication pin', $e->getMessage());
+        }
+
+        $this->assertNull($entry->fresh()->particle_id);
+        $this->assertSame([0, 0], $this->rows('particles'), 'a failed central hydration left a particle (central, default)');
+        $this->assertSame([0, 0], $this->rows('versions'));
+
+        $this->assertTrue($this->app->make(RegisterEntriesFromDisk::class)->hydrateEmpty($entry->fresh(), "# Guide\n\nHydrated.\n"));
+
+        $this->assertNotNull($entry->fresh()->published_version, 'a central hydration was left unpinned');
+        $this->assertSame([1, 0], $this->rows('particles'), 'the body left the entry connection');
+        $this->assertSame([1, 0], $this->rows('versions'));
+    }
+
+    public function test_a_central_entry_under_a_tenant_default_reasserts_on_central_and_a_failed_pin_rolls_the_rewrite_back(): void
+    {
+        $this->withCentral();
+        $entry = BeamUxEntry::on('central')->create(['slug' => 'guide', 'type' => 'page', 'format' => 'mdx', 'title' => 'Guide']);
+        $this->app->make(RegisterEntriesFromDisk::class)->hydrateEmpty($entry, "# Guide\n\nRegistered from disk.\n");
+        // Pristine, as a disk-registered row is: its provenance hash is taken over the stored body.
+        $entry = $entry->fresh();
+        $entry->forceFill(\Splicewire\Beam\Ux\Provenance\Provenance::stamp(\Splicewire\Beam\Ux\Provenance\Provenance::disk('page/guide.mdx'), 'Guide', "# Guide\n\nRegistered from disk.\n", $entry->codec()))->save();
+        $pin = (string) $entry->fresh()->published_version;
+        $body = $this->centralBody($entry);
+        $this->failNextPinSave();
+
+        try {
+            app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->reassert($entry->fresh(), 'Guide', "# Guide\n\nChanged on disk.\n", \Splicewire\Beam\Ux\Provenance\Provenance::disk('page/guide.mdx'));
+            $this->fail('a failure while pinning a central re-assert was swallowed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated failure saving the publication pin', $e->getMessage());
+        }
+
+        $this->assertSame($pin, (string) $entry->fresh()->published_version);
+        $this->assertSame($body, $this->centralBody($entry), 'a failed central re-assert kept its rewrite');
+        $this->assertSame([1, 0], $this->rows('particles'));
+        $this->assertSame([1, 0], $this->rows('versions'));
+
+        $this->assertTrue(app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->reassert($entry->fresh(), 'Guide', "# Guide\n\nChanged on disk.\n", \Splicewire\Beam\Ux\Provenance\Provenance::disk('page/guide.mdx')));
+
+        $this->assertNotSame($pin, (string) $entry->fresh()->published_version, 'a central re-assert left the old pin');
+        $this->assertSame([1, 0], $this->rows('particles'), 'the re-assert left the entry connection or its particle');
+        $this->assertSame([2, 0], $this->rows('versions'));
+    }
+
+    /** A `central` connection carrying the same migrated schema, beside the (tenant) default. */
+    private function withCentral(): void
+    {
+        config(['database.connections.central' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '', 'foreign_key_constraints' => true]]);
+        $default = \DB::getDefaultConnection();
+        \DB::setDefaultConnection('central');
+        try {
+            $this->createTables();
+        } finally {
+            \DB::setDefaultConnection($default);
+        }
+    }
+
+    /** @return array{0: int, 1: int} [central, default] row counts of a beam table */
+    private function rows(string $table): array
+    {
+        return [
+            (int) \DB::connection('central')->table(Beam::table($table))->count(),
+            (int) \DB::table(Beam::table($table))->count(),
+        ];
+    }
+
+    private function centralBody(BeamUxEntry $entry): mixed
+    {
+        return \DB::connection('central')->table(Beam::table('particles'))->where('id', (string) $entry->fresh()->particle_id)->value('payload');
+    }
+
     private function writeGuide(string $body): void
     {
         file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\n---\n\n".$body);

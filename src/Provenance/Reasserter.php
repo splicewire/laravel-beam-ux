@@ -74,7 +74,7 @@ final class Reasserter
         $existing->getConnection()->transaction(function () use ($existing, $source, $newTitle, $newHash, $incomingOrigin, $origin, $publication): void {
             // Into the entry's OWN particle, so the re-asserted body is the next version of one history (a new particle per
             // re-assert restarted the history and orphaned the published versions).
-            $written = $this->drivers->resolve($existing)->write((string) ($existing->particle_id ?? ''), $existing->codec()->encode($source), $existing->namespace);
+            $written = $this->drivers->resolveOnEntryConnection($existing)->write((string) ($existing->particle_id ?? ''), $existing->codec()->encode($source), $existing->namespace);
             $existing->title = $newTitle;
             $existing->asserted_hash = $newHash;
             // A stronger incoming origin takes the coordinate (a host file supersedes a package stub).
@@ -118,7 +118,7 @@ final class Reasserter
         }
 
         try {
-            $item = $this->drivers->resolve($entry)->read((string) $entry->particle_id);
+            $item = $this->drivers->resolveOnEntryConnection($entry)->read((string) $entry->particle_id);
 
             return $item === null ? null : $entry->codec()->decode($item->body);
         } catch (Throwable) {
