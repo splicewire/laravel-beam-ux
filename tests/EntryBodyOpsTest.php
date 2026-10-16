@@ -175,6 +175,24 @@ class EntryBodyOpsTest extends TestCase
         $this->assertSame('h2', EntryBodySaveOp::respond($payload, $entry->fresh())->body[0]['name']);
     }
 
+    public function test_save_refuses_a_canvas_body_with_a_block_outside_the_manifest_profile(): void
+    {
+        // EP-07a c (ADR-0228 d8): the save checks each node against the realm's resolved Manifest
+        // Profile. A tag the profile does not ship (<Marquee>) is refused with a 422 on `body` naming
+        // the node by id + path — proving ProfileLegality runs through the real op, not just in isolation.
+        $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        try {
+            EntryBodySaveOp::handle($entry, $this->saveRequest($entry, [
+                ['kind' => 'block', 'name' => 'Marquee', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [], 'id' => 'm1'],
+            ]), actor: null);
+            $this->fail('expected a ValidationException for an out-of-profile block');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('Marquee', implode("\n", $e->errors()['body']));
+            $this->assertStringContainsString('m1', implode("\n", $e->errors()['body']));
+        }
+    }
+
     public function test_a_css_theme_entry_also_refuses_a_json_doc_body(): void
     {
         // The guard is a codec CAPABILITY (`AcceptsJsonDoc`), not an mdx special case — every format
