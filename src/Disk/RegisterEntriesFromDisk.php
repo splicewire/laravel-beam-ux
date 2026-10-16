@@ -17,6 +17,7 @@ use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
+use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
@@ -211,6 +212,10 @@ class RegisterEntriesFromDisk
                 } else {
                     $skipped[] = $relative;
                 }
+                // Born published (ADR-0225 decision 2; launch row qitem-20261016215906-483ede25): a row registered before
+                // entries were pinned is repaired here. baseline() pins only a body with NO history, so an unpublished
+                // draft is never published, and it snapshots + pins atomically, so a failure surfaces and a rerun retries.
+                app(EntryPublication::class)->baseline($existing->refresh());
 
                 continue;
             }
@@ -265,7 +270,12 @@ class RegisterEntriesFromDisk
         // placing files on disk and explicitly running this batch is asking for content that is live;
         // arriving invisible is the import not happening. Overridable from frontmatter, so importing
         // genuine drafts stays possible.
-        $entry = DB::transaction(function () use ($envelope, $source, $relative): BeamUxEntry {
+        // Born published, like a seeded page: no pin-less entry is created, and the create, the body and the pin commit
+        // together, so a failure while pinning leaves no row behind and propagates (a rerun registers it again).
+        $publication = app(EntryPublication::class);
+        $publication->requireVersionStore();
+
+        $entry = DB::transaction(function () use ($envelope, $source, $relative, $publication): BeamUxEntry {
             // DOCS-06: resolve containment first so its title feeds the asserted hash, then stamp
             // provenance LAST — `origin = disk:<relative>` (a host file) and the title+body hash the
             // import asserts, so a later host edit is detectable by `docs.diverged`. No-ops pre-migration.
@@ -299,6 +309,11 @@ class RegisterEntriesFromDisk
             // `format` default docblock records finding for themes, in a second place.
             $this->writeBody($entry, $source);
 
+            // Compiles too; its compile error is kept with this run's failures below rather than thrown.
+            if (($error = $publication->publishWritten($entry->refresh(), 'registered')) !== null) {
+                $this->failures[$relative] = $error;
+            }
+
             return $entry;
         });
 
@@ -318,7 +333,8 @@ class RegisterEntriesFromDisk
         // and report what it could not, and one page with a syntax error must not abort the other four
         // hundred. Loudness is preserved by {@see scan()} returning the failures and the command
         // reporting them — plus the page 404ing and the doctor naming it, exactly as at save time.
-        if ($this->compile !== null) {
+        // Pinned entries were compiled by publishWritten(); only a non-particle entry (no version history) compiles here.
+        if ($this->compile !== null && $entry->published_version === null) {
             try {
                 $this->compile->forEntry($entry, $source, force: true);
             } catch (CompilationFailed $e) {
