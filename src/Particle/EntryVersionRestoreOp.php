@@ -24,12 +24,11 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
  * and the request is well-formed, the named version simply is not one of its own — and scoping the
  * lookup to the record is what keeps one entry's history from being addressable from another's.
  *
- * ⚠️ **A restore onto an empty document must read as UNAUTHORED, not as a broken page.** Restoring an
- * entry to a version whose body is `{}` retires the artifact rather than compiling a module that exports
- * nothing, so the reader gets the honest never-authored state and the host's own default page. That is
- * {@see \Splicewire\Beam\Ux\Compile\CompileEntryBody}'s behaviour (beam-ux d033815, measured across
- * beam.test, satellite.test and a fresh tower), inherited here because this path calls the same compile
- * action rather than a second one.
+ * ⚠️ **An empty restored version is still only a draft.** Restoring an entry to a version whose body is `{}`
+ * neither compiles nor retires anything: the artifact a reader gets stays the published one. It is the LATER
+ * `publish` of that draft that retires the artifact rather than compiling a module that exports nothing, so the
+ * reader then gets the honest never-authored state and the host's own default page — that is
+ * {@see \Splicewire\Beam\Ux\Compile\CompileEntryBody}'s behaviour (beam-ux d033815), reached through Publish.
  */
 #[ParticleOp(
     resource: 'beam-ux-entry',

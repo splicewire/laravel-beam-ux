@@ -153,11 +153,12 @@ class EntryPublicationTest extends TestCase
         $this->assertStringNotContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
     }
 
-    public function test_a_restore_onto_an_empty_document_retires_the_artifact_rather_than_serving_an_empty_module(): void
+    public function test_publishing_a_restored_empty_document_retires_the_artifact_rather_than_serving_an_empty_module(): void
     {
         // beam-ux d033815: a cleared document is no body, so the reader must read UNAUTHORED (no
-        // artifact at any address) rather than be handed a module that exports nothing. A restore is
-        // the second way to reach that state, and it must land in the same place as the first.
+        // artifact at any address) rather than be handed a module that exports nothing. Restoring an empty
+        // version only drafts it (ADR-0225 decision 5); PUBLISHING that draft is what retires the artifact,
+        // and it must land in the same place as publishing a cleared body directly.
         $entry = $this->publishedPage([]);
         $publication = app(EntryPublication::class);
         $cleared = $publication->publish($entry->fresh());
