@@ -353,7 +353,13 @@ class RegisterEntriesFromDisk
     public function hydrateEmpty(BeamUxEntry $entry, string $source): bool
     {
         $format = $entry->format;
-        $hydrated = DB::transaction(function () use ($entry, $source, $format): bool {
+        // Born published, like register(): refused before anything is written, and the body, the inference and the pin
+        // commit together, so a failure while pinning leaves the entry empty and a retry hydrates it.
+        $publication = app(EntryPublication::class);
+        $publication->requireVersionStore();
+        $compileError = null;
+
+        $hydrated = $entry->getConnection()->transaction(function () use ($entry, $source, $format, $publication, &$compileError): bool {
             $current = $entry->newQuery()->whereKey($entry->getKey())->lockForUpdate()->firstOrFail();
             if ($current->particle_id !== null) {
                 return false;
@@ -361,12 +367,21 @@ class RegisterEntriesFromDisk
             $current->format = $format;
             $this->writeBody($current, $source);
             $this->inference->forEntry($current, $source, persist: true);
+            $compileError = $publication->publishWritten($current->refresh(), 'hydrated');
 
             return true;
         });
-        // Compile the stored body, including a retained body from a previous failed compilation.
+
+        // A body hydrated just now was compiled by publishWritten(); its compile error propagates, as it always has.
+        if ($compileError !== null) {
+            throw new CompilationFailed($compileError);
+        }
+
+        // Otherwise compile the stored body, including a retained body from a previous failed compilation.
         // Never compile the caller's candidate source after the lock has been released.
-        $this->compile?->forEntry($entry->refresh());
+        if (! $hydrated || $entry->refresh()->published_version === null) {
+            $this->compile?->forEntry($entry->refresh());
+        }
 
         return $hydrated;
     }

@@ -2,11 +2,11 @@
 
 namespace Splicewire\Beam\Ux\Provenance;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Throwable;
 
@@ -65,8 +65,16 @@ final class Reasserter
             return false; // Pristine and the origin is unchanged: nothing to re-assert.
         }
 
-        DB::transaction(function () use ($existing, $source, $newTitle, $newHash, $incomingOrigin, $origin): void {
-            $written = $this->drivers->resolve($existing)->write('', $existing->codec()->encode($source), $existing->namespace);
+        // Born published (ADR-0225 decision 2; review-r1, 2026-10-16): a re-asserted body is a new published version, so
+        // the publication capability is checked BEFORE anything is written, and the write, the provenance stamp and the
+        // new pin commit together. Writing then compiling under the old pin served bytes no version recorded.
+        $publication = app(EntryPublication::class);
+        $publication->requireVersionStore();
+
+        $existing->getConnection()->transaction(function () use ($existing, $source, $newTitle, $newHash, $incomingOrigin, $origin, $publication): void {
+            // Into the entry's OWN particle, so the re-asserted body is the next version of one history (a new particle per
+            // re-assert restarted the history and orphaned the published versions).
+            $written = $this->drivers->resolve($existing)->write((string) ($existing->particle_id ?? ''), $existing->codec()->encode($source), $existing->namespace);
             $existing->title = $newTitle;
             $existing->asserted_hash = $newHash;
             // A stronger incoming origin takes the coordinate (a host file supersedes a package stub).
@@ -77,10 +85,19 @@ final class Reasserter
                 $existing->particle_id = $written->key;
             }
             $existing->save();
+
+            // Snapshots the re-asserted body, advances the pin and compiles at the new address. A compile error is
+            // returned, not thrown: non-fatal, as in the seed path, and reported by BeamUxArtifactAudit.
+            $publication->publishWritten($existing->refresh(), 'reasserted');
         });
 
+        // Only an entry with no particle (nothing to version) still compiles separately.
+        if ($existing->refresh()->published_version !== null) {
+            return true;
+        }
+
         try {
-            $this->compile->forEntry($existing->refresh(), $source, force: true);
+            $this->compile->forEntry($existing, $source, force: true);
         } catch (CompilationFailed) {
             // Non-fatal, as in the seed path: reported by BeamUxArtifactAudit.
         }
