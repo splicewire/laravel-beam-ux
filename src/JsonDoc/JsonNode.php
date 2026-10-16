@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\JsonDoc;
 
 use Schemastud\DataSchemas\Attributes\MorphUnion;
+use Spatie\LaravelData\Attributes\PropertyForMorph;
 use Spatie\LaravelData\Contracts\PropertyMorphableData;
 use Splicewire\Beam\Data\BeamData;
 
@@ -22,7 +23,12 @@ use Splicewire\Beam\Data\BeamData;
 ])]
 abstract class JsonNode extends BeamData implements PropertyMorphableData
 {
-    public function __construct(public string $kind) {}
+    // #[PropertyForMorph] is what marks `kind` as the discriminator Spatie passes to morph() at
+    // RUNTIME hydration (DataMorphClassResolver collects only morphable properties). Without it the
+    // resolver hands morph() an empty array, it returns null, and a perfectly valid node fails with
+    // CannotCreateAbstractClass. EP-02's generation path reads the #[MorphUnion] attribute instead, so
+    // its fixtures never needed this — but an op that hydrates a stored body does.
+    public function __construct(#[PropertyForMorph] public string $kind) {}
 
     /**
      * @param  array<string, mixed>  $properties
