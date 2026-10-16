@@ -96,6 +96,35 @@ class StorageDriverResolver implements Gated, Registry
         return $this->driver(self::DEFAULT);
     }
 
+    /**
+     * The entry's driver, bound to the entry's OWN connection (review-r1, 2026-10-16). An entry on a non-default
+     * connection (EntryPromoter's central entry under a tenant default) must keep its body beside it, inside any
+     * transaction a caller holds on that connection; the unbound driver writes on the process default. A driver that
+     * cannot be bound is refused for such an entry rather than writing where no rollback or pin can reach it, the way
+     * {@see BeamUxEntry::forgetBody()} declines to delete through one.
+     */
+    public function resolveOnEntryConnection(BeamUxEntry $entry): mixed
+    {
+        $driver = $this->resolve($entry);
+        $own = $entry->getConnectionName();
+
+        if ($driver instanceof \Splicewire\Beam\Storage\ConnectionAwareStorageDriver) {
+            return $driver->onConnection($own);
+        }
+
+        if ($own !== null && $own !== app('db')->getDefaultConnection()) {
+            throw new \RuntimeException(sprintf(
+                "Entry [%s] lives on the [%s] connection, but its storage driver [%s] cannot be bound to a connection, so its body would be written on the default connection, outside the entry's transaction. Give it a %s.",
+                $entry->slug,
+                $own,
+                is_object($driver) ? $driver::class : get_debug_type($driver),
+                \Splicewire\Beam\Storage\ConnectionAwareStorageDriver::class,
+            ));
+        }
+
+        return $driver;
+    }
+
     public function has(RegistryKey|string $key): bool
     {
         return $this->entries->has($key);

@@ -390,7 +390,7 @@ class RegisterEntriesFromDisk
     private function writeBody(BeamUxEntry $entry, string $source): void
     {
         $body = $entry->codec()->encode($source, $entry->body_style);
-        $item = $this->drivers->resolve($entry)->write('', $body, $entry->namespace);
+        $item = $this->drivers->resolveOnEntryConnection($entry)->write('', $body, $entry->namespace);
         if ($entry->particle_id === null && $item->key !== '') {
             $entry->particle_id = $item->key;
             $entry->save();

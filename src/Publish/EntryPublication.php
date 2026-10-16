@@ -538,7 +538,7 @@ class EntryPublication
     {
         $item = $entry->particle_id === null
             ? null
-            : $this->drivers->resolve($entry)->read((string) $entry->particle_id);
+            : $this->drivers->resolveOnEntryConnection($entry)->read((string) $entry->particle_id);
 
         $this->mirror->mirror(
             $entry,
