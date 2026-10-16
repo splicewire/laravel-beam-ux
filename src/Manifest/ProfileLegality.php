@@ -3,6 +3,8 @@
 namespace Splicewire\Beam\Ux\Manifest;
 
 use Illuminate\Validation\ValidationException;
+use Opis\JsonSchema\Errors\ErrorFormatter;
+use Opis\JsonSchema\Validator;
 
 /**
  * ADR-0228 d8 / ux-0227 d1 (EP-07a, part c) — the PHP save legality check. It walks a canvas (JsonDoc)
@@ -117,7 +119,58 @@ final class ProfileLegality
                 $violations[] = $this->message($path, $id, "block '$name' (category '$category') is not admitted here (the parent admits: $admitted)");
             }
 
+            $this->assertAttrsMatchSchema($node, $entry, $path, $id, $violations);
+
             $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $entry['admitsChildCategories'] ?? null, (bool) ($entry['admitsText'] ?? false), $violations);
+        }
+    }
+
+    /**
+     * EP-07a c-3 — validate a block's props against its node's `attrsSchema` (opis). Literal props are
+     * type-checked; an EXPRESSION prop carries dynamic code, so it satisfies a required field by its
+     * presence but its type is relaxed to "any" here (whether code is allowed at all is the
+     * x-admits-code check's job, not the schema's). A schema violation is one 422 on `body` by id + path.
+     *
+     * @param  array<string, mixed>  $node
+     * @param  array<string, mixed>  $entry
+     * @param  list<string>          $violations
+     */
+    private function assertAttrsMatchSchema(array $node, array $entry, string $path, ?string $id, array &$violations): void
+    {
+        $schema = $entry['attrsSchema'] ?? null;
+        if (! is_array($schema)) {
+            return;
+        }
+
+        $attrs = [];
+        $dynamic = [];
+        foreach ($node['props'] ?? [] as $prop) {
+            $name = $prop['name'] ?? null;
+            if ($name === null) {
+                continue;
+            }
+            $attrs[$name] = $prop['value'] ?? null;
+            if (($prop['kind'] ?? null) === 'expression') {
+                $dynamic[] = $name;
+            }
+        }
+
+        // An expression prop's value is dynamic code: keep it present (so a required field is satisfied)
+        // but relax its declared type to "any", since its runtime type is unknown at save.
+        foreach ($dynamic as $name) {
+            if (isset($schema['properties'][$name])) {
+                $schema['properties'][$name] = new \stdClass;
+            }
+        }
+
+        $result = (new Validator)->validate(
+            json_decode(json_encode($attrs, JSON_FORCE_OBJECT | JSON_THROW_ON_ERROR)),
+            json_decode(json_encode($schema, JSON_THROW_ON_ERROR)),
+        );
+
+        if (! $result->isValid()) {
+            $errors = (new ErrorFormatter)->formatKeyed($result->error());
+            $violations[] = $this->message($path, $id, 'has props that do not match the block schema: '.json_encode($errors, JSON_THROW_ON_ERROR));
         }
     }
 

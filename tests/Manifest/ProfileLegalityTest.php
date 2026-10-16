@@ -116,4 +116,62 @@ class ProfileLegalityTest extends TestCase
 
         $this->assertSame([], $this->violations($body, $this->profile(true)));
     }
+
+    /** @return array<string, mixed> a profile with one node whose attrsSchema is constrained. */
+    private function constrainedProfile(): array
+    {
+        return [
+            'profile' => 'test',
+            'version' => 1,
+            'doc' => ['admitsChildCategories' => ['html']],
+            'nodes' => [[
+                'name' => 'Rating',
+                'group' => 'block',
+                'category' => 'html',
+                'admitsChildCategories' => [],
+                'admitsText' => false,
+                'contentExpression' => null,
+                'attrsSchema' => [
+                    'type' => 'object',
+                    'properties' => ['stars' => ['type' => 'integer']],
+                    'required' => ['stars'],
+                    'additionalProperties' => false,
+                ],
+            ]],
+            'marks' => [],
+            'x-admits-code' => true,
+        ];
+    }
+
+    public function test_a_prop_whose_type_violates_the_node_attrs_schema_is_refused(): void
+    {
+        $body = [$this->block('Rating', 'r1', props: [['name' => 'stars', 'kind' => 'string', 'value' => 'five']])];
+
+        $joined = implode("\n", $this->violations($body, $this->constrainedProfile()));
+        $this->assertStringContainsString('r1', $joined);
+        $this->assertStringContainsString('schema', $joined);
+    }
+
+    public function test_props_matching_the_node_attrs_schema_pass(): void
+    {
+        $body = [$this->block('Rating', 'r1', props: [['name' => 'stars', 'kind' => 'number', 'value' => 5]])];
+
+        $this->assertSame([], $this->violations($body, $this->constrainedProfile()));
+    }
+
+    public function test_a_missing_required_prop_is_refused(): void
+    {
+        $body = [$this->block('Rating', 'r1', props: [])];
+
+        $this->assertNotEmpty($this->violations($body, $this->constrainedProfile()));
+    }
+
+    public function test_an_expression_prop_satisfies_a_required_field_without_being_type_checked(): void
+    {
+        // stars is required + integer, but an expression prop is dynamic: present (so required is
+        // satisfied) and type-relaxed (a string expression does not fail the integer type) when code is admitted.
+        $body = [$this->block('Rating', 'r1', props: [['name' => 'stars', 'kind' => 'expression', 'value' => 'count + 1']])];
+
+        $this->assertSame([], $this->violations($body, $this->constrainedProfile()));
+    }
 }
