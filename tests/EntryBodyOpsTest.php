@@ -19,6 +19,7 @@ use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
 use Splicewire\Beam\Ux\Particle\EntryBodyShowOp;
+use Splicewire\Beam\Ux\Particle\EntryFormSaveOp;
 use Splicewire\Beam\Ux\Particle\EntrySourceSaveOp;
 use Splicewire\Beam\Ux\Schema\ThemeSchemas;
 use Splicewire\Beam\Ux\Workflow\EntryWorkflowShowOp;
@@ -461,6 +462,56 @@ class EntryBodyOpsTest extends TestCase
         }
 
         $this->assertNull($entry->fresh()->particle_id);
+    }
+
+    public function test_save_form_stores_a_theme_form_checked_against_its_schema_and_round_trips(): void
+    {
+        // ADR-0228 d10 Form input: a theme's `{ canvas, site }` fields, checked against the entry's schema,
+        // stored as the body (CssBodyCodec decodes it to custom properties on the mirror).
+        $theme = BeamUxEntry::create(['slug' => 'beam', 'type' => 'theme', 'format' => 'css', 'namespace' => 'theme']);
+
+        $payload = EntryFormSaveOp::handle(
+            $theme,
+            Request::create('/beam-ux-entries/'.$theme->id.'/save-form', 'POST', ['form' => ['canvas' => ['accent' => '#14803f'], 'site' => []]]),
+            actor: null,
+        );
+
+        $this->assertNotSame('', $payload['key']);
+        $envelope = EntryFormSaveOp::respond($payload, $theme->fresh());
+        $this->assertSame('#14803f', $envelope->body['canvas']['accent']);
+    }
+
+    public function test_save_form_refuses_a_field_the_schema_does_not_declare(): void
+    {
+        // The theme schema's canvas is `additionalProperties: false`, so an undeclared field is a 422 on
+        // `form`, before anything is written.
+        $theme = BeamUxEntry::create(['slug' => 'beam', 'type' => 'theme', 'format' => 'css', 'namespace' => 'theme']);
+
+        try {
+            EntryFormSaveOp::handle(
+                $theme,
+                Request::create('/x', 'POST', ['form' => ['canvas' => ['notARealThemeField' => 'x']]]),
+                actor: null,
+            );
+            $this->fail('a form field the schema does not declare was accepted');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('form', $e->errors());
+        }
+
+        $this->assertNull($theme->fresh()->particle_id);
+    }
+
+    public function test_save_form_refuses_a_non_form_entry_naming_its_kind(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        try {
+            EntryFormSaveOp::handle($entry, Request::create('/x', 'POST', ['form' => ['canvas' => []]]), actor: null);
+            $this->fail('a form write was accepted on a blocks entry');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('form', $e->errors());
+            $this->assertStringContainsString('blocks', $e->errors()['form'][0]);
+        }
     }
 
     private function saveRequest(BeamUxEntry $entry, array $body): Request
