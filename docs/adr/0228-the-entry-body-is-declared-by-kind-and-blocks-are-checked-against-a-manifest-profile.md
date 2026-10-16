@@ -48,10 +48,16 @@ page holds `[]`.
    holds **source**. A theme holds a **form**: fields checked against the entry's own `schema` and written through
    `CssBodyCodec`, whatever its format column says. Editor-parity ticket 15 decides what an MDX page holds. Until then it
    holds source. No operation takes a bare `array`.
+   *Amended by ADR-0231 decision 1 (2026-10-15): a component entry holds blocks, as an Authored Component, or, on a
+   central entry only, source.*
+   *Amended by ADR-0233 decision 1 (2026-10-16): an MDX page holds blocks. MDX names its File Language, not its kind.*
 2. **The JsonDoc is a declared Data union.** `JsonNode` is a `PropertyMorphableData` keyed on `kind`, with three arms:
    block, text and opaque. `rushing/laravel-data-nav`'s `NavNode` is the precedent. A block's props keep their five
    kinds. The TypeScript types and the JSON Schema are generated from the classes. `json.ts`'s hand-written types and
    `JsonDocPrinter`'s mirroring retire.
+   *Amended by ADR-0229 decision 3 and ADR-0231 decision 8 (2026-10-15): a block's props have seven kinds, with `field`
+   and `prop` added.*
+   *Amended by ADR-0234 decision 13 (2026-10-16): a block may carry a Click Event, printed as `bdEvent`.*
 3. **Every block has a stable id**, a UUIDv7 as in blockdoc. The TSX printer leaves ids out of source. Wherever source
    comes back in, ids are reattached against the Working Head by content (the `NodeIdRematcher` precedent in
    `schemastud/laravel-blockdoc`). A node with no match gets a fresh id.
@@ -70,10 +76,14 @@ page holds `[]`.
      can't drift silently.
    - **Component entries keep their inference.** `TsxPropInference` stays for them, since they have no class, and its
      schema stays a draft.
+
+   *Amended by ADR-0231 decision 3 (2026-10-15): a placeable component is a `#[NodeType]` class or a component entry of
+   the realm, read at its Working Head.*
 7. **The host declares a profile per realm.** Central entries are edited against the HTML profile plus the host's
    components, and code is admitted. Hosted-site entries are edited against the profile the host offers tenants, marked
    `x-admits-code: false`. The save check and the inspector read the same profile. ADR-0227's blocks-only rule is that
    flag, and it has no second reader.
+   *Amended by ADR-0231 decision 3 (2026-10-15): a profile also offers the realm's own component entries.*
 8. **A save refuses only what it adds or changes.** `save-body` checks each node it adds or changes, compared by id
    against the Working Head. It looks for an unknown name, illegal containment, or a prop that fails its schema. The 422
    names the node's id and path.
@@ -87,6 +97,9 @@ page holds `[]`.
    - **Import and restore never refuse.** They store what they read and record diagnostics, because neither is
      authoring.
    - **A file with code outside its JSX isn't a page.** Importing it leaves the entry as it was and records a diagnostic.
+
+   *Amended by ADR-0233 decision 2 (2026-10-16): for an MDX page each path runs the MDX Lens, which lives beside the MDX
+   kit in `@splicewire/beam-mdx`.*
 10. **There is one input per kind.**
     - **Blocks:** `save-body` takes a declared JsonDoc.
     - **Source:** a source write, `{ source: string }`, serves every codec that edits text, and the codec encodes it. For

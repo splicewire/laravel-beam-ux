@@ -31,6 +31,9 @@ column (F5).
    `headVersion` (the working head) is what the author edits, and `publishedVersion` (the publication pin) is what a
    guest reads. `draftPending` is derived from the two and never stored. Git is not a second history and not its
    storage: ADR-0226 makes git the record of what a Release published.
+   *Amended by ADR-0232 decisions 1 and 2 (2026-10-15): a version also holds the entry fields a guest sees (title,
+   parent and segment, nav order and nav group, layout, template, and per-page SEO fields once they exist). Publish
+   writes them to the row, which holds published values only, and Restore brings them back.*
 2. **The pin is required wherever the editor is mounted.** The pin-less branch of `publishWritten()` is deleted. A host
    that mounts the editor without the versions table and the pin column fails at install, through a doctor audit and a
    boot or mount refusal that names `vendor:publish --tag=beam-migrations --tag=beam-ux-migrations`. It no longer
@@ -38,6 +41,9 @@ column (F5).
 3. **A save is a draft.** The editor's Save calls `recordDraft`: the working head moves and nothing public changes. **Publish**
    is a separate act with its own ability. It pins the version the author names and then mirrors and compiles. The
    mirror file and the compiled artifact follow `publishedVersion` only.
+   *Amended by ADR-0232 decision 7 (2026-10-15): Save also compiles the new version, into an address of its own (the
+   compiler generation and the version id), and Publish moves the pin onto that artifact, compiling only what's
+   missing. The mirror file still follows `publishedVersion` only, and guests are served only the pinned artifact.*
 4. **Publishing a hidden workflow entry also makes it visible.** When the entry's type is bound to a lifecycle and its
    marking isn't `published`, Publish also fires the `publish` transition, under that transition's own guard. The pin and
    the marking stay separate: the marking decides whether the entry is visible, and the pin decides which body a
