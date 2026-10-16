@@ -54,6 +54,15 @@ use Splicewire\Beam\Ux\BeamUxServiceProvider;
  */
 trait WiresParticleDeclarations
 {
+    #[Chained('register', order: 5)]
+    protected function registerStandaloneRecordExclusion(): void
+    {
+        $this->app->tag(
+            \Splicewire\Beam\Ux\Collections\EntryBodyExclusion::class,
+            \Splicewire\Beam\Collections\StandaloneRecordExclusion::class,
+        );
+    }
+
     /**
      * The three resources and four operations this package declares.
      *
