@@ -1,5 +1,9 @@
 # ADR-0214 — The entry-body transport is two particle operations, addressed by id
 
+> **Amendment (2026-10-16, docs-truth sweep):** the entry now carries SEVEN operations; this
+> ADR's "two" remains true of the BODY TRANSPORT pair it rules (save-body / get-body) and of
+> nothing wider.
+
 Status: **accepted** — beam-docs-satellite ticket 24, 2026-08-23.
 Date: 2026-08-23
 Builds on: **ADR-0116** (the host owns the wire and the policy), **ADR-0160** (operation kind is the
