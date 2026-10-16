@@ -436,12 +436,13 @@ class EntryPublication
      * the pin is this package's (`beam-ux-migrations`), and a host can legitimately be mid-way through
      * either.
      *
-     * **Where this returns false, the behaviour is exactly the pre-pin behaviour**: a save mirrors and
-     * compiles at the unpinned address, and it is live when it returns. That is a degrade to a contract
-     * that was correct for years, not a silent degrade of THIS one — the capability that cannot work
-     * ({@see recordDraft()}, {@see restore()}) refuses out loud with the remedy rather than quietly
-     * publishing something an author asked to keep back. Which of the two a host gets is therefore
-     * never ambiguous: the draft door says so, and the save door never claimed to do this.
+     * **Where this returns false, nothing publishes (ADR-0225 decision 2: no pin-less publish).** Every
+     * door that would make a body live ({@see recordDraft()}, {@see publish()}, {@see publishWritten()},
+     * {@see restore()}, and the save op that ends in `publishWritten()`) calls {@see requireVersionStore()}
+     * and refuses out loud with the remedy, BEFORE it writes. There is no unpinned fallback: a host
+     * mid-way through either migration fails closed until it has migrated, and
+     * {@see \Splicewire\Beam\Ux\Doctor\BeamUxVersionStoreAudit} names it before an author finds out.
+     * Callers that only READ (the baseline and clearing an entry) treat false as "nothing to snapshot".
      */
     public function recordsVersions(): bool
     {
@@ -524,8 +525,8 @@ class EntryPublication
      * The two producers every publish ends in, whatever pinned it: project the published body to its
      * placed disk file, then compile the artifact at the entry's current address.
      *
-     * Split out because this IS the whole of publishing on a host with no version store — the pin is
-     * the only step that needs one.
+     * Split out because the pin is the only step that needs the version store; every publish reaches this
+     * only after {@see requireVersionStore()} has passed and the pin is set, so it never publishes unpinned.
      */
     private function mirrorAndCompile(BeamUxEntry $entry): ?string
     {

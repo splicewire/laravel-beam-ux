@@ -7,7 +7,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 
 /**
- * The BASELINE: give every already-written entry a Publication Pin, inside `migrate`.
+ * The BASELINE: give every legacy written entry with NO particle history a Publication Pin, inside `migrate`.
  *
  * ADR-0225 decision 2 makes the pin required wherever the editor is mounted: a publish with no version
  * store refuses instead of mirroring at the unpinned address. An entry written before the pin existed has
@@ -15,9 +15,14 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
  * someone next publishing each entry, in which the pin is required but missing (launch ticket 00,
  * orch-lead 2026-10-16 16:57Z: the baseline runs INSIDE the migration, not as a separate step).
  *
- * Each pin-less entry with a body gets exactly what {@see EntryPublication::baseline()} gives it at its
- * first draft: its current body frozen as version 1, pinned, and compiled at the pinned address. The body
- * is the one already on the page, so a reader sees nothing change.
+ * Each pin-less entry with a body and NO particle history gets exactly what {@see EntryPublication::baseline()}
+ * gives it at its first draft: its current body frozen as version 1, pinned, and compiled at the pinned
+ * address. The body is the one already on the page, so a reader sees nothing change.
+ *
+ * An entry that already HAS history but no pin is deliberately left alone: its history means someone saved a
+ * draft that was never published, so its working copy is not what readers were served, and pinning it here
+ * would publish that draft. `baseline()` no-ops for it, it stays unpinned, and the resolver keeps serving no
+ * override for it until someone publishes.
  *
  * A SEPARATE migration from `add_published_version_to_beam_ux_entries_table` on purpose: hosts that
  * already ran that one (or got the column from the `create` stub) will never run it again, and they are

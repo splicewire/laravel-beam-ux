@@ -5,12 +5,15 @@ namespace Splicewire\Beam\Ux\Tests;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Facades\Beam;
+use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
+use Splicewire\Beam\Ux\Theme\ThemeResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
@@ -77,6 +80,31 @@ class PublicationPinBaselineMigrationTest extends TestCase
         }
         // An entry with no body has nothing to publish, and the baseline manufactures no history.
         $this->assertNull($empty->fresh()->getAttribute('published_version'));
+        $this->assertSame(2, $this->versionRows());
+    }
+
+    public function test_an_entry_with_history_but_no_pin_stays_unpinned_and_unserved(): void
+    {
+        // History without a pin means a draft was saved and never published: its working copy is NOT what
+        // readers were served. The baseline covers only legacy entries with NO particle history, so it must
+        // leave this one alone rather than publish the draft (build-qa L3 review, 2026-10-16 17:33Z).
+        $this->createTables();
+        $particle = BeamParticle::create(['payload' => ['canvas' => ['accent' => '#444444']]]);
+        $theme = BeamUxEntry::create([
+            'namespace' => ThemeResolver::NAMESPACE,
+            'slug' => ThemeResolver::SLUG,
+            'type' => UxType::Component->value,
+            'particle_id' => $particle->id,
+        ]);
+        app(VersionStore::class)->snapshot($particle, 'draft');
+        $legacy = $this->pinlessEntry();
+
+        $this->migration()->up();
+
+        $this->assertNull($theme->fresh()->getAttribute('published_version'), 'the baseline published an unpublished draft');
+        $this->assertSame('#14803f', (new ThemeResolver)->resolve()['canvas']['accent'], 'readers were served the unpublished draft');
+        // The no-history entry beside it is still baselined, so the migration did run: one draft row + one baseline row.
+        $this->assertNotNull($legacy->fresh()->getAttribute('published_version'));
         $this->assertSame(2, $this->versionRows());
     }
 
