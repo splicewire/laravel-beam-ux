@@ -42,6 +42,17 @@ class EditorKitTest extends TestCase
         $this->assertSame($body, app(EntryBody::class)->forSlug('home'));
     }
 
+    public function test_author_can_create_the_packaged_demo_islands(): void
+    {
+        $this->actingAs(new KitAuthor);
+        $block = fn (string $name) => ['kind' => 'block', 'name' => $name, 'isComponent' => true, 'dynamic' => false, 'props' => [], 'children' => []];
+        $body = [$block('DemoHero'), $block('DemoFeatureRow')];
+        $this->postJson('/beam-ux-entries/make-editable', ['slug' => 'demo', 'body' => $body])->assertOk();
+        $entry = BeamUxEntry::query()->where('slug', 'demo')->firstOrFail();
+        $this->assertNotNull($entry->published_version);
+        $this->assertSame($body, app(EntryBody::class)->forSlug('demo'));
+    }
+
     public function test_invalid_slug_is_refused_without_creating_a_row(): void
     {
         $this->actingAs(new KitAuthor);
