@@ -10,10 +10,8 @@ use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
+use Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard;
 use Splicewire\Beam\Ux\JsonDoc\JsonNode;
-use Splicewire\Beam\Ux\Manifest\BodyNodeDiff;
-use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
-use Splicewire\Beam\Ux\Manifest\ProfileLegality;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -115,9 +113,9 @@ class EntryBodySaveOp
         self::assertCanvasBodyWellFormed($input->body);
 
         // ADR-0228 d8 / ux-0227 d1: a canvas body must be admitted by the realm's resolved Manifest
-        // Profile — refusing an unknown block, illegal containment, or (for a tenant-owned entry) code,
+        // Profile — an unknown block, illegal containment, or (for a tenant-owned entry) code is refused
         // by node id + path. Runs after the well-formed pass so the tree is known hydratable first.
-        self::assertBodyAdmittedByProfile($model, $input->body);
+        app(CanvasBodyGuard::class)->assertAdmitted($model, $input->body);
 
         // ADR-0225 decision 2: a save is its own publish, and a publish needs the version store. Refuse
         // BEFORE the write, so a host missing the store keeps the working copy it had.
@@ -174,50 +172,6 @@ class EntryBodySaveOp
                 'body' => 'This document has a node the canvas editor cannot read ('.$e->getMessage().').',
             ]);
         }
-    }
-
-    /**
-     * Refuse a canvas body the realm's resolved Manifest Profile does not admit (EP-07a c / ux-0227 d1),
-     * as a 422 on `body` naming each offending node by id + path. Runs only for a JsonDoc-shaped body.
-     * The profile's `x-admits-code` follows the entry's RESIDENCY ({@see ManifestProfileResolver}), so a
-     * tenant-owned entry refuses code even when an operator is the one saving. EP-06 d8 narrows this to
-     * only the nodes a save adds or changes (by id); for now the whole body is checked.
-     *
-     * @param  array<int|string, mixed>  $body
-     */
-    private static function assertBodyAdmittedByProfile(BeamUxEntry $model, array $body): void
-    {
-        if (! JsonDocShape::is($body)) {
-            return;
-        }
-
-        $profile = app(ManifestProfileResolver::class)->resolve($model);
-
-        // EP-06 d8: narrow the LEGALITY checks to only the nodes this save adds or changes vs the
-        // Working Head (the current stored body), compared by content per id. The code refusal inside
-        // ProfileLegality stays whole-body. On a first save the Working Head is empty, so every node is
-        // "added" and all are checked.
-        $checkIds = (new BodyNodeDiff)->changedIds(self::currentBody($model), $body);
-
-        app(ProfileLegality::class)->assert($body, $profile, $checkIds);
-    }
-
-    /**
-     * The entry's current stored body (the Working Head), read before the write. Empty for a first save
-     * or a non-JsonDoc body.
-     *
-     * @return array<int|string, mixed>
-     */
-    private static function currentBody(BeamUxEntry $model): array
-    {
-        $key = $model->particle_id;
-        if (! is_string($key) || $key === '') {
-            return [];
-        }
-
-        $body = app(StorageDriverResolver::class)->resolve($model)->read($key)?->body ?? [];
-
-        return is_array($body) ? $body : [];
     }
 
     /**

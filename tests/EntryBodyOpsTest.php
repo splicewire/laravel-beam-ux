@@ -17,6 +17,7 @@ use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
+use Splicewire\Beam\Ux\JsonDoc\TsxLens;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
 use Splicewire\Beam\Ux\Particle\EntryBodyShowOp;
@@ -519,24 +520,49 @@ class EntryBodyOpsTest extends TestCase
         $this->assertStringContainsString('Real source.', (string) $envelope->source);
     }
 
-    public function test_save_source_refuses_a_blocks_entry_as_a_422_naming_its_kind(): void
+    public function test_save_source_on_a_tsx_entry_lowers_the_source_to_a_stored_jsondoc(): void
     {
-        // The split d10 makes: a Blocks-kind entry (tsx) has save-body's typed JsonDoc, not a source write.
+        // EP-06 d9: a Blocks-kind (tsx) entry's source write is LOWERED to a JsonDoc through the Node TSX
+        // Lens (the EP-05 refusal became the lowering). A fake lens stands in for the Node run, proven
+        // end-to-end on tots in docs/review/ep-06-node-identity-20261017/d9-real-lens-run.md.
+        $this->app->bind(TsxLens::class, fn () => new class implements TsxLens
+        {
+            public function lower(string $source): array
+            {
+                return [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Lowered']], 'dynamic' => false]];
+            }
+        });
+
         $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        $payload = EntrySourceSaveOp::handle(
+            $entry,
+            Request::create('/beam-ux-entries/'.$entry->id.'/save-source', 'POST', ['source' => 'export default () => <h2>Lowered</h2>']),
+            actor: null,
+        );
+
+        $stored = EntrySourceSaveOp::respond($payload, $entry->fresh())->body;
+        $this->assertSame('h2', $stored[0]['name']);
+        $this->assertArrayHasKey('id', $stored[0]); // a stable id was minted by the rematch
+    }
+
+    public function test_save_source_refuses_a_form_kind_entry_that_has_no_source_editor(): void
+    {
+        // A theme is Form-kind: it has no source editor, so a source write is refused.
+        $theme = BeamUxEntry::create(['slug' => 'beam', 'type' => 'theme', 'format' => 'css', 'namespace' => 'theme']);
 
         try {
             EntrySourceSaveOp::handle(
-                $entry,
-                Request::create('/x', 'POST', ['source' => 'export default () => <div/>;']),
+                $theme,
+                Request::create('/beam-ux-entries/'.$theme->id.'/save-source', 'POST', ['source' => 'whatever']),
                 actor: null,
             );
-            $this->fail('a source write was accepted on a blocks entry');
+            $this->fail('a source write was accepted on a form-kind entry');
         } catch (ValidationException $e) {
             $this->assertArrayHasKey('source', $e->errors());
-            $this->assertStringContainsString('blocks', $e->errors()['source'][0]);
         }
 
-        $this->assertNull($entry->fresh()->particle_id);
+        $this->assertNull($theme->fresh()->particle_id);
     }
 
     public function test_save_form_stores_a_theme_form_checked_against_its_schema_and_round_trips(): void
