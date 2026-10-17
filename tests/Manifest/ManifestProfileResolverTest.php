@@ -6,10 +6,10 @@ use Illuminate\Validation\ValidationException;
 use Schemastud\Blockdoc\Contracts\ManifestNodeSource;
 use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Ux\Manifest\EntryResidency;
-use Splicewire\Beam\Ux\Tests\Manifest\Fixtures\CalloutBlock;
 use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
 use Splicewire\Beam\Ux\Manifest\ProfileLegality;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Tests\Manifest\Fixtures\CalloutBlock;
 use Splicewire\Beam\Ux\Tests\TestCase;
 
 /**
@@ -25,15 +25,30 @@ class ManifestProfileResolverTest extends TestCase
         {
             public function __construct(private ?string $central) {}
 
-            public function isMultiTenant(): bool { return $this->central !== null; }
+            public function isMultiTenant(): bool
+            {
+                return $this->central !== null;
+            }
 
-            public function isActive(): bool { return false; }
+            public function isActive(): bool
+            {
+                return false;
+            }
 
-            public function currentTenant(): ?object { return null; }
+            public function currentTenant(): ?object
+            {
+                return null;
+            }
 
-            public function currentTenantId(): int|string|null { return null; }
+            public function currentTenantId(): int|string|null
+            {
+                return null;
+            }
 
-            public function centralConnection(): ?string { return $this->central; }
+            public function centralConnection(): ?string
+            {
+                return $this->central;
+            }
         };
 
         return new ManifestProfileResolver(new EntryResidency($tenancy));
@@ -78,23 +93,57 @@ class ManifestProfileResolverTest extends TestCase
         (new ProfileLegality)->assert([['kind' => 'opaque', 'reason' => 'unsupported', 'source' => '<script>steal()</script>']], $tenant);
     }
 
+    public function test_packaged_demo_islands_are_sealed_with_empty_strict_props(): void
+    {
+        $profile = $this->resolver(null)->resolve($this->entry(null));
+        $nodes = array_column($profile['nodes'], null, 'name');
+        foreach (['DemoHero', 'DemoFeatureRow'] as $name) {
+            $this->assertArrayHasKey($name, $nodes);
+            $this->assertSame([], $nodes[$name]['admitsChildCategories']);
+            $this->assertFalse($nodes[$name]['admitsText']);
+            $this->assertSame(['type' => 'object', 'additionalProperties' => false], $nodes[$name]['attrsSchema']);
+            $body = [['kind' => 'block', 'name' => $name, 'props' => [], 'children' => []]];
+            (new ProfileLegality)->assert($body, $profile);
+            $body[0]['props'] = [['name' => 'title', 'kind' => 'string', 'value' => 'not a prop']];
+            try {
+                (new ProfileLegality)->assert($body, $profile);
+                $this->fail('sealed island accepted a prop');
+            } catch (ValidationException $e) {
+                $this->assertArrayHasKey('body', $e->errors());
+            }
+        }
+    }
+
     public function test_a_bound_node_source_composes_host_components_onto_the_html_base(): void
     {
         // The host declares its placeable #[NodeType] components through a bound ManifestNodeSource.
         $this->app->instance(ManifestNodeSource::class, new class implements ManifestNodeSource
         {
-            public function profiles(): array { return ['content']; }
+            public function profiles(): array
+            {
+                return ['content'];
+            }
 
-            public function nodeClassesFor(string $profile): array { return [CalloutBlock::class]; }
+            public function nodeClassesFor(string $profile): array
+            {
+                return [CalloutBlock::class];
+            }
 
-            public function docAdmitsFor(string $profile): ?array { return ['html']; }
+            public function docAdmitsFor(string $profile): ?array
+            {
+                return ['html'];
+            }
 
-            public function marksFor(string $profile): array { return []; }
+            public function marksFor(string $profile): array
+            {
+                return [];
+            }
         });
 
         $profile = $this->resolver('central_db')->resolve($this->entry('central'));
         $names = array_column($profile['nodes'], 'name');
 
+        $this->assertContains('DemoHero', $names);
         $this->assertContains('Callout', $names, 'the host #[NodeType] component is composed in');
         $this->assertContains('div', $names, 'the HTML base vocabulary is still present');
 

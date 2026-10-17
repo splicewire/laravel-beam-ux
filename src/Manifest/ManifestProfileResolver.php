@@ -24,7 +24,7 @@ final class ManifestProfileResolver
     public function resolve(BeamUxEntry $entry, string $profile = 'content'): array
     {
         $base = HtmlManifestProfile::manifest();
-        $nodes = $base['nodes'];
+        $nodes = array_merge($base['nodes'], (new PackagedEditorNodeSource)->manifest($profile)['nodes']);
 
         // Compose the host's placeable `#[NodeType]` components onto the HTML base through the bound
         // ManifestNodeSource, when the host declares one (the flagship realm-bind is 07a's later host
