@@ -98,6 +98,101 @@ class EntryPublicationTest extends TestCase
         $this->assertSame(self::BODY_ONE, $entry->fresh()->particle->payload);
     }
 
+    public function test_ep10_save_compiles_its_version_and_preserves_the_public_artifact(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $state = app(EntryPublication::class)->recordDraft($entry->fresh(), self::BODY_TWO);
+        $draft = clone $entry->fresh();
+        $draft->published_version = $state->headVersion;
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($draft));
+        $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
+    }
+
+    public function test_ep10_prunes_only_obsolete_artifacts_and_restore_recompiles_its_draft(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $publication = app(EntryPublication::class);
+        $first = $publication->recordDraft($entry->fresh(), self::BODY_TWO);
+        $firstPath = $this->artifacts()->path($entry, $this->artifacts()->versionKey($first->headVersion));
+        $this->assertTrue($this->artifacts()->disk()->exists($firstPath));
+        $publication->recordDraft($entry->fresh(), self::BODY_ONE);
+        $this->assertFalse($this->artifacts()->disk()->exists($firstPath));
+        $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
+
+        $restored = $publication->restore($entry->fresh(), $first->headVersion);
+        $restoredPath = $this->artifacts()->path($entry, $this->artifacts()->versionKey($restored->headVersion));
+        $this->assertStringContainsString('Two', $this->artifacts()->disk()->get($restoredPath));
+        $this->assertSame($first->publishedVersion, $restored->publishedVersion);
+        $this->assertTrue($restored->draftPending);
+    }
+
+    public function test_ep10_publish_of_missing_artifact_compiles_the_named_snapshot_not_the_head(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $publication = app(EntryPublication::class);
+        $first = $publication->recordDraft($entry->fresh(), self::BODY_TWO);
+        $latest = $publication->recordDraft($entry->fresh(), self::BODY_ONE);
+        $state = $publication->publishVersion($entry->fresh(), $first->headVersion);
+        $this->assertSame($first->headVersion, $state->publishedVersion);
+        $this->assertSame($latest->headVersion, $state->headVersion);
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
+        $this->assertSame(self::BODY_ONE, BeamParticle::find($entry->particle_id)->payload);
+    }
+
+    public function test_ep10_backfill_uses_the_pin_snapshot_and_keeps_the_draft_artifact(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $state = app(EntryPublication::class)->recordDraft($entry->fresh(), self::BODY_TWO);
+        app(CompileEntryBody::class)->forEntry($entry->fresh(), force: true);
+        $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
+        $draftPath = $this->artifacts()->path($entry, $this->artifacts()->versionKey($state->headVersion));
+        $this->assertStringContainsString('Two', $this->artifacts()->disk()->get($draftPath));
+    }
+
+    public function test_ep10_programmatic_save_retains_body_but_does_not_publish_a_failed_compile(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $pin = $entry->published_version;
+        PublicationFakeCompiler::$fails = true;
+        try {
+            try {
+                EntryBodySaveOp::handle($entry->fresh(), Request::create('/', 'POST', ['body' => self::BODY_TWO]), null);
+                $this->fail('Programmatic save published an uncompilable version.');
+            } catch (CompilationFailed $exception) {
+                $this->assertNotEmpty($exception->getMessage());
+            }
+            $this->assertSame(self::BODY_TWO, BeamParticle::find($entry->particle_id)->payload);
+            $this->assertSame($pin, $entry->fresh()->published_version);
+            $this->assertTrue(app(EntryPublication::class)->state($entry->fresh())->draftPending);
+        } finally {
+            PublicationFakeCompiler::$fails = false;
+        }
+    }
+
+    public function test_ep10_failed_draft_compile_keeps_the_draft_and_publish_refuses(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $pin = $entry->published_version;
+        $publication = app(EntryPublication::class);
+        PublicationFakeCompiler::$fails = true;
+        try {
+            $state = $publication->recordDraft($entry->fresh(), self::BODY_TWO);
+            $this->assertNotNull($state->compileError);
+            $this->assertTrue($state->draftPending);
+            $this->assertSame(self::BODY_TWO, BeamParticle::find($entry->particle_id)->payload);
+            try {
+                $publication->publishVersion($entry->fresh(), $state->headVersion);
+                $this->fail('Publish accepted an uncompilable version');
+            } catch (CompilationFailed $exception) {
+                $this->assertNotEmpty($exception->getMessage());
+            }
+            $this->assertSame($pin, $entry->fresh()->published_version);
+            $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
+        } finally {
+            PublicationFakeCompiler::$fails = false;
+        }
+    }
+
     public function test_a_draft_is_recorded_as_a_version_and_the_reader_keeps_the_published_body(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
@@ -338,7 +433,7 @@ class EntryPublicationTest extends TestCase
         $this->assertNull($entry->fresh()->particle_id, 'the refused draft still bound a particle');
     }
 
-    public function test_a_failed_compile_leaves_the_publish_landed_and_reports_itself(): void
+    public function test_publish_reuses_the_saved_artifact_without_invoking_a_now_failing_compiler(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
         app(EntryPublication::class)->recordDraft($entry->fresh(), self::BODY_TWO);
@@ -351,8 +446,9 @@ class EntryPublicationTest extends TestCase
             PublicationFakeCompiler::$fails = false;
         }
 
-        $this->assertNotNull($state->compileError);
-        $this->assertFalse($state->draftPending, 'a failed compile rolled the publication back');
+        $this->assertNull($state->compileError);
+        $this->assertFalse($state->draftPending);
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
     }
 
     public function test_the_artifact_address_follows_the_publication_pin_and_not_the_working_head(): void
@@ -501,15 +597,30 @@ class EntryPublicationTest extends TestCase
         {
             public function __construct(private string $central) {}
 
-            public function isMultiTenant(): bool { return true; }
+            public function isMultiTenant(): bool
+            {
+                return true;
+            }
 
-            public function isActive(): bool { return true; }
+            public function isActive(): bool
+            {
+                return true;
+            }
 
-            public function currentTenant(): ?object { return null; }
+            public function currentTenant(): ?object
+            {
+                return null;
+            }
 
-            public function currentTenantId(): int|string|null { return 1; }
+            public function currentTenantId(): int|string|null
+            {
+                return 1;
+            }
 
-            public function centralConnection(): ?string { return $this->central; }
+            public function centralConnection(): ?string
+            {
+                return $this->central;
+            }
         });
     }
 
@@ -676,6 +787,26 @@ class EntryPublicationTest extends TestCase
         try {
             $publication->publishVersion($entry->fresh(), $restored->headVersion);
             $this->fail('Restored illegal draft bypassed publication admission.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('marquee', implode('\n', $exception->errors()['body']));
+        }
+        $this->assertSame($before, $entry->fresh()->getAttributes());
+    }
+
+    public function test_programmatic_publish_cannot_pin_a_restored_illegal_working_head(): void
+    {
+        $entry = $this->legacyPublishedPage();
+        $publication = app(EntryPublication::class);
+        $legacy = $publication->state($entry)->publishedVersion;
+        $publication->recordDraft($entry->fresh(), self::BODY_TWO);
+        $publication->publish($entry->fresh());
+        $this->bindSplitTenancy();
+        $publication->restore($entry->fresh(), $legacy);
+        $before = $entry->fresh()->getAttributes();
+
+        try {
+            $publication->publishAuthoredBody($entry->fresh());
+            $this->fail('An illegal working head was compared to itself and published.');
         } catch (ValidationException $exception) {
             $this->assertStringContainsString('marquee', implode('\n', $exception->errors()['body']));
         }

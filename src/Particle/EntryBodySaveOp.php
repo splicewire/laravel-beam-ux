@@ -4,7 +4,6 @@ namespace Splicewire\Beam\Ux\Particle;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
@@ -127,7 +126,7 @@ class EntryBodySaveOp
             // publishes the way {@see EntryPublishOp} does: the body is recorded as a version, the
             // publication pin moves to it, the disk mirror and the artifact follow the pin. An author
             // who never opens the draft affordance sees no difference, and gains a history.
-            'compileError' => $publication->publishWritten($model->refresh()),
+            'compileError' => $publication->publishAuthoredBody($model->refresh()),
         ];
     }
 
