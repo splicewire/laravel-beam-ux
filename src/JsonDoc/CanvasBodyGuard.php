@@ -43,7 +43,9 @@ final class CanvasBodyGuard
             return [];
         }
 
-        $body = $this->drivers->resolve($entry)->read($key)?->body ?? [];
+        // On the entry's OWN connection: an entry on a non-default connection (a tenant's, central under a
+        // tenant default) read through the unbound driver showed the guard an empty or foreign body.
+        $body = $this->drivers->resolveOnEntryConnection($entry)->read($key)?->body ?? [];
 
         return is_array($body) ? $body : [];
     }

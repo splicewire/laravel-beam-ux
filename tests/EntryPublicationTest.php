@@ -481,6 +481,90 @@ class EntryPublicationTest extends TestCase
         });
     }
 
+    /**
+     * review-r1, EP-07a boundary-fix re-review (2026-10-17): Publish guards the working copy, which it must read
+     * on the ENTRY's connection. Read on the default one, a tenant entry on its own connection showed the guard
+     * nothing (`[]`), passed, and the real body was pinned and compiled unchecked.
+     */
+    public function test_publish_guards_the_working_copy_on_the_entrys_own_connection(): void
+    {
+        config(['database.connections.tenant_acme' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '', 'foreign_key_constraints' => true]]);
+        $this->createTables('tenant_acme');
+        $this->bindSplitTenancy();
+
+        \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
+        // Code written straight to the particle, as history from before the save check, on the tenant's connection.
+        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(
+            (new \Splicewire\Beam\Models\BeamParticle)->setConnection('tenant_acme'),
+            [['kind' => 'opaque', 'reason' => 'map', 'source' => '{steal()}']],
+        );
+        $entry = BeamUxEntry::on('tenant_acme')->create(['slug' => 'tenant-home', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site', 'particle_id' => $particle->id]);
+        $this->assertSame(0, \DB::table(Beam::table('particles'))->count(), 'the default connection must hold no body, or the probe proves nothing');
+
+        try {
+            app(EntryPublication::class)->publish($entry->fresh());
+            $this->fail('publish pinned a tenant body it never checked');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('opaque', implode("\n", $e->errors()['body']));
+        }
+
+        $this->assertNull($entry->fresh()->published_version);
+        $this->assertSame(0, \DB::connection('tenant_acme')->table(Beam::table('versions'))->count(), 'a refused publish recorded a version');
+    }
+
+    /**
+     * review-r1 R2 (2026-10-17): publish() baselined first, and on an entry with no history baseline() pins,
+     * mirrors and compiles the working copy itself, so code was published before the guard refused it. The
+     * guard now runs before any write: a refused first publish leaves history, pin, artifact and mirror as they were.
+     */
+    public function test_a_refused_first_publish_writes_nothing(): void
+    {
+        Storage::fake('mirror');
+        config(['beam.ux.storage.mirror_disk' => 'mirror']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+
+        // History-less, as a body written before the save check existed; then the entry is tenant-resident.
+        $entry = BeamUxEntry::create(['slug' => 'legacy', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site']);
+        \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
+        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(new \Splicewire\Beam\Models\BeamParticle, [['kind' => 'opaque', 'reason' => 'map', 'source' => '{steal()}']]);
+        $entry->forceFill(['particle_id' => $particle->id])->save();
+        $this->bindSplitTenancy();
+        $artifactsBefore = Storage::disk('artifacts')->allFiles();
+
+        try {
+            app(EntryPublication::class)->publish($entry->fresh());
+            $this->fail('a code-bearing first publish was not refused');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('opaque', implode("\n", $e->errors()['body']));
+        }
+
+        $this->assertNull($entry->fresh()->published_version, 'the pin moved');
+        $this->assertSame(0, \DB::table(Beam::table('versions'))->count(), 'history was written');
+        $this->assertSame($artifactsBefore, Storage::disk('artifacts')->allFiles(), 'an artifact was compiled');
+        $this->assertSame([], Storage::disk('mirror')->allFiles(), 'the body was mirrored');
+    }
+
+    /** The legality half of the same order: an illegal history-less body is checked against nothing published, not itself. */
+    public function test_a_first_publish_of_an_illegal_body_is_refused(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'legacy', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site']);
+        \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
+        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(new \Splicewire\Beam\Models\BeamParticle, [['kind' => 'block', 'id' => 'mq', 'name' => 'marquee', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []]]);
+        $entry->forceFill(['particle_id' => $particle->id])->save();
+        $this->bindSplitTenancy();
+
+        try {
+            app(EntryPublication::class)->publish($entry->fresh());
+            $this->fail('an illegal first publish passed because it was compared with its own baseline');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('marquee', implode("\n", $e->errors()['body']));
+        }
+
+        $this->assertNull($entry->fresh()->published_version);
+        $this->assertSame(0, \DB::table(Beam::table('versions'))->count());
+    }
+
     public function test_a_tenant_save_draft_with_an_opaque_node_is_refused_at_the_choke(): void
     {
         // HIGH-1: save-draft -> recordDraft -> write(), the choke. A tenant entry refuses an opaque node

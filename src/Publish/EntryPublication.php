@@ -170,7 +170,6 @@ class EntryPublication
         // that mirrored and compiled at the unpinned address is deleted; a host without the version
         // store refuses here, naming the fix, instead of publishing outside the entry's one history.
         $this->requireVersionStore();
-        $this->baseline($entry);
 
         $particle = $this->particle($entry);
 
@@ -180,10 +179,15 @@ class EntryPublication
 
         // Publishing serves the body, so it refuses code and illegality alike (ADR-0227 d1, ADR-0228 d8):
         // a restore may have stored an illegal draft (d9 as amended), and it must not go live from here.
+        // BEFORE baseline(): on an entry with no history baseline() itself pins, mirrors and compiles the
+        // working copy, and would then also be the version the legality diff compares against (review-r1 R2).
         $guard = app(CanvasBodyGuard::class);
         $pinned = $this->publishedVersionId($entry);
         $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
         $guard->assertPublishable($entry, $guard->workingHead($entry), JsonDocShape::is($publishedBody) ? $publishedBody : []);
+
+        $this->baseline($entry);
+        $particle = $this->particle($entry->refresh()) ?? $particle;
 
         $version = $this->versionForWorkingCopy($particle, $label ?? 'published');
 
