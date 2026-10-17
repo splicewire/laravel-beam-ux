@@ -17,7 +17,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * `namespace` (dots→slashes) + `type` + `slug` + the **format extension** (sourced from the entry's
  * `format` via its codec, ADR-0164 — no longer a hardcoded `.tsx`); the {@see DatePartitionedPlacement}
  * strategy files content by date. A {@see PlacementResolver} picks the strategy per entry
- * (per-entry ref → per-namespace map → default).
+ * (per-entry ref → per-namespace map → disk origin → default).
  */
 interface FilePlacement
 {

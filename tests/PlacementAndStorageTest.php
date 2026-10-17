@@ -78,6 +78,24 @@ class PlacementAndStorageTest extends TestCase
         $this->assertInstanceOf(DefaultPlacement::class, $resolver->resolve($override));
     }
 
+    public function test_disk_origin_is_used_only_without_an_explicit_placement_policy(): void
+    {
+        $resolver = (new PlacementResolver)->register('default', new DefaultPlacement);
+        $entry = new BeamUxEntry(['slug' => 'privacy', 'namespace' => 'legal', 'type' => UxType::Page, 'format' => UxFormat::Mdx]);
+        $entry->origin = 'disk:legal/privacy.mdx';
+        $this->assertSame('legal/privacy.mdx', $resolver->resolve($entry)->pathFor($entry));
+        $entry->placement_ref = 'default';
+        $this->assertSame('legal/page/privacy.mdx', $resolver->resolve($entry)->pathFor($entry));
+        $entry->placement_ref = null;
+        $resolver->mapNamespaces(['legal' => 'default']);
+        $this->assertSame('legal/page/privacy.mdx', $resolver->resolve($entry)->pathFor($entry));
+        $resolver->mapNamespaces([]);
+        foreach (['package:legal', 'cms', null] as $origin) {
+            $entry->origin = $origin;
+            $this->assertSame('legal/page/privacy.mdx', $resolver->resolve($entry)->pathFor($entry));
+        }
+    }
+
     public function test_driver_resolver_precedence_entry_ref_then_namespace_map_then_default(): void
     {
         $default = new FakeDriver('default');

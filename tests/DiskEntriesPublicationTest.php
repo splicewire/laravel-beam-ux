@@ -15,7 +15,9 @@ use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\JsonDoc\TsxLens;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
+use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
+use Splicewire\Beam\Ux\Type\UxType;
 
 /**
  * An entry registered from disk is BORN PUBLISHED (ADR-0225 decision 2), like a seeded page.
@@ -56,6 +58,30 @@ class DiskEntriesPublicationTest extends TestCase
         @rmdir($this->root.'/page');
         @rmdir($this->root);
         parent::tearDown();
+    }
+
+    public function test_baseline_keeps_an_imported_legacy_disk_path_without_a_second_source(): void
+    {
+        $disk = Storage::fake('legacy-source');
+        $disk->put('access.mdx', "# Access\n");
+        $scanner = app(RegisterEntriesFromDisk::class);
+        $scanner->scan($disk->path(''), default: UxType::Page);
+        $entry = BeamUxEntry::query()->where('slug', 'access')->firstOrFail();
+        $this->assertSame('disk:access.mdx', $entry->origin);
+
+        // Reproduce an imported pre-L3 row: body present, no history or publication pin.
+        $entry->forceFill(['published_version' => null])->save();
+        \DB::table(Beam::table('versions'))->where('versionable_id', $entry->particle_id)->delete();
+        $this->app->instance(PlacedDiskMirror::class, new PlacedDiskMirror($disk));
+        $this->app->forgetInstance(EntryPublication::class);
+        app(EntryPublication::class)->baseline($entry->fresh());
+
+        $this->assertSame(['access.mdx'], $disk->allFiles(), 'baseline created a second recognized source');
+        $this->assertSame("# Access\n", $disk->get('access.mdx'));
+        $this->assertNotNull($entry->fresh()->published_version);
+        $plan = $scanner->plan($disk->path(''), UxType::Page);
+        $this->assertCount(1, $plan['matched']);
+        $this->assertSame([], $plan['unregistered']);
     }
 
     private function guide(): ?BeamUxEntry
