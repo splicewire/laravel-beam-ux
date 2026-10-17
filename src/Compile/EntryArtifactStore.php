@@ -167,9 +167,8 @@ class EntryArtifactStore
     }
 
     /**
-     * Write the artifact for the entry's current version and drop every older one for that entry, so a
-     * long-lived site does not accumulate one dead module per edit. Pruning is per-entry and version-
-     * scoped: nothing else's artifacts are ever in the blast radius.
+     * Write the current artifact and prune addresses no longer held by the pin or working head.
+     * Pruning is per-entry; other entries are never in the blast radius.
      */
     public function put(BeamUxEntry $entry, string $code): string
     {

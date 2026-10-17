@@ -61,6 +61,20 @@ class CompileEntryBody
             return null;
         }
 
+        // Backfills must compile the pin's snapshot, never file a newer working body at its address.
+        $pin = $entry->getAttribute('published_version');
+        if ($pin !== null && $entry->particle_id !== null) {
+            $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($entry->particle, (string) $pin);
+            $body = $version?->snapshot['payload'] ?? null;
+            if (! is_array($body)) {
+                throw CompilationFailed::for($entry, 'The publication pin has no valid body snapshot.');
+            }
+            $path = $this->forVersion($entry, (string) $version->id, $body, $force);
+            $this->artifacts->prune($entry);
+
+            return $path;
+        }
+
         if (! $force && $this->artifacts->has($entry)) {
             return $this->artifacts->path($entry);
         }
@@ -83,7 +97,7 @@ class CompileEntryBody
     }
 
     /** Compile an immutable, entry-owned snapshot without changing the entry's public address. */
-    public function forVersion(BeamUxEntry $entry, string $versionId, array $body): ?string
+    public function forVersion(BeamUxEntry $entry, string $versionId, array $body, bool $force = false): ?string
     {
         if ($this->uncompilable($entry)) {
             throw CompilationFailed::unsupported($entry);
@@ -97,7 +111,7 @@ class CompileEntryBody
 
             return null;
         }
-        if ($this->artifacts->disk()->exists($path)) {
+        if (! $force && $this->artifacts->disk()->exists($path)) {
             return $path;
         }
         $source = $entry->codec() instanceof AcceptsJsonDoc && JsonDocShape::is($body)
