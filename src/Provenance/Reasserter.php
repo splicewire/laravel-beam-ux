@@ -36,6 +36,43 @@ final class Reasserter
      */
     public function reassert(BeamUxEntry $existing, ?string $title, string $source, string $incomingOrigin): bool
     {
+        return $this->reassertBody($existing, $title, $existing->codec()->encode($source), $incomingOrigin);
+    }
+
+    /** Seed shipped structured content without passing it through the author profile guard. */
+    public function seedBody(array $coordinate, array $attributes, array $body, string $origin): BeamUxEntry
+    {
+        if (! $this->asserts($origin)) {
+            throw new \InvalidArgumentException('A system seed requires package: or disk: provenance.');
+        }
+        $publication = app(EntryPublication::class);
+        $publication->requireVersionStore();
+        $model = new BeamUxEntry;
+
+        return $model->getConnection()->transaction(function () use ($model, $coordinate, $attributes, $body, $origin, $publication) {
+            $existing = $model->newQuery()->where($coordinate)->lockForUpdate()->first();
+            if ($existing !== null) {
+                $this->reassertBody($existing, $attributes['title'] ?? null, $body, $origin);
+                // Same repair as SeedsEntries: baseline only pins a body with no history,
+                // never an unpublished draft which already has history.
+                $publication->baseline($existing->refresh());
+
+                return $existing->refresh();
+            }
+            $entry = $model->newInstance(array_merge(BeamUxEntry::publishedMarkingAttributes(), $attributes, $coordinate));
+            if ($entry->getConnection()->getSchemaBuilder()->hasColumn($entry->getTable(), 'origin')) {
+                $entry->origin = $origin;
+                $entry->asserted_hash = Provenance::hash($entry->title, $entry->codec()->decode($body));
+            }
+            $entry->save();
+            $this->writeAndPublish($entry, $body, $publication, 'seeded');
+
+            return $entry->refresh();
+        });
+    }
+
+    private function reassertBody(BeamUxEntry $existing, ?string $title, array $body, string $incomingOrigin): bool
+    {
         if (! Schema::hasColumn($existing->getTable(), 'asserted_hash')) {
             return false; // Pre-migration: create-once stands; a row without provenance is never re-asserted.
         }
@@ -60,7 +97,7 @@ final class Reasserter
 
         $newTitle = $title ?? $existing->title;
         // Like with like: the new source as it WOULD be stored, the form the asserted hash was taken over.
-        $newHash = Provenance::hash($newTitle, Provenance::asStored($existing->codec(), $source));
+        $newHash = Provenance::hash($newTitle, $existing->codec()->decode($body));
         if ($newHash === (string) $existing->asserted_hash) {
             return false; // Pristine and the origin is unchanged: nothing to re-assert.
         }
@@ -71,24 +108,17 @@ final class Reasserter
         $publication = app(EntryPublication::class);
         $publication->requireVersionStore();
 
-        $existing->getConnection()->transaction(function () use ($existing, $source, $newTitle, $newHash, $incomingOrigin, $origin, $publication): void {
+        $existing->getConnection()->transaction(function () use ($existing, $body, $newTitle, $newHash, $incomingOrigin, $origin, $publication): void {
             // Into the entry's OWN particle, so the re-asserted body is the next version of one history (a new particle per
             // re-assert restarted the history and orphaned the published versions).
-            $written = $this->drivers->resolveOnEntryConnection($existing)->write((string) ($existing->particle_id ?? ''), $existing->codec()->encode($source), $existing->namespace);
             $existing->title = $newTitle;
             $existing->asserted_hash = $newHash;
             // A stronger incoming origin takes the coordinate (a host file supersedes a package stub).
             if (Provenance::rank($incomingOrigin) > Provenance::rank($origin)) {
                 $existing->origin = $incomingOrigin;
             }
-            if ($written->key !== '') {
-                $existing->particle_id = $written->key;
-            }
             $existing->save();
-
-            // Snapshots the re-asserted body, advances the pin and compiles at the new address. A compile error is
-            // returned, not thrown: non-fatal, as in the seed path, and reported by BeamUxArtifactAudit.
-            $publication->publishWritten($existing->refresh(), 'reasserted');
+            $this->writeAndPublish($existing, $body, $publication, 'reasserted');
         });
 
         // Only an entry with no particle (nothing to version) still compiles separately.
@@ -97,12 +127,23 @@ final class Reasserter
         }
 
         try {
-            $this->compile->forEntry($existing, $source, force: true);
+            $this->compile->forEntry($existing, $existing->codec()->decode($body), force: true);
         } catch (CompilationFailed) {
             // Non-fatal, as in the seed path: reported by BeamUxArtifactAudit.
         }
 
         return true;
+    }
+
+    /** Shared connection-bound system write; caller owns the transaction and provenance check. */
+    private function writeAndPublish(BeamUxEntry $entry, array $body, EntryPublication $publication, string $label): void
+    {
+        $written = $this->drivers->resolveOnEntryConnection($entry)->write((string) ($entry->particle_id ?? ''), $body, $entry->namespace);
+        if ($written->key !== '') {
+            $entry->particle_id = $written->key;
+            $entry->save();
+        }
+        $publication->publishWritten($entry->refresh(), $label);
     }
 
     private function asserts(string $origin): bool
