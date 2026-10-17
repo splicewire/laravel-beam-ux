@@ -141,9 +141,10 @@ class EntrySourceSaveOp
      */
     private static function lowerToBlocks(BeamUxEntry $entry, string $source): array
     {
+        // The lowered body is held to the realm's profile at the publication choke (EntryPublication::write);
+        // here we only lower + reattach ids against the Working Head.
         $guard = app(CanvasBodyGuard::class);
         $body = app(SourceToBlocks::class)->convert($source, $guard->workingHead($entry));
-        $guard->assertAdmitted($entry, $body);
 
         return $body;
     }

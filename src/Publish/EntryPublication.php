@@ -18,6 +18,7 @@ use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
+use Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Data\EntryPublicationData;
@@ -207,6 +208,12 @@ class EntryPublication
                 'ref' => "No version [{$ref}] belongs to this entry; there is nothing to restore.",
             ]);
         }
+
+        // ADR-0227 d1 — a restore must not bring code into a tenant entry: guard the version's body BEFORE
+        // applying it (refuse before any write), the same boundary a save enforces. The body is the
+        // particle snapshot's `payload` ({@see BeamParticle::toVersionSnapshot()}).
+        $restoredBody = $version->snapshot['payload'] ?? null;
+        app(CanvasBodyGuard::class)->assertAdmitted($entry, is_array($restoredBody) ? $restoredBody : []);
 
         $this->versions->restore($particle, (string) $version->id);
 
@@ -417,6 +424,12 @@ class EntryPublication
      */
     public function write(BeamUxEntry $entry, array $body): array
     {
+        // ADR-0227 d1 / ADR-0228 d8 — THE CHOKE: every canvas-body write that goes through publication
+        // (save-body, save-source, a draft via recordDraft) is held to the realm's Manifest Profile here,
+        // including its code boundary, so no op can bypass it by forgetting to call the guard. The guard is
+        // a no-op for a non-canvas (Source/Form) body.
+        app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
+
         $written = $this->authoringDriver()->write(
             (string) ($entry->particle_id ?? ''),
             $body,

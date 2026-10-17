@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\JsonDoc;
 
+use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Manifest\BodyNodeDiff;
 use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
@@ -56,6 +57,21 @@ final class CanvasBodyGuard
     {
         if (! JsonDocShape::is($body)) {
             return;
+        }
+
+        // ADR-0228 d2 — well-formedness first: every node must hydrate through the JsonNode union, or the
+        // document is one the canvas editor cannot read. A bad node (unknown kind, malformed field)
+        // becomes the same clean 422 as any other bad input, never a 500 from deep in the hydrator.
+        try {
+            foreach ($body as $node) {
+                JsonNode::from($node);
+            }
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            throw ValidationException::withMessages([
+                'body' => 'This document has a node the canvas editor cannot read ('.$e->getMessage().').',
+            ]);
         }
 
         $profile = $this->resolver->resolve($entry);
