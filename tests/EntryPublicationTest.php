@@ -66,6 +66,38 @@ class EntryPublicationTest extends TestCase
         $this->app->forgetInstance(EntryArtifactStore::class);
     }
 
+    public function test_editor_draft_refuses_a_stale_base_before_any_write(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $publication = app(EntryPublication::class);
+        $base = $publication->state($entry)->headVersion;
+        $first = EntryDraftSaveOp::handle($entry, Request::create('/', 'POST', ['body' => self::BODY_TWO, 'baseVersion' => $base]), null);
+        $this->assertNotSame($base, $first->headVersion);
+        try {
+            EntryDraftSaveOp::handle($entry->fresh(), Request::create('/', 'POST', ['body' => self::BODY_ONE, 'baseVersion' => $base]), null);
+            $this->fail('stale editor save was accepted');
+        } catch (\Symfony\Component\HttpKernel\Exception\ConflictHttpException $e) {
+            $this->assertStringContainsString('base', $e->getMessage());
+        }
+        $this->assertSame($first->headVersion, $publication->state($entry->fresh())->headVersion);
+        $this->assertCount(2, $publication->state($entry->fresh())->versions);
+        $this->assertSame(self::BODY_TWO, $entry->fresh()->particle->payload);
+    }
+
+    public function test_named_publish_pins_the_seen_version_without_replacing_a_newer_working_head(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $publication = app(EntryPublication::class);
+        $seen = $publication->recordDraft($entry->fresh(), self::BODY_TWO);
+        $later = $publication->recordDraft($entry->fresh(), self::BODY_ONE);
+        $published = EntryPublishOp::handle($entry->fresh(), Request::create('/', 'POST', ['ref' => $seen->headVersion]), null);
+        $this->assertSame($seen->headVersion, $published->publishedVersion);
+        $this->assertSame($later->headVersion, $published->headVersion);
+        $this->assertTrue($published->draftPending);
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
+        $this->assertSame(self::BODY_ONE, $entry->fresh()->particle->payload);
+    }
+
     public function test_a_draft_is_recorded_as_a_version_and_the_reader_keeps_the_published_body(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
@@ -165,7 +197,7 @@ class EntryPublicationTest extends TestCase
         \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
         // Built the way EntryPromoter builds one: the particle written with its own central connection, then the entry.
         $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(
-            (new \Splicewire\Beam\Models\BeamParticle)->setConnection('central'),
+            (new BeamParticle)->setConnection('central'),
             self::BODY_ONE,
         );
         $entry = BeamUxEntry::on('central')->create(['slug' => 'central-home', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site', 'particle_id' => $particle->id]);
@@ -396,14 +428,14 @@ class EntryPublicationTest extends TestCase
 
         $drafted = EntryDraftSaveOp::handle(
             $entry->fresh(),
-            Request::create('/x', 'POST', ['body' => self::BODY_TWO, 'label' => 'from the op']),
+            Request::create('/x', 'POST', ['body' => self::BODY_TWO, 'baseVersion' => app(EntryPublication::class)->state($entry->fresh())->headVersion, 'label' => 'from the op']),
             actor: null,
         );
         $this->assertInstanceOf(EntryPublicationData::class, $drafted);
         $this->assertTrue($drafted->draftPending);
         $this->assertSame('from the op', $drafted->versions[0]->label);
 
-        $published = EntryPublishOp::handle($entry->fresh(), Request::create('/x', 'POST', []), actor: null);
+        $published = EntryPublishOp::handle($entry->fresh(), Request::create('/x', 'POST', ['ref' => $drafted->headVersion]), actor: null);
         $this->assertFalse($published->draftPending);
 
         $restored = EntryVersionRestoreOp::handle(
@@ -610,6 +642,79 @@ class EntryPublicationTest extends TestCase
         app(EntryPublication::class)->restore($entry->fresh(), $codeRef);
     }
 
+    public function test_named_publish_republishes_a_legacy_page_against_the_published_body(): void
+    {
+        $entry = $this->legacyPublishedPage();
+        $publication = app(EntryPublication::class);
+        $pin = $publication->state($entry)->publishedVersion;
+        $draft = $publication->recordDraft($entry->fresh(), self::BODY_TWO);
+        $this->bindSplitTenancy();
+
+        $result = $publication->publishVersion($entry->fresh(), $pin);
+
+        $this->assertSame($pin, $result->publishedVersion);
+        $this->assertSame($draft->headVersion, $result->headVersion);
+        $this->assertSame(self::BODY_TWO, $entry->fresh()->particle->payload);
+    }
+
+    public function test_restore_stores_illegal_legacy_nodes_but_named_publish_refuses_them(): void
+    {
+        $entry = $this->legacyPublishedPage();
+        $publication = app(EntryPublication::class);
+        $legacy = $publication->state($entry)->publishedVersion;
+        $legacyBody = $entry->fresh()->particle->payload;
+        $publication->recordDraft($entry->fresh(), self::BODY_TWO);
+        $current = $publication->publish($entry->fresh());
+        $this->bindSplitTenancy();
+
+        $restored = $publication->restore($entry->fresh(), $legacy);
+
+        $this->assertSame($legacyBody, $entry->fresh()->particle->payload);
+        $this->assertSame($current->publishedVersion, $restored->publishedVersion);
+        $this->assertNotEmpty($restored->diagnostics);
+        $before = $entry->fresh()->getAttributes();
+        try {
+            $publication->publishVersion($entry->fresh(), $restored->headVersion);
+            $this->fail('Restored illegal draft bypassed publication admission.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('marquee', implode('\n', $exception->errors()['body']));
+        }
+        $this->assertSame($before, $entry->fresh()->getAttributes());
+    }
+
+    private function legacyPublishedPage(): BeamUxEntry
+    {
+        $entry = BeamUxEntry::create(['slug' => 'legacy-published', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site']);
+        \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
+        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(new BeamParticle, [[
+            'kind' => 'block', 'id' => 'legacy', 'name' => 'marquee', 'isComponent' => false,
+            'dynamic' => false, 'props' => [], 'children' => [],
+        ]]);
+        $entry->forceFill(['particle_id' => $particle->id])->save();
+        app(EntryPublication::class)->baseline($entry);
+
+        return $entry->fresh();
+    }
+
+    public function test_publishing_a_historical_code_version_refuses_before_any_write(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $publication = app(EntryPublication::class);
+        $state = $publication->recordDraft($entry->fresh(), [['kind' => 'opaque', 'reason' => 'map', 'source' => '{code()}']], 'old code');
+        $before = $entry->fresh()->getAttributes();
+        $this->bindSplitTenancy();
+
+        try {
+            $publication->publishVersion($entry->fresh(), $state->headVersion);
+            $this->fail('A historical code version was published without admission.');
+        } catch (ValidationException $exception) {
+            $this->assertNotEmpty($exception->errors());
+        }
+
+        $this->assertSame($before, $entry->fresh()->getAttributes());
+        $this->assertSame($state->publishedVersion, $publication->state($entry->fresh())->publishedVersion);
+    }
+
     /** An entry with a written body and NO version history — every entry authored before this path. */
     private function pageWithUnversionedBody(array $body): BeamUxEntry
     {
@@ -642,6 +747,19 @@ class EntryPublicationTest extends TestCase
 
     private function createTables(?string $connection = null): void
     {
+        Schema::connection($connection)->create('activity_log', function (Blueprint $table) {
+            $table->bigIncrements('id');
+            $table->string('log_name')->nullable()->index();
+            $table->text('description');
+            $table->nullableUuidMorphs('subject', 'subject');
+            $table->string('event')->nullable();
+            $table->string('causer_type')->nullable();
+            $table->string('causer_id')->nullable();
+            $table->json('attribute_changes')->nullable();
+            $table->json('properties')->nullable();
+            $table->timestamps();
+        });
+
         Schema::connection($connection)->create('beam_ux_entries', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->uuid('particle_id')->nullable()->index();

@@ -126,6 +126,63 @@ class SeededEntryPublicationTest extends TestCase
         $this->assertNull($entry->fresh()->published_version, 'a re-seed published an unpublished draft');
     }
 
+    public function test_shipped_structural_auth_body_is_pinned_preserved_and_idempotent(): void
+    {
+        $body = [['kind' => 'block', 'name' => 'AuthLogin', 'isComponent' => true, 'props' => [], 'children' => [], 'dynamic' => false]];
+        $seeder = app(\Splicewire\Beam\Ux\Provenance\Reasserter::class);
+        $entry = $seeder->seedBody(['namespace' => 'starter', 'slug' => 'login'], ['type' => 'page', 'format' => 'tsx', 'title' => 'Login'], $body, 'package:starter/auth');
+        $pin = $entry->published_version;
+        $this->assertNotNull($pin);
+        $this->assertSame($body, \Splicewire\Beam\Models\BeamParticle::findOrFail($entry->particle_id)->payload);
+        $again = $seeder->seedBody(['namespace' => 'starter', 'slug' => 'login'], ['type' => 'page', 'format' => 'tsx', 'title' => 'Login'], $body, 'package:starter/auth');
+        $this->assertSame($pin, $again->published_version);
+        $this->assertCount(1, app(EntryPublication::class)->state($again)->versions);
+    }
+
+    public function test_structured_reseed_repairs_a_pinless_existing_body_without_changing_it(): void
+    {
+        $entry = BeamUxEntry::create(['namespace' => 'starter', 'slug' => 'login', 'type' => 'page', 'format' => 'tsx']);
+        app(EntryPublication::class)->write($entry, $entry->codec()->encode('<p>Existing body</p>'));
+        $particle = $entry->fresh()->particle_id;
+        $again = app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->seedBody(
+            ['namespace' => 'starter', 'slug' => 'login'], ['type' => 'page', 'title' => 'Login'], [], 'package:starter/auth',
+        );
+        $this->assertSame($particle, $again->particle_id);
+        $this->assertNotNull($again->published_version);
+        $this->assertStringContainsString('Existing body', (string) app(EntryArtifactStore::class)->read($again));
+    }
+
+    public function test_structured_reseed_updates_pristine_content_but_preserves_author_edits(): void
+    {
+        $seed = app(\Splicewire\Beam\Ux\Provenance\Reasserter::class);
+        $coordinate = ['namespace' => 'starter', 'slug' => 'login'];
+        $attributes = ['type' => 'page', 'format' => 'tsx', 'title' => 'Login'];
+        $first = $seed->seedBody($coordinate, $attributes, ['source' => '<p>First</p>'], 'package:starter/auth');
+        $second = $seed->seedBody($coordinate, $attributes, ['source' => '<p>Second</p>'], 'package:starter/auth');
+        $this->assertSame($first->particle_id, $second->particle_id);
+        $this->assertNotSame($first->published_version, $second->published_version);
+        app(EntryPublication::class)->write($second, ['source' => '<p>Author</p>']);
+        $again = $seed->seedBody($coordinate, $attributes, ['source' => '<p>Third</p>'], 'package:starter/auth');
+        $this->assertSame(['source' => '<p>Author</p>'], \Splicewire\Beam\Models\BeamParticle::findOrFail($again->particle_id)->payload);
+        $this->assertSame($second->published_version, $again->published_version);
+    }
+
+    public function test_structured_seed_rolls_back_when_pinning_fails(): void
+    {
+        FailingOncePublication::$fail = true;
+        $this->app->bind(EntryPublication::class, FailingOncePublication::class);
+        try {
+            app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->seedBody(
+                ['namespace' => 'starter', 'slug' => 'login'], ['type' => 'page', 'format' => 'tsx'], [], 'package:starter/auth',
+            );
+            $this->fail('Expected publication failure');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated failure while pinning', $e->getMessage());
+        }
+        $this->assertSame(0, BeamUxEntry::query()->where('slug', 'login')->count());
+        $this->assertSame(0, \Splicewire\Beam\Models\BeamParticle::query()->count());
+    }
+
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {
@@ -139,6 +196,8 @@ class SeededEntryPublicationTest extends TestCase
             $table->string('format')->default('tsx')->index();
             $table->string('body_style')->nullable();
             $table->string('namespace')->nullable()->index();
+            $table->string('origin')->nullable();
+            $table->string('asserted_hash')->nullable();
             $table->string('placement_ref')->nullable();
             $table->string('driver_ref')->nullable();
             $table->string('residency_mode')->default('context-following')->index();

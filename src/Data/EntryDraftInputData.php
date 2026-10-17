@@ -31,6 +31,8 @@ class EntryDraftInputData extends BeamData
             'but NOT compiled — readers keep the published body until a publish moves the pin.'
         )]
         public array $body,
+        #[Description('The working head this editor session read; null only when it had no head.')]
+        public ?string $baseVersion,
         #[Description('An optional annotation for the version this draft records, e.g. "before the rewrite".')]
         public ?string $label = null,
     ) {}
@@ -40,6 +42,7 @@ class EntryDraftInputData extends BeamData
     {
         return [
             'body' => ['present', 'array'],
+            'baseVersion' => ['present', 'nullable', 'string'],
             'label' => ['nullable', 'string', 'max:255'],
         ];
     }

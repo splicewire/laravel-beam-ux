@@ -3,10 +3,10 @@
 namespace Splicewire\Beam\Ux\Seeders;
 
 use Illuminate\Database\Seeder;
-use Splicewire\Beam\Ux\Models\BeamUxEntry;
-use Splicewire\Beam\Ux\Publish\EntryPublication;
+use Splicewire\Beam\Ux\Provenance\Reasserter;
 use Splicewire\Beam\Ux\Theme\ThemeResolver;
 use Splicewire\Beam\Ux\Type\UxType;
+use Splicewire\Beam\Write\AsSystemWriter;
 
 /**
  * Seeds this host's central theme entry (theme-entries-and-authoring ticket `str-01`) with TODAY's
@@ -24,18 +24,21 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class ThemeSeeder extends Seeder
 {
+    use AsSystemWriter;
+
     public function run(): void
     {
-        $publication = app(EntryPublication::class);
-        $publication->requireVersionStore();
-        $entry = BeamUxEntry::firstOrCreate(
+        $this->asSystemWriter(fn () => $this->seedShipped());
+    }
+
+    private function seedShipped(): void
+    {
+        app(Reasserter::class)->seedBody(
             ['namespace' => ThemeResolver::NAMESPACE, 'slug' => ThemeResolver::SLUG],
             ['type' => UxType::Theme, 'title' => 'Theme', 'format' => 'css'],
+            $this->body(),
+            'package:splicewire/laravel-beam-ux/theme',
         );
-        $publication->assertStorable($entry, $this->body());
-        $publication->baseline($entry);
-        $publication->write($entry, $this->body());
-        $publication->publishWritten($entry->refresh());
     }
 
     /** @return array{canvas: array<string, string>, shell: array<string, string>, site: array<string, string>} */

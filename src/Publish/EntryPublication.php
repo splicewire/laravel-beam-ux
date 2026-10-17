@@ -12,7 +12,6 @@ use Rushing\Versioning\Contracts\VersionStore;
 use Rushing\Versioning\Models\Version;
 use Schemastud\DataSchemas\Migration\AcceptanceGate;
 use Splicewire\Beam\Models\BeamParticle;
-use Splicewire\Beam\Revisions\RevisionRecorder;
 use Splicewire\Beam\Schema\Contracts\SchemaTargetResolver;
 use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
@@ -20,7 +19,6 @@ use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
-use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Data\EntryPublicationData;
 use Splicewire\Beam\Ux\Data\EntryVersionData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -141,6 +139,75 @@ class EntryPublication
      *
      * @param  array<string, mixed>  $body
      */
+    /** Editor CAS: a stale base never reaches the write path (ADR-0225 d6). */
+    public function draftFromBase(BeamUxEntry $entry, array $body, ?string $baseVersion, ?string $label = null, ?Model $actor = null): EntryPublicationData
+    {
+        $this->requireVersionStore();
+
+        return $entry->getConnection()->transaction(function () use ($entry, $body, $baseVersion, $label, $actor) {
+            $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
+            if ($this->state($locked)->headVersion !== $baseVersion) {
+                throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('The editor base version has moved. Reload or explicitly save your changes against the new base.');
+            }
+
+            $state = $this->recordDraft($locked, $body, $label);
+            $this->audit($locked, 'drafted', $actor, $state);
+
+            return $state;
+        });
+    }
+
+    /** Publish precisely the version the author saw; do not overwrite a newer working copy. */
+    public function publishVersion(BeamUxEntry $entry, string $ref, ?Model $actor = null): EntryPublicationData
+    {
+        $this->requireVersionStore();
+
+        return $entry->getConnection()->transaction(function () use ($entry, $ref, $actor) {
+            $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
+            $particle = $this->particle($locked);
+            $version = $particle === null ? null : $this->versions->version($particle, $ref);
+            if ($version === null) {
+                throw ValidationException::withMessages(['ref' => 'The named version does not belong to this entry.']);
+            }
+            $body = $version->snapshot['payload'] ?? null;
+            if (! is_array($body)) {
+                throw ValidationException::withMessages(['ref' => 'The named version has no valid body snapshot.']);
+            }
+            // Publish compares legality against what readers see, not a newer working head.
+            $pinned = $this->publishedVersionId($locked);
+            $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
+            app(CanvasBodyGuard::class)->assertPublishable($locked, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
+
+            $workflow = app(\Splicewire\Beam\Workflows\Control\WorkflowActuator::class);
+            if ($workflow->manages($locked) && $locked->workflow_marking !== BeamUxEntry::MARKING_PUBLISHED) {
+                $result = $workflow->transition($locked, 'publish', new \Splicewire\Beam\Workflows\Control\TransitionContext(
+                    actor: $actor === null ? null : 'user:'.$actor->getKey(),
+                ));
+                if (! $result->applied) {
+                    throw ValidationException::withMessages(['publish' => 'The entry lifecycle refused the publish transition.']);
+                }
+                $locked->refresh();
+            }
+            $locked->published_version = (string) $version->id;
+            $locked->save();
+            $this->mirror->mirror($locked, $this->placements->resolve($locked)->pathFor($locked), $body);
+            $compileError = null;
+            try {
+                $source = $locked->codec() instanceof AcceptsJsonDoc && JsonDocShape::is($body)
+                    ? \Splicewire\Beam\Ux\Codec\JsonDocPrinter::printModule($body)
+                    : $locked->codec()->decode($body);
+                app(CompileEntryBody::class)->forEntry($locked, source: $source, force: true);
+            } catch (CompilationFailed $e) {
+                $compileError = $e->getMessage();
+            }
+
+            $state = $this->state($locked->refresh(), $compileError);
+            $this->audit($locked, 'published', $actor, $state);
+
+            return $state;
+        });
+    }
+
     public function recordDraft(BeamUxEntry $entry, array $body, ?string $label = null): EntryPublicationData
     {
         $this->assertStorable($entry, $body);
@@ -206,83 +273,43 @@ class EntryPublication
      *
      * @throws ValidationException when no such version belongs to this entry
      */
-    public function restore(BeamUxEntry $entry, string $ref, ?string $label = null): EntryPublicationData
+    public function restore(BeamUxEntry $entry, string $ref, ?string $label = null, ?Model $actor = null): EntryPublicationData
     {
         $this->requireVersionStore();
 
-        $particle = $this->particle($entry);
+        return $entry->getConnection()->transaction(function () use ($entry, $ref, $label, $actor) {
+            $entry = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
+            $particle = $this->particle($entry);
 
-        $version = $particle === null ? null : $this->versions->version($particle, $ref);
+            $version = $particle === null ? null : $this->versions->version($particle, $ref);
 
-        if ($particle === null || $version === null) {
-            throw ValidationException::withMessages([
-                'ref' => "No version [{$ref}] belongs to this entry; there is nothing to restore.",
-            ]);
-        }
+            if ($particle === null || $version === null) {
+                throw ValidationException::withMessages([
+                    'ref' => "No version [{$ref}] belongs to this entry; there is nothing to restore.",
+                ]);
+            }
 
-        // ADR-0227 d1 — a restore must not bring code into a tenant entry: guard the version's body BEFORE
-        // applying it (refuse before any write). ADR-0228 d9 as amended: only CODE refuses; an illegal but
-        // code-free version is restored and its legality comes back as diagnostics, because a restore is not
-        // authoring. Publish still refuses both. The body is the particle snapshot's `payload`
-        // ({@see BeamParticle::toVersionSnapshot()}).
-        $restoredBody = $version->snapshot['payload'] ?? null;
-        $diagnostics = app(CanvasBodyGuard::class)->admitForRestore($entry, is_array($restoredBody) ? $restoredBody : []);
+            // ADR-0227 d1 — a restore must not bring code into a tenant entry: guard the version's body BEFORE
+            // applying it. ADR-0228 d9: legality is diagnostic on restore, not a refusal.
+            $restoredBody = $version->snapshot['payload'] ?? null;
+            $diagnostics = app(CanvasBodyGuard::class)->admitForRestore($entry, is_array($restoredBody) ? $restoredBody : []);
 
-        $this->versions->restore($particle, (string) $version->id);
+            $this->versions->restore($particle, (string) $version->id);
 
-        $this->versions->snapshot($this->requireParticle($entry->refresh()), $label ?? "restore of {$version->readableVersion()}");
+            $this->versions->snapshot($this->requireParticle($entry->refresh()), $label ?? "restore of {$version->readableVersion()}");
 
-        $state = $this->state($entry->refresh());
-        $state->diagnostics = $diagnostics;
+            $state = $this->state($entry->refresh());
+            $state->diagnostics = $diagnostics;
+            $this->audit($entry, 'restored', $actor, $state);
 
-        return $state;
+            return $state;
+        });
     }
 
     /**
-     * **Clear** the entry: remove its body and return it to the unauthored state — `particle_id` null,
-     * no publication pin, no placed mirror file, no compiled artifact. The one act that removes content;
-     * {@see \Splicewire\Beam\Ux\Particle\EntryBodyClearOp} is its wire door.
-     *
-     * It is not "save an empty body". That stays a legitimate authored act — the particle stays bound,
-     * `[]` is recorded and published, and the mirror writes the empty file the author chose. A clear
-     * takes the binding away, so every reader (the public page, the doctor, the reader's
-     * {@see CompileEntryBody::holdsEmptyDocument()} branch) sees an entry nobody has authored.
-     *
-     * ## What is kept, and why the particle row is NOT deleted
-     *
-     * History lives on the particle: every version is keyed by the particle's id
-     * (`versionable_id`), and the working HEAD is a column on it. Deleting the row would orphan or cascade
-     * away every recorded body, which is exactly the history a clear must not lose. So the clear is
-     * recorded on BOTH sides of the binding and destroys nothing:
-     *
-     *  1. **the particle's version history** gains a final version labelled `cleared` (or the caller's
-     *     label), freezing the body being removed — including an unpublished draft, which would otherwise
-     *     exist only in a working copy nobody can reach any more. The baseline runs first, so an entry
-     *     that predates versioning gets its live body recorded as well;
-     *  2. **the entry's revision log** (beam-core's {@see RevisionRecorder}, the same log an entry's
-     *     soft-delete/restore is recorded in) gains a `cleared` revision whose pre-image is the binding —
-     *     `particle_id` and `published_version`. That is what makes the unbound particle findable from
-     *     the entry, and `RevisionRecorder::revert()` puts the binding back; a reverted entry recompiles
-     *     with `splicewire:beam:ux:compile` or its next publish.
-     *
-     * The particle row itself is left in place, unreferenced, which is the price of keeping its history.
-     *
-     * ## Workflows: a clear is a publish, and it does not touch the marking
-     *
-     * It changes what readers are served the moment it returns, so it takes the PUBLISH gate — the op
-     * declares the same `ux.author` entitlement `save-body`, `publish`, `restore` and the workflow
-     * `transition` op all declare. It deliberately does not move `workflow_marking`: that axis decides
-     * whether the entry is visible AT ALL, this one decides which body a visible entry serves (see this
-     * class's header). A workflow-managed page that is `published` stays published and reads as the
-     * unauthored page (the host's own default, or the nav pointer); taking it out of view is the
-     * workflow's `unpublish`/`archive` transition, through the workflow's own door. There is no "staged
-     * clear" because nothing in the entry can hold one: a draft is a version of a BOUND particle, and a
-     * clear is precisely the removal of that binding.
-     *
-     * Idempotent: an entry that is already unbound reports its (empty) state and removes nothing — for
-     * such an entry a file at the placement path, if any, was not written by a publish of this entry and
-     * may be disk-authored source (`RegisterEntriesFromDisk` registers unbound rows over exactly those
-     * files).
+     * ADR-0225 decisions 3 and 8: Clear records a draft on the same particle history.
+     * The binding, publication pin, mirror and public artifact remain intact. History restores
+     * the former body through VersionStore; activity is audit only, never a restoration source.
      */
     public function clear(BeamUxEntry $entry, ?string $label = null, ?Model $actor = null): EntryPublicationData
     {
@@ -290,40 +317,30 @@ class EntryPublication
             return $this->state($entry);
         }
 
-        // Resolved BEFORE the unbind, while the entry still describes the file that publishing it wrote.
-        $mirrorPath = $this->placements->resolve($entry)->pathFor($entry);
-        $hasPin = Schema::hasColumn($entry->getTable(), 'published_version');
+        $this->requireVersionStore();
 
-        $entry->getConnection()->transaction(function () use ($entry, $label, $actor, $hasPin): void {
-            $this->baseline($entry);
-            $entry->unsetRelation('particle');
+        return $entry->getConnection()->transaction(function () use ($entry, $label, $actor): EntryPublicationData {
+            $locked = $entry->newQuery()->whereKey($entry->getKey())->lockForUpdate()->firstOrFail();
+            $before = $this->state($locked);
+            $state = $this->recordDraft($locked, [], $label ?? 'cleared');
+            $this->audit($locked, 'cleared', $actor, $state, ['previousHeadVersion' => $before->headVersion]);
 
-            $particle = $this->recordsVersions() ? $this->particle($entry) : null;
-
-            if ($particle !== null) {
-                $this->versions->snapshot($particle, $label ?? 'cleared');
-            }
-
-            $before = ['particle_id' => (string) $entry->particle_id];
-
-            if ($hasPin) {
-                $before['published_version'] = $this->publishedVersionId($entry);
-            }
-
-            $after = array_map(static fn (): null => null, $before);
-
-            $entry->forceFill($after)->save();
-            $entry->unsetRelation('particle');
-
-            app(RevisionRecorder::class)->record($entry, $before, $after, 'cleared', actor: $actor);
+            return $state;
         });
+    }
 
-        // The two projections follow the source of record, as every publish's do: the placed file a
-        // publish wrote, and every artifact addressed under this entry.
-        $this->mirror->remove($mirrorPath);
-        app(EntryArtifactStore::class)->forget($entry);
-
-        return $this->state($entry->refresh());
+    /** ADR-0225 d8: audit metadata only, on the entry's realm connection. */
+    private function audit(BeamUxEntry $entry, string $event, ?Model $actor, EntryPublicationData $state, array $extra = []): void
+    {
+        $logger = activity('beam-entry')->performedOn($entry)->event($event)
+            ->withProperties($extra + ['headVersion' => $state->headVersion, 'publishedVersion' => $state->publishedVersion])
+            ->tap(fn ($activity) => $activity->setConnection($entry->getConnectionName()));
+        if ($actor === null) {
+            $logger->causedByAnonymous();
+        } else {
+            $logger->causedBy($actor);
+        }
+        $logger->log('Entry '.$event);
     }
 
     /**

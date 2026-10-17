@@ -48,6 +48,6 @@ class EntryPublishOp
         /** @var BeamUxEntry $model */
         $input = EntryPublishInputData::validateAndCreate($request->all());
 
-        return app(EntryPublication::class)->publish($model, $input->label);
+        return app(EntryPublication::class)->publishVersion($model, $input->ref, $actor instanceof Model ? $actor : null);
     }
 }

@@ -47,6 +47,6 @@ class EntryVersionRestoreOp
         /** @var BeamUxEntry $model */
         $input = EntryVersionRestoreInputData::validateAndCreate($request->all());
 
-        return app(EntryPublication::class)->restore($model, $input->ref, $input->label);
+        return app(EntryPublication::class)->restore($model, $input->ref, $input->label, $actor instanceof Model ? $actor : null);
     }
 }

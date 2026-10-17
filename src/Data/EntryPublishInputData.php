@@ -19,6 +19,8 @@ use Splicewire\Beam\Ux\Particle\EntryPublishOp;
 class EntryPublishInputData extends BeamData
 {
     public function __construct(
+        #[Description('The exact version of this entry to publish.')]
+        public string $ref,
         #[Description('An optional annotation for the version this publish pins, e.g. "launch copy".')]
         public ?string $label = null,
     ) {}
@@ -27,6 +29,7 @@ class EntryPublishInputData extends BeamData
     public static function rules(): array
     {
         return [
+            'ref' => ['required', 'string'],
             'label' => ['nullable', 'string', 'max:255'],
         ];
     }
