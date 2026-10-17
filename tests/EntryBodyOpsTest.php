@@ -251,6 +251,108 @@ class EntryBodyOpsTest extends TestCase
         }
     }
 
+    /**
+     * ADR-0227 d1 — a body that is not a canvas document is source, and source is code. The guard read only
+     * a JsonDoc-shaped body, so `{source: '<tsx>'}` (the disk-registered shape `TsxBodyCodec::decode()`
+     * compiles verbatim) reached a tenant page untouched (EP-07a probe P2, launch 2026-10-17). The entry is
+     * on `testing` while the central connection is `central_db`, so it is tenant-resident.
+     */
+    public function test_save_body_refuses_a_non_canvas_body_on_a_tenant_resident_entry(): void
+    {
+        $this->bindSplitTenancy();
+        $cases = [
+            'tsx page, {source}' => [['slug' => 'p', 'type' => 'page', 'format' => 'tsx'], ['source' => 'export default function Page() { steal(); return null; }']],
+            'component, {source}' => [['slug' => 'c', 'type' => 'component', 'format' => 'tsx'], ['source' => 'export default function C() { steal(); return null; }']],
+            'mdx page, {content}' => [['slug' => 'm', 'type' => 'page', 'format' => 'mdx'], ['frontmatter' => [], 'content' => "# Hi\n\n{steal()}\n"]],
+        ];
+
+        foreach ($cases as $label => [$attributes, $body]) {
+            $entry = BeamUxEntry::create([...$attributes, 'namespace' => null])->fresh();
+
+            try {
+                EntryBodySaveOp::handle($entry, $this->saveRequest($entry, $body), actor: null);
+                $this->fail("$label: a tenant-resident entry accepted a non-canvas body");
+            } catch (ValidationException $e) {
+                $this->assertStringContainsString('code', implode("\n", $e->errors()['body']), $label);
+            }
+
+            $this->assertNull($entry->fresh()->particle_id, "$label: the refused body was written");
+        }
+    }
+
+    public function test_save_body_refuses_a_literal_prop_that_would_print_code_in_every_realm(): void
+    {
+        // EP-07a probe P3/P4: a literal prop's name, or a `number` prop's value, printed into the module raw.
+        // Refused at save on a CENTRAL entry too: a literal is never the way code is written.
+        $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+        $props = [
+            'a name' => ['name' => 'onClick={() => steal()} data-x', 'kind' => 'boolean-shorthand', 'value' => true],
+            'a number value' => ['name' => 'data-n', 'kind' => 'number', 'value' => '0} onMouseOver={() => steal()} data-m={0'],
+        ];
+
+        foreach ($props as $label => $prop) {
+            try {
+                EntryBodySaveOp::handle($entry, $this->saveRequest($entry, [
+                    ['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'props' => [$prop], 'children' => [['kind' => 'text', 'value' => 'x']]],
+                ]), actor: null);
+                $this->fail("$label carrying code was saved");
+            } catch (ValidationException $e) {
+                $this->assertArrayHasKey('body', $e->errors(), $label);
+            }
+        }
+
+        $this->assertNull($entry->fresh()->particle_id, 'a refused body was written');
+    }
+
+    public function test_a_tenant_resident_entry_may_still_clear_its_body(): void
+    {
+        $this->bindSplitTenancy();
+        $entry = BeamUxEntry::create(['slug' => 'p', 'type' => 'page', 'format' => 'tsx', 'namespace' => null])->fresh();
+
+        app(\Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard::class)->assertAdmitted($entry, []);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_a_tenant_resident_theme_keeps_its_form_body(): void
+    {
+        // A theme is Form-kind: its `{canvas,site}` token object is data, not source (ADR-0228 d1), and a
+        // Hosted site's theme is a tenant row (ADR-0227 d3), so the code refusal must not reach it.
+        $this->bindSplitTenancy();
+        $theme = BeamUxEntry::create(['slug' => 'beam', 'type' => 'theme', 'format' => 'css', 'namespace' => 'theme'])->fresh();
+
+        app(\Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard::class)->assertAdmitted($theme, ['canvas' => [], 'site' => ['accent' => '#123456']]);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_a_central_entry_keeps_the_disk_registered_source_shape(): void
+    {
+        // Central entries are unchanged (ADR-0227 d1): `{source}` is how RegisterEntriesFromDisk stores a .tsx.
+        $entry = BeamUxEntry::create(['slug' => 'p', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        $payload = EntryBodySaveOp::handle($entry, $this->saveRequest($entry, ['source' => 'export default function Page() { return null; }']), actor: null);
+
+        $this->assertSame($payload['key'], (string) $entry->fresh()->particle_id);
+    }
+
+    public function test_restore_refuses_a_non_canvas_version_on_a_tenant_resident_entry(): void
+    {
+        // History written while the entry was central-authored (or before this guard) must not be a way to
+        // bring source back into a tenant page.
+        $entry = BeamUxEntry::create(['slug' => 'p', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+        app(\Splicewire\Beam\Ux\Publish\EntryPublication::class)->write($entry, ['source' => 'export default function Page() { steal(); return null; }']);
+        $version = app(\Rushing\Versioning\Contracts\VersionStore::class)
+            ->snapshot(\Splicewire\Beam\Models\BeamParticle::find($entry->fresh()->particle_id), 'source');
+
+        $this->bindSplitTenancy();
+
+        try {
+            app(\Splicewire\Beam\Ux\Publish\EntryPublication::class)->restore($entry->fresh(), (string) $version->id);
+            $this->fail('a tenant-resident entry restored a source version');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('code', implode("\n", $e->errors()['body']));
+        }
+    }
+
     public function test_a_css_theme_entry_also_refuses_a_json_doc_body(): void
     {
         // The guard is a codec CAPABILITY (`AcceptsJsonDoc`), not an mdx special case — every format

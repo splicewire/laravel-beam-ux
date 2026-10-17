@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\JsonDoc;
 
 use Illuminate\Validation\ValidationException;
+use Splicewire\Beam\Ux\Body\BodyKind;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Manifest\BodyNodeDiff;
 use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
@@ -49,13 +50,16 @@ final class CanvasBodyGuard
 
     /**
      * Refuse a canvas body the realm's resolved Manifest Profile does not admit, as a 422 on `body`
-     * naming each offending node by id + path. A no-op for a non-JsonDoc body.
+     * naming each offending node by id + path. A non-JsonDoc body is source, so where the profile refuses
+     * code it is refused whole ({@see assertNotSourceWhereCodeIsRefused()}); elsewhere it passes untouched.
      *
      * @param  array<int|string, mixed>  $body
      */
     public function assertAdmitted(BeamUxEntry $entry, array $body): void
     {
         if (! JsonDocShape::is($body)) {
+            $this->assertNotSourceWhereCodeIsRefused($entry, $body);
+
             return;
         }
 
@@ -78,5 +82,29 @@ final class CanvasBodyGuard
         $checkIds = $this->diff->changedIds($this->workingHead($entry), $body);
 
         $this->legality->assert($body, $profile, $checkIds);
+    }
+
+    /**
+     * ADR-0227 d1 — a body that is not a canvas document is source: `{source}` (a disk-registered tsx, which
+     * `TsxBodyCodec::decode()` compiles verbatim), an mdx `{frontmatter,content}`, a component's TSX. Where
+     * the profile refuses code, only an empty body (a clear) and a Form-kind entry's token object (a theme,
+     * ADR-0228 d1: data, not source) remain. The guard used to return early here, so `{source: '<tsx>'}`
+     * reached a tenant page through save-body and restore (EP-07a probe P2, launch 2026-10-17).
+     *
+     * @param  array<int|string, mixed>  $body
+     */
+    private function assertNotSourceWhereCodeIsRefused(BeamUxEntry $entry, array $body): void
+    {
+        if ($body === [] || $entry->bodyKind() === BodyKind::Form) {
+            return;
+        }
+
+        if (($this->resolver->resolve($entry)['x-admits-code'] ?? false) === true) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'body' => 'This entry holds blocks, not code (ADR-0227 decision 1): a body that is not a canvas document is source, and source is refused here.',
+        ]);
     }
 }
