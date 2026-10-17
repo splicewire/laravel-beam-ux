@@ -877,5 +877,20 @@ class EntryBodyOpsTest extends TestCase
             $table->timestamps();
             $table->unique(['versionable_type', 'versionable_id', 'version']);
         });
+
+        // EntryPublication audits every restore and clear to spatie's activity_log (ADR-0225 d8), and the restore test
+        // restores; the same shape as EditorKitTest's.
+        Schema::create('activity_log', function (Blueprint $table) {
+            $table->bigIncrements('id');
+            $table->string('log_name')->nullable()->index();
+            $table->text('description');
+            $table->nullableUuidMorphs('subject', 'subject');
+            $table->string('event')->nullable();
+            $table->string('causer_type')->nullable();
+            $table->string('causer_id')->nullable();
+            $table->json('attribute_changes')->nullable();
+            $table->json('properties')->nullable();
+            $table->timestamps();
+        });
     }
 }
