@@ -169,6 +169,13 @@ class EntryPublication
             if ($version === null) {
                 throw ValidationException::withMessages(['ref' => 'The named version does not belong to this entry.']);
             }
+            $body = $version->snapshot['payload'] ?? null;
+            if (! is_array($body)) {
+                throw ValidationException::withMessages(['ref' => 'The named version has no valid body snapshot.']);
+            }
+            // ADR-0227 d1: historical snapshots must pass admission before any publication write.
+            app(CanvasBodyGuard::class)->assertAdmitted($locked, $body);
+
             $workflow = app(\Splicewire\Beam\Workflows\Control\WorkflowActuator::class);
             if ($workflow->manages($locked) && $locked->workflow_marking !== BeamUxEntry::MARKING_PUBLISHED) {
                 $result = $workflow->transition($locked, 'publish', new \Splicewire\Beam\Workflows\Control\TransitionContext(
@@ -181,10 +188,6 @@ class EntryPublication
             }
             $locked->published_version = (string) $version->id;
             $locked->save();
-            $body = $version->snapshot['payload'] ?? null;
-            if (! is_array($body)) {
-                throw ValidationException::withMessages(['ref' => 'The named version has no valid body snapshot.']);
-            }
             $this->mirror->mirror($locked, $this->placements->resolve($locked)->pathFor($locked), $body);
             $compileError = null;
             try {

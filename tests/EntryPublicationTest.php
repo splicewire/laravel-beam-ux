@@ -642,6 +642,25 @@ class EntryPublicationTest extends TestCase
         app(EntryPublication::class)->restore($entry->fresh(), $codeRef);
     }
 
+    public function test_publishing_a_historical_code_version_refuses_before_any_write(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $publication = app(EntryPublication::class);
+        $state = $publication->recordDraft($entry->fresh(), [['kind' => 'opaque', 'reason' => 'map', 'source' => '{code()}']], 'old code');
+        $before = $entry->fresh()->getAttributes();
+        $this->bindSplitTenancy();
+
+        try {
+            $publication->publishVersion($entry->fresh(), $state->headVersion);
+            $this->fail('A historical code version was published without admission.');
+        } catch (ValidationException $exception) {
+            $this->assertNotEmpty($exception->errors());
+        }
+
+        $this->assertSame($before, $entry->fresh()->getAttributes());
+        $this->assertSame($state->publishedVersion, $publication->state($entry->fresh())->publishedVersion);
+    }
+
     /** An entry with a written body and NO version history — every entry authored before this path. */
     private function pageWithUnversionedBody(array $body): BeamUxEntry
     {
