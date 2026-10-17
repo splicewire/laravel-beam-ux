@@ -548,11 +548,17 @@ class EntryPublicationTest extends TestCase
     /** The legality half of the same order: an illegal history-less body is checked against nothing published, not itself. */
     public function test_a_first_publish_of_an_illegal_body_is_refused(): void
     {
+        Storage::fake('mirror');
+        config(['beam.ux.storage.mirror_disk' => 'mirror']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+
         $entry = BeamUxEntry::create(['slug' => 'legacy', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site']);
         \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
         $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(new \Splicewire\Beam\Models\BeamParticle, [['kind' => 'block', 'id' => 'mq', 'name' => 'marquee', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []]]);
         $entry->forceFill(['particle_id' => $particle->id])->save();
         $this->bindSplitTenancy();
+        $artifactsBefore = Storage::disk('artifacts')->allFiles();
 
         try {
             app(EntryPublication::class)->publish($entry->fresh());
@@ -561,8 +567,10 @@ class EntryPublicationTest extends TestCase
             $this->assertStringContainsString('marquee', implode("\n", $e->errors()['body']));
         }
 
-        $this->assertNull($entry->fresh()->published_version);
-        $this->assertSame(0, \DB::table(Beam::table('versions'))->count());
+        $this->assertNull($entry->fresh()->published_version, 'the pin moved');
+        $this->assertSame(0, \DB::table(Beam::table('versions'))->count(), 'history was written');
+        $this->assertSame($artifactsBefore, Storage::disk('artifacts')->allFiles(), 'an artifact was compiled');
+        $this->assertSame([], Storage::disk('mirror')->allFiles(), 'the body was mirrored');
     }
 
     public function test_a_tenant_save_draft_with_an_opaque_node_is_refused_at_the_choke(): void
