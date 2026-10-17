@@ -12,6 +12,7 @@ use Splicewire\Beam\Mdx\MdxBody;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Particle\ParticleOperationRegistry;
+use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
@@ -190,6 +191,62 @@ class EntryBodyOpsTest extends TestCase
         } catch (ValidationException $e) {
             $this->assertStringContainsString('Marquee', implode("\n", $e->errors()['body']));
             $this->assertStringContainsString('m1', implode("\n", $e->errors()['body']));
+        }
+    }
+
+    private function bindSplitTenancy(string $central = 'central_db'): void
+    {
+        $this->app->instance(TenancyContext::class, new class($central) implements TenancyContext
+        {
+            public function __construct(private string $central) {}
+
+            public function isMultiTenant(): bool { return true; }
+
+            public function isActive(): bool { return true; }
+
+            public function currentTenant(): ?object { return null; }
+
+            public function currentTenantId(): int|string|null { return 1; }
+
+            public function centralConnection(): ?string { return $this->central; }
+        });
+    }
+
+    public function test_save_body_refuses_code_on_a_tenant_resident_entry_even_unchanged(): void
+    {
+        // ADR-0227 d1: a tenant-owned entry holds blocks, not code — an opaque node (verbatim code) is
+        // refused on a tenant save, whole-body (EP-06 d8's narrowing never spares code). Residency is the
+        // entry's connection; the refusal fires before the write, so no tenant DB is needed.
+        $this->bindSplitTenancy();
+        $entry = BeamUxEntry::create(['slug' => 'tenant-code', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+        $entry->setConnection('tenant_acme');
+
+        try {
+            EntryBodySaveOp::handle($entry, $this->saveRequest($entry, [
+                ['kind' => 'opaque', 'reason' => 'map', 'source' => '{steal()}'],
+            ]), actor: null);
+            $this->fail('a tenant-resident entry accepted an opaque (code) node');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('code', implode("\n", $e->errors()['body']));
+        }
+    }
+
+    public function test_save_source_refuses_on_a_tenant_resident_entry(): void
+    {
+        // ADR-0227 d1 / ADR-0233 d6: source (MDX/TSX) is code; a tenant-owned entry refuses a source write.
+        $this->bindSplitTenancy();
+        $entry = BeamUxEntry::create(['slug' => 'tenant-src', 'type' => 'component', 'format' => 'tsx', 'namespace' => null]);
+        $entry->setConnection('tenant_acme');
+
+        try {
+            EntrySourceSaveOp::handle(
+                $entry,
+                Request::create('/beam-ux-entries/'.$entry->id.'/save-source', 'POST', ['source' => 'export const X = () => null']),
+                actor: null,
+            );
+            $this->fail('a tenant-resident entry accepted a source write');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('source', $e->errors());
         }
     }
 

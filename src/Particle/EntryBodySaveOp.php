@@ -11,6 +11,7 @@ use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
 use Splicewire\Beam\Ux\JsonDoc\JsonNode;
+use Splicewire\Beam\Ux\Manifest\BodyNodeDiff;
 use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
 use Splicewire\Beam\Ux\Manifest\ProfileLegality;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -191,7 +192,32 @@ class EntryBodySaveOp
         }
 
         $profile = app(ManifestProfileResolver::class)->resolve($model);
-        app(ProfileLegality::class)->assert($body, $profile);
+
+        // EP-06 d8: narrow the LEGALITY checks to only the nodes this save adds or changes vs the
+        // Working Head (the current stored body), compared by content per id. The code refusal inside
+        // ProfileLegality stays whole-body. On a first save the Working Head is empty, so every node is
+        // "added" and all are checked.
+        $checkIds = (new BodyNodeDiff)->changedIds(self::currentBody($model), $body);
+
+        app(ProfileLegality::class)->assert($body, $profile, $checkIds);
+    }
+
+    /**
+     * The entry's current stored body (the Working Head), read before the write. Empty for a first save
+     * or a non-JsonDoc body.
+     *
+     * @return array<int|string, mixed>
+     */
+    private static function currentBody(BeamUxEntry $model): array
+    {
+        $key = $model->particle_id;
+        if (! is_string($key) || $key === '') {
+            return [];
+        }
+
+        $body = app(StorageDriverResolver::class)->resolve($model)->read($key)?->body ?? [];
+
+        return is_array($body) ? $body : [];
     }
 
     /**

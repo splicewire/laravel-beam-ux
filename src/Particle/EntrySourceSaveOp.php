@@ -10,6 +10,7 @@ use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Ux\Body\BodyKind;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntrySourceInputData;
+use Splicewire\Beam\Ux\Manifest\EntryResidency;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -61,6 +62,11 @@ class EntrySourceSaveOp
         // before the write, naming the entry's actual declared kind.
         self::assertSourceKind($model);
 
+        // ADR-0227 d1 / ADR-0233 d6 (EP-06 d8): a tenant-owned entry holds blocks, not code, and a Hosted
+        // site has no File Language — so a source (MDX/TSX) write must never reach a tenant-resident entry.
+        // Enforce it at the save rather than trust that nothing ever sends one.
+        self::assertNotTenantResident($model);
+
         // The codec turns the author's text into the stored body (mdx: `{frontmatter,content}`; css: the
         // theme token object a theme would use a form for — but a Source css entry still round-trips text).
         $body = $model->codec()->encode($input->source);
@@ -95,6 +101,18 @@ class EntrySourceSaveOp
             $reloaded?->body ?? [],
             $payload['compileError'],
         );
+    }
+
+    private static function assertNotTenantResident(BeamUxEntry $entry): void
+    {
+        if (app(EntryResidency::class)->isCentralResident($entry)) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'source' => 'A hosted-site (tenant-owned) entry holds blocks, not source: a source body is code '
+                .'and is refused here (ADR-0227 decision 1, ADR-0233 decision 6).',
+        ]);
     }
 
     private static function assertSourceKind(BeamUxEntry $entry): void
