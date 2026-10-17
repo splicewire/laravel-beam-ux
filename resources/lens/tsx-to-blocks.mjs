@@ -14,7 +14,7 @@
  * same trap-closing resolution the compile worker documents (a Composer path repo symlinks this package
  * away from the host, so a bare import would not find the host's copy).
  */
-import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -34,8 +34,25 @@ const fail = (message) => {
 
 const load = async (specifier, root) => {
   try {
-    const require = createRequire(join(root, 'package.json'))
-    return await import(pathToFileURL(require.resolve(specifier)).href)
+    // `@splicewire/beam-ux` is an import-only ESM package, so CJS `require.resolve` (what the compile
+    // worker uses for its dual-mode deps) cannot resolve it, and node's `import.meta.resolve` does not
+    // honour a parent-URL argument unflagged on this runtime. Resolve it ourselves from the HOST's
+    // node_modules via the package's own `exports` map — the same host-root model as compile.mjs, just
+    // the one step node will not do for an import-only subpath.
+    const segments = specifier.split('/')
+    const pkg = specifier.startsWith('@') ? segments.slice(0, 2).join('/') : segments[0]
+    const tail = segments.slice(specifier.startsWith('@') ? 2 : 1).join('/')
+    const subpath = tail === '' ? '.' : `./${tail}`
+
+    const pkgDir = join(root, 'node_modules', pkg)
+    const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'))
+    const entry = manifest.exports?.[subpath]
+    const relative = typeof entry === 'string' ? entry : (entry?.import ?? entry?.default)
+    if (typeof relative !== 'string') {
+      throw new Error(`[${pkg}] does not export [${subpath}]`)
+    }
+
+    return await import(pathToFileURL(join(pkgDir, relative)).href)
   } catch (error) {
     fail(
       `beam-ux lens: cannot resolve [${specifier}] from the host at ${root} (${error.message}). ` +
