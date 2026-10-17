@@ -176,6 +176,8 @@ class EntryPublication
             // ADR-0227 d1: historical snapshots must pass admission before any publication write.
             app(CanvasBodyGuard::class)->assertAdmitted($locked, $body);
 
+            // Compile before any publication or workflow write; failure leaves the site unchanged.
+            app(CompileEntryBody::class)->forVersion($locked, (string) $version->id, $body);
             $workflow = app(\Splicewire\Beam\Workflows\Control\WorkflowActuator::class);
             if ($workflow->manages($locked) && $locked->workflow_marking !== BeamUxEntry::MARKING_PUBLISHED) {
                 $result = $workflow->transition($locked, 'publish', new \Splicewire\Beam\Workflows\Control\TransitionContext(
@@ -189,17 +191,8 @@ class EntryPublication
             $locked->published_version = (string) $version->id;
             $locked->save();
             $this->mirror->mirror($locked, $this->placements->resolve($locked)->pathFor($locked), $body);
-            $compileError = null;
-            try {
-                $source = $locked->codec() instanceof AcceptsJsonDoc && JsonDocShape::is($body)
-                    ? \Splicewire\Beam\Ux\Codec\JsonDocPrinter::printModule($body)
-                    : $locked->codec()->decode($body);
-                app(CompileEntryBody::class)->forEntry($locked, source: $source, force: true);
-            } catch (CompilationFailed $e) {
-                $compileError = $e->getMessage();
-            }
-
-            $state = $this->state($locked->refresh(), $compileError);
+            app(CompileEntryBody::class)->artifacts()->prune($locked->refresh());
+            $state = $this->state($locked);
             $this->audit($locked, 'published', $actor, $state);
 
             return $state;
@@ -212,9 +205,9 @@ class EntryPublication
         $this->requireVersionStore();
         $this->baseline($entry);
         $this->write($entry, $body);
-        $this->versions->snapshot($this->requireParticle($entry), $label ?? 'draft');
+        $version = $this->versions->snapshot($this->requireParticle($entry), $label ?? 'draft');
 
-        return $this->state($entry->refresh());
+        return $this->state($entry->refresh(), $this->compileDraft($entry, $version));
     }
 
     /**
@@ -284,9 +277,9 @@ class EntryPublication
 
             $this->versions->restore($particle, (string) $version->id);
 
-            $this->versions->snapshot($this->requireParticle($entry->refresh()), $label ?? "restore of {$version->readableVersion()}");
+            $draft = $this->versions->snapshot($this->requireParticle($entry->refresh()), $label ?? "restore of {$version->readableVersion()}");
 
-            $state = $this->state($entry->refresh());
+            $state = $this->state($entry->refresh(), $this->compileDraft($entry, $draft));
             $this->audit($entry, 'restored', $actor, $state);
 
             return $state;
@@ -554,10 +547,31 @@ class EntryPublication
      */
     private function pinAndCompile(BeamUxEntry $entry, Version $version): ?string
     {
+        $body = $version->snapshot['payload'] ?? null;
+        if (! is_array($body)) {
+            throw ValidationException::withMessages(['ref' => 'The named version has no valid body snapshot.']);
+        }
+        app(CompileEntryBody::class)->forVersion($entry, (string) $version->id, $body);
         $entry->setAttribute('published_version', (string) $version->id);
         $entry->save();
+        $this->mirror->mirror($entry, $this->placements->resolve($entry)->pathFor($entry), $body);
+        app(CompileEntryBody::class)->artifacts()->prune($entry->refresh());
 
-        return $this->mirrorAndCompile($entry);
+        return null;
+    }
+
+    private function compileDraft(BeamUxEntry $entry, Version $version): ?string
+    {
+        $compiler = app(CompileEntryBody::class);
+        try {
+            $compiler->forVersion($entry, (string) $version->id, $version->snapshot['payload']);
+
+            return null;
+        } catch (CompilationFailed $exception) {
+            return $exception->getMessage();
+        } finally {
+            $compiler->artifacts()->prune($entry->refresh());
+        }
     }
 
     /**

@@ -82,6 +82,31 @@ class CompileEntryBody
         return $this->artifacts->put($entry, $this->compiler->compile($entry, $source));
     }
 
+    /** Compile an immutable, entry-owned snapshot without changing the entry's public address. */
+    public function forVersion(BeamUxEntry $entry, string $versionId, array $body): ?string
+    {
+        if ($this->uncompilable($entry)) {
+            throw CompilationFailed::unsupported($entry);
+        }
+        if (! $this->compilable($entry)) {
+            return null;
+        }
+        $path = $this->artifacts->path($entry, $this->artifacts->versionKey($versionId));
+        if ($body === []) {
+            $this->artifacts->forgetVersion($entry, $versionId);
+
+            return null;
+        }
+        if ($this->artifacts->disk()->exists($path)) {
+            return $path;
+        }
+        $source = $entry->codec() instanceof AcceptsJsonDoc && JsonDocShape::is($body)
+            ? JsonDocPrinter::printModule($body)
+            : $entry->codec()->decode($body);
+
+        return $this->artifacts->putVersion($entry, $versionId, $this->compiler->compile($entry, $source));
+    }
+
     /** Whether this entry is one the action compiles at all. */
     public function compilable(BeamUxEntry $entry): bool
     {

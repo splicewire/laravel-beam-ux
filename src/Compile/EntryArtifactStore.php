@@ -107,7 +107,41 @@ class EntryArtifactStore
             $source = $source->format('U.u');
         }
 
-        return substr(hash('xxh128', self::GENERATION.':'.$source), 0, 16);
+        return $this->versionKey((string) $source);
+    }
+
+    /** ADR-0232 d7: an immutable snapshot has its own compiler-generation address. */
+    public function versionKey(string $versionId): string
+    {
+        return substr(hash('xxh128', self::GENERATION.':'.$versionId), 0, 16);
+    }
+
+    public function putVersion(BeamUxEntry $entry, string $versionId, string $code): string
+    {
+        $path = $this->path($entry, $this->versionKey($versionId));
+        $this->disk->put($path, $code);
+
+        return $path;
+    }
+
+    public function forgetVersion(BeamUxEntry $entry, string $versionId): void
+    {
+        $this->disk->delete($this->path($entry, $this->versionKey($versionId)));
+    }
+
+    /** Only the publication pin and working head currently have lifecycle owners (EP-15 adds Releases). */
+    public function prune(BeamUxEntry $entry): void
+    {
+        $keep = [$this->path($entry)];
+        $head = $entry->particle?->getAttribute('head_version');
+        if ($head !== null) {
+            $keep[] = $this->path($entry, $this->versionKey((string) $head));
+        }
+        foreach ($this->disk->files("{$this->root}/{$entry->getKey()}") as $existing) {
+            if (! in_array($existing, $keep, true)) {
+                $this->disk->delete($existing);
+            }
+        }
     }
 
     /** The disk path of an entry's artifact at a given version (its CURRENT version by default). */
@@ -142,11 +176,7 @@ class EntryArtifactStore
         $path = $this->path($entry);
         $this->disk->put($path, $code);
 
-        foreach ($this->disk->files("{$this->root}/{$entry->getKey()}") as $existing) {
-            if ($existing !== $path) {
-                $this->disk->delete($existing);
-            }
-        }
+        $this->prune($entry);
 
         return $path;
     }
