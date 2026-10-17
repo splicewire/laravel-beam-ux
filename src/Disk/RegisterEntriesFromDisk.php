@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Disk;
 use FilesystemIterator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -12,9 +13,11 @@ use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Access\EntryAccessGate;
 use Splicewire\Beam\Ux\Access\Right;
+use Splicewire\Beam\Ux\Body\BodyKind;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
+use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
@@ -307,7 +310,14 @@ class RegisterEntriesFromDisk
             // `.mdx` entry decoded to an EMPTY STRING, and `PlacedDiskMirror` (which decodes through the
             // codec) wrote a blank `.mdx` back out with no error. Exactly the failure the model's own
             // `format` default docblock records finding for themes, in a second place.
-            $this->writeBody($entry, $source);
+            // A tsx file the Lens cannot lower is recorded like a compile failure and falls back to raw
+            // source so the batch still registers it (ADR-0228 d9).
+            try {
+                $this->writeBody($entry, $source);
+            } catch (ValidationException $e) {
+                $this->failures[$relative] = $e->errors()['source'][0] ?? 'the TSX lens could not lower the source.';
+                $this->writeBody($entry, $source, lower: false);
+            }
 
             // Compiles too; its compile error is kept with this run's failures below rather than thrown.
             if (($error = $publication->publishWritten($entry->refresh(), 'registered')) !== null) {
@@ -387,9 +397,16 @@ class RegisterEntriesFromDisk
     }
 
     /** Both new registration and explicit empty-entry hydration use the same codec and storage seam. */
-    private function writeBody(BeamUxEntry $entry, string $source): void
+    private function writeBody(BeamUxEntry $entry, string $source, bool $lower = true): void
     {
-        $body = $entry->codec()->encode($source, $entry->body_style);
+        // ADR-0228 d9: a Blocks-kind (tsx) file is LOWERED to a JsonDoc through the Node TSX Lens — the
+        // "future structural-import mechanism" this method used to defer to, which is why a disk `page`
+        // once arrived as raw source. A fresh registration has no Working Head, so every node is minted a
+        // fresh id. Every other kind encodes its text through the codec unchanged. `$lower = false` is the
+        // batch's fallback when the Lens cannot read a file (see the caller).
+        $body = ($lower && $entry->bodyKind() === BodyKind::Blocks)
+            ? app(SourceToBlocks::class)->convert($source, [])
+            : $entry->codec()->encode($source, $entry->body_style);
         $item = $this->drivers->resolveOnEntryConnection($entry)->write('', $body, $entry->namespace);
         if ($entry->particle_id === null && $item->key !== '') {
             $entry->particle_id = $item->key;
