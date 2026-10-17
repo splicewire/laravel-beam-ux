@@ -50,5 +50,8 @@ class EntryPublicationData extends BeamData
         public array $versions = [],
         #[Description('Why the published body could not be compiled to its artifact, or null when it did (and null on every draft path, which never compiles).')]
         public ?string $compileError = null,
+        /** @var list<string> */
+        #[Description("Profile legality the restored version breaks (an unknown block, illegal containment, a schema fail), by node id and path. A restore records these and does not refuse (ADR-0228 d9); empty on every other path.")]
+        public array $diagnostics = [],
     ) {}
 }

@@ -30,6 +30,81 @@ class JsonDocPrinterTest extends TestCase
         $this->assertMatchesRegularExpression('/ open\b/', $out);
     }
 
+    /**
+     * A literal prop must not print code. The printer emitted a prop's NAME and a `number` prop's VALUE
+     * verbatim, so `{name: 'onClick={() => steal()} x'}` or `{kind: 'number', value: '0} onMouseOver={…'}`
+     * put an expression into the module with no `expression` prop anywhere (EP-07a probe P3/P4, launch
+     * 2026-10-17). In every realm: a central author has expression props for code, a literal is never one.
+     */
+    public function test_a_prop_name_that_is_not_a_jsx_attribute_name_is_refused(): void
+    {
+        foreach (['onClick={() => steal()} data-x', 'a b', 'x"', 'x=1', '{x}', '1abc', '', 'a>'] as $name) {
+            try {
+                JsonDocPrinter::print([[
+                    'kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'children' => [],
+                    'props' => [['name' => $name, 'kind' => 'boolean-shorthand', 'value' => true]],
+                ]]);
+                $this->fail("the prop name [$name] was printed");
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString('attribute name', $e->getMessage());
+            }
+        }
+    }
+
+    public function test_a_number_prop_must_carry_a_finite_number(): void
+    {
+        // Code in a string, non-numbers, non-finite numbers, and the numbers PHP and JS print differently:
+        // -0, an unsafe integer, and exponent forms (review-r1, 2026-10-17).
+        foreach (['0} onMouseOver={() => steal()} data-m={0', '3', true, null, NAN, INF, -INF, -0.0, 9007199254740992, -9007199254740992, 1e20, 1e17, 1e-6, 1.5e-7] as $value) {
+            try {
+                JsonDocPrinter::print([[
+                    'kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'children' => [],
+                    'props' => [['name' => 'data-n', 'kind' => 'number', 'value' => $value]],
+                ]]);
+                $this->fail('the number value '.json_encode($value).' was printed');
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString('number', $e->getMessage());
+            }
+        }
+    }
+
+    /** Each admitted number prints exactly as the JS printer's `{String(n)}` would. */
+    public function test_an_admitted_number_prints_as_javascript_prints_it(): void
+    {
+        $cases = [[3, '3'], [3.0, '3'], [-1, '-1'], [1.5, '1.5'], [0.0, '0'], [0.0001, '0.0001'], [0.1 + 0.2, '0.30000000000000004'], [9007199254740991, '9007199254740991'], [123456789.25, '123456789.25'], [1e16, '10000000000000000']];
+
+        foreach ($cases as [$value, $js]) {
+            $out = JsonDocPrinter::print([[
+                'kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'children' => [],
+                'props' => [['name' => 'data-n', 'kind' => 'number', 'value' => $value]],
+            ]]);
+
+            $this->assertStringContainsString("data-n={{$js}}", $out, var_export($value, true));
+        }
+    }
+
+    public function test_real_attribute_names_and_numbers_still_print(): void
+    {
+        $out = JsonDocPrinter::print([[
+            'kind' => 'block', 'name' => 'svg', 'isComponent' => false, 'dynamic' => false, 'children' => [],
+            'props' => [
+                ['name' => 'aria-label', 'kind' => 'string', 'value' => 'Logo'],
+                ['name' => 'data-x', 'kind' => 'boolean-shorthand', 'value' => true],
+                ['name' => 'xlink:href', 'kind' => 'string', 'value' => '#a'],
+                ['name' => 'strokeWidth', 'kind' => 'number', 'value' => 1.5],
+                ['name' => 'tabIndex', 'kind' => 'number', 'value' => -1],
+                ['name' => 'onClick', 'kind' => 'expression', 'value' => 'handle'],
+            ],
+        ]]);
+
+        $this->assertStringContainsString('aria-label="Logo"', $out);
+        $this->assertMatchesRegularExpression('/ data-x\b/', $out);
+        $this->assertStringContainsString('xlink:href="#a"', $out);
+        $this->assertStringContainsString('strokeWidth={1.5}', $out);
+        $this->assertStringContainsString('tabIndex={-1}', $out);
+        $this->assertStringContainsString('onClick={handle}', $out);
+    }
+
     public function test_escapes_jsx_special_characters_in_text_leaves(): void
     {
         $out = JsonDocPrinter::print([

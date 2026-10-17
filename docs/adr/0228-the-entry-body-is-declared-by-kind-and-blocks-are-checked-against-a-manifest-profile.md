@@ -98,6 +98,10 @@ page holds `[]`.
      authoring.
    - **A file with code outside its JSX isn't a page.** Importing it leaves the entry as it was and records a diagnostic.
 
+   *Amended 2026-10-17 (EP-07a boundary fix, orch-lead ruling): "never refuse" covers profile legality; where
+   `x-admits-code` is false, a restore of a version carrying code is refused and leaves the entry as it was (ADR-0227
+   decision 1), and Publish refuses both.*
+
    *Amended by ADR-0233 decision 2 (2026-10-16): for an MDX page each path runs the MDX Lens, which lives beside the MDX
    kit in `@splicewire/beam-mdx`.*
 10. **There is one input per kind.**
