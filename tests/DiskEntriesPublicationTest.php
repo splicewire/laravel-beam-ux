@@ -12,8 +12,10 @@ use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
+use Splicewire\Beam\Ux\JsonDoc\TsxLens;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
+use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 
 /**
  * An entry registered from disk is BORN PUBLISHED (ADR-0225 decision 2), like a seeded page.
@@ -64,6 +66,31 @@ class DiskEntriesPublicationTest extends TestCase
     private function versionRows(BeamUxEntry $entry): int
     {
         return (int) \DB::table(Beam::table('versions'))->where('versionable_id', (string) $entry->fresh()->particle_id)->count();
+    }
+
+    public function test_a_registered_tsx_page_is_lowered_to_a_jsondoc_through_the_lens(): void
+    {
+        // EP-06 d9: a disk-registered tsx page stores a JsonDoc LOWERED through the Node TSX Lens, not raw
+        // source (the mechanism this method used to defer). A fake lens stands in for the Node run (proven
+        // end-to-end on tots); a fresh registration has no Working Head, so the rematch mints fresh ids.
+        $this->app->bind(TsxLens::class, fn () => new class implements TsxLens
+        {
+            public function lower(string $source): array
+            {
+                return [['kind' => 'block', 'name' => 'section', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'From disk']], 'dynamic' => false]];
+            }
+        });
+        file_put_contents($this->root.'/page/home.tsx', 'export default () => <section>From disk</section>');
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $entry = BeamUxEntry::query()->where('slug', 'home')->whereNull('namespace')->firstOrFail();
+        $body = app(StorageDriverResolver::class)->resolve($entry)->read($entry->particle_id)->body;
+
+        $this->assertSame('section', $body[0]['name']);
+        $this->assertArrayHasKey('id', $body[0]); // a stable id minted by the rematch, not raw source
+
+        @unlink($this->root.'/page/home.tsx');
     }
 
     public function test_a_registered_entry_is_born_published_with_a_pin_and_a_compiled_artifact(): void

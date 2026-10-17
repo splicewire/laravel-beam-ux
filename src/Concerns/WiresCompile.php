@@ -9,6 +9,8 @@ use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
 use Splicewire\Beam\Ux\Compile\NodeEntryBodyCompiler;
+use Splicewire\Beam\Ux\JsonDoc\NodeTsxLens;
+use Splicewire\Beam\Ux\JsonDoc\TsxLens;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 
 /**
@@ -43,6 +45,15 @@ trait WiresCompile
         $this->app->singleton(EntryBodyCompiler::class, fn () => new NodeEntryBodyCompiler(
             binary: (string) config('beam.ux.compile.binary', 'node'),
             script: config('beam.ux.compile.script'),
+            workingDirectory: base_path(),
+            timeout: (float) config('beam.ux.compile.timeout', 60),
+        ));
+
+        // ADR-0228 d9 — the TSX Lens shares the host's Node toolchain (binary + timeout) with the
+        // compiler; its own script key defaults to the bundled resources/lens/tsx-to-blocks.mjs.
+        $this->app->singleton(TsxLens::class, fn () => new NodeTsxLens(
+            binary: (string) config('beam.ux.compile.binary', 'node'),
+            script: config('beam.ux.lens.script'),
             workingDirectory: base_path(),
             timeout: (float) config('beam.ux.compile.timeout', 60),
         ));

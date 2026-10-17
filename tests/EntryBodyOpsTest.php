@@ -12,10 +12,12 @@ use Splicewire\Beam\Mdx\MdxBody;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Particle\ParticleOperationRegistry;
+use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
+use Splicewire\Beam\Ux\JsonDoc\TsxLens;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
 use Splicewire\Beam\Ux\Particle\EntryBodyShowOp;
@@ -173,6 +175,80 @@ class EntryBodyOpsTest extends TestCase
         ]), actor: null);
 
         $this->assertSame('h2', EntryBodySaveOp::respond($payload, $entry->fresh())->body[0]['name']);
+    }
+
+    public function test_save_refuses_a_canvas_body_with_a_block_outside_the_manifest_profile(): void
+    {
+        // EP-07a c (ADR-0228 d8): the save checks each node against the realm's resolved Manifest
+        // Profile. A tag the profile does not ship (<Marquee>) is refused with a 422 on `body` naming
+        // the node by id + path — proving ProfileLegality runs through the real op, not just in isolation.
+        $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        try {
+            EntryBodySaveOp::handle($entry, $this->saveRequest($entry, [
+                ['kind' => 'block', 'name' => 'Marquee', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [], 'id' => 'm1'],
+            ]), actor: null);
+            $this->fail('expected a ValidationException for an out-of-profile block');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('Marquee', implode("\n", $e->errors()['body']));
+            $this->assertStringContainsString('m1', implode("\n", $e->errors()['body']));
+        }
+    }
+
+    private function bindSplitTenancy(string $central = 'central_db'): void
+    {
+        $this->app->instance(TenancyContext::class, new class($central) implements TenancyContext
+        {
+            public function __construct(private string $central) {}
+
+            public function isMultiTenant(): bool { return true; }
+
+            public function isActive(): bool { return true; }
+
+            public function currentTenant(): ?object { return null; }
+
+            public function currentTenantId(): int|string|null { return 1; }
+
+            public function centralConnection(): ?string { return $this->central; }
+        });
+    }
+
+    public function test_save_body_refuses_code_on_a_tenant_resident_entry_even_unchanged(): void
+    {
+        // ADR-0227 d1: a tenant-owned entry holds blocks, not code — an opaque node (verbatim code) is
+        // refused on a tenant save, whole-body (EP-06 d8's narrowing never spares code). Residency is the
+        // entry's connection; the refusal fires before the write, so no tenant DB is needed.
+        $this->bindSplitTenancy();
+        $entry = BeamUxEntry::create(['slug' => 'tenant-code', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+        $entry->setConnection('tenant_acme');
+
+        try {
+            EntryBodySaveOp::handle($entry, $this->saveRequest($entry, [
+                ['kind' => 'opaque', 'reason' => 'map', 'source' => '{steal()}'],
+            ]), actor: null);
+            $this->fail('a tenant-resident entry accepted an opaque (code) node');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('code', implode("\n", $e->errors()['body']));
+        }
+    }
+
+    public function test_save_source_refuses_on_a_tenant_resident_entry(): void
+    {
+        // ADR-0227 d1 / ADR-0233 d6: source (MDX/TSX) is code; a tenant-owned entry refuses a source write.
+        $this->bindSplitTenancy();
+        $entry = BeamUxEntry::create(['slug' => 'tenant-src', 'type' => 'component', 'format' => 'tsx', 'namespace' => null]);
+        $entry->setConnection('tenant_acme');
+
+        try {
+            EntrySourceSaveOp::handle(
+                $entry,
+                Request::create('/beam-ux-entries/'.$entry->id.'/save-source', 'POST', ['source' => 'export const X = () => null']),
+                actor: null,
+            );
+            $this->fail('a tenant-resident entry accepted a source write');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('source', $e->errors());
+        }
     }
 
     public function test_a_css_theme_entry_also_refuses_a_json_doc_body(): void
@@ -444,24 +520,49 @@ class EntryBodyOpsTest extends TestCase
         $this->assertStringContainsString('Real source.', (string) $envelope->source);
     }
 
-    public function test_save_source_refuses_a_blocks_entry_as_a_422_naming_its_kind(): void
+    public function test_save_source_on_a_tsx_entry_lowers_the_source_to_a_stored_jsondoc(): void
     {
-        // The split d10 makes: a Blocks-kind entry (tsx) has save-body's typed JsonDoc, not a source write.
+        // EP-06 d9: a Blocks-kind (tsx) entry's source write is LOWERED to a JsonDoc through the Node TSX
+        // Lens (the EP-05 refusal became the lowering). A fake lens stands in for the Node run, proven
+        // end-to-end on tots in docs/review/ep-06-node-identity-20261017/d9-real-lens-run.md.
+        $this->app->bind(TsxLens::class, fn () => new class implements TsxLens
+        {
+            public function lower(string $source): array
+            {
+                return [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Lowered']], 'dynamic' => false]];
+            }
+        });
+
         $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+
+        $payload = EntrySourceSaveOp::handle(
+            $entry,
+            Request::create('/beam-ux-entries/'.$entry->id.'/save-source', 'POST', ['source' => 'export default () => <h2>Lowered</h2>']),
+            actor: null,
+        );
+
+        $stored = EntrySourceSaveOp::respond($payload, $entry->fresh())->body;
+        $this->assertSame('h2', $stored[0]['name']);
+        $this->assertArrayHasKey('id', $stored[0]); // a stable id was minted by the rematch
+    }
+
+    public function test_save_source_refuses_a_form_kind_entry_that_has_no_source_editor(): void
+    {
+        // A theme is Form-kind: it has no source editor, so a source write is refused.
+        $theme = BeamUxEntry::create(['slug' => 'beam', 'type' => 'theme', 'format' => 'css', 'namespace' => 'theme']);
 
         try {
             EntrySourceSaveOp::handle(
-                $entry,
-                Request::create('/x', 'POST', ['source' => 'export default () => <div/>;']),
+                $theme,
+                Request::create('/beam-ux-entries/'.$theme->id.'/save-source', 'POST', ['source' => 'whatever']),
                 actor: null,
             );
-            $this->fail('a source write was accepted on a blocks entry');
+            $this->fail('a source write was accepted on a form-kind entry');
         } catch (ValidationException $e) {
             $this->assertArrayHasKey('source', $e->errors());
-            $this->assertStringContainsString('blocks', $e->errors()['source'][0]);
         }
 
-        $this->assertNull($entry->fresh()->particle_id);
+        $this->assertNull($theme->fresh()->particle_id);
     }
 
     public function test_save_form_stores_a_theme_form_checked_against_its_schema_and_round_trips(): void

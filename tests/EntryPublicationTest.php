@@ -12,6 +12,7 @@ use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
+use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
@@ -458,6 +459,63 @@ class EntryPublicationTest extends TestCase
         app(EntryPublication::class)->publish($entry->fresh());
 
         return $entry->fresh();
+    }
+
+    private function bindSplitTenancy(string $central = 'central_db'): void
+    {
+        // The entry stays on the default (testing) connection, which is not this central connection, so
+        // it is tenant-resident while its DB ops still work.
+        $this->app->instance(TenancyContext::class, new class($central) implements TenancyContext
+        {
+            public function __construct(private string $central) {}
+
+            public function isMultiTenant(): bool { return true; }
+
+            public function isActive(): bool { return true; }
+
+            public function currentTenant(): ?object { return null; }
+
+            public function currentTenantId(): int|string|null { return 1; }
+
+            public function centralConnection(): ?string { return $this->central; }
+        });
+    }
+
+    public function test_a_tenant_save_draft_with_an_opaque_node_is_refused_at_the_choke(): void
+    {
+        // HIGH-1: save-draft -> recordDraft -> write(), the choke. A tenant entry refuses an opaque node
+        // (code) even though EntryDraftSaveOp itself calls no guard.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $this->bindSplitTenancy();
+
+        $this->expectException(ValidationException::class);
+        app(EntryPublication::class)->recordDraft($entry->fresh(), [['kind' => 'opaque', 'reason' => 'map', 'source' => '{steal()}']], 'draft');
+    }
+
+    public function test_a_tenant_save_draft_with_an_expression_prop_is_refused_at_the_choke(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $this->bindSplitTenancy();
+
+        $this->expectException(ValidationException::class);
+        app(EntryPublication::class)->recordDraft($entry->fresh(), [[
+            'kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false,
+            'props' => [['name' => 'x', 'kind' => 'expression', 'value' => 'user.isAdmin']], 'children' => [],
+        ]], 'draft');
+    }
+
+    public function test_a_restore_of_a_code_bearing_version_on_a_tenant_entry_is_refused(): void
+    {
+        // A code-bearing version recorded while central, then the entry is tenant-owned: restore refuses
+        // it BEFORE applying (ADR-0227 d1), so a tenant cannot republish old code via restore + publish.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $state = app(EntryPublication::class)->recordDraft($entry->fresh(), [['kind' => 'opaque', 'reason' => 'map', 'source' => '{code()}']], 'code draft');
+        $codeRef = $state->versions[0]->readable;
+
+        $this->bindSplitTenancy();
+
+        $this->expectException(ValidationException::class);
+        app(EntryPublication::class)->restore($entry->fresh(), $codeRef);
     }
 
     /** An entry with a written body and NO version history — every entry authored before this path. */
