@@ -13,7 +13,6 @@ use Illuminate\Support\Facades\Storage;
 use ReflectionClass;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Facades\Particle;
-use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
@@ -37,15 +36,7 @@ use Splicewire\Beam\Workflows\Awaiting\Contracts\AwaitingStore;
 use Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry;
 use Splicewire\Beam\Workflows\Control\LifecycleService;
 
-/**
- * **`clear-body` — the one act that removes a page's content** (compile-on-save-tower follow-up 1).
- *
- * Before it existed, "removing" content meant saving `[]`, which binds and publishes an empty document
- * and writes a 0-byte mirror file. Owner ruling: that empty-save behaviour is CORRECT and stays (an
- * author may save an empty body on purpose); what was missing is an operation that returns the entry to
- * "never authored". Every case below reads what a reader, the doctor and the disk would see — the
- * artifact store, the mirror disk, the body envelope — rather than only the `particle_id` column.
- */
+/** ADR-0225 d3/d8: Clear is an audited draft on the existing, restorable history. */
 class EntryBodyClearTest extends TestCase
 {
     private const BODY = [[
@@ -82,56 +73,70 @@ class EntryBodyClearTest extends TestCase
         });
     }
 
-    public function test_clearing_removes_the_body_the_mirror_file_and_the_artifact_and_reads_as_unauthored(): void
+    public function test_clear_is_a_restorable_draft_on_the_same_history_with_audit_only(): void
     {
         $entry = $this->savedPage(self::BODY);
+        $particleId = $entry->particle_id;
+        $pin = $entry->published_version;
         $mirrorPath = $this->mirrorPath($entry);
-        $this->assertNotNull($this->artifacts()->read($entry), 'precondition: the save compiled an artifact');
-        Storage::disk('mirror')->assertExists($mirrorPath);
+        $mirror = Storage::disk('mirror')->get($mirrorPath);
+        $artifact = $this->artifacts()->read($entry);
 
-        $state = app(EntryPublication::class)->clear($entry);
+        $state = app(EntryPublication::class)->clear($entry, 'clear draft');
 
-        $fresh = $entry->fresh();
-        $this->assertNull($fresh->particle_id, 'the entry is still bound to its particle');
-        $this->assertNull($fresh->getAttribute('published_version'));
-        Storage::disk('mirror')->assertMissing($mirrorPath);
-        $this->assertSame([], Storage::disk('mirror')->allDirectories(), 'the emptied placement directories were left behind');
-        $this->assertSame([], Storage::disk('artifacts')->allFiles(), 'an artifact survived the clear');
+        $this->assertSame($particleId, $entry->fresh()->particle_id);
+        $this->assertSame($pin, $state->publishedVersion);
+        $this->assertTrue($state->draftPending);
+        $this->assertSame([], app(EntryBodyEnvelope::class)->read($entry->fresh())->body);
+        $this->assertSame($mirror, Storage::disk('mirror')->get($mirrorPath));
+        $this->assertSame($artifact, $this->artifacts()->read($entry->fresh()));
+        $this->assertCount(2, $state->versions);
+        $this->assertSame(0, DB::table('activity_log')->where('log_name', 'beam-revision')->where('event', 'cleared')->count());
+        $this->assertSame(1, DB::table('activity_log')->where('log_name', 'beam-entry')->where('event', 'cleared')->count());
 
-        // Every reader's answer is the unauthored one, not the empty-document one.
-        $this->assertFalse(app(CompileEntryBody::class)->holdsEmptyDocument($fresh));
-        $this->assertNull(app(CompileEntryBody::class)->sourceFor($fresh));
-        $this->assertSame([], app(EntryBodyEnvelope::class)->read($fresh)->body);
-        $this->assertSame([], $state->versions);
-        $this->assertNull($state->publishedVersion);
-        $this->assertFalse($state->draftPending);
+        $restored = app(EntryPublication::class)->restore($entry->fresh(), $pin);
+        $this->assertSame(self::BODY, app(EntryBodyEnvelope::class)->read($entry->fresh())->body);
+        $this->assertSame($pin, $restored->publishedVersion);
+        $this->assertTrue($restored->draftPending);
+        $this->assertCount(3, $restored->versions);
     }
 
-    public function test_the_clear_is_recorded_on_the_particle_history_and_the_entry_revision_log(): void
+    public function test_clear_audit_records_the_actor_without_a_restorable_activity_preimage(): void
     {
         $entry = $this->savedPage(self::BODY);
-        $particleId = (string) $entry->particle_id;
-        $pin = (string) $entry->getAttribute('published_version');
+        $actor = new ClearingUser;
+        $actor->setAttribute('id', '00000000-0000-4000-8000-000000000008');
+        app(EntryPublication::class)->clear($entry, actor: $actor);
+        $audit = DB::table('activity_log')->where('event', 'cleared')->first();
+        $this->assertSame('beam-entry', $audit->log_name);
+        $this->assertSame((string) $actor->getKey(), (string) $audit->causer_id);
+        $this->assertSame($actor->getMorphClass(), $audit->causer_type);
+        $properties = json_decode($audit->properties, true);
+        $this->assertArrayNotHasKey('old', $properties);
+        $this->assertArrayNotHasKey('new', $properties);
+        $this->assertNotNull($properties['headVersion']);
+    }
 
-        app(EntryPublication::class)->clear($entry, 'retired');
+    public function test_clear_audit_stays_on_the_entry_connection_under_another_default(): void
+    {
+        $default = DB::getDefaultConnection();
+        config(['database.connections.entry_realm' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '', 'foreign_key_constraints' => true]]);
+        DB::setDefaultConnection('entry_realm');
+        try {
+            $this->createTables();
+            $entry = $this->savedPage(self::BODY)->setConnection('entry_realm');
+        } finally {
+            DB::setDefaultConnection($default);
+        }
 
-        // The particle row is kept, and its history gained a final version freezing the removed body.
-        $particle = BeamParticle::query()->find($particleId);
-        $this->assertNotNull($particle, 'the clear deleted the particle and its history with it');
-        $last = DB::table(Beam::table('versions'))->where('versionable_id', $particleId)->orderByDesc('version')->first();
-        $this->assertSame('retired', $last->label);
-        $this->assertStringContainsString('Authored', (string) $last->snapshot);
+        $actor = new ClearingUser;
+        $actor->setAttribute('id', '00000000-0000-4000-8000-000000000008');
+        app(EntryPublication::class)->clear($entry, actor: $actor);
 
-        // The entry side names the binding it lost, so the unbound particle is findable from the entry.
-        $revision = collect(app(RevisionRecorder::class)->history($entry->fresh()))->firstWhere('cause', 'cleared');
-        $this->assertNotNull($revision, 'no `cleared` revision was recorded on the entry');
-        $this->assertSame(['particle_id' => $particleId, 'published_version' => $pin], $revision->old);
-        $this->assertSame(['particle_id' => null, 'published_version' => null], $revision->new);
-
-        // And the revision is a real pre-image: reverting it rebinds the entry to its history.
-        app(RevisionRecorder::class)->revert($revision);
-        $this->assertSame($particleId, (string) $entry->fresh()->particle_id);
-        // The published body the save recorded, plus the version that froze it at the clear.
+        $this->assertSame(0, DB::table('activity_log')->where('event', 'cleared')->count());
+        $this->assertSame(1, DB::connection('entry_realm')->table('activity_log')->where('event', 'cleared')->count());
+        $this->assertSame((string) $actor->getKey(), DB::connection('entry_realm')->table('activity_log')->where('event', 'cleared')->value('causer_id'));
+        $this->assertNotNull($entry->fresh()->particle_id);
         $this->assertCount(2, app(EntryPublication::class)->state($entry->fresh())->versions);
     }
 
@@ -145,10 +150,12 @@ class EntryBodyClearTest extends TestCase
 
         $last = DB::table(Beam::table('versions'))->where('versionable_id', $particleId)->orderByDesc('version')->first();
         $this->assertSame('cleared', $last->label);
-        $this->assertStringContainsString('Unpublished draft', (string) $last->snapshot);
+        // The former draft is still a prior VersionStore version; the new head is cleared.
+        $this->assertSame([], json_decode($last->snapshot, true)['payload']);
+        $this->assertTrue(DB::table(Beam::table('versions'))->where('versionable_id', $particleId)->get()->contains(fn ($v) => str_contains($v->snapshot, 'Unpublished draft')));
     }
 
-    public function test_an_entry_holding_an_empty_document_clears_to_unauthored_and_loses_its_empty_mirror_file(): void
+    public function test_clearing_an_empty_document_keeps_its_publication_and_history(): void
     {
         // The live-data case: the G2 journey "restored" pages with `save-body {body: []}`.
         $entry = $this->savedPage([]);
@@ -159,9 +166,9 @@ class EntryBodyClearTest extends TestCase
 
         app(EntryPublication::class)->clear($entry);
 
-        $this->assertNull($entry->fresh()->particle_id);
-        Storage::disk('mirror')->assertMissing($mirrorPath);
-        $this->assertFalse(app(CompileEntryBody::class)->holdsEmptyDocument($entry->fresh()));
+        $this->assertNotNull($entry->fresh()->particle_id);
+        Storage::disk('mirror')->assertExists($mirrorPath);
+        $this->assertTrue(app(CompileEntryBody::class)->holdsEmptyDocument($entry->fresh()));
     }
 
     public function test_saving_an_empty_body_still_writes_an_empty_mirror_file(): void
@@ -176,14 +183,14 @@ class EntryBodyClearTest extends TestCase
         $this->assertSame('', Storage::disk('mirror')->get($this->mirrorPath($entry)));
     }
 
-    public function test_the_mirror_prunes_only_the_directories_the_removal_emptied(): void
+    public function test_clear_leaves_both_its_published_mirror_and_siblings_unchanged(): void
     {
         $sibling = $this->savedPage(self::BODY);
         $entry = $this->savedPage(self::BODY);
 
         app(EntryPublication::class)->clear($entry);
 
-        Storage::disk('mirror')->assertMissing($this->mirrorPath($entry));
+        Storage::disk('mirror')->assertExists($this->mirrorPath($entry));
         Storage::disk('mirror')->assertExists($this->mirrorPath($sibling));
     }
 
@@ -221,6 +228,51 @@ class EntryBodyClearTest extends TestCase
         }
     }
 
+    public function test_editor_save_publish_restore_each_audit_the_explicit_actor(): void
+    {
+        $entry = $this->savedPage(self::BODY);
+        $actor = new ClearingUser;
+        $actor->setAttribute('id', '00000000-0000-4000-8000-000000000008');
+        $publication = app(EntryPublication::class);
+        $base = $publication->state($entry)->headVersion;
+        $draft = \Splicewire\Beam\Ux\Particle\EntryDraftSaveOp::handle($entry, Request::create('/x', 'POST', ['body' => self::DRAFT, 'baseVersion' => $base]), $actor);
+        EntryPublishOp::handle($entry->fresh(), Request::create('/x', 'POST', ['ref' => $draft->headVersion]), $actor);
+        \Splicewire\Beam\Ux\Particle\EntryVersionRestoreOp::handle($entry->fresh(), Request::create('/x', 'POST', ['ref' => $base]), $actor);
+        foreach (['drafted', 'published', 'restored'] as $event) {
+            $events = DB::table('activity_log')->where('log_name', 'beam-entry')->where('event', $event)->get();
+            $this->assertCount(1, $events, $event);
+            $this->assertSame((string) $actor->getKey(), (string) $events[0]->causer_id);
+            $this->assertSame($actor->getMorphClass(), $events[0]->causer_type);
+        }
+    }
+
+    public function test_named_publish_moves_a_hidden_entry_through_its_workflow(): void
+    {
+        app(WorkflowBindingRegistry::class)->bind(UxType::Page->value, EntryPublishLifecycle::DEFINITION);
+        $entry = $this->savedPage(self::BODY);
+        $state = app(EntryPublication::class)->recordDraft($entry, self::DRAFT);
+        app(EntryPublication::class)->publishVersion($entry->fresh(), $state->headVersion);
+        $this->assertSame(BeamUxEntry::MARKING_PUBLISHED, $entry->fresh()->workflow_marking);
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+    }
+
+    public function test_named_publish_cannot_publish_an_archived_entry_or_move_its_pin(): void
+    {
+        app(WorkflowBindingRegistry::class)->bind(UxType::Page->value, EntryPublishLifecycle::DEFINITION);
+        $entry = $this->savedPage(self::BODY);
+        $pin = $entry->published_version;
+        $this->assertTrue(app(LifecycleService::class)->transition($entry, 'archive')->applied);
+        $state = app(EntryPublication::class)->recordDraft($entry->fresh(), self::DRAFT);
+        try {
+            app(EntryPublication::class)->publishVersion($entry->fresh(), $state->headVersion);
+            $this->fail('Archived publication was accepted');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            $this->assertArrayHasKey('publish', $exception->errors());
+        }
+        $this->assertSame('archived', $entry->fresh()->workflow_marking);
+        $this->assertSame($pin, $entry->fresh()->published_version);
+    }
+
     public function test_a_workflow_managed_published_page_clears_its_body_and_keeps_its_marking(): void
     {
         $this->app->make(WorkflowBindingRegistry::class)->bind(UxType::Page->value, EntryPublishLifecycle::DEFINITION);
@@ -232,9 +284,9 @@ class EntryBodyClearTest extends TestCase
 
         app(EntryPublication::class)->clear($entry->fresh());
 
-        // The body went; visibility is the workflow's own door (unpublish/archive), not a side effect.
+        // The working body is cleared; public visibility is the workflow's own door (unpublish/archive), not a side effect.
         $fresh = $entry->fresh();
-        $this->assertNull($fresh->particle_id);
+        $this->assertNotNull($fresh->particle_id);
         $this->assertSame(BeamUxEntry::MARKING_PUBLISHED, $fresh->workflow_marking);
         $this->assertContains('unpublish', $lifecycle->available($fresh));
     }
@@ -250,9 +302,10 @@ class EntryBodyClearTest extends TestCase
         $response = $this->postJson("/beam-ux-entries/{$entry->id}/clear-body", ['label' => 'over http'])->assertOk();
 
         $this->assertSame((string) $entry->id, $response->json('data.id'));
-        $this->assertSame([], $response->json('data.versions'));
-        $this->assertNull($entry->fresh()->particle_id);
-        Storage::disk('mirror')->assertMissing($this->mirrorPath($entry));
+        $this->assertCount(2, $response->json('data.versions'));
+        $this->assertTrue($response->json('data.draftPending'));
+        $this->assertNotNull($entry->fresh()->particle_id);
+        Storage::disk('mirror')->assertExists($this->mirrorPath($entry));
     }
 
     public function test_an_actor_without_the_entitlement_is_refused_and_nothing_is_removed(): void
