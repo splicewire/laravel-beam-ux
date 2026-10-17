@@ -20,6 +20,24 @@ expression already in a tenant entry is still refused (ADR-0227 d1 is unconditio
 re-assertion is a system write, outside the tenant-save check). The shared `CanvasBodyGuard` carries this
 for every save path. Defensive (ADR-0233 d6): a source write on a tenant-resident entry is refused.
 
+**The code-boundary choke (HIGH-1 review fix).** The guard runs at the publication CHOKE —
+`EntryPublication::write` (which `recordDraft`, save-body and save-source all call) plus `restore` (which
+guards the version snapshot's `payload` BEFORE applying it, refuse-before-write) — so **every AUTHOR and
+API write** is covered in one place: save-body, save-source, save-draft (`EntryDraftSaveOp->recordDraft`)
+and restore. This closed a real bypass: previously save-draft and restore wrote a canvas body without the
+guard, so a tenant could smuggle an opaque node or an expression prop in via save-draft+publish or a
+code-bearing restore, past `x-admits-code: false`. The per-op guard calls were removed; `CanvasBodyGuard`
+now runs the JsonNode well-formedness pass and the profile/code check together. Red-first: a tenant
+save-draft with an opaque node → 422; with an expression prop → 422; a code-bearing restore on a tenant
+entry → 422 (`EntryPublicationTest`).
+
+**The deliberate system-write exemption.** Disk registration, seeders and pack re-assertion write the body
+through `Provenance\Reasserter` → the storage driver directly, NOT `EntryPublication::write`, so they are
+NOT subject to the code boundary. This is intentional (orch-lead ruling 2026-10-17 01:25Z): they carry
+content the host or a package SHIPS, which ux-0227 d1 is explicit holds the code, and ADR-0227 d2's
+re-assertion is a system write outside the tenant-save check. The choke covers the author/API surface; the
+Reasserter path is the sanctioned system exemption.
+
 ## d9 — source becomes blocks on the server (the Node TSX Lens)
 
 `resources/lens/tsx-to-blocks.mjs` (mirrors `compile.mjs`, resolves the host's built
