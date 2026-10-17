@@ -51,9 +51,6 @@ class EditorKitTest extends TestCase
 
     public function test_packaged_theme_seeder_publishes_and_reuses_one_entry(): void
     {
-        // System seed uses the same host-authorized storage driver as SeedsEntries/Reasserter.
-        Gate::define('create', fn ($user = null) => true);
-        Gate::define('update', fn ($user = null) => true);
         $this->seed(\Splicewire\Beam\Ux\Seeders\ThemeSeeder::class);
         $entry = BeamUxEntry::query()->where('namespace', 'theme')->firstOrFail();
         $this->assertNotNull($entry->published_version);

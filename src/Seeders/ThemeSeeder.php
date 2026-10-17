@@ -6,6 +6,7 @@ use Illuminate\Database\Seeder;
 use Splicewire\Beam\Ux\Provenance\Reasserter;
 use Splicewire\Beam\Ux\Theme\ThemeResolver;
 use Splicewire\Beam\Ux\Type\UxType;
+use Splicewire\Beam\Write\AsSystemWriter;
 
 /**
  * Seeds this host's central theme entry (theme-entries-and-authoring ticket `str-01`) with TODAY's
@@ -23,7 +24,14 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class ThemeSeeder extends Seeder
 {
+    use AsSystemWriter;
+
     public function run(): void
+    {
+        $this->asSystemWriter(fn () => $this->seedShipped());
+    }
+
+    private function seedShipped(): void
     {
         app(Reasserter::class)->seedBody(
             ['namespace' => ThemeResolver::NAMESPACE, 'slug' => ThemeResolver::SLUG],
