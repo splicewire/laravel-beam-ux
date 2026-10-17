@@ -793,6 +793,26 @@ class EntryPublicationTest extends TestCase
         $this->assertSame($before, $entry->fresh()->getAttributes());
     }
 
+    public function test_programmatic_publish_cannot_pin_a_restored_illegal_working_head(): void
+    {
+        $entry = $this->legacyPublishedPage();
+        $publication = app(EntryPublication::class);
+        $legacy = $publication->state($entry)->publishedVersion;
+        $publication->recordDraft($entry->fresh(), self::BODY_TWO);
+        $publication->publish($entry->fresh());
+        $this->bindSplitTenancy();
+        $publication->restore($entry->fresh(), $legacy);
+        $before = $entry->fresh()->getAttributes();
+
+        try {
+            $publication->publishAuthoredBody($entry->fresh());
+            $this->fail('An illegal working head was compared to itself and published.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('marquee', implode('\n', $exception->errors()['body']));
+        }
+        $this->assertSame($before, $entry->fresh()->getAttributes());
+    }
+
     private function legacyPublishedPage(): BeamUxEntry
     {
         $entry = BeamUxEntry::create(['slug' => 'legacy-published', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site']);

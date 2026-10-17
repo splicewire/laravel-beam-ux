@@ -572,7 +572,10 @@ class EntryPublication
 
             return $this->mirrorAndCompile($entry);
         }
-        app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
+        $particle = $this->requireParticle($entry);
+        $pinned = $this->publishedVersionId($entry);
+        $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
+        app(CanvasBodyGuard::class)->assertPublishable($entry, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
         app(CompileEntryBody::class)->forVersion($entry, (string) $version->id, $body);
         $entry->setAttribute('published_version', (string) $version->id);
         $entry->save();
