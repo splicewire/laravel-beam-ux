@@ -1,0 +1,998 @@
+{
+    "profile": "html",
+    "version": 1,
+    "doc": {
+        "admitsChildCategories": [
+            "html"
+        ]
+    },
+    "nodes": [
+        {
+            "name": "section",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "div",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "article",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "aside",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "header",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "footer",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "main",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "nav",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "figure",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "figcaption",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "p",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "h1",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "h2",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "h3",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "h4",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "h5",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "h6",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "span",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "a",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "strong",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "em",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "small",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "blockquote",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "pre",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "code",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "ul",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "ol",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "li",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "dl",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "dt",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "dd",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "button",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "label",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "img",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [],
+            "admitsText": false,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "table",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "caption",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "thead",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "tbody",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "tfoot",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "tr",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "td",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "th",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [
+                "html"
+            ],
+            "admitsText": true,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "hr",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [],
+            "admitsText": false,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "br",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [],
+            "admitsText": false,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                },
+                "additionalProperties": true
+            }
+        },
+        {
+            "name": "DemoHero",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [],
+            "admitsText": false,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "DemoFeatureRow",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [],
+            "admitsText": false,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "additionalProperties": false
+            }
+        }
+    ],
+    "marks": []
+}
