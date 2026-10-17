@@ -25,10 +25,8 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
  * over a working copy some other writer moved (a disk import, a backfill) records the working copy first,
  * so the thing pinned is always a version that froze exactly what is being served.
  *
- * A failed compile does not fail the publish. The pin has moved and stays moved, the author gets the
- * compiler's own message on `compileError`, and the page has no artifact until the body compiles — which
- * `BeamUxArtifactAudit` names and the reader reports. Absence in three places, degradation in none
- * (ADR-0209 §7).
+ * ADR-0232 d7: compile a missing named artifact before changing the pin. A failed compile
+ * refuses publication; a compiled draft is reused without invoking the compiler again.
  */
 #[ParticleOp(
     resource: 'beam-ux-entry',

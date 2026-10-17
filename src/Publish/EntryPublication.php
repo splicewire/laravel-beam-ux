@@ -17,10 +17,10 @@ use Splicewire\Beam\Storage\ParticleStorageDriver;
 use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
-use Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Data\EntryPublicationData;
 use Splicewire\Beam\Ux\Data\EntryVersionData;
+use Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
 use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
@@ -62,18 +62,9 @@ use Splicewire\Beam\Write\PolicyWriteGate;
  * recompiled at the address that pin now names. The recompile is not optional: the pin changes the
  * artifact's address, and the file is at the old one.
  *
- * ## What a publish actually does, in order
- *
- *  1. mint a version of the working copy (or reuse HEAD when HEAD already IS the working copy — a
- *     publish straight after a draft pins that draft rather than duplicating it);
- *  2. move the publication pin to it;
- *  3. mirror the body to its placed disk file — the mirror follows the PUBLISHED body, so a draft never
- *     changes the git-trackable file;
- *  4. compile the artifact, at the address step 2 just named.
- *
- * A failed compile does not fail the publish, for the reason {@see \Splicewire\Beam\Ux\Particle\EntryBodySaveOp}
- * states at length: the write has landed, the author gets the compiler's own message, and absence is
- * reported by the doctor rather than degraded into a client-side compile.
+ * Explicit publication compiles the named snapshot before changing the pin or disk mirror
+ * (ADR-0232 d7). Drafts compile at their own addresses and return compileError without losing
+ * the saved body. System seed/registration keeps its existing pin-and-diagnostic contract.
  */
 class EntryPublication
 {
@@ -133,9 +124,8 @@ class EntryPublication
     /**
      * Write a body to the entry's working copy and RECORD it as a version — without publishing it.
      *
-     * Nothing downstream of the particle moves: no disk mirror, no compile, no pin. The public artifact
-     * stays exactly where {@see baseline()} left it, which is what makes the draft invisible to a reader
-     * rather than merely unannounced.
+     * The draft compiles at its own address (ADR-0232 d7). No disk mirror or public pin moves;
+     * compilation errors are diagnostics on a retained draft, never a loss of the author's save.
      *
      * @param  array<string, mixed>  $body
      */
@@ -213,8 +203,7 @@ class EntryPublication
     /**
      * Publish the entry's working copy: pin it, mirror it, compile it.
      *
-     * Returns the state including any compile diagnostic — the publish itself has already landed by then
-     * and stays landed.
+     * A missing artifact must compile before the publication pin moves (ADR-0232 d7).
      */
     public function publish(BeamUxEntry $entry, ?string $label = null): EntryPublicationData
     {
@@ -238,7 +227,7 @@ class EntryPublication
 
         $version = $this->versionForWorkingCopy($particle, $label ?? 'published');
 
-        return $this->state($entry->refresh(), $this->pinAndCompile($entry, $version));
+        return $this->state($entry->refresh(), $this->pinAndCompile($entry, $version, requireCompiled: true));
     }
 
     /**
@@ -333,6 +322,17 @@ class EntryPublication
      */
     public function publishWritten(BeamUxEntry $entry, ?string $label = null): ?string
     {
+        return $this->publishWorkingCopy($entry, $label, false);
+    }
+
+    /** Programmatic author save: retain its written draft, but never publish a failed compile. */
+    public function publishAuthoredBody(BeamUxEntry $entry, ?string $label = null): ?string
+    {
+        return $this->publishWorkingCopy($entry, $label, true);
+    }
+
+    private function publishWorkingCopy(BeamUxEntry $entry, ?string $label, bool $requireCompiled): ?string
+    {
         if ($entry->particle_id === null) {
             return null;
         }
@@ -346,7 +346,7 @@ class EntryPublication
             return null;
         }
 
-        return $this->pinAndCompile($entry, $this->versionForWorkingCopy($particle, $label ?? 'published'));
+        return $this->pinAndCompile($entry, $this->versionForWorkingCopy($particle, $label ?? 'published'), $requireCompiled);
     }
 
     /**
@@ -542,15 +542,24 @@ class EntryPublication
      * Move the publication pin to `$version`, mirror the body to disk, and compile the artifact at the
      * address the pin now names. Returns the compile diagnostic, or null.
      *
-     * Order is load-bearing: the pin is written FIRST, because the artifact store hashes it into the
-     * artifact's path, so compiling before pinning would file the module at the outgoing address.
+     * Explicit author publication compiles at the snapshot address first. System publication
+     * retains its established pin-first diagnostic behavior pending its separately nominated policy.
      */
-    private function pinAndCompile(BeamUxEntry $entry, Version $version): ?string
+    private function pinAndCompile(BeamUxEntry $entry, Version $version, bool $requireCompiled = false): ?string
     {
         $body = $version->snapshot['payload'] ?? null;
         if (! is_array($body)) {
             throw ValidationException::withMessages(['ref' => 'The named version has no valid body snapshot.']);
         }
+        // System registration/seed retains its established pin + diagnostic contract. EP-10
+        // changes explicit publication, not boot-time availability of shipped entries.
+        if (! $requireCompiled) {
+            $entry->setAttribute('published_version', (string) $version->id);
+            $entry->save();
+
+            return $this->mirrorAndCompile($entry);
+        }
+        app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
         app(CompileEntryBody::class)->forVersion($entry, (string) $version->id, $body);
         $entry->setAttribute('published_version', (string) $version->id);
         $entry->save();

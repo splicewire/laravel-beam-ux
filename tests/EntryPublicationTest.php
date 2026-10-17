@@ -139,6 +139,36 @@ class EntryPublicationTest extends TestCase
         $this->assertSame(self::BODY_ONE, BeamParticle::find($entry->particle_id)->payload);
     }
 
+    public function test_ep10_backfill_uses_the_pin_snapshot_and_keeps_the_draft_artifact(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $state = app(EntryPublication::class)->recordDraft($entry->fresh(), self::BODY_TWO);
+        app(CompileEntryBody::class)->forEntry($entry->fresh(), force: true);
+        $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
+        $draftPath = $this->artifacts()->path($entry, $this->artifacts()->versionKey($state->headVersion));
+        $this->assertStringContainsString('Two', $this->artifacts()->disk()->get($draftPath));
+    }
+
+    public function test_ep10_programmatic_save_retains_body_but_does_not_publish_a_failed_compile(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $pin = $entry->published_version;
+        PublicationFakeCompiler::$fails = true;
+        try {
+            try {
+                EntryBodySaveOp::handle($entry->fresh(), Request::create('/', 'POST', ['body' => self::BODY_TWO]), null);
+                $this->fail('Programmatic save published an uncompilable version.');
+            } catch (CompilationFailed $exception) {
+                $this->assertNotEmpty($exception->getMessage());
+            }
+            $this->assertSame(self::BODY_TWO, BeamParticle::find($entry->particle_id)->payload);
+            $this->assertSame($pin, $entry->fresh()->published_version);
+            $this->assertTrue(app(EntryPublication::class)->state($entry->fresh())->draftPending);
+        } finally {
+            PublicationFakeCompiler::$fails = false;
+        }
+    }
+
     public function test_ep10_failed_draft_compile_keeps_the_draft_and_publish_refuses(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
@@ -567,15 +597,30 @@ class EntryPublicationTest extends TestCase
         {
             public function __construct(private string $central) {}
 
-            public function isMultiTenant(): bool { return true; }
+            public function isMultiTenant(): bool
+            {
+                return true;
+            }
 
-            public function isActive(): bool { return true; }
+            public function isActive(): bool
+            {
+                return true;
+            }
 
-            public function currentTenant(): ?object { return null; }
+            public function currentTenant(): ?object
+            {
+                return null;
+            }
 
-            public function currentTenantId(): int|string|null { return 1; }
+            public function currentTenantId(): int|string|null
+            {
+                return 1;
+            }
 
-            public function centralConnection(): ?string { return $this->central; }
+            public function centralConnection(): ?string
+            {
+                return $this->central;
+            }
         });
     }
 
