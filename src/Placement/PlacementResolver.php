@@ -12,6 +12,7 @@ use Rushing\Popcorn\Registries\RegistryKey;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Provenance\Provenance;
 
 /**
  * Resolves the {@see FilePlacement} strategy for an entry by the charter S2 **precedence**:
@@ -20,7 +21,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *      strategy; the most specific wins.
  *   2. **per-namespace map** — a `namespace → strategy-name` map (config `beam.ux.placement.namespaces`)
  *      matched by longest namespace prefix, so `articles.*` can be date-partitioned wholesale.
- *   3. **default** — the {@see DefaultPlacement} (`namespace/type/slug.ext`).
+ *   3. **disk origin** — preserve the imported relative path when no policy overrides it.
+ *   4. **default** — the {@see DefaultPlacement} (`namespace/type/slug.ext`).
  *
  * Strategies are registered by NAME (like the {@see CodecRegistry}), so a host
  * adds a placement without editing this class. The resolver is beam-ux's; the disk it derives a path
@@ -105,7 +107,12 @@ class PlacementResolver implements Gated, Registry
             return $this->strategy($matched);
         }
 
-        // 3. default.
+        // 3. Disk provenance is the source address, not a namespace/type derivation.
+        if (str_starts_with((string) $key->origin, Provenance::DISK_PREFIX)) {
+            return new DiskOriginPlacement;
+        }
+
+        // 4. default.
         return $this->strategy(self::DEFAULT);
     }
 
