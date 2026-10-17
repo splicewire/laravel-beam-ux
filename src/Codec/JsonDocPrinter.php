@@ -232,8 +232,9 @@ class JsonDocPrinter
             // `json_encode` escapes it by default, which would otherwise diverge from the client-side
             // printer's output for any URL-bearing prop (href, src, …).
             PropKind::StringValue => " {$name}=".json_encode((string) $value, JSON_UNESCAPED_SLASHES),
-            // JsonProp admits only a finite int|float here; json_encode prints it as JS's JSON.stringify does.
-            PropKind::NumberValue => " {$name}={".json_encode($value).'}',
+            // JsonProp admits only numbers both printers write alike; an integral float prints as its integer,
+            // as JS's String(3.0) is "3", where PHP's json_encode would write "3.0".
+            PropKind::NumberValue => " {$name}={".(is_float($value) && floor($value) === $value ? (string) (int) $value : json_encode($value)).'}',
             PropKind::BooleanValue => " {$name}={".($value ? 'true' : 'false').'}',
             // Expression (and, defensively, any later-added kind): `value` is the source text with `{…}`
             // already stripped by the lens; re-wrap it.

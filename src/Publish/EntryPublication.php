@@ -178,6 +178,13 @@ class EntryPublication
             return $this->state($entry);
         }
 
+        // Publishing serves the body, so it refuses code and illegality alike (ADR-0227 d1, ADR-0228 d8):
+        // a restore may have stored an illegal draft (d9 as amended), and it must not go live from here.
+        $guard = app(CanvasBodyGuard::class);
+        $pinned = $this->publishedVersionId($entry);
+        $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
+        $guard->assertPublishable($entry, $guard->workingHead($entry), JsonDocShape::is($publishedBody) ? $publishedBody : []);
+
         $version = $this->versionForWorkingCopy($particle, $label ?? 'published');
 
         return $this->state($entry->refresh(), $this->pinAndCompile($entry, $version));
@@ -210,16 +217,21 @@ class EntryPublication
         }
 
         // ADR-0227 d1 — a restore must not bring code into a tenant entry: guard the version's body BEFORE
-        // applying it (refuse before any write), the same boundary a save enforces. The body is the
-        // particle snapshot's `payload` ({@see BeamParticle::toVersionSnapshot()}).
+        // applying it (refuse before any write). ADR-0228 d9 as amended: only CODE refuses; an illegal but
+        // code-free version is restored and its legality comes back as diagnostics, because a restore is not
+        // authoring. Publish still refuses both. The body is the particle snapshot's `payload`
+        // ({@see BeamParticle::toVersionSnapshot()}).
         $restoredBody = $version->snapshot['payload'] ?? null;
-        app(CanvasBodyGuard::class)->assertAdmitted($entry, is_array($restoredBody) ? $restoredBody : []);
+        $diagnostics = app(CanvasBodyGuard::class)->admitForRestore($entry, is_array($restoredBody) ? $restoredBody : []);
 
         $this->versions->restore($particle, (string) $version->id);
 
         $this->versions->snapshot($this->requireParticle($entry->refresh()), $label ?? "restore of {$version->readableVersion()}");
 
-        return $this->state($entry->refresh());
+        $state = $this->state($entry->refresh());
+        $state->diagnostics = $diagnostics;
+
+        return $state;
     }
 
     /**
@@ -426,8 +438,8 @@ class EntryPublication
     {
         // ADR-0227 d1 / ADR-0228 d8 — THE CHOKE: every canvas-body write that goes through publication
         // (save-body, save-source, a draft via recordDraft) is held to the realm's Manifest Profile here,
-        // including its code boundary, so no op can bypass it by forgetting to call the guard. The guard is
-        // a no-op for a non-canvas (Source/Form) body.
+        // including its code boundary, so no op can bypass it by forgetting to call the guard. A non-canvas
+        // body is source: refused where the profile refuses code, except a clear and a Form-kind token object.
         app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
 
         $written = $this->authoringDriver()->write(

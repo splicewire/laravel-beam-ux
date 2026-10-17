@@ -53,7 +53,9 @@ class JsonDocPrinterTest extends TestCase
 
     public function test_a_number_prop_must_carry_a_finite_number(): void
     {
-        foreach (['0} onMouseOver={() => steal()} data-m={0', '3', true, null] as $value) {
+        // Code in a string, non-numbers, non-finite numbers, and the numbers PHP and JS print differently:
+        // -0, an unsafe integer, and exponent forms (review-r1, 2026-10-17).
+        foreach (['0} onMouseOver={() => steal()} data-m={0', '3', true, null, NAN, INF, -INF, -0.0, 9007199254740992, -9007199254740992, 1e20, 1e17, 1e-6, 1.5e-7] as $value) {
             try {
                 JsonDocPrinter::print([[
                     'kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'children' => [],
@@ -63,6 +65,21 @@ class JsonDocPrinterTest extends TestCase
             } catch (\InvalidArgumentException $e) {
                 $this->assertStringContainsString('number', $e->getMessage());
             }
+        }
+    }
+
+    /** Each admitted number prints exactly as the JS printer's `{String(n)}` would. */
+    public function test_an_admitted_number_prints_as_javascript_prints_it(): void
+    {
+        $cases = [[3, '3'], [3.0, '3'], [-1, '-1'], [1.5, '1.5'], [0.0, '0'], [0.0001, '0.0001'], [0.1 + 0.2, '0.30000000000000004'], [9007199254740991, '9007199254740991'], [123456789.25, '123456789.25'], [1e16, '10000000000000000']];
+
+        foreach ($cases as [$value, $js]) {
+            $out = JsonDocPrinter::print([[
+                'kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'children' => [],
+                'props' => [['name' => 'data-n', 'kind' => 'number', 'value' => $value]],
+            ]]);
+
+            $this->assertStringContainsString("data-n={{$js}}", $out, var_export($value, true));
         }
     }
 

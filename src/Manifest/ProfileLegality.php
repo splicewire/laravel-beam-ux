@@ -32,12 +32,8 @@ final class ProfileLegality
      */
     public function assert(array $body, array $profile, ?array $checkIds = null): void
     {
-        $admitsCode = (bool) ($profile['x-admits-code'] ?? true);
-        $entries = array_column($profile['nodes'] ?? [], null, 'name');
-        $docAdmits = $profile['doc']['admitsChildCategories'] ?? null;
-
-        $violations = [];
-        $this->walk($body, '', $entries, $admitsCode, $checkIds, $docAdmits, false, $violations);
+        ['code' => $code, 'legality' => $legality] = $this->violations($body, $profile, $checkIds);
+        $violations = [...$code, ...$legality];
 
         if ($violations !== []) {
             throw ValidationException::withMessages(['body' => $violations]);
@@ -45,13 +41,36 @@ final class ProfileLegality
     }
 
     /**
+     * The two bands apart, for a caller that treats them differently: a restore refuses code but records
+     * legality as diagnostics (ADR-0228 d9 as amended).
+     *
+     * @param  array<int, array<string, mixed>>  $body
+     * @param  array<string, mixed>              $profile
+     * @param  array<string, true>|null          $checkIds
+     * @return array{code: list<string>, legality: list<string>}
+     */
+    public function violations(array $body, array $profile, ?array $checkIds = null): array
+    {
+        $admitsCode = (bool) ($profile['x-admits-code'] ?? true);
+        $entries = array_column($profile['nodes'] ?? [], null, 'name');
+        $docAdmits = $profile['doc']['admitsChildCategories'] ?? null;
+
+        $code = [];
+        $violations = [];
+        $this->walk($body, '', $entries, $admitsCode, $checkIds, $docAdmits, false, $violations, $code);
+
+        return ['code' => $code, 'legality' => $violations];
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>     $nodes
      * @param  array<string, array<string, mixed>>  $entries       name => v1 node entry
      * @param  array<string, true>|null             $checkIds
      * @param  list<string>|null                    $parentAdmits  categories the parent admits (null = unconstrained)
-     * @param  list<string>                         $violations
+     * @param  list<string>                         $violations    the legality band
+     * @param  list<string>                         $code          the code band (ux-0227 d1)
      */
-    private function walk(array $nodes, string $prefix, array $entries, bool $admitsCode, ?array $checkIds, ?array $parentAdmits, bool $parentAdmitsText, array &$violations): void
+    private function walk(array $nodes, string $prefix, array $entries, bool $admitsCode, ?array $checkIds, ?array $parentAdmits, bool $parentAdmitsText, array &$violations, array &$code): void
     {
         foreach ($nodes as $i => $node) {
             $path = $prefix === '' ? (string) $i : "$prefix.$i";
@@ -60,7 +79,7 @@ final class ProfileLegality
             if ($kind === 'opaque') {
                 // Code refusal — whole body, never narrowed (ux-0227 d1).
                 if (! $admitsCode) {
-                    $violations[] = $this->message($path, null, 'carries an opaque node (verbatim code); this profile does not admit code (ux-0227 d1)');
+                    $code[] = $this->message($path, null, 'carries an opaque node (verbatim code); this profile does not admit code (ux-0227 d1)');
                 }
 
                 continue;
@@ -83,7 +102,7 @@ final class ProfileLegality
 
             // A fragment is a transparent wrapper: its children are checked against ITS parent.
             if ($name === null) {
-                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, $parentAdmits, $parentAdmitsText, $violations);
+                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, $parentAdmits, $parentAdmitsText, $violations, $code);
 
                 continue;
             }
@@ -93,7 +112,7 @@ final class ProfileLegality
                 foreach ($node['props'] ?? [] as $prop) {
                     if (($prop['kind'] ?? null) === 'expression') {
                         $propName = $prop['name'] ?? '?';
-                        $violations[] = $this->message($path, $id, "carries the expression prop '$propName' (code); this profile does not admit code (ux-0227 d1)");
+                        $code[] = $this->message($path, $id, "carries the expression prop '$propName' (code); this profile does not admit code (ux-0227 d1)");
                     }
                 }
             }
@@ -108,7 +127,7 @@ final class ProfileLegality
                 if ($checkLegality) {
                     $violations[] = $this->message($path, $id, "uses the unknown block '$name', which is not in this profile");
                 }
-                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, null, true, $violations);
+                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, null, true, $violations, $code);
 
                 continue;
             }
@@ -123,7 +142,7 @@ final class ProfileLegality
                 $this->assertAttrsMatchSchema($node, $entry, $path, $id, $violations);
             }
 
-            $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, $entry['admitsChildCategories'] ?? null, (bool) ($entry['admitsText'] ?? false), $violations);
+            $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, $entry['admitsChildCategories'] ?? null, (bool) ($entry['admitsText'] ?? false), $violations, $code);
         }
     }
 

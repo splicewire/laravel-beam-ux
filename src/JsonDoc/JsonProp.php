@@ -33,8 +33,25 @@ class JsonProp extends BeamData
             throw new \InvalidArgumentException('The prop name ['.$name.'] is not a JSX attribute name.');
         }
 
-        if ($kind === PropKind::NumberValue && ! ((is_int($value) || is_float($value)) && is_finite((float) $value))) {
-            throw new \InvalidArgumentException('The prop ['.$name.'] is a number prop and must carry a finite number, not '.get_debug_type($value).'.');
+        if ($kind === PropKind::NumberValue && ! self::printsAlike($value)) {
+            throw new \InvalidArgumentException('The prop ['.$name.'] is a number prop and must carry a number both printers write alike (a safe integer, or a finite decimal with no exponent and not -0), not '.json_encode($value).'.');
         }
+    }
+
+    /**
+     * A number the PHP and JS printers write identically. PHP's `json_encode` and JS's `String(n)` disagree
+     * on `-0`, on unsafe integers (JS rounds 2^53+1), and on exponent forms (PHP switches at 1e15 and 1e-5,
+     * JS at 1e21 and 1e-7), so those are refused rather than reconciled; an integral float prints as its
+     * integer, as JS does (review-r1, 2026-10-17).
+     */
+    private static function printsAlike(mixed $value): bool
+    {
+        if (is_int($value)) {
+            return abs($value) <= 9007199254740991;
+        }
+
+        return is_float($value) && is_finite($value)
+            && ! ($value === 0.0 && fdiv(1, $value) < 0)
+            && preg_match('/\A-?\d+(\.\d+)?\z/', (string) json_encode($value)) === 1;
     }
 }
