@@ -167,6 +167,22 @@ class SeededEntryPublicationTest extends TestCase
         $this->assertSame($second->published_version, $again->published_version);
     }
 
+    public function test_structured_seed_rolls_back_when_pinning_fails(): void
+    {
+        FailingOncePublication::$fail = true;
+        $this->app->bind(EntryPublication::class, FailingOncePublication::class);
+        try {
+            app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->seedBody(
+                ['namespace' => 'starter', 'slug' => 'login'], ['type' => 'page', 'format' => 'tsx'], [], 'package:starter/auth',
+            );
+            $this->fail('Expected publication failure');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated failure while pinning', $e->getMessage());
+        }
+        $this->assertSame(0, BeamUxEntry::query()->where('slug', 'login')->count());
+        $this->assertSame(0, \Splicewire\Beam\Models\BeamParticle::query()->count());
+    }
+
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {
