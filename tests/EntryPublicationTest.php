@@ -642,6 +642,60 @@ class EntryPublicationTest extends TestCase
         app(EntryPublication::class)->restore($entry->fresh(), $codeRef);
     }
 
+    public function test_named_publish_republishes_a_legacy_page_against_the_published_body(): void
+    {
+        $entry = $this->legacyPublishedPage();
+        $publication = app(EntryPublication::class);
+        $pin = $publication->state($entry)->publishedVersion;
+        $draft = $publication->recordDraft($entry->fresh(), self::BODY_TWO);
+        $this->bindSplitTenancy();
+
+        $result = $publication->publishVersion($entry->fresh(), $pin);
+
+        $this->assertSame($pin, $result->publishedVersion);
+        $this->assertSame($draft->headVersion, $result->headVersion);
+        $this->assertSame(self::BODY_TWO, $entry->fresh()->particle->payload);
+    }
+
+    public function test_restore_stores_illegal_legacy_nodes_but_named_publish_refuses_them(): void
+    {
+        $entry = $this->legacyPublishedPage();
+        $publication = app(EntryPublication::class);
+        $legacy = $publication->state($entry)->publishedVersion;
+        $legacyBody = $entry->fresh()->particle->payload;
+        $publication->recordDraft($entry->fresh(), self::BODY_TWO);
+        $current = $publication->publish($entry->fresh());
+        $this->bindSplitTenancy();
+
+        $restored = $publication->restore($entry->fresh(), $legacy);
+
+        $this->assertSame($legacyBody, $entry->fresh()->particle->payload);
+        $this->assertSame($current->publishedVersion, $restored->publishedVersion);
+        $this->assertNotEmpty($restored->diagnostics);
+        $before = $entry->fresh()->getAttributes();
+        try {
+            $publication->publishVersion($entry->fresh(), $restored->headVersion);
+            $this->fail('Restored illegal draft bypassed publication admission.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('marquee', implode('\n', $exception->errors()['body']));
+        }
+        $this->assertSame($before, $entry->fresh()->getAttributes());
+    }
+
+    private function legacyPublishedPage(): BeamUxEntry
+    {
+        $entry = BeamUxEntry::create(['slug' => 'legacy-published', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site']);
+        \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
+        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(new BeamParticle, [[
+            'kind' => 'block', 'id' => 'legacy', 'name' => 'marquee', 'isComponent' => false,
+            'dynamic' => false, 'props' => [], 'children' => [],
+        ]]);
+        $entry->forceFill(['particle_id' => $particle->id])->save();
+        app(EntryPublication::class)->baseline($entry);
+
+        return $entry->fresh();
+    }
+
     public function test_publishing_a_historical_code_version_refuses_before_any_write(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);

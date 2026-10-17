@@ -173,8 +173,10 @@ class EntryPublication
             if (! is_array($body)) {
                 throw ValidationException::withMessages(['ref' => 'The named version has no valid body snapshot.']);
             }
-            // ADR-0227 d1: historical snapshots must pass admission before any publication write.
-            app(CanvasBodyGuard::class)->assertAdmitted($locked, $body);
+            // Publish compares legality against what readers see, not a newer working head.
+            $pinned = $this->publishedVersionId($locked);
+            $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
+            app(CanvasBodyGuard::class)->assertPublishable($locked, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
 
             $workflow = app(\Splicewire\Beam\Workflows\Control\WorkflowActuator::class);
             if ($workflow->manages($locked) && $locked->workflow_marking !== BeamUxEntry::MARKING_PUBLISHED) {
