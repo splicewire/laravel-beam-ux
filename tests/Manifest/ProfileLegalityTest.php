@@ -174,4 +174,42 @@ class ProfileLegalityTest extends TestCase
 
         $this->assertSame([], $this->violations($body, $this->constrainedProfile()));
     }
+
+    public function test_legality_is_narrowed_to_the_checked_ids(): void
+    {
+        // An unknown block is a LEGALITY failure, so a save that did not touch it (not in checkIds) does
+        // not re-refuse it; a save that added or changed it (in checkIds) does.
+        $body = [$this->block('Marquee', 'm1', [])];
+
+        (new ProfileLegality)->assert($body, $this->profile(true), []);        // m1 not checked -> passes
+        $this->addToAssertionCount(1);
+
+        try {
+            (new ProfileLegality)->assert($body, $this->profile(true), ['m1' => true]);
+            $this->fail('expected a legality violation for a checked unknown block');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('Marquee', implode("\n", $e->errors()['body']));
+        }
+    }
+
+    public function test_the_code_refusal_is_never_narrowed_so_an_unchanged_opaque_is_still_refused(): void
+    {
+        // ADR-0227 d1 refuses code on every tenant save, even an opaque node the save did not touch.
+        $body = [['kind' => 'opaque', 'reason' => 'unsupported', 'source' => '<script>steal()</script>']];
+
+        $this->expectException(ValidationException::class);
+        (new ProfileLegality)->assert($body, $this->profile(false), []); // empty checkIds does NOT spare code
+    }
+
+    public function test_an_unchanged_expression_prop_is_still_refused_when_code_is_not_admitted(): void
+    {
+        $body = [$this->block('div', 'd1', props: [['name' => 'x', 'kind' => 'expression', 'value' => 'user.isAdmin']])];
+
+        try {
+            (new ProfileLegality)->assert($body, $this->profile(false), []); // d1 not in checkIds
+            $this->fail('expected the expression-prop code refusal to fire regardless of checkIds');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('code', implode("\n", $e->errors()['body']));
+        }
+    }
 }
