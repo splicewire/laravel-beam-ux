@@ -19,8 +19,14 @@ final class BindingResolver
     /** @return array<string, RepeatRecordsData> keyed by stable block identity */
     public function resolve(BeamUxEntry $entry, Request $request, string $realm): array
     {
+        return $this->resolveDocument($entry, $this->documents->read($entry), $request, $realm);
+    }
+
+    /** Internal author-envelope path: the same reader, on the already authorized current body. */
+    public function resolveDocument(BeamUxEntry $entry, array $body, Request $request, string $realm): array
+    {
         $out = [];
-        $this->walk($this->documents->read($entry), $entry, $request, $realm, $out);
+        $this->walk($body, $entry, $request, $realm, $out);
 
         return $out;
     }

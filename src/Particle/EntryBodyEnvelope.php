@@ -64,6 +64,9 @@ class EntryBodyEnvelope
             format: $this->formatValue($entry),
             schema: $this->schemaFor($entry),
             body: $body,
+            bindings: JsonDocShape::is($body)
+                ? app(\Splicewire\Beam\Ux\Bindings\BindingResolver::class)->resolveDocument($entry, $body, app(\Illuminate\Http\Request::class), (string) $entry->realm)
+                : [],
             source: $this->sourceFor($entry, $body),
             compileError: $compileError,
             profile: $this->profiles->resolve($entry),

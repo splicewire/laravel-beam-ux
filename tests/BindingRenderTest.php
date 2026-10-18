@@ -17,6 +17,48 @@ use Splicewire\Beam\Ux\Type\UxType;
 /** Exercise the actual page response and canonical resource read, not an author-side query surrogate. */
 class BindingRenderTest extends TestCase
 {
+    public function test_hosted_save_accepts_literal_field_bindings_but_still_refuses_expressions(): void
+    {
+        $tenancy = \Mockery::mock(\Splicewire\Beam\Realm\Contracts\TenancyContext::class);
+        $tenancy->shouldReceive('centralConnection')->andReturn('central-host');
+        $this->app->instance(\Splicewire\Beam\Realm\Contracts\TenancyContext::class, $tenancy);
+        $entry = BeamUxEntry::where('slug', 'bound')->firstOrFail();
+        $this->assertFalse(app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve($entry)['x-admits-code']);
+        $body = [[
+            'kind' => 'block', 'id' => 'hosted-binding', 'name' => 'p', 'isComponent' => false, 'dynamic' => false,
+            'props' => [['name' => 'title', 'kind' => 'field', 'value' => 'title']],
+            'repeat' => ['collection' => 'articles'],
+            'children' => [['kind' => 'text', 'value' => 'Placeholder', 'field' => 'title']],
+        ]];
+        $guard = app(\Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard::class);
+        $guard->assertAdmitted($entry, $body);
+        $this->addToAssertionCount(1);
+        $body[0]['props'][0] = ['name' => 'title', 'kind' => 'expression', 'value' => 'steal()'];
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $guard->assertAdmitted($entry, $body);
+    }
+
+    public function test_save_and_publish_reject_undeclared_fields_and_url_without_a_record_page(): void
+    {
+        $entry = BeamUxEntry::where('slug', 'bound')->firstOrFail();
+        $guard = app(\Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard::class);
+        foreach (['missing', 'url'] as $field) {
+            $body = [[
+                'kind' => 'block', 'id' => 'binding-save', 'name' => 'p', 'isComponent' => false, 'dynamic' => false,
+                'props' => [], 'repeat' => ['collection' => 'articles'],
+                'children' => [['kind' => 'text', 'value' => 'Placeholder', 'field' => $field]],
+            ]];
+            foreach (['save', 'publish'] as $operation) {
+                try {
+                    $operation === 'save' ? $guard->assertAdmitted($entry, $body) : $guard->assertPublishable($entry, $body, $body);
+                    $this->fail($operation.' accepted undeclared binding '.$field);
+                } catch (\Illuminate\Validation\ValidationException $e) {
+                    $this->assertArrayHasKey('body', $e->errors());
+                }
+            }
+        }
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -215,8 +257,8 @@ class BindingRenderTest extends TestCase
         $this->assertArrayHasKey('secret', $plain[0]['schema']['properties']);
         $this->installCollectionFixtures();
         $collections = app(\Splicewire\Beam\Ux\Bindings\ProfileCollections::class)->manifest($entry, 'content');
-        $this->assertSame('https://example.test/articles/1', $collections[0]['schema']['$id']);
-        $this->assertSame('https://example.test/events/1', $collections[1]['schema']['$id']);
+        $this->assertSame('https://example.test/articles/1', $collections[0]['schema']['properties']['fields']['$id']);
+        $this->assertSame('https://example.test/events/1', $collections[1]['schema']['properties']['fields']['$id']);
     }
 
     public function test_nested_relation_bindings_batch_target_public_reads_for_all_outer_rows(): void

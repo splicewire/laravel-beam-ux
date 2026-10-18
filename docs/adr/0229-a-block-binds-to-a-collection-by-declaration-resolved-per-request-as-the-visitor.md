@@ -53,6 +53,12 @@ entry's child pages, and a tenant-registered schema's records are editor-parity 
    text node gains an optional `field` path, and its literal text becomes the placeholder for an empty field. A binding is
    never an expression, so a tenant can author one (ADR-0227). The save checks the path against the Collection's declared
    fields.
+   *EP-22 amendment (owner ruling, 2026-10-18): the TSX Lens writes a prop binding as
+   `title={bdField("title")}` and bound text as `{bdText("title", "Untitled")}`. These are
+   structurally recognized declarations, not executable author functions. Every argument must be a
+   literal string; identifiers, templates, calls, expressions and spreads refuse at Lens read and save.
+   `bdText`'s second argument is the literal fallback. The compiled artifact consumes the request's
+   binding payload through the package runtime; it does not execute these source helpers or fetch Records.*
 4. **Records are resolved on the server, per request, as the visitor.** The public renderer reads each Repeat's Records
    and the Record Page's Record, and sends them in the page payload as it sends the nav. The artifact stays static and is
    compiled from the body as before. Only bindings declared in the published body run, so the site never answers an

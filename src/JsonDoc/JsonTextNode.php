@@ -15,7 +15,11 @@ class JsonTextNode extends JsonNode
         // discriminator stays the base's #[PropertyForMorph] `kind`.
         #[LiteralTypeScriptType("'text'")]
         public string $kind = 'text',
+        public ?string $field = null,
     ) {
         parent::__construct($kind);
+        if ($field !== null) {
+            \Splicewire\Beam\Ux\Bindings\FieldPath::assert($field);
+        }
     }
 }

@@ -29,6 +29,9 @@ class JsonProp extends BeamData
         public PropKind $kind,
         public string|int|float|bool|null $value,
     ) {
+        if ($kind === PropKind::Field) {
+            \Splicewire\Beam\Ux\Bindings\FieldPath::assert($value);
+        }
         if (preg_match(self::NAME_PATTERN, $name) !== 1) {
             throw new \InvalidArgumentException('The prop name ['.$name.'] is not a JSX attribute name.');
         }

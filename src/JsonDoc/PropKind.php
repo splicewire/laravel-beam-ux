@@ -18,4 +18,5 @@ enum PropKind: string
     case NumberValue = 'number';
     case BooleanValue = 'boolean';
     case Expression = 'expression';
+    case Field = 'field';
 }

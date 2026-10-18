@@ -15,6 +15,18 @@ use Splicewire\Beam\Ux\Tests\TestCase;
  */
 class ProfileLegalityTest extends TestCase
 {
+    public function test_repeat_empty_state_cannot_hide_code_or_an_unknown_block(): void
+    {
+        foreach ([
+            ['kind' => 'opaque', 'source' => '{steal()}', 'reason' => 'expression'],
+            $this->block('script', 'hidden-script', [['kind' => 'text', 'value' => 'steal()']]),
+        ] as $empty) {
+            $body = [$this->block('p', 'outer')];
+            $body[0]['repeat'] = ['collection' => 'articles', 'empty' => [$empty]];
+            $this->assertNotEmpty($this->violations($body, $this->profile(false)));
+        }
+    }
+
     /** @return array<string, mixed> an HTML base profile with x-admits-code set. */
     private function profile(bool $admitsCode): array
     {

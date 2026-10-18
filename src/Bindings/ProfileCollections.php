@@ -46,13 +46,28 @@ final class ProfileCollections
 
                 continue;
             }
-            $resource = app(ParticleResourceRegistry::class)->get($source->resource);
-            $schema = isset($source->address['collection'])
-                ? app(CollectionSchemaResolver::class)->resolve($source->address['collection'])->schema
-                : app(Generator::class)->forResponse()->generate(new ReflectionClass($resource->data));
+            $schema = $this->fieldSchema($source);
             $out[] = ['name' => $source->name, 'schema' => $schema, 'hasRecordPage' => false];
         }
 
         return $out;
+    }
+
+    /** The schema describes the actual Record envelope returned by its owner. */
+    public function fieldSchema(CollectionSource $source): array
+    {
+        if ($source->parentEntryId !== null) {
+            return app(Generator::class)->forResponse()->generate(new ReflectionClass(\Splicewire\Beam\Ux\Data\ChildPageRecordData::class));
+        }
+        $resource = app(ParticleResourceRegistry::class)->get($source->resource);
+        if (! isset($source->address['collection'])) {
+            return app(Generator::class)->forResponse()->generate(new ReflectionClass($resource->data));
+        }
+        $fields = app(CollectionSchemaResolver::class)->resolve($source->address['collection'])->schema;
+
+        return ['type' => 'object', 'properties' => [
+            'id' => ['type' => 'string'],
+            'fields' => $fields,
+        ], '$defs' => $fields['$defs'] ?? [], 'definitions' => $fields['definitions'] ?? []];
     }
 }

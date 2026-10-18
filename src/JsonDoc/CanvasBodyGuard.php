@@ -68,6 +68,7 @@ final class CanvasBodyGuard
         $this->assertWellFormed($body);
 
         $profile = $this->resolver->resolve($entry);
+        app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $body, $profile);
         $checkIds = $this->diff->changedIds($this->workingHead($entry), $body);
 
         $this->legality->assert($body, $profile, $checkIds);
@@ -108,7 +109,7 @@ final class CanvasBodyGuard
      * restored illegal draft cannot go live while a legacy page that is already live still republishes.
      * An unknown block is not cosmetic on a tenant page: `script` and `iframe` are unknown to the HTML profile.
      *
-     * @param  array<int|string, mixed>  $working    the working copy about to be pinned
+     * @param  array<int|string, mixed>  $working  the working copy about to be pinned
      * @param  array<int|string, mixed>  $published  the body of the currently published version ([] if none)
      */
     public function assertPublishable(BeamUxEntry $entry, array $working, array $published): void
@@ -121,7 +122,9 @@ final class CanvasBodyGuard
 
         $this->assertWellFormed($working);
 
-        $this->legality->assert($working, $this->resolver->resolve($entry), $this->diff->changedIds($published, $working));
+        $profile = $this->resolver->resolve($entry);
+        app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $working, $profile);
+        $this->legality->assert($working, $profile, $this->diff->changedIds($published, $working));
     }
 
     /**

@@ -92,6 +92,9 @@ class JsonDocPrinter
             ? ''
             : '  const { '.implode(', ', $islands)."} = components;\n";
         $signature = $styles !== [] ? 'Page({ components = {}, styleRegistry } = {})' : ($islands === [] ? 'Page()' : 'Page({ components = {} })');
+        if (self::hasBindings($nodes)) {
+            $signature = 'Page({ components = {}, styleRegistry, bindings = {}, bindingRuntime } = {})';
+        }
 
         return "export default function {$signature} {\n{$destructure}{$styleSetup}  return (\n    <>\n{$styleTag}{$body}\n    </>\n  );\n}\n";
     }
@@ -146,6 +149,7 @@ class JsonDocPrinter
                 }
 
                 $walk($node->children);
+                $walk($node->repeat?->empty ?? []);
             }
         };
 
@@ -154,11 +158,19 @@ class JsonDocPrinter
         return array_keys($found);
     }
 
-    private static function printNode(JsonNode $node, int $depth, bool $module = false, ?array &$styles = null): string
+    private static function printNode(JsonNode $node, int $depth, bool $module = false, ?array &$styles = null, string $record = 'undefined', string $bindings = 'bindings'): string
     {
         $pad = str_repeat(self::INDENT, $depth);
 
         if ($node instanceof JsonTextNode) {
+            if ($node->field !== null) {
+                if ($module) {
+                    return $pad.'{bindingRuntime.text('.$record.', '.json_encode($node->field, JSON_THROW_ON_ERROR).', '.json_encode($node->value, JSON_THROW_ON_ERROR).')}';
+                }
+
+                return $pad.'{bdText('.json_encode($node->field, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).', '.json_encode($node->value, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).')}';
+            }
+
             return $pad.self::escapeText(trim($node->value));
         }
 
@@ -167,6 +179,28 @@ class JsonDocPrinter
         }
 
         /** @var JsonBlockNode $node */
+        if ($module && $node->repeat !== null) {
+            if ($node->id === null || $node->id === '') {
+                throw new \InvalidArgumentException('A compiled Repeat requires its stable block id.');
+            }
+            $template = clone $node;
+            $template->repeat = null;
+            $content = self::printNode($template, $depth + 1, true, $styles, 'record', '(record.bindings ?? {})');
+            $emptyParts = [];
+            foreach ($node->repeat->empty as $child) {
+                $emptyParts[] = self::printNode($child, $depth + 1, true, $styles, $record, $bindings);
+            }
+            $empty = implode("\n", $emptyParts);
+
+            return $pad.'{bindingRuntime.repeat('.$bindings.'['.json_encode($node->id, JSON_THROW_ON_ERROR).'], (record) => (<>'."\n".$content."\n".$pad.'</>), () => (<>'."\n".$empty."\n".$pad.'</>))}';
+        }
+        if ($module && $node->when !== null) {
+            $template = clone $node;
+            $template->when = null;
+            $content = self::printNode($template, $depth + 1, true, $styles, $record, $bindings);
+
+            return $pad.'{bindingRuntime.when('.json_encode($node->when->toArray(), JSON_THROW_ON_ERROR).', '.$record.') ? (<>'."\n".$content."\n".$pad.'</>) : null}';
+        }
         $isFragment = $node->name === null;
         $tag = (string) ($node->name ?? '');
         $props = $node->props;
@@ -183,7 +217,15 @@ class JsonDocPrinter
             }
             unset($layer);
         }
-        $attrs = implode('', array_map(fn (JsonProp $prop) => self::printProp($prop, $module), $props));
+        $attrs = implode('', array_map(fn (JsonProp $prop) => self::printProp($prop, $module, $record), $props));
+        foreach (['bdRepeat' => $node->repeat, 'bdWhen' => $node->when] as $attribute => $declaration) {
+            if ($declaration !== null) {
+                if ($isFragment) {
+                    throw new \InvalidArgumentException('A fragment cannot carry binding declarations.');
+                }
+                $attrs .= ' '.$attribute.'={'.json_encode($declaration->toArray(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}';
+            }
+        }
         if ($style !== null && ! $isFragment) {
             if ($module) {
                 $index = count($styles);
@@ -197,7 +239,7 @@ class JsonDocPrinter
 
                     return false;
                 }));
-                $attrs = implode('', array_map(fn (JsonProp $p) => self::printProp($p, true), $props));
+                $attrs = implode('', array_map(fn (JsonProp $p) => self::printProp($p, true, $record), $props));
                 $attrs .= ' className={['.$class.',blockStyles.classes['.$index.']].filter(Boolean).join(" ")}';
             } else {
                 $attrs .= ' bdStyle={'.json_encode($style, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}';
@@ -225,7 +267,7 @@ class JsonDocPrinter
 
         $childParts = [];
         foreach ($children as $child) {
-            $childParts[] = self::printNode($child, $depth + 1, $module, $styles);
+            $childParts[] = self::printNode($child, $depth + 1, $module, $styles, $record, $bindings);
         }
         $kids = implode("\n", $childParts);
 
@@ -242,7 +284,7 @@ class JsonDocPrinter
         }
 
         foreach ($children as $c) {
-            if (! $c instanceof JsonTextNode) {
+            if (! $c instanceof JsonTextNode || $c->field !== null) {
                 return false;
             }
         }
@@ -259,7 +301,7 @@ class JsonDocPrinter
      *                        (beam.test 2026-09-11). The mirror keeps the string: that file is read back
      *                        by `blockdoc`'s `parse()`, which expects the authored attribute.
      */
-    private static function printProp(JsonProp $p, bool $module = false): string
+    private static function printProp(JsonProp $p, bool $module = false, string $record = 'undefined'): string
     {
         $name = $p->name;
         $value = $p->value;
@@ -271,6 +313,7 @@ class JsonDocPrinter
         }
 
         return match ($p->kind) {
+            PropKind::Field => ' '.$name.'={'.($module ? 'bindingRuntime.field('.$record.', ' : 'bdField(').json_encode($value, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).')}',
             PropKind::BooleanShorthand => " {$name}",
             // UNESCAPED_SLASHES: matches JS's `JSON.stringify` (which never escapes `/`) — plain PHP
             // `json_encode` escapes it by default, which would otherwise diverge from the client-side
@@ -322,5 +365,26 @@ class JsonDocPrinter
     private static function escapeText(string $s): string
     {
         return (string) preg_replace_callback('/[{}<>]/', fn (array $m) => "{'{$m[0]}'}", $s);
+    }
+
+    private static function hasBindings(array $nodes): bool
+    {
+        foreach ($nodes as $node) {
+            if ($node instanceof JsonTextNode && $node->field !== null) {
+                return true;
+            }
+            if ($node instanceof JsonBlockNode) {
+                if ($node->repeat !== null || $node->when !== null || self::hasBindings($node->children)) {
+                    return true;
+                }
+                foreach ($node->props as $prop) {
+                    if ($prop->kind === PropKind::Field) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 }

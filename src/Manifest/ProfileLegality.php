@@ -24,9 +24,9 @@ use Opis\JsonSchema\Validator;
 final class ProfileLegality
 {
     /**
-     * @param  array<int, array<string, mixed>>  $body      the JsonDoc node array (wire shape)
-     * @param  array<string, mixed>              $profile   a resolved v1 manifest: { nodes, doc, x-admits-code, ... }
-     * @param  array<string, true>|null          $checkIds  ids whose legality to check; null = all
+     * @param  array<int, array<string, mixed>>  $body  the JsonDoc node array (wire shape)
+     * @param  array<string, mixed>  $profile  a resolved v1 manifest: { nodes, doc, x-admits-code, ... }
+     * @param  array<string, true>|null  $checkIds  ids whose legality to check; null = all
      *
      * @throws ValidationException
      */
@@ -45,8 +45,8 @@ final class ProfileLegality
      * legality as diagnostics (ADR-0228 d9 as amended).
      *
      * @param  array<int, array<string, mixed>>  $body
-     * @param  array<string, mixed>              $profile
-     * @param  array<string, true>|null          $checkIds
+     * @param  array<string, mixed>  $profile
+     * @param  array<string, true>|null  $checkIds
      * @return array{code: list<string>, legality: list<string>}
      */
     public function violations(array $body, array $profile, ?array $checkIds = null): array
@@ -63,12 +63,12 @@ final class ProfileLegality
     }
 
     /**
-     * @param  array<int, array<string, mixed>>     $nodes
-     * @param  array<string, array<string, mixed>>  $entries       name => v1 node entry
-     * @param  array<string, true>|null             $checkIds
-     * @param  list<string>|null                    $parentAdmits  categories the parent admits (null = unconstrained)
-     * @param  list<string>                         $violations    the legality band
-     * @param  list<string>                         $code          the code band (ux-0227 d1)
+     * @param  array<int, array<string, mixed>>  $nodes
+     * @param  array<string, array<string, mixed>>  $entries  name => v1 node entry
+     * @param  array<string, true>|null  $checkIds
+     * @param  list<string>|null  $parentAdmits  categories the parent admits (null = unconstrained)
+     * @param  list<string>  $violations  the legality band
+     * @param  list<string>  $code  the code band (ux-0227 d1)
      */
     private function walk(array $nodes, string $prefix, array $entries, bool $admitsCode, ?array $checkIds, ?array $parentAdmits, bool $parentAdmitsText, array &$violations, array &$code): void
     {
@@ -99,6 +99,9 @@ final class ProfileLegality
 
             $id = $node['id'] ?? null;
             $name = $node['name'] ?? null;
+            // An empty-state subtree is authored content at the Repeat's own position. It must not
+            // become a second route around whole-body code or profile legality admission.
+            $this->walk($node['repeat']['empty'] ?? [], $path.'.empty', $entries, $admitsCode, null, $parentAdmits, $parentAdmitsText, $violations, $code);
 
             // A fragment is a transparent wrapper: its children are checked against ITS parent.
             if ($name === null) {
@@ -154,7 +157,7 @@ final class ProfileLegality
      *
      * @param  array<string, mixed>  $node
      * @param  array<string, mixed>  $entry
-     * @param  list<string>          $violations
+     * @param  list<string>  $violations
      */
     private function assertAttrsMatchSchema(array $node, array $entry, string $path, ?string $id, array &$violations): void
     {

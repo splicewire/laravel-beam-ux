@@ -84,5 +84,6 @@ class BeamUxEntryBodyData extends BeamData
         public ?array $profile = null,
         public ?array $styleRegistry = null,
         public ?EntryPageSettingsData $pageSettings = null,
+        public array $bindings = [],
     ) {}
 }

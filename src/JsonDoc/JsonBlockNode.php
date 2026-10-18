@@ -40,6 +40,8 @@ class JsonBlockNode extends JsonNode
         #[LiteralTypeScriptType("'block'")]
         public string $kind = 'block',
         public ?\Splicewire\Beam\Ux\Style\BlockStyleData $style = null,
+        public ?\Splicewire\Beam\Ux\Bindings\RepeatData $repeat = null,
+        public ?\Splicewire\Beam\Ux\Bindings\ConditionData $when = null,
     ) {
         parent::__construct($kind);
     }
