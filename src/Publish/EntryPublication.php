@@ -130,17 +130,17 @@ class EntryPublication
      * @param  array<string, mixed>  $body
      */
     /** Editor CAS: a stale base never reaches the write path (ADR-0225 d6). */
-    public function draftFromBase(BeamUxEntry $entry, array $body, ?string $baseVersion, ?string $label = null, ?Model $actor = null): EntryPublicationData
+    public function draftFromBase(BeamUxEntry $entry, array $body, ?string $baseVersion, ?string $label = null, ?Model $actor = null, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): EntryPublicationData
     {
         $this->requireVersionStore();
 
-        return $entry->getConnection()->transaction(function () use ($entry, $body, $baseVersion, $label, $actor) {
+        return $entry->getConnection()->transaction(function () use ($entry, $body, $baseVersion, $label, $actor, $pageSettings) {
             $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
             if ($this->state($locked)->headVersion !== $baseVersion) {
                 throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('The editor base version has moved. Reload or explicitly save your changes against the new base.');
             }
 
-            $state = $this->recordDraft($locked, $body, $label);
+            $state = $this->recordDraft($locked, $body, $label, $pageSettings);
             $this->audit($locked, 'drafted', $actor, $state);
 
             return $state;
@@ -153,6 +153,7 @@ class EntryPublication
         $this->requireVersionStore();
 
         return $entry->getConnection()->transaction(function () use ($entry, $ref, $actor) {
+            $entry->newQuery()->orderBy('id')->lockForUpdate()->get();
             $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
             $particle = $this->particle($locked);
             $version = $particle === null ? null : $this->versions->version($particle, $ref);
@@ -167,6 +168,8 @@ class EntryPublication
             $pinned = $this->publishedVersionId($locked);
             $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
             app(CanvasBodyGuard::class)->assertPublishable($locked, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
+
+            $this->applyPageSettings($locked, $version);
 
             // Compile before any publication or workflow write; failure leaves the site unchanged.
             app(CompileEntryBody::class)->forVersion($locked, (string) $version->id, $body);
@@ -191,12 +194,23 @@ class EntryPublication
         });
     }
 
-    public function recordDraft(BeamUxEntry $entry, array $body, ?string $label = null): EntryPublicationData
+    public function recordDraft(BeamUxEntry $entry, array $body, ?string $label = null, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): EntryPublicationData
     {
         $this->assertStorable($entry, $body);
+        if ($pageSettings !== null && $entry->type !== \Splicewire\Beam\Ux\Type\UxType::Page) {
+            throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);
+        }
         $this->requireVersionStore();
         $this->baseline($entry);
+        $priorSettings = $this->particle($entry)?->meta['pageSettings'] ?? null;
         $this->write($entry, $body);
+        if ($pageSettings !== null || $priorSettings !== null) {
+            $particle = $this->requireParticle($entry->refresh());
+            $meta = $particle->meta ?? [];
+            $meta['pageSettings'] = $pageSettings?->toArray() ?? $priorSettings;
+            $particle->meta = $meta;
+            $particle->save();
+        }
         $version = $this->versions->snapshot($this->requireParticle($entry), $label ?? 'draft');
 
         return $this->state($entry->refresh(), $this->compileDraft($entry, $version));
@@ -208,6 +222,15 @@ class EntryPublication
      * A missing artifact must compile before the publication pin moves (ADR-0232 d7).
      */
     public function publish(BeamUxEntry $entry, ?string $label = null): EntryPublicationData
+    {
+        return $entry->getConnection()->transaction(function () use ($entry, $label) {
+            $entry->newQuery()->orderBy('id')->lockForUpdate()->get();
+
+            return $this->publishLocked($entry->fresh(), $label);
+        });
+    }
+
+    private function publishLocked(BeamUxEntry $entry, ?string $label): EntryPublicationData
     {
         if ($entry->particle_id === null) {
             // Nothing has ever been written to this entry, so there is no body to publish. Reporting the
@@ -586,6 +609,7 @@ class EntryPublication
         $pinned = $this->publishedVersionId($entry);
         $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
         app(CanvasBodyGuard::class)->assertPublishable($entry, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
+        $this->applyPageSettings($entry, $version);
         app(CompileEntryBody::class)->forVersion($entry, (string) $version->id, $body);
         $entry->setAttribute('published_version', (string) $version->id);
         $entry->save();
@@ -593,6 +617,29 @@ class EntryPublication
         app(CompileEntryBody::class)->artifacts()->prune($entry->refresh());
 
         return null;
+    }
+
+    /** Assign only in memory; the caller persists these with the pin after compilation succeeds. */
+    private function applyPageSettings(BeamUxEntry $entry, Version $version): void
+    {
+        $settings = $version->snapshot['meta']['pageSettings'] ?? null;
+        if ($settings === null) {
+            return; // Historical versions predate page settings; do not invent their old values.
+        }
+        $data = \Splicewire\Beam\Ux\Data\EntryPageSettingsData::validateAndCreate($settings);
+        app(EntryUrlChanges::class)->assertAllowed($entry, [$entry->id => [
+            'parentId' => $data->parentId, 'segment' => $data->segment,
+        ]]);
+        $entry->forceFill([
+            'title' => $data->title, 'parent_id' => $data->parentId, 'segment' => $data->segment,
+            'nav_order' => $data->navOrder, 'nav_group' => $data->navGroup,
+            'layout' => $data->layout, 'template' => $data->template,
+            'seo_description' => $data->description, 'seo_social_image' => $data->socialImage,
+            'seo_page_type' => $data->pageType,
+            'seo_published_date' => $data->publishedDate ?? substr((string) ($entry->first_published_at ?? now()), 0, 10),
+            'first_published_at' => $entry->first_published_at ?? now(),
+            'last_published_at' => now(),
+        ]);
     }
 
     private function compileDraft(BeamUxEntry $entry, Version $version): ?string

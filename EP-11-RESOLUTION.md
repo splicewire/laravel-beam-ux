@@ -8,4 +8,4 @@ The artifact retains the style data, then invokes the runtime compiler when rend
 
 The CSS grammar accepts literal property/value pairs, rejects selector/HTML/at-rule breakouts, and admits only declared breakpoint/state names. States are hover, focus-visible and active. Variants, presets, Release, colour-scheme modes and component interface work are outside this slice.
 
-Package proof includes the real PHP printer → shipped Node compiler → React render chain. No live-host proof or release attestation is claimed. PHP landing is held for EP-43; the JS/PHP contract must reach consumers together.
+Package proof includes the real PHP printer → shipped Node compiler → React render chain. No live-host proof or release attestation is claimed. The JS/PHP contract must reach consumers together.

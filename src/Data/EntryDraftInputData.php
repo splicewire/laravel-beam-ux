@@ -35,6 +35,7 @@ class EntryDraftInputData extends BeamData
         public ?string $baseVersion,
         #[Description('An optional annotation for the version this draft records, e.g. "before the rewrite".')]
         public ?string $label = null,
+        public ?EntryPageSettingsData $pageSettings = null,
     ) {}
 
     /** @return array<string, mixed> */

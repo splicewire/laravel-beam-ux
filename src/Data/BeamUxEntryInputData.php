@@ -164,13 +164,27 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
     /** @return array<string, mixed> */
     public function toModelAttributes(): array
     {
+        $current = self::currentEntry();
+        if ($current?->type === \Splicewire\Beam\Ux\Type\UxType::Page) {
+            foreach (['title' => $this->title, 'parent_id' => $this->parentId, 'segment' => $this->segment, 'nav_order' => $this->navOrder] as $column => $value) {
+                if ($current->getAttribute($column) !== $value) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'pageSettings' => 'Edit page settings in the editor and publish their version.',
+                    ]);
+                }
+            }
+
+            // Do not re-write even unchanged copies: they may have been published since the form opened.
+            return ['type' => $this->type, 'slug' => $this->slug, 'realm' => $this->realm];
+        }
+
         return [
             'type' => $this->type,
             'title' => $this->title,
             'slug' => $this->slug,
             'realm' => $this->realm,
-            'parent_id' => $this->parentId,
-            'segment' => $this->segment,
+            'parent_id' => $this->type === 'page' ? null : $this->parentId,
+            'segment' => $this->type === 'page' ? null : $this->segment,
             'nav_order' => $this->navOrder,
         ];
     }

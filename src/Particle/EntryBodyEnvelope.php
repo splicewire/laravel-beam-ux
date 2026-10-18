@@ -68,6 +68,11 @@ class EntryBodyEnvelope
             compileError: $compileError,
             profile: $this->profiles->resolve($entry),
             styleRegistry: \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
+            pageSettings: $this->typeValue($entry) === 'page'
+                ? (($settings = $entry->particle?->meta['pageSettings'] ?? null) !== null
+                    ? \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from($settings)
+                    : \Splicewire\Beam\Ux\Data\EntryPageSettingsData::fromEntry($entry))
+                : null,
         );
     }
 

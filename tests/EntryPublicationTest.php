@@ -66,6 +66,160 @@ class EntryPublicationTest extends TestCase
         $this->app->forgetInstance(EntryArtifactStore::class);
     }
 
+    public function test_page_settings_are_drafted_with_body_and_only_published_from_the_named_version(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $entry->forceFill(['title' => 'Published title'])->save();
+        $publication = app(EntryPublication::class);
+        $base = $publication->state($entry)->headVersion;
+        $draft = EntryDraftSaveOp::handle($entry, Request::create('/', 'POST', [
+            'body' => self::BODY_TWO, 'baseVersion' => $base,
+            'pageSettings' => ['title' => 'Draft title', 'parentId' => null, 'segment' => 'draft-page'],
+        ]), null);
+        $this->assertSame('Published title', $entry->fresh()->title);
+        $particle = $entry->fresh()->particle;
+        $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($particle, $draft->headVersion);
+        $this->assertSame('Draft title', $version->snapshot['meta']['pageSettings']['title'] ?? null);
+        $publication->publishVersion($entry->fresh(), $draft->headVersion);
+        $this->assertSame('Draft title', $entry->fresh()->title);
+        $this->assertSame('draft-page', $entry->fresh()->segment);
+    }
+
+    public function test_restoring_page_settings_keeps_live_fields_until_publish_and_first_date_is_stable(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $pub = app(EntryPublication::class);
+        $first = $pub->draftFromBase($entry, self::BODY_TWO, $pub->state($entry)->headVersion, pageSettings: new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'First', segment: 'first'));
+        $pub->publishVersion($entry->fresh(), $first->headVersion);
+        $firstDate = $entry->fresh()->first_published_at;
+        $this->assertNotNull($firstDate);
+        $second = $pub->draftFromBase($entry->fresh(), self::BODY_ONE, $first->headVersion, pageSettings: new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'Second', segment: 'second'));
+        $pub->publishVersion($entry->fresh(), $second->headVersion);
+        $restored = $pub->restore($entry->fresh(), $first->headVersion);
+        $this->assertSame('Second', $entry->fresh()->title);
+        $pub->publishVersion($entry->fresh(), $restored->headVersion);
+        $this->assertSame('First', $entry->fresh()->title);
+        $this->assertSame($firstDate, $entry->fresh()->first_published_at);
+    }
+
+    public function test_entry_form_cannot_change_a_published_pages_settings_outside_history(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $request = Request::create('/entries/'.$entry->id, 'PATCH');
+        $route = new \Illuminate\Routing\Route(['PATCH'], 'entries/{id}', fn () => null);
+        $route->bind($request);
+        $request->setRouteResolver(fn () => $route);
+        $this->app->instance('request', $request);
+        $input = \Splicewire\Beam\Ux\Data\BeamUxEntryInputData::fromModel($entry);
+        $input->title = 'Direct live overwrite';
+        $this->expectException(ValidationException::class);
+        $input->toModelAttributes();
+    }
+
+    public function test_batch_url_check_accepts_a_swap_but_refuses_a_collision(): void
+    {
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_TWO);
+        $one->forceFill(['segment' => 'one'])->save();
+        $two->forceFill(['segment' => 'two'])->save();
+        $check = app(\Splicewire\Beam\Ux\Publish\EntryUrlChanges::class);
+        $check->assertAllowed($one, [
+            $one->id => ['parentId' => null, 'segment' => 'two'],
+            $two->id => ['parentId' => null, 'segment' => 'one'],
+        ]);
+        $this->assertSame('one', $one->fresh()->segment);
+        $this->expectException(ValidationException::class);
+        $check->assertAllowed($one, [$one->id => ['parentId' => null, 'segment' => 'two']]);
+    }
+
+    public function test_batch_url_check_refuses_an_unpublished_parent(): void
+    {
+        $child = $this->publishedPage(self::BODY_ONE);
+        $parent = $this->pageWithUnversionedBody(self::BODY_TWO);
+        $this->expectException(ValidationException::class);
+        app(\Splicewire\Beam\Ux\Publish\EntryUrlChanges::class)->assertAllowed($child, [
+            $child->id => ['parentId' => $parent->id, 'segment' => 'child'],
+        ]);
+    }
+
+    public function test_batch_includes_a_new_parent_and_uses_the_existing_absolute_url_grammar(): void
+    {
+        $parent = $this->pageWithUnversionedBody(self::BODY_ONE);
+        $child = $this->publishedPage(self::BODY_TWO);
+        $other = $this->publishedPage(self::BODY_ONE);
+        $other->forceFill(['segment' => '/taken'])->save();
+        $check = app(\Splicewire\Beam\Ux\Publish\EntryUrlChanges::class);
+        $check->assertAllowed($child, [
+            $parent->id => ['parentId' => null, 'segment' => 'parent'],
+            $child->id => ['parentId' => $parent->id, 'segment' => './child'],
+        ]);
+        $this->expectException(ValidationException::class);
+        $check->assertAllowed($child, [
+            $parent->id => ['parentId' => null, 'segment' => 'parent'],
+            $child->id => ['parentId' => $parent->id, 'segment' => '/taken'],
+        ]);
+    }
+
+    public function test_batch_refuses_a_cycle_without_mutating_rows(): void
+    {
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_TWO);
+        try {
+            app(\Splicewire\Beam\Ux\Publish\EntryUrlChanges::class)->assertAllowed($one, [
+                $one->id => ['parentId' => $two->id, 'segment' => 'one'],
+                $two->id => ['parentId' => $one->id, 'segment' => 'two'],
+            ]);
+            $this->fail('cycle was admitted');
+        } catch (ValidationException) {
+            $this->assertNull($one->fresh()->parent_id);
+            $this->assertNull($two->fresh()->parent_id);
+        }
+    }
+
+    public function test_body_only_save_preserves_the_working_page_settings(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $pub = app(EntryPublication::class);
+        $first = $pub->draftFromBase($entry, self::BODY_TWO, $pub->state($entry)->headVersion, pageSettings:
+            new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'Draft', segment: 'draft'));
+        $next = $pub->recordDraft($entry->fresh(), self::BODY_ONE);
+        $pub->publishVersion($entry->fresh(), $next->headVersion);
+        $this->assertSame('Draft', $entry->fresh()->title);
+        $this->assertSame('draft', $entry->fresh()->segment);
+    }
+
+    public function test_invalid_page_settings_refuse_before_recording_a_draft(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $pub = app(EntryPublication::class);
+        $before = $pub->state($entry)->headVersion;
+        try {
+            EntryDraftSaveOp::handle($entry, Request::create('/', 'POST', [
+                'body' => self::BODY_TWO, 'baseVersion' => $before,
+                'pageSettings' => ['title' => 'Page', 'pageType' => 'InventedType'],
+            ]), null);
+            $this->fail('invalid page type was accepted');
+        } catch (ValidationException) {
+            $this->assertSame($before, $pub->state($entry->fresh())->headVersion);
+        }
+    }
+
+    public function test_page_settings_on_a_component_refuse_before_any_write(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $entry->type = UxType::Component;
+        $entry->save();
+        $publication = app(EntryPublication::class);
+        $before = $publication->state($entry)->headVersion;
+        try {
+            $publication->draftFromBase($entry, self::BODY_TWO, $before, pageSettings:
+                new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'Not a page'));
+            $this->fail('component accepted page settings');
+        } catch (ValidationException) {
+            $this->assertSame($before, $publication->state($entry->fresh())->headVersion);
+        }
+    }
+
     public function test_editor_draft_refuses_a_stale_base_before_any_write(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
@@ -919,6 +1073,12 @@ class EntryPublicationTest extends TestCase
             $table->json('realms')->nullable();
             $table->uuid('parent_id')->nullable()->index();
             $table->string('segment')->nullable();
+            $table->integer('nav_order')->nullable();
+            foreach (['nav_group', 'layout', 'template', 'seo_description', 'seo_social_image', 'seo_page_type', 'seo_published_date'] as $column) {
+                $table->string($column)->nullable();
+            }
+            $table->timestamp('first_published_at')->nullable();
+            $table->timestamp('last_published_at')->nullable();
             $table->string('workflow_marking')->nullable()->index();
             $table->string('workflow_version')->nullable();
             $table->uuid('published_version')->nullable();
