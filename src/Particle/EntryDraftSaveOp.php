@@ -52,6 +52,13 @@ class EntryDraftSaveOp
         /** @var BeamUxEntry $model */
         $input = EntryDraftInputData::validateAndCreate($request->all());
 
-        return app(EntryPublication::class)->draftFromBase($model, $input->body, $input->baseVersion, $input->label, $actor instanceof Model ? $actor : null, $input->pageSettings);
+        return app(EntryPublication::class)->draftFromBase(
+            $model,
+            $input->body,
+            $input->baseVersion,
+            $input->label,
+            $actor instanceof Model ? $actor : null,
+            $input->pageSettings?->toPageSettingsData(),
+        );
     }
 }

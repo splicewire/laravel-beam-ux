@@ -2,8 +2,28 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use ReflectionClass;
+use Schemastud\DataSchemas\Generators\Generator;
+use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
+use Splicewire\Beam\Ux\Data\EntryDraftInputData;
+
 class PageSettingsContractTest extends TestCase
 {
+    public function test_request_and_response_page_settings_have_distinct_schema_components(): void
+    {
+        $generator = app(Generator::class);
+        $response = $generator->forResponse()->generate(new ReflectionClass(BeamUxEntryBodyData::class));
+        $request = $generator->forRequest()->generate(new ReflectionClass(EntryDraftInputData::class));
+
+        $this->assertArrayHasKey('EntryPageSettingsData', $response['$defs']);
+        $this->assertArrayHasKey('EntryPageSettingsInputData', $request['$defs']);
+        $this->assertSame([
+            'title', 'parentId', 'segment', 'navOrder', 'navGroup', 'layout', 'template',
+            'description', 'socialImage', 'pageType', 'publishedDate',
+        ], $response['$defs']['EntryPageSettingsData']['required']);
+        $this->assertSame(['title'], $request['$defs']['EntryPageSettingsInputData']['required']);
+    }
+
     public function test_committed_typescript_matches_the_declared_data(): void
     {
         $autoload = collect(get_included_files())->first(fn ($file) => str_ends_with($file, '/vendor/autoload.php'));
