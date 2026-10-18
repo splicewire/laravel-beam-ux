@@ -325,7 +325,7 @@ class EntryPublicationTest extends TestCase
         }
     }
 
-    private function releaseFixture(?\Closure $authorize = null, bool $reviewedAndMapped = true): array
+    private function releaseFixture(?\Closure $authorize = null, bool $reviewedAndMapped = true, bool $standardGuardProvider = false): array
     {
         // Most cases here are about REVIEWED Releases and the abilities a host maps: opt in to review, and map
         // `update` and `publish` so they are checked strictly through the Gate. The owner-ruled defaults (review off,
@@ -356,7 +356,16 @@ class EntryPublicationTest extends TestCase
         $guard = \Mockery::mock(\Illuminate\Contracts\Auth\Guard::class);
         $guard->shouldReceive('user')->andReturn(null);
         $guard->shouldReceive('id')->andReturn(null);
-        \Illuminate\Support\Facades\Auth::shouldReceive('createUserProvider')->andReturn($provider);
+        if ($standardGuardProvider) {
+            config([
+                'auth.defaults.guard' => 'web',
+                'auth.defaults.provider' => null,
+                'auth.guards.web.provider' => 'users',
+            ]);
+            \Illuminate\Support\Facades\Auth::shouldReceive('createUserProvider')->with('users')->andReturn($provider);
+        } else {
+            \Illuminate\Support\Facades\Auth::shouldReceive('createUserProvider')->andReturn($provider);
+        }
         \Illuminate\Support\Facades\Auth::shouldReceive('guard')->andReturn($guard);
 
         return [app(\Splicewire\Beam\Ux\Release\ReleaseService::class), $author, $reviewer];
@@ -378,6 +387,18 @@ class EntryPublicationTest extends TestCase
     {
         $entry = $this->publishedPage(self::BODY_ONE);
         [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+
+        $state = $this->publishDraftAs($entry, $author);
+
+        $this->assertSame('published', $state->release->status);
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+    }
+
+    public function test_a_release_resolves_its_author_from_the_default_guards_provider(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false, standardGuardProvider: true);
         \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
 
         $state = $this->publishDraftAs($entry, $author);

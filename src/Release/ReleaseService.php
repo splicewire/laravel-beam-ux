@@ -4,10 +4,12 @@ namespace Splicewire\Beam\Ux\Release;
 
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\UserProvider;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
+use Rushing\PermissionCascade\Policies\ConfiguredModelPolicy;
 use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -16,7 +18,6 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Control\TransitionResult;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
-use Rushing\PermissionCascade\Policies\ConfiguredModelPolicy;
 
 /** ADR-0226: all writes are on the Release's connection and serialized by its row lock. */
 final class ReleaseService
@@ -368,12 +369,40 @@ final class ReleaseService
     private function actor(?string $token): Authenticatable
     {
         $actor = $token !== null && str_starts_with($token, 'user:')
-            ? Auth::createUserProvider()?->retrieveById(substr($token, 5)) : null;
+            ? $this->userProvider()?->retrieveById(substr($token, 5)) : null;
         if (! $actor instanceof Authenticatable) {
             throw new AuthorizationException('A Release requires a currently resolvable author.');
         }
 
         return $actor;
+    }
+
+    private function userProvider(): ?UserProvider
+    {
+        try {
+            $guardName = config('auth.defaults.guard');
+            $providerName = is_string($guardName) && $guardName !== ''
+                ? config("auth.guards.{$guardName}.provider")
+                : null;
+            if (is_string($providerName) && $providerName !== '') {
+                $provider = Auth::createUserProvider($providerName);
+                if ($provider instanceof UserProvider) {
+                    return $provider;
+                }
+            }
+
+            $guard = Auth::guard(is_string($guardName) && $guardName !== '' ? $guardName : null);
+            if (method_exists($guard, 'getProvider')) {
+                $provider = $guard->getProvider();
+                if ($provider instanceof UserProvider) {
+                    return $provider;
+                }
+            }
+
+            return Auth::createUserProvider();
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
     }
 
     private function token(Authenticatable $actor): string
