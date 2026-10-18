@@ -148,7 +148,12 @@ class EntryBodyOpsTest extends TestCase
         $this->assertSame((string) $entry->id, $envelope->id);
         $this->assertSame('about', $envelope->slug);
         $this->assertSame('page', $envelope->type);
-        $this->assertSame([], $envelope->body);
+        $this->assertSame([[
+            'kind' => 'block', 'name' => 'div', 'isComponent' => false,
+            'props' => [], 'children' => [], 'dynamic' => false,
+        ]], $envelope->body);
+        $this->assertNull($entry->fresh()->particle_id, 'A read must not initialize history.');
+        $this->assertNull($entry->fresh()->published_version);
         $this->assertNull($envelope->compileError);
     }
 

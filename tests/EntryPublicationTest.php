@@ -40,6 +40,107 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class EntryPublicationTest extends TestCase
 {
+    public function test_seeded_unauthored_first_save_pins_visible_baseline_then_reloads_and_publishes_draft(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'seeded-home', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $pub = app(EntryPublication::class);
+        $envelope = app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->read($entry);
+        $this->assertSame('div', $envelope->body[0]['name']);
+        $this->assertNull($pub->state($entry)->headVersion);
+        $this->assertNull($entry->fresh()->particle_id, 'reading must not initialize history');
+        $request = Request::create('/save-draft', 'POST', ['body' => self::BODY_TWO, 'baseVersion' => null, 'initialBody' => self::BODY_ONE]);
+        $state = EntryDraftSaveOp::handle($entry, $request, null);
+        $this->assertNotNull($state->publishedVersion);
+        $this->assertNotSame($state->headVersion, $state->publishedVersion);
+        $this->assertCount(2, $state->versions);
+        $this->assertStringContainsString('div', (string) $this->artifacts()->read($entry->fresh()));
+        $this->assertStringNotContainsString('One', (string) $this->artifacts()->read($entry->fresh()), 'forged initialBody must never be pinned');
+        $reloaded = $pub->state($entry->fresh());
+        $this->assertSame($state->headVersion, $reloaded->headVersion);
+        $pub->publishVersion($entry->fresh(), $reloaded->headVersion);
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
+        try {
+            EntryDraftSaveOp::handle($entry->fresh(), $request, null);
+            $this->fail('a racing null-base write overwrote history');
+        } catch (\Symfony\Component\HttpKernel\Exception\ConflictHttpException) {
+            $this->assertCount(2, $pub->state($entry->fresh())->versions);
+        }
+    }
+
+    public function test_history_bearing_missing_pin_is_not_reinitialized_by_editor_save(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $pub = app(EntryPublication::class);
+        $head = $pub->state($entry)->headVersion;
+        $entry->forceFill(['published_version' => null])->save();
+        $this->expectException(\Symfony\Component\HttpKernel\Exception\ConflictHttpException::class);
+        $pub->draftFromBase($entry, self::BODY_TWO, $head);
+    }
+
+    public function test_first_save_preserves_the_server_stored_body_not_a_forged_baseline(): void
+    {
+        $entry = $this->pageWithUnversionedBody(self::BODY_ONE);
+        $request = Request::create('/save-draft', 'POST', ['body' => self::BODY_TWO, 'baseVersion' => null, 'initialBody' => self::BODY_TWO]);
+        $state = EntryDraftSaveOp::handle($entry, $request, null);
+        $this->assertCount(2, $state->versions);
+        $this->assertStringContainsString('One', (string) $this->artifacts()->read($entry->fresh()));
+        $this->assertStringNotContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
+    }
+
+    public function test_a_foreign_pin_is_not_accepted_as_a_history_baseline(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $other = $this->publishedPage(self::BODY_TWO);
+        $entry->forceFill(['published_version' => $other->published_version])->save();
+        $pub = app(EntryPublication::class);
+        $before = $pub->state($entry);
+        try {
+            $pub->draftFromBase($entry, self::BODY_TWO, $before->headVersion);
+            $this->fail('foreign pin admitted');
+        } catch (\Symfony\Component\HttpKernel\Exception\ConflictHttpException) {
+            $this->assertSame($before->headVersion, $pub->state($entry->fresh())->headVersion);
+        }
+    }
+
+    public function test_failed_first_save_rolls_back_the_baseline_and_particle(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'atomic-new', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $pub = app(EntryPublication::class);
+        PublicationFakeCompiler::$fails = true;
+        try {
+            $pub->draftFromBase($entry, self::BODY_TWO, null);
+            $this->fail('compile refusal expected');
+        } catch (CompilationFailed) {
+            $this->assertNull($entry->fresh()->particle_id);
+            $this->assertNull($entry->fresh()->published_version);
+            $this->assertSame([], $pub->state($entry->fresh())->versions);
+        } finally {
+            PublicationFakeCompiler::$fails = false;
+        }
+    }
+
+    public function test_refused_edit_after_initialization_leaves_no_pin_or_mirror(): void
+    {
+        Storage::fake('mirror');
+        config(['beam.ux.storage.mirror_disk' => 'mirror']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->bindSplitTenancy();
+        $entry = BeamUxEntry::create(['slug' => 'refused-first', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $pub = app(EntryPublication::class);
+        try {
+            $pub->draftFromBase($entry, [[
+                'kind' => 'block', 'name' => 'UnknownIsland', 'isComponent' => true,
+                'props' => [], 'children' => [], 'dynamic' => false,
+            ]], null);
+            $this->fail('the edited unknown component must be refused');
+        } catch (ValidationException) {
+            $this->assertNull($entry->fresh()->particle_id);
+            $this->assertNull($entry->fresh()->published_version);
+            $this->assertSame([], $pub->state($entry->fresh())->versions);
+            $this->assertSame([], Storage::disk('mirror')->allFiles());
+        }
+    }
+
     /** A JsonDoc body with one heading — the canvas shape a tsx entry stores. */
     private const BODY_ONE = [[
         'kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false,

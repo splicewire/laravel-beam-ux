@@ -42,11 +42,9 @@ class EntryBodyEnvelope
      */
     public function read(BeamUxEntry $entry): BeamUxEntryBodyData
     {
-        $item = $entry->particle_id !== null
-            ? $this->drivers->resolve($entry)->read((string) $entry->particle_id)
-            : null;
+        $body = app(\Splicewire\Beam\Ux\Publish\EntryInitialBody::class)->resolve($entry);
 
-        return $this->of($entry, $this->viewGateFilter->filter($item?->body ?? []));
+        return $this->of($entry, $this->viewGateFilter->filter($body));
     }
 
     /**

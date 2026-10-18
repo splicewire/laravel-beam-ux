@@ -136,8 +136,35 @@ class EntryPublication
 
         return $entry->getConnection()->transaction(function () use ($entry, $body, $baseVersion, $label, $actor, $pageSettings) {
             $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
-            if ($this->state($locked)->headVersion !== $baseVersion) {
+            $before = $this->state($locked);
+            if ($before->headVersion !== $baseVersion) {
                 throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('The editor base version has moved. Reload or explicitly save your changes against the new base.');
+            }
+
+            $unauthored = $before->headVersion === null && $before->versions === []
+                && $this->publishedVersionId($locked) === null
+                && $this->particle($locked)?->getAttribute('head_version') === null;
+            if (! $unauthored && ($before->headVersion === null || $before->publishedVersion === null
+                || ! array_filter($before->versions, fn ($version) => $version->id === $before->publishedVersion))) {
+                throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('This entry has history but no valid Publication Pin. Repair its pin before editing.');
+            }
+            if ($unauthored) {
+                // FIRST SAVE, never mount: the locked null-base comparison owns initialization.
+                // The baseline is server-owned. A client-supplied initialBody is not authority.
+                $baseline = app(EntryInitialBody::class)->resolve($locked);
+                if ($locked->particle_id === null) {
+                    $this->write($locked, $baseline);
+                }
+                $version = $this->versions->snapshot($this->requireParticle($locked), 'baseline');
+                // The writer may normalize legacy styles: compile and mirror the frozen snapshot.
+                $baseline = $version->snapshot['payload'];
+                app(CompileEntryBody::class)->forVersion($locked, (string) $version->id, $baseline);
+                $locked->published_version = (string) $version->id;
+                $locked->save();
+                $snapshot = clone $locked;
+                $locked->getConnection()->afterCommit(function () use ($snapshot, $baseline) {
+                    $this->mirror->mirror($snapshot, $this->placements->resolve($snapshot)->pathFor($snapshot), $baseline);
+                });
             }
 
             $state = $this->recordDraft($locked, $body, $label, $pageSettings);

@@ -1,0 +1,357 @@
+{
+  "home": [
+    {
+      "kind": "block",
+      "name": "div",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "st-editable-home"
+        },
+        {
+          "name": "style",
+          "kind": "string",
+          "value": "max-width:900px;margin:0 auto;padding:24px"
+        }
+      ],
+      "children": [
+        {
+          "kind": "block",
+          "name": "DemoHero",
+          "isComponent": true,
+          "props": [],
+          "children": [],
+          "dynamic": false
+        },
+        {
+          "kind": "block",
+          "name": "p",
+          "isComponent": false,
+          "dynamic": false,
+          "props": [
+            {
+              "name": "style",
+              "kind": "string",
+              "value": "font-size:16px;line-height:1.6;color:var(--st-muted,#475569);margin:28px 0"
+            }
+          ],
+          "children": [
+            {
+              "kind": "text",
+              "value": "Edit this page right here: change the text and move blocks around. Save a draft as you go, and publish when it’s ready."
+            }
+          ]
+        },
+        {
+          "kind": "block",
+          "name": "DemoFeatureRow",
+          "isComponent": true,
+          "props": [],
+          "children": [],
+          "dynamic": false
+        }
+      ]
+    }
+  ],
+  "login": [
+    {
+      "kind": "block",
+      "name": "h1",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-xl font-medium text-center"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Log in to your account"
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "p",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-center text-sm text-muted-foreground"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Enter your email and password below to log in"
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "AuthLogin",
+      "isComponent": true,
+      "props": [],
+      "children": [],
+      "dynamic": false
+    }
+  ],
+  "register": [
+    {
+      "kind": "block",
+      "name": "h1",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-xl font-medium text-center"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Create an account"
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "p",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-center text-sm text-muted-foreground"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Enter your details below to create your account"
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "AuthRegister",
+      "isComponent": true,
+      "props": [],
+      "children": [],
+      "dynamic": false
+    }
+  ],
+  "forgot-password": [
+    {
+      "kind": "block",
+      "name": "h1",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-xl font-medium text-center"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Forgot password"
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "p",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-center text-sm text-muted-foreground"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Enter your email to receive a password reset link"
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "AuthForgotPassword",
+      "isComponent": true,
+      "props": [],
+      "children": [],
+      "dynamic": false
+    }
+  ],
+  "reset-password": [
+    {
+      "kind": "block",
+      "name": "h1",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-xl font-medium text-center"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Reset password"
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "p",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-center text-sm text-muted-foreground"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Please enter your new password below"
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "AuthResetPassword",
+      "isComponent": true,
+      "props": [],
+      "children": [],
+      "dynamic": false
+    }
+  ],
+  "confirm-password": [
+    {
+      "kind": "block",
+      "name": "h1",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-xl font-medium text-center"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Confirm password"
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "p",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-center text-sm text-muted-foreground"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "This is a secure area of the application. Please confirm your password before continuing."
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "AuthConfirmPassword",
+      "isComponent": true,
+      "props": [],
+      "children": [],
+      "dynamic": false
+    }
+  ],
+  "two-factor-challenge": [
+    {
+      "kind": "block",
+      "name": "AuthTwoFactorChallenge",
+      "isComponent": true,
+      "props": [],
+      "children": [],
+      "dynamic": false
+    }
+  ],
+  "verify-email": [
+    {
+      "kind": "block",
+      "name": "h1",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-xl font-medium text-center"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Email verification"
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "p",
+      "isComponent": false,
+      "dynamic": false,
+      "props": [
+        {
+          "name": "className",
+          "kind": "string",
+          "value": "text-center text-sm text-muted-foreground"
+        }
+      ],
+      "children": [
+        {
+          "kind": "text",
+          "value": "Please verify your email address by clicking on the link we just emailed to you."
+        }
+      ]
+    },
+    {
+      "kind": "block",
+      "name": "AuthVerifyEmail",
+      "isComponent": true,
+      "props": [],
+      "children": [],
+      "dynamic": false
+    }
+  ]
+}
