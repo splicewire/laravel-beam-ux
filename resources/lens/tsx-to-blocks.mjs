@@ -74,7 +74,7 @@ const main = async () => {
     fail('beam-ux lens: stdin must be {"source": string, "root": string}.')
   }
 
-  const { parse, toJson } = await load('@splicewire/beam-ux/blockdoc', root)
+  const { parse, toJson } = await load('@splicewire/beam-ux/tsx-lens', root)
 
   let doc
   try {

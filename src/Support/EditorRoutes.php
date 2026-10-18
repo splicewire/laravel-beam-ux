@@ -12,7 +12,7 @@ final class EditorRoutes
     {
         // NoSubject must precede any {id} route; no hidden package route registration.
         Particle::ops($uri, 'beam-ux-entry', [EntryMakeEditableOp::class]);
-        foreach (['body', 'save-body', 'save-draft', 'publish', 'versions', 'restore', 'clear-body'] as $op) {
+        foreach (['body', 'save-body', 'save-draft', 'publish', 'versions', 'restore', 'clear-body', 'print-source', 'read-source'] as $op) {
             Particle::ops($uri, 'beam-ux-entry', $op);
         }
     }

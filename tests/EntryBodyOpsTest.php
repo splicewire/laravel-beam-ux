@@ -48,6 +48,60 @@ class EntryBodyOpsTest extends TestCase
         $this->createTables();
     }
 
+    public function test_source_mode_print_and_read_preserve_local_ids_without_any_write(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'source-mode', 'type' => 'page', 'format' => 'tsx']);
+        $before = $entry->refresh()->getRawOriginal();
+        $body = [['kind' => 'block', 'id' => '019a0000-0000-7000-8000-000000000001', 'name' => 'p', 'isComponent' => false,
+            'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Local unsaved text']]]];
+        $parsed = $body;
+        unset($parsed[0]['id']);
+        $this->app->instance(TsxLens::class, new class($parsed) implements TsxLens {
+            public function __construct(private array $body) {}
+            public function lower(string $source): array { return $this->body; }
+        });
+        $queries = [];
+        \Illuminate\Support\Facades\DB::listen(function ($event) use (&$queries) { $queries[] = $event->sql; });
+        $printed = \Splicewire\Beam\Ux\Particle\EntrySourcePrintOp::handle($entry, new Request(['body' => $body]), null);
+        $this->assertStringContainsString('Local unsaved text', $printed->source);
+        $read = \Splicewire\Beam\Ux\Particle\EntrySourceReadOp::handle($entry, new Request(['source' => $printed->source, 'body' => $body]), null);
+        $this->assertEquals($body, $read->body);
+        $this->assertSame($body[0]['id'], $read->body[0]['id']);
+        $this->assertSame($before, $entry->refresh()->getRawOriginal());
+        $this->assertSame(0, \Illuminate\Support\Facades\DB::table(Beam::table('particles'))->count());
+        $this->assertSame(0, \Illuminate\Support\Facades\DB::table(Beam::table('versions'))->count());
+        $this->assertSame(0, \Illuminate\Support\Facades\DB::table('activity_log')->count());
+        $this->assertSame([], array_values(array_filter($queries, fn ($sql) => preg_match('/^\s*(insert|update|delete|replace|create|alter|drop)\b/i', $sql))));
+    }
+
+    public function test_source_mode_operations_are_declared_read_only_and_author_gated(): void
+    {
+        foreach ([\Splicewire\Beam\Ux\Particle\EntrySourcePrintOp::class, \Splicewire\Beam\Ux\Particle\EntrySourceReadOp::class] as $class) {
+            $op = (new ReflectionClass($class))->getAttributes(ParticleOp::class)[0]->newInstance();
+            $this->assertSame(OperationKind::Read, $op->kind);
+            $this->assertSame('ux.author', $op->ability);
+            $this->assertFalse($op->abilityModel);
+            $this->assertFalse($op->affordance);
+        }
+    }
+
+    public function test_source_mode_refuses_hosted_entries_and_non_tsx_bodies(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'source-mode', 'type' => 'page', 'format' => 'mdx']);
+        try {
+            \Splicewire\Beam\Ux\Particle\EntrySourcePrintOp::handle($entry, new Request(['body' => []]), null);
+            $this->fail('MDX is outside EP-14');
+        } catch (ValidationException $e) { $this->assertArrayHasKey('source', $e->errors()); }
+        $entry->format = 'tsx';
+        $this->bindSplitTenancy();
+        foreach ([\Splicewire\Beam\Ux\Particle\EntrySourcePrintOp::class, \Splicewire\Beam\Ux\Particle\EntrySourceReadOp::class] as $class) {
+            try {
+                $class::handle($entry, new Request(['source' => '<p/>', 'body' => []]), null);
+                $this->fail('Hosted Source Mode must refuse');
+            } catch (ValidationException $e) { $this->assertArrayHasKey('source', $e->errors()); }
+        }
+    }
+
     public function test_show_returns_the_declared_envelope_for_an_entry_with_no_particle_yet(): void
     {
         $entry = BeamUxEntry::create(['slug' => 'about', 'type' => 'page', 'namespace' => null]);
