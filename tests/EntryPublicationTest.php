@@ -455,6 +455,34 @@ class EntryPublicationTest extends TestCase
         $this->publishDraftAs($entry, $author);
     }
 
+    public function test_direct_publish_resolves_one_ability_so_a_policy_that_allows_publish_governs(): void
+    {
+        // orch-peer HIGH on b23e933: the editor's Publish (a Release of one) must decide on ONE ability, the publish
+        // ladder (publish, else update, else ux.author). A host policy with publish=true and update=false publishes;
+        // checking edit first would refuse before the specific publish decision could govern.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, AllowPublishDenyUpdateEntryPolicy::class);
+
+        $state = $this->publishDraftAs($entry, $author);
+
+        $this->assertSame('published', $state->release->status);
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+    }
+
+    public function test_a_multi_entry_release_still_checks_edit_on_its_member_operations(): void
+    {
+        // Only the direct Publish takes the single-ability path; building a Release by hand keeps the edit check.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, AllowPublishDenyUpdateEntryPolicy::class);
+
+        $this->expectException(\Illuminate\Auth\Access\AuthorizationException::class);
+        $service->create($entry, 'By hand', $author);
+    }
+
     public function test_save_draft_keeps_its_pre_releases_gate_and_never_consults_an_entry_policy(): void
     {
         // orch-lead 13:14Z: every operation keeps exactly its pre-Releases authorization. At 86d4b98 save-draft was
@@ -1602,5 +1630,19 @@ class DenyUpdateEntryPolicy
     public function update($user, BeamUxEntry $entry): bool
     {
         return false;
+    }
+}
+
+/** A host's BeamUxEntry policy that allows publishing and denies editing. */
+class AllowPublishDenyUpdateEntryPolicy
+{
+    public function update($user, BeamUxEntry $entry): bool
+    {
+        return false;
+    }
+
+    public function publish($user, BeamUxEntry $entry): bool
+    {
+        return true;
     }
 }

@@ -21,16 +21,37 @@ use Rushing\PermissionCascade\Policies\ConfiguredModelPolicy;
 /** ADR-0226: all writes are on the Release's connection and serialized by its row lock. */
 final class ReleaseService
 {
-    /** ADR-0226 d1: the editor and Workflow tab use the same Release admission as batches. */
+    /**
+     * The entry a direct Publish/Take-down is authorizing on its single publish ability, while requestOne runs. Static
+     * because the workflow lifecycle calls back into a container-resolved instance (BeamUxRelease's transaction
+     * participant) during the same request; requestOne always resets it.
+     */
+    private static ?string $directPublishOf = null;
+
+    /**
+     * ADR-0226 d1: the editor and Workflow tab use the same Release admission as batches.
+     *
+     * A direct Publish or Take-down (a Release of one) decides on ONE ability for its entry, the publish ladder
+     * (`publish`, else `update`, else `ux.author`; see entryAbility()), at every step of this request: create, the
+     * member, and the transition. Checking edit first would let a host policy's `update` refuse before its own
+     * `publish` decision could govern, which is stricter than the pre-Releases Publish (orch-peer, 2026-10-18). A
+     * Release built step by step keeps the separate edit and publish checks.
+     */
     public function requestOne(BeamUxEntry $entry, ?string $ref, Authenticatable $actor): BeamUxRelease
     {
-        return $entry->getConnection()->transaction(function () use ($entry, $ref, $actor) {
-            $release = $this->create($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor);
-            $this->putMember($release, $entry->id, $ref, $actor);
-            $this->transition($release, config('beam.ux.releases.review_required', false) ? 'submit' : 'publish', $actor);
+        self::$directPublishOf = (string) $entry->getKey();
 
-            return $release->fresh();
-        });
+        try {
+            return $entry->getConnection()->transaction(function () use ($entry, $ref, $actor) {
+                $release = $this->create($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor);
+                $this->putMember($release, $entry->id, $ref, $actor);
+                $this->transition($release, config('beam.ux.releases.review_required', false) ? 'submit' : 'publish', $actor);
+
+                return $release->fresh();
+            });
+        } finally {
+            self::$directPublishOf = null;
+        }
     }
 
     public function create(BeamUxEntry $context, string $title, Authenticatable $actor): BeamUxRelease
@@ -274,6 +295,15 @@ final class ReleaseService
     {
         $gate = Gate::forUser($actor);
         $gate->authorize('ux.author');
+
+        if (self::$directPublishOf !== null && (string) $entry->getKey() === self::$directPublishOf) {
+            $ability = $this->entryAbility($entry, 'publish');
+            if ($ability !== null) {
+                $gate->authorize($ability, $entry);
+            }
+
+            return;
+        }
 
         foreach ($publish ? ['edit', 'publish'] : ['edit'] as $kind) {
             $ability = $this->entryAbility($entry, $kind);
