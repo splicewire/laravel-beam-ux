@@ -56,6 +56,7 @@ final class BindingResolver
             throw ValidationException::withMessages(['repeat.query.limit' => 'The Repeat limit must be between 1 and 100.']);
         }
         unset($query['limit']);
+        $context = null;
         $page = max(1, min(10000, (int) $request->query('repeat_'.$node['id'], 1)));
         // Duplicate creates new parameter bags. Never let a browser's filter or address override the saved declaration.
         if ($source->parentEntryId !== null) {
@@ -67,21 +68,25 @@ final class BindingResolver
             $resource = app(ParticleResourceRegistry::class)->get($source->resource);
             try {
                 $rows = app(BindingRequestScope::class)->run($request, [...$query, ...$source->address],
-                    fn (Request $read) => app(ParticleFrameResourceHandler::class)->forRequest($read, $realm)
-                        ->indexWindow($resource->toResourceDefinition(), $limit + 1, ($page - 1) * $limit));
+                    function (Request $read) use ($resource, $realm, $limit, $page, &$context) {
+                        $context = app(\Splicewire\Beam\Authorization\ResourceReadGuard::class)->bindReadContext($resource, $read);
+
+                        return app(ParticleFrameResourceHandler::class)->forRequest($read, $realm)
+                            ->indexWindow($resource->toResourceDefinition(), $limit + 1, ($page - 1) * $limit);
+                    });
             } catch (AuthorizationException) {
                 // Refused and empty have one public shape; no author fallback.
                 $rows = [];
             }
         }
         $more = count($rows) > $limit;
-        $records = $this->project($node, array_slice($rows, 0, $limit), $source, $request, true);
+        $records = $this->project($node, array_slice($rows, 0, $limit), $source, $request, true, $context);
 
         return new RepeatRecordsData($records, $more, $page);
     }
 
     /** Project each level as a batch; never resolve a relation inside an outer-record loop. */
-    private function project(array $node, array $rows, CollectionSource $source, Request $request, bool $enriched): array
+    private function project(array $node, array $rows, CollectionSource $source, Request $request, bool $enriched, ?\Splicewire\Beam\Read\ReadContext $context): array
     {
         $fields = $this->fields($node);
         $records = array_map(function (array $row) use ($fields, $source): array {
@@ -106,7 +111,7 @@ final class BindingResolver
         $definition = app(\Splicewire\Beam\Collections\CollectionSchemaResolver::class)->resolve($source->address['collection']);
         if (! $enriched && $rows !== []) {
             $relationData = app(\Splicewire\Beam\Collections\CollectionRelations::class)->resolve(
-                array_map(fn ($row) => \Splicewire\Beam\Collections\CollectionRecordData::from($row), $rows), $request->user());
+                array_map(fn ($row) => \Splicewire\Beam\Collections\CollectionRecordData::from($row), $rows), $request->user(), $context);
             foreach ($rows as &$row) {
                 $row['relations'] = $relationData[$row['id']] ?? [];
             }
@@ -138,7 +143,7 @@ final class BindingResolver
                 }
             }
             $target = new CollectionSource($source->name, $source->resource, ['collection' => $edge['collection']]);
-            $projected = $flat === [] ? [] : $this->project($child, $flat, $target, $request, false);
+            $projected = $flat === [] ? [] : $this->project($child, $flat, $target, $request, false, $context);
             foreach ($windows as $index => [$offset, $count, $more]) {
                 $records[$index]['bindings'][$id] = (new RepeatRecordsData(array_slice($projected, $offset, $count), $more, $page))->toArray();
             }

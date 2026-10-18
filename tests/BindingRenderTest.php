@@ -139,6 +139,46 @@ class BindingRenderTest extends TestCase
         $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.repeat-one.records', [['title' => 'Visible A', 'url' => null]]);
     }
 
+    public function test_public_floor_keeps_request_identity_tenant_and_no_public_read_refusal(): void
+    {
+        $resource = app(ParticleResourceRegistry::class)->get('binding-records');
+        $resource->readPolicy = BindingDeniedPolicy::class;
+        $visitor = (new \Illuminate\Foundation\Auth\User)->forceFill(['id' => 7]);
+        $this->actingAs($visitor);
+        $resource->publicScope = function ($query) use ($visitor) {
+            $this->assertSame($visitor, app(\Illuminate\Http\Request::class)->user());
+
+            return $query->where('public', true);
+        };
+        config(['binding-test.tenant' => 'b']);
+        $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.repeat-one.records', [['title' => 'Visible B', 'url' => null]]);
+        $resource->publicRead = null;
+        $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.repeat-one.records', []);
+    }
+
+    public function test_public_floor_does_not_change_an_allowed_reader(): void
+    {
+        $resource = app(ParticleResourceRegistry::class)->get('binding-records');
+        $resource->readPolicy = \Splicewire\Beam\Authorization\AuthenticatedReadPolicy::class;
+        $resource->readBoundary = ParticleResource::READ_BOUNDARY_GLOBAL;
+        $this->actingAs((new \Illuminate\Foundation\Auth\User)->forceFill(['id' => 7]));
+        $rows = $this->getJson('/bound')->assertOk()->json('props.bindings.repeat-one.records');
+        $this->assertSame(['Visible A', 'Author only'], array_column($rows, 'title'));
+    }
+
+    public function test_denied_reader_cannot_use_hidden_query_fields_on_the_public_floor(): void
+    {
+        $this->installCollectionFixtures();
+        app(ParticleResourceRegistry::class)->get('records')->readPolicy = BindingDeniedPolicy::class;
+        $this->actingAs((new \Illuminate\Foundation\Auth\User)->forceFill(['id' => 7]));
+        foreach ([['filter' => ['secret' => 'private field']], ['sort' => 'secret']] as $query) {
+            app(PublishedBindingDocument::class)->savedQuery = $query;
+            $this->getJson('/bound')->assertUnprocessable();
+        }
+        app(PublishedBindingDocument::class)->savedQuery = [];
+        $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.articles.records', [['fields' => ['title' => 'articles public'], 'url' => null]]);
+    }
+
     public function test_binding_document_reads_only_the_named_publication_snapshot(): void
     {
         $entry = new BeamUxEntry;
@@ -196,6 +236,13 @@ class BindingRenderTest extends TestCase
                 'created_at' => now(), 'updated_at' => now(),
             ]);
         }
+        foreach (['private-only' => 'events-0', 'missing-only' => 'missing'] as $id => $target) {
+            \Illuminate\Support\Facades\DB::table($table)->insert([
+                'id' => $id, 'schema_ref' => 'https://example.test/articles/1', 'schema_id' => 'https://example.test/articles/1',
+                'payload' => json_encode(['title' => $id, 'visible' => true, 'related' => [$target]]),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
         $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument
         {
             public function read(BeamUxEntry $entry): array
@@ -213,7 +260,7 @@ class BindingRenderTest extends TestCase
         $targets = array_filter($queries, fn ($q) => str_contains($q['query'], $table) && in_array('https://example.test/events/1', $q['bindings'], true));
         $this->assertCount(1, $targets);
         $rows = $response->json('props.bindings.outer.records');
-        $this->assertCount(13, $rows);
+        $this->assertCount(15, $rows);
         $populated = 0;
         foreach ($rows as $row) {
             $nested = $row['bindings']['inner'];
@@ -225,6 +272,9 @@ class BindingRenderTest extends TestCase
         $this->assertSame(12, $populated);
         $this->assertStringNotContainsString('author only', $response->getContent());
         $this->assertStringNotContainsString('private field', $response->getContent());
+        app(ParticleResourceRegistry::class)->get('records')->readPolicy = BindingDeniedPolicy::class;
+        $this->actingAs((new \Illuminate\Foundation\Auth\User)->forceFill(['id' => 7]));
+        $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.outer.records', $rows);
     }
 
     public function test_hidden_collection_filter_refuses_and_the_next_render_has_no_stale_address(): void
