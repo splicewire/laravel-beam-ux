@@ -455,6 +455,16 @@ class EntryPublication
         // including its code boundary, so no op can bypass it by forgetting to call the guard. A non-canvas
         // body is source: refused where the profile refuses code, except a clear and a Form-kind token object.
         app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
+        try {
+            if (JsonDocShape::is($body)) {
+                $body = \Splicewire\Beam\Ux\Style\NormalizeBlockStyles::apply($body,
+                    \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()));
+            } elseif ($entry->type === \Splicewire\Beam\Ux\Type\UxType::Theme) {
+                \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss($body);
+            }
+        } catch (\InvalidArgumentException $e) {
+            throw ValidationException::withMessages(['body' => $e->getMessage()]);
+        }
 
         $written = $this->authoringDriver()->write(
             (string) ($entry->particle_id ?? ''),

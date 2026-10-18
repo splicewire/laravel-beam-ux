@@ -1,0 +1,18 @@
+import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+const {root, source, compiler} = JSON.parse(Buffer.concat(chunks));
+const require = createRequire(`${root}/package.json`);
+const esbuild = require('esbuild');
+const React = require('react');
+const {renderToStaticMarkup} = require('react-dom/server');
+const runtimeBuild = await esbuild.build({entryPoints:[`${root}/beam-ux/src/blockdoc/style-runtime.ts`],bundle:true,write:false,format:'esm',platform:'node'});
+const runtime = await import(`data:text/javascript;base64,${Buffer.from(runtimeBuild.outputFiles[0].text).toString('base64')}`);
+const child = spawnSync(process.execPath, [compiler], {input:JSON.stringify({root,format:'tsx',source}),encoding:'utf8'});
+if (child.status !== 0) throw new Error(child.stderr);
+const {code} = JSON.parse(child.stdout);
+const artifact = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const Page = artifact.default({...React,compileEntryStyles:runtime.compileEntryStyles}).default;
+const html = renderToStaticMarkup(React.createElement(Page,{styleRegistry:runtime.styleRegistry({responsive:{breakpoints:{md:'52rem'}}})}));
+process.stdout.write(html);

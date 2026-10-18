@@ -84,6 +84,16 @@ class EntryPublicationTest extends TestCase
         $this->assertSame(self::BODY_TWO, $entry->fresh()->particle->payload);
     }
 
+    public function test_next_author_write_migrates_legacy_style_to_the_versioned_block_field(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $body = self::BODY_ONE;
+        $body[0]['props'] = [['name' => 'style', 'kind' => 'string', 'value' => 'color:red']];
+        $written = app(EntryPublication::class)->write($entry, $body);
+        $this->assertSame(['color' => 'red'], $written['body'][0]['style']['layers'][0]['declarations']);
+        $this->assertSame([], $written['body'][0]['props']);
+    }
+
     public function test_named_publish_pins_the_seen_version_without_replacing_a_newer_working_head(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
@@ -638,7 +648,7 @@ class EntryPublicationTest extends TestCase
         \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
         // Code written straight to the particle, as history from before the save check, on the tenant's connection.
         $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(
-            (new \Splicewire\Beam\Models\BeamParticle)->setConnection('tenant_acme'),
+            (new BeamParticle)->setConnection('tenant_acme'),
             [['kind' => 'opaque', 'reason' => 'map', 'source' => '{steal()}']],
         );
         $entry = BeamUxEntry::on('tenant_acme')->create(['slug' => 'tenant-home', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site', 'particle_id' => $particle->id]);
@@ -670,7 +680,7 @@ class EntryPublicationTest extends TestCase
         // History-less, as a body written before the save check existed; then the entry is tenant-resident.
         $entry = BeamUxEntry::create(['slug' => 'legacy', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site']);
         \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
-        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(new \Splicewire\Beam\Models\BeamParticle, [['kind' => 'opaque', 'reason' => 'map', 'source' => '{steal()}']]);
+        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(new BeamParticle, [['kind' => 'opaque', 'reason' => 'map', 'source' => '{steal()}']]);
         $entry->forceFill(['particle_id' => $particle->id])->save();
         $this->bindSplitTenancy();
         $artifactsBefore = Storage::disk('artifacts')->allFiles();
@@ -698,7 +708,7 @@ class EntryPublicationTest extends TestCase
 
         $entry = BeamUxEntry::create(['slug' => 'legacy', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site']);
         \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
-        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(new \Splicewire\Beam\Models\BeamParticle, [['kind' => 'block', 'id' => 'mq', 'name' => 'marquee', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []]]);
+        $particle = app(\Splicewire\Beam\Write\ParticleWriter::class)->write(new BeamParticle, [['kind' => 'block', 'id' => 'mq', 'name' => 'marquee', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []]]);
         $entry->forceFill(['particle_id' => $particle->id])->save();
         $this->bindSplitTenancy();
         $artifactsBefore = Storage::disk('artifacts')->allFiles();
