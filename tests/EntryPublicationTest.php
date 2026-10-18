@@ -251,6 +251,28 @@ class EntryPublicationTest extends TestCase
         $this->assertNull(app(\Splicewire\Beam\Calendars\Actions\ActionScheduler::class)->run($next->id, 'tenant:test', \Carbon\CarbonImmutable::parse('2030-01-03T00:00:00Z')));
     }
 
+    public function test_scheduled_release_rechecks_revoked_member_authority(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $draft = app(EntryPublication::class)->recordDraft($entry, self::BODY_TWO);
+        $deny = false;
+        [$service, $author, $reviewer] = $this->releaseFixture(function ($actor, $ability) use (&$deny) {
+            return ! ($deny && $ability === 'publish');
+        });
+        $this->calendarFixture();
+        $release = $service->create($entry, 'Later', $author);
+        $service->putMember($release, $entry->id, $draft->headVersion, $author);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $service->schedule($release, '2030-01-01T00:00:00Z', 'UTC', $reviewer);
+        $deny = true;
+        $action = \Splicewire\Beam\Calendars\Models\CalendarAction::firstOrFail();
+        $attempt = app(\Splicewire\Beam\Calendars\Actions\ActionScheduler::class)->run($action->id, 'tenant:test', \Carbon\CarbonImmutable::parse('2030-01-02T00:00:00Z'));
+        $this->assertSame('blocked', $attempt->status);
+        $this->assertSame('scheduled', $release->fresh()->status);
+        $this->assertSame($entry->published_version, $entry->fresh()->published_version);
+    }
+
     private function calendarFixture(): void
     {
         $root = dirname((new ReflectionClass(\Splicewire\Beam\Calendars\Actions\ActionService::class))->getFileName(), 3);
