@@ -204,6 +204,22 @@ class EntryPublicationTest extends TestCase
         }
     }
 
+    public function test_page_settings_on_a_component_refuse_before_any_write(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $entry->type = UxType::Component;
+        $entry->save();
+        $publication = app(EntryPublication::class);
+        $before = $publication->state($entry)->headVersion;
+        try {
+            $publication->draftFromBase($entry, self::BODY_TWO, $before, pageSettings:
+                new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'Not a page'));
+            $this->fail('component accepted page settings');
+        } catch (ValidationException) {
+            $this->assertSame($before, $publication->state($entry->fresh())->headVersion);
+        }
+    }
+
     public function test_editor_draft_refuses_a_stale_base_before_any_write(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
