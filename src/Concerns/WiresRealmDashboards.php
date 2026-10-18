@@ -5,6 +5,8 @@ namespace Splicewire\Beam\Ux\Concerns;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Rushing\Popcorn\Concerns\Chained;
+use Splicewire\Beam\Accounts\Contracts\TeamContract;
+use Splicewire\Beam\Accounts\Facades\BeamAccounts;
 use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Particle\ParticleResource;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
@@ -12,6 +14,7 @@ use Splicewire\Beam\Realm\RealmRegistry;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Data\DashboardCardRowData;
 use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
+use Throwable;
 
 /**
  * One concern of {@see BeamUxServiceProvider}: every registered realm gets a `{realm}-dashboard`
@@ -44,11 +47,12 @@ use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
  * ## The read gate is a decision written on the declaration
  *
  * `policy:` is {@see RealmDashboard::abilityFor()} — the realm gate's own ability string, so the dashboard
- * opens no door its realm does not. For a realm that gates nothing, that is {@see RealmDashboard::OPEN_ABILITY},
- * defined HERE as "an authenticated principal is present": the same population an undeclared model-less
- * read admits, spelled as a declaration so `ModelLessReadGateAudit` reads a decision. A host narrows it by
- * redefining the ability from its own provider. The per-row {@see \Splicewire\Beam\Authorization\ResourceVisibility::listable()}
- * filter inside the backing is the dashboard's second gate.
+ * opens no door its realm does not. For a realm that declares no entitlement,
+ * {@see RealmDashboard::openAbilityFor()} names a realm-specific ability defined here: tenant requires
+ * current-team membership; site requires that membership AND `ux.site.author`; user admits the signed-in
+ * actor to their own projection. An unknown realm is denied until its host explicitly defines the named
+ * ability. The per-row {@see \Splicewire\Beam\Authorization\ResourceVisibility::listable()} filter inside
+ * the backing is the dashboard's second gate.
  */
 trait WiresRealmDashboards
 {
@@ -58,11 +62,6 @@ trait WiresRealmDashboards
         if (! $this->app->bound(ParticleResourceRegistry::class) || ! $this->app->bound(RealmRegistry::class)) {
             return;
         }
-
-        $this->app->make(Gate::class)->define(
-            RealmDashboard::OPEN_ABILITY,
-            fn (?Authenticatable $user = null): bool => $user !== null,
-        );
 
         $this->registerRealmDashboards();
         $this->app->booted(fn () => $this->registerRealmDashboards());
@@ -78,6 +77,8 @@ trait WiresRealmDashboards
         $registry = $this->app->make(ParticleResourceRegistry::class);
 
         foreach (array_keys($realms->all()) as $realm) {
+            $this->defineOpenRealmAbility($realm, $realms);
+
             if ($registry->has(RealmDashboard::keyFor($realm))) {
                 continue;
             }
@@ -103,5 +104,49 @@ trait WiresRealmDashboards
                 frame: true,
             ), [$realm], by: 'splicewire/laravel-beam-ux');
         }
+    }
+
+    /**
+     * Define the kit's secure default for an ungated realm, without replacing a host's explicit rule.
+     */
+    private function defineOpenRealmAbility(string $realm, RealmRegistry $realms): void
+    {
+        $ability = RealmDashboard::abilityFor($realm, $realms);
+
+        if ($ability !== RealmDashboard::openAbilityFor($realm)) {
+            return;
+        }
+
+        $gate = $this->app->make(Gate::class);
+
+        if ($gate->has($ability)) {
+            return;
+        }
+
+        $gate->define($ability, function (?Authenticatable $user = null) use ($realm, $gate): bool {
+            if ($user === null) {
+                return false;
+            }
+
+            if ($realm === 'user') {
+                return true;
+            }
+
+            if (! in_array($realm, ['tenant', 'site'], true)) {
+                return false;
+            }
+
+            try {
+                $team = BeamAccounts::currentTeam();
+            } catch (Throwable) {
+                return false;
+            }
+
+            if (! $team instanceof TeamContract || ! $team->hasMember($user)) {
+                return false;
+            }
+
+            return $realm === 'tenant' || $gate->forUser($user)->allows('ux.site.author');
+        });
     }
 }

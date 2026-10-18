@@ -2,7 +2,9 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\Gate;
 use Schemastud\Frame\Contracts\ResourceAccessGate;
 use Schemastud\Frame\FrameServiceProvider;
 use Schemastud\Frame\Realm\RealmDefinition;
@@ -61,8 +63,10 @@ class RealmDashboardRegistrationTest extends TestCase
         $resource = $registry->find('partner-dashboard');
         $this->assertInstanceOf(DashboardBacking::class, $resource->backing);
         $this->assertSame('partner', $resource->backing->realm);
-        // A non-central realm with no declared gate: the open ability, written down.
-        $this->assertSame(RealmDashboard::OPEN_ABILITY, $resource->policy);
+        // A custom realm with no declared gate gets a named, fail-closed ability. A host that wants
+        // readers must define that ability explicitly rather than inheriting an authenticated default.
+        $this->assertSame(RealmDashboard::openAbilityFor('partner'), $resource->policy);
+        $this->assertTrue(Gate::forUser((new User)->forceFill(['id' => 7]))->denies($resource->policy));
         $this->assertSame(RealmDashboard::LABEL, $resource->label);
     }
 }

@@ -8,6 +8,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Pagination\CursorPaginator as Paginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Rushing\PermissionCascade\Contracts\EntitlementResolver;
 use Rushing\PermissionCascade\PermissionCascadeServiceProvider;
@@ -75,7 +76,7 @@ class RealmDashboardTest extends TestCase
         // are gated on `entitlement:os.operate`, an ability beam defines at boot from the known key
         // universe against whatever resolver is bound. The fake is bound BEFORE boot so the ability
         // exists; which keys it answers is set per test.
-        $app['config']->set('app.entitlements', ['os.operate' => []]);
+        $app['config']->set('app.entitlements', ['os.operate' => [], 'ux.site.author' => []]);
         $app->instance(EntitlementResolver::class, $this->entitlements = new FakeEntitlementResolver);
 
         // The manifest is realm-blind at this host (no per-realm mount), so the contributor reads the
@@ -212,9 +213,32 @@ class RealmDashboardTest extends TestCase
         }
 
         // The read gate is the realm gate's ability, written on the declaration: `entitlement:os.operate`
-        // for the central realm with no declared gate, the open ability for a realm that gates nothing.
+        // for the central realm and a realm-specific ability for a realm that declares no entitlement.
         $this->assertSame('entitlement:os.operate', $registry->find('operator-dashboard')->policy);
-        $this->assertSame(RealmDashboard::OPEN_ABILITY, $registry->find('tenant-dashboard')->policy);
+        $this->assertSame(RealmDashboard::openAbilityFor('tenant'), $registry->find('tenant-dashboard')->policy);
+    }
+
+    public function test_the_open_realm_abilities_keep_tenant_and_site_scoped_while_user_is_actor_scoped(): void
+    {
+        $actor = $this->member();
+        $otherTeam = new DashTeam(seats: [99]);
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => $otherTeam);
+
+        $this->actingAs($actor);
+        Gate::define('ux.site.author', fn (?User $user = null): bool => $user !== null);
+
+        $this->getJson('frame/resources/tenant-dashboard')->assertForbidden();
+        $this->getJson('frame/resources/site-dashboard')->assertForbidden();
+        $this->getJson('frame/resources/user-dashboard')->assertOk();
+
+        $actorsTeam = new DashTeam(seats: [8]);
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => $actorsTeam);
+
+        $this->getJson('frame/resources/tenant-dashboard')->assertOk();
+        $this->getJson('frame/resources/site-dashboard')->assertOk();
+
+        Gate::define('ux.site.author', fn (): bool => false);
+        $this->getJson('frame/resources/site-dashboard')->assertForbidden();
     }
 
     public function test_dashboard_destinations_are_unique_and_undeclared_resources_are_tiles(): void
@@ -523,7 +547,7 @@ class RealmDashboardTest extends TestCase
 
         $this->actingAs($this->member()->forceFill(['name' => 'Probe User']));
 
-        $rows = $this->getJson('frame/resources/tenant-dashboard')->assertOk()->json('data');
+        $rows = $this->getJson('frame/resources/user-dashboard')->assertOk()->json('data');
 
         $this->assertCount(1, $rows);
         $this->assertSame('welcome', $rows[0]['id']);
@@ -549,7 +573,7 @@ class RealmDashboardTest extends TestCase
 
         $this->actingAs($this->member());
 
-        $welcome = $this->getJson('frame/resources/tenant-dashboard')->assertOk()->json('data.0.welcome');
+        $welcome = $this->getJson('frame/resources/user-dashboard')->assertOk()->json('data.0.welcome');
 
         // A nameless viewer is still welcomed, just not by a name we would have to invent.
         $this->assertSame('Welcome', $welcome['heading']);
@@ -580,10 +604,7 @@ class RealmDashboardTest extends TestCase
 
         $this->actingAs($this->member());
 
-        $this->assertSame(
-            DashboardWelcomeData::STATE_FIRST_RUN,
-            $this->getJson('frame/resources/tenant-dashboard')->assertOk()->json('data.0.welcome.state'),
-        );
+        $this->getJson('frame/resources/tenant-dashboard')->assertForbidden();
     }
 
     public function test_a_resolver_that_cannot_answer_makes_no_claim_about_teams(): void
@@ -592,10 +613,7 @@ class RealmDashboardTest extends TestCase
 
         $this->actingAs($this->member());
 
-        $this->assertSame(
-            DashboardWelcomeData::STATE_EMPTY,
-            $this->getJson('frame/resources/tenant-dashboard')->assertOk()->json('data.0.welcome.state'),
-        );
+        $this->getJson('frame/resources/tenant-dashboard')->assertForbidden();
     }
 
     public function test_a_populated_dashboard_carries_no_welcome_row_and_a_guest_gets_none(): void
