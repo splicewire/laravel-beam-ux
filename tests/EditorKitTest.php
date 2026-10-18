@@ -7,8 +7,16 @@ use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use ReflectionClass;
 use Splicewire\Beam\Facades\Beam;
+use Splicewire\Beam\Particle\Attributes\ParticleOp;
+use Splicewire\Beam\Particle\OperationKind;
+use Splicewire\Beam\Particle\Subject\NoSubject;
+use Splicewire\Beam\Routing\HttpMethod;
+use Splicewire\Beam\Ux\Data\PageEntryRefData;
+use Splicewire\Beam\Ux\Data\PageEntryRefInputData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Particle\ResolvePageEntryRefOp;
 use Splicewire\Beam\Ux\Support\EditorRoutes;
 use Splicewire\Beam\Ux\Support\EntryBody;
 
@@ -57,6 +65,76 @@ class EditorKitTest extends TestCase
     {
         $this->actingAs(new KitAuthor);
         $this->postJson('/beam-ux-entries/make-editable', ['slug' => '../escape', 'body' => []])->assertUnprocessable();
+        $this->assertSame(0, BeamUxEntry::query()->count());
+    }
+
+    public function test_author_resolves_an_existing_page_ref_by_slug_without_writing(): void
+    {
+        $entry = BeamUxEntry::create([
+            'slug' => 'home',
+            'type' => 'page',
+            'format' => 'tsx',
+            'namespace' => 'test-kit',
+        ]);
+        $before = $entry->refresh()->getRawOriginal();
+
+        $this->actingAs(new KitAuthor);
+
+        $this->getJson('/beam-ux-entries/resolve-ref?slug=home')
+            ->assertOk()
+            ->assertExactJson(['data' => [
+                'id' => (string) $entry->id,
+                'slug' => 'home',
+                'format' => 'tsx',
+                'artifact' => null,
+            ]]);
+
+        $this->assertSame($before, $entry->refresh()->getRawOriginal());
+        $this->assertSame(1, BeamUxEntry::query()->count());
+    }
+
+    public function test_unknown_slug_returns_json_null_without_creating_a_row(): void
+    {
+        $this->actingAs(new KitAuthor);
+
+        $this->getJson('/beam-ux-entries/resolve-ref?slug=missing')
+            ->assertOk()
+            ->assertContent('null');
+
+        $this->assertSame(0, BeamUxEntry::query()->count());
+    }
+
+    public function test_page_ref_resolution_refuses_guests_and_non_authors(): void
+    {
+        BeamUxEntry::create([
+            'slug' => 'home',
+            'type' => 'page',
+            'namespace' => 'test-kit',
+        ]);
+
+        $this->getJson('/beam-ux-entries/resolve-ref?slug=home')->assertForbidden();
+
+        $this->actingAs(new User);
+        $this->getJson('/beam-ux-entries/resolve-ref?slug=home')->assertForbidden();
+    }
+
+    public function test_page_ref_resolution_is_a_subject_free_read_and_has_no_write_route(): void
+    {
+        $operation = (new ReflectionClass(ResolvePageEntryRefOp::class))
+            ->getAttributes(ParticleOp::class)[0]
+            ->newInstance();
+
+        $this->assertSame(OperationKind::Read, $operation->kind);
+        $this->assertSame(HttpMethod::Get, $operation->method);
+        $this->assertSame(NoSubject::class, $operation->subject);
+        $this->assertSame('ux.author', $operation->ability);
+        $this->assertFalse($operation->abilityModel);
+        $this->assertSame(PageEntryRefInputData::class, $operation->input);
+        $this->assertSame(PageEntryRefData::class, $operation->output);
+
+        $this->actingAs(new KitAuthor);
+        $this->postJson('/beam-ux-entries/resolve-ref', ['slug' => 'home'])
+            ->assertMethodNotAllowed();
         $this->assertSame(0, BeamUxEntry::query()->count());
     }
 
