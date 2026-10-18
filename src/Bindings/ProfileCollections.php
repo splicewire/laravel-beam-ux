@@ -41,6 +41,11 @@ final class ProfileCollections
     {
         $out = [];
         foreach ($this->sources($entry, $profile) as $source) {
+            if ($source->parentEntryId !== null) {
+                $out[] = ['name' => $source->name, 'schema' => app(Generator::class)->forResponse()->generate(new ReflectionClass(\Splicewire\Beam\Ux\Data\ChildPageRecordData::class)), 'hasRecordPage' => true];
+
+                continue;
+            }
             $resource = app(ParticleResourceRegistry::class)->get($source->resource);
             $schema = isset($source->address['collection'])
                 ? app(CollectionSchemaResolver::class)->resolve($source->address['collection'])->schema

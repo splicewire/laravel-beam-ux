@@ -58,18 +58,25 @@ final class BindingResolver
         unset($query['limit']);
         $page = max(1, min(10000, (int) $request->query('repeat_'.$node['id'], 1)));
         // Duplicate creates new parameter bags. Never let a browser's filter or address override the saved declaration.
-        $resource = app(ParticleResourceRegistry::class)->get($source->resource);
-        try {
-            $rows = app(BindingRequestScope::class)->run($request, [...$query, ...$source->address],
-                fn (Request $read) => app(ParticleFrameResourceHandler::class)->forRequest($read, $realm)
-                    ->indexWindow($resource->toResourceDefinition(), $limit + 1, ($page - 1) * $limit));
-        } catch (AuthorizationException) {
-            // Refused and empty have one public shape; no author fallback.
-            $rows = [];
+        if ($source->parentEntryId !== null) {
+            if ($query !== []) {
+                throw ValidationException::withMessages(['repeat.query' => 'This child-page source does not declare filters or sorts.']);
+            }
+            $rows = array_slice(app(ChildPageRecords::class)->read($source->parentEntryId, $realm, $request->user()), ($page - 1) * $limit, $limit + 1);
+        } else {
+            $resource = app(ParticleResourceRegistry::class)->get($source->resource);
+            try {
+                $rows = app(BindingRequestScope::class)->run($request, [...$query, ...$source->address],
+                    fn (Request $read) => app(ParticleFrameResourceHandler::class)->forRequest($read, $realm)
+                        ->indexWindow($resource->toResourceDefinition(), $limit + 1, ($page - 1) * $limit));
+            } catch (AuthorizationException) {
+                // Refused and empty have one public shape; no author fallback.
+                $rows = [];
+            }
         }
         $more = count($rows) > $limit;
         $fields = $this->fields($node);
-        $records = array_map(function (array $row) use ($fields): array {
+        $records = array_map(function (array $row) use ($fields, $source): array {
             $visible = [];
             foreach ($fields as $field) {
                 if (Arr::has($row, $field)) {
@@ -77,7 +84,7 @@ final class BindingResolver
                 }
             }
             // EP-23 owns Record Pages. Do not invent an editor URL for visitors.
-            $visible['url'] = null;
+            $visible['url'] = $source->parentEntryId !== null ? $row['url'] : null;
 
             return $visible;
         }, array_slice($rows, 0, $limit));
@@ -91,6 +98,13 @@ final class BindingResolver
         $fields = [];
         if (is_string($node['field'] ?? null)) {
             $fields[] = $node['field'];
+        }
+        foreach (['all', 'any'] as $join) {
+            foreach ($node['when'][$join] ?? [] as $rule) {
+                if (is_string($rule['field'] ?? null)) {
+                    $fields[] = $rule['field'];
+                }
+            }
         }
         foreach ($node['props'] ?? [] as $prop) {
             if (($prop['kind'] ?? null) === 'field' && is_string($prop['value'] ?? null)) {

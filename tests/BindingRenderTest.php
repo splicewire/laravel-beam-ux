@@ -23,7 +23,8 @@ class BindingRenderTest extends TestCase
         $this->createTables();
         \Illuminate\Support\Facades\Storage::fake('artifacts');
         config(['beam.ux.compile.disk' => 'artifacts']);
-        $this->app->bind(\Splicewire\Beam\Ux\Http\EntryRenderer::class, fn () => new class implements \Splicewire\Beam\Ux\Http\EntryRenderer {
+        $this->app->bind(\Splicewire\Beam\Ux\Http\EntryRenderer::class, fn () => new class implements \Splicewire\Beam\Ux\Http\EntryRenderer
+        {
             public function render(string $page, array $props): \Symfony\Component\HttpFoundation\Response
             {
                 return new \Illuminate\Http\JsonResponse(['page' => $page, 'props' => $props]);
@@ -49,7 +50,8 @@ class BindingRenderTest extends TestCase
             publicScope: fn ($query) => $query->where('public', true),
             readOnly: true,
         ));
-        $this->app->instance(ManifestCollectionSource::class, new class implements ManifestCollectionSource {
+        $this->app->instance(ManifestCollectionSource::class, new class implements ManifestCollectionSource
+        {
             public function collections(BeamUxEntry $entry, string $profile): array
             {
                 return [new CollectionSource('articles', 'binding-records')];
@@ -57,7 +59,8 @@ class BindingRenderTest extends TestCase
         });
         // Snapshot retrieval is tested separately. This fixture supplies the published declaration;
         // resource authorization, projection, database scopes and HTTP rendering remain real.
-        $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument {
+        $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument
+        {
             public function read(BeamUxEntry $entry): array
             {
                 return [[
@@ -102,6 +105,20 @@ class BindingRenderTest extends TestCase
         $this->assertSame([['title' => 'Visible A', 'url' => null]], $response->json('props.bindings.repeat-one.records'));
     }
 
+    public function test_condition_fields_are_included_only_after_the_visitor_projection(): void
+    {
+        $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument {
+            public function read(BeamUxEntry $entry): array
+            {
+                return [['kind' => 'block', 'id' => 'conditional', 'name' => 'article',
+                    'repeat' => ['collection' => 'articles'],
+                    'when' => ['all' => [['field' => 'title', 'operator' => 'is set'], ['field' => 'secret', 'operator' => 'is set']]],
+                    'children' => []]];
+            }
+        });
+        $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.conditional.records', [['title' => 'Visible A', 'url' => null]]);
+    }
+
     public function test_an_undeclared_source_refuses_instead_of_enumerating_resources(): void
     {
         $this->app->forgetInstance(ManifestCollectionSource::class);
@@ -142,6 +159,18 @@ class BindingRenderTest extends TestCase
         $this->assertStringNotContainsString('private field', $response->getContent());
     }
 
+    public function test_profile_collection_fields_are_generated_from_the_owner(): void
+    {
+        $entry = BeamUxEntry::where('slug', 'bound')->firstOrFail();
+        $plain = app(\Splicewire\Beam\Ux\Bindings\ProfileCollections::class)->manifest($entry, 'content');
+        $this->assertArrayHasKey('title', $plain[0]['schema']['properties']);
+        $this->assertArrayHasKey('secret', $plain[0]['schema']['properties']);
+        $this->installCollectionFixtures();
+        $collections = app(\Splicewire\Beam\Ux\Bindings\ProfileCollections::class)->manifest($entry, 'content');
+        $this->assertSame('https://example.test/articles/1', $collections[0]['schema']['$id']);
+        $this->assertSame('https://example.test/events/1', $collections[1]['schema']['$id']);
+    }
+
     public function test_hidden_collection_filter_refuses_and_the_next_render_has_no_stale_address(): void
     {
         $this->installCollectionFixtures();
@@ -154,6 +183,49 @@ class BindingRenderTest extends TestCase
             $this->assertSame('articles public', $response->json('props.bindings.articles.records.0.fields.title'));
             $this->assertSame('events public', $response->json('props.bindings.events.records.0.fields.title'));
         }
+    }
+
+    public function test_child_page_bindings_use_the_visitor_gates_and_canonical_urls(): void
+    {
+        $parent = BeamUxEntry::where('slug', 'bound')->firstOrFail();
+        foreach (['visible', 'private', 'draft'] as $slug) {
+            BeamUxEntry::create(['slug' => $slug, 'segment' => $slug, 'title' => ucfirst($slug),
+                'type' => UxType::Page, 'parent_id' => $parent->id,
+                'access' => $slug === 'private' ? ['auth'] : null]);
+        }
+        $this->app->instance(\Splicewire\Beam\Ux\Sitemap\EntryPublishGate::class, new class implements \Splicewire\Beam\Ux\Sitemap\EntryPublishGate
+        {
+            public function isPublished(BeamUxEntry $entry): bool
+            {
+                return $entry->slug !== 'draft';
+            }
+        });
+        $this->app->instance(ManifestCollectionSource::class, new class($parent->id) implements ManifestCollectionSource
+        {
+            public function __construct(private string $parent) {}
+
+            public function collections(BeamUxEntry $entry, string $profile): array
+            {
+                return [CollectionSource::childPages('children', $this->parent)];
+            }
+        });
+        $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument
+        {
+            public function read(BeamUxEntry $entry): array
+            {
+                return [['kind' => 'block', 'id' => 'children', 'name' => 'a',
+                    'repeat' => ['collection' => 'children'],
+                    'props' => ['href' => ['kind' => 'field', 'value' => 'url']],
+                    'children' => [['kind' => 'text', 'value' => '', 'field' => 'title']]]];
+            }
+        });
+        $response = $this->getJson('/bound')->assertOk();
+        $this->assertSame([['url' => '/bound/visible', 'title' => 'Visible']], $response->json('props.bindings.children.records'));
+        $this->actingAs((new \Illuminate\Foundation\Auth\User)->forceFill(['id' => 7]));
+        $response = $this->getJson('/bound')->assertOk();
+        $this->assertSame(['Private', 'Visible'], array_column($response->json('props.bindings.children.records'), 'title'));
+        $parent->update(['traverse' => ['missing-grant']]);
+        $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.children.records', []);
     }
 
     private function installCollectionFixtures(): void
@@ -204,13 +276,15 @@ class BindingRenderTest extends TestCase
         $this->app->instance(\Rushing\Versioning\Contracts\RecordReconciler::class, $reconciler);
         $this->app->instance(\Splicewire\Beam\Collections\CollectionSchemaResolver::class,
             new \Splicewire\Beam\Collections\CollectionSchemaResolver(new \Splicewire\Beam\Schema\RegistrySchemaTargetResolver($registry), $registry));
-        $this->app->instance(ManifestCollectionSource::class, new class implements ManifestCollectionSource {
+        $this->app->instance(ManifestCollectionSource::class, new class implements ManifestCollectionSource
+        {
             public function collections(BeamUxEntry $entry, string $profile): array
             {
                 return array_map(fn ($name) => new CollectionSource($name, 'records', ['collection' => 'https://example.test/'.$name]), ['articles', 'events']);
             }
         });
-        $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument {
+        $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument
+        {
             public array $savedQuery = [];
 
             public function read(BeamUxEntry $entry): array
@@ -223,6 +297,7 @@ class BindingRenderTest extends TestCase
             }
         });
     }
+
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {
@@ -263,7 +338,9 @@ class BindingRenderTest extends TestCase
 class BindingRecord extends Model
 {
     protected $table = 'binding_records';
+
     protected $guarded = [];
+
     public $timestamps = false;
 }
 
