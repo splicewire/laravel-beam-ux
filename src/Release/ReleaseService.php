@@ -16,6 +16,7 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Control\TransitionResult;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
+use Rushing\PermissionCascade\Policies\ConfiguredModelPolicy;
 
 /** ADR-0226: all writes are on the Release's connection and serialized by its row lock. */
 final class ReleaseService
@@ -26,7 +27,7 @@ final class ReleaseService
         return $entry->getConnection()->transaction(function () use ($entry, $ref, $actor) {
             $release = $this->create($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor);
             $this->putMember($release, $entry->id, $ref, $actor);
-            $this->transition($release, config('beam.ux.releases.review_required', true) ? 'submit' : 'publish', $actor);
+            $this->transition($release, config('beam.ux.releases.review_required', false) ? 'submit' : 'publish', $actor);
 
             return $release->fresh();
         });
@@ -203,7 +204,7 @@ final class ReleaseService
             if (str_starts_with($context->causationId ?? '', 'ux-release:') && $context->causationId !== $release->schedule_token) {
                 throw new AuthorizationException('The scheduled Release membership changed; schedule the reviewed revision again.');
             }
-            if (config('beam.ux.releases.review_required', true) && (! in_array($release->status, ['approved', 'scheduled'], true) || $release->reviewed_by === null)) {
+            if (config('beam.ux.releases.review_required', false) && (! in_array($release->status, ['approved', 'scheduled'], true) || $release->reviewed_by === null)) {
                 $this->refuse('This Release requires approval before publication.');
             }
             $refs = $pins = [];
@@ -271,11 +272,48 @@ final class ReleaseService
 
     private function authorizeEntry(BeamUxEntry $entry, Authenticatable $actor, bool $publish): void
     {
-        Gate::forUser($actor)->authorize('ux.author');
-        Gate::forUser($actor)->authorize(config('beam.ux.releases.edit_ability', 'update'), $entry);
-        if ($publish) {
-            Gate::forUser($actor)->authorize(config('beam.ux.releases.publish_ability', 'publish'), $entry);
+        $gate = Gate::forUser($actor);
+        $gate->authorize('ux.author');
+
+        foreach ($publish ? ['edit', 'publish'] : ['edit'] as $kind) {
+            $ability = $this->entryAbility($entry, $kind);
+            if ($ability !== null) {
+                $gate->authorize($ability, $entry);
+            }
         }
+    }
+
+    /**
+     * The ability a Release checks on a member for `edit` or `publish`, or null when only `ux.author` applies (owner
+     * ruling 2026-10-18: an upgrade never makes Publish answer 403 to an author).
+     *
+     * A host maps an ability explicitly in `beam.ux.releases.{edit,publish}_ability`; that is checked strictly through
+     * the Gate. Otherwise the ability is the method of a policy the HOST registered for BeamUxEntry: `publish` falls
+     * back to that policy's `update`, and `update` to nothing beyond `ux.author`. Two things do not count:
+     *  - a global `Gate::define` closure for a common name such as `update`: nothing can tell what subject it was
+     *    written for, and a host that defines `update` for its own models only would otherwise refuse every author;
+     *  - this package's own default, permission-cascade's ConfiguredModelPolicy, which BeamUxEntry's
+     *    `#[UseCascadePolicy]` registers on every host. Pre-Releases Publish never consulted it (`ux.author` only), so
+     *    counting it would make an upgrade refuse an author who could publish before.
+     */
+    private function entryAbility(BeamUxEntry $entry, string $kind): ?string
+    {
+        $configured = config("beam.ux.releases.{$kind}_ability");
+        if (is_string($configured) && $configured !== '') {
+            return $configured;
+        }
+
+        $policy = Gate::getPolicyFor($entry);
+        if ($policy instanceof ConfiguredModelPolicy) {
+            $policy = null;
+        }
+        foreach ($kind === 'publish' ? ['publish', 'update'] : ['update'] as $method) {
+            if ($policy !== null && method_exists($policy, $method)) {
+                return $method;
+            }
+        }
+
+        return null;
     }
 
     private function actor(?string $token): Authenticatable

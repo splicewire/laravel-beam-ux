@@ -325,8 +325,19 @@ class EntryPublicationTest extends TestCase
         }
     }
 
-    private function releaseFixture(?\Closure $authorize = null): array
+    private function releaseFixture(?\Closure $authorize = null, bool $reviewedAndMapped = true): array
     {
+        // Most cases here are about REVIEWED Releases and the abilities a host maps: opt in to review, and map
+        // `update` and `publish` so they are checked strictly through the Gate. The owner-ruled defaults (review off,
+        // abilities unmapped) pass `$reviewedAndMapped = false`, which also installs no blanket Gate::before, so
+        // each of those cases declares its own gates.
+        if ($reviewedAndMapped) {
+            config([
+                'beam.ux.releases.review_required' => true,
+                'beam.ux.releases.edit_ability' => 'update',
+                'beam.ux.releases.publish_ability' => 'publish',
+            ]);
+        }
         $this->runBeamWorkflowsMigrations();
         $migration = __DIR__.'/../database/migrations/shared/create_beam_ux_releases_table.php.stub';
         if (is_file($migration)) {
@@ -338,7 +349,9 @@ class EntryPublicationTest extends TestCase
         $reviewer = new \Illuminate\Foundation\Auth\User;
         $reviewer->setKeyType('string');
         $reviewer->forceFill(['id' => 'reviewer']);
-        \Illuminate\Support\Facades\Gate::before($authorize ?? fn () => true);
+        if ($reviewedAndMapped) {
+            \Illuminate\Support\Facades\Gate::before($authorize ?? fn () => true);
+        }
         $provider = \Mockery::mock(\Illuminate\Contracts\Auth\UserProvider::class);
         $provider->shouldReceive('retrieveById')->andReturnUsing(fn ($id) => $id === 'author' ? $author : ($id === 'reviewer' ? $reviewer : null));
         $guard = \Mockery::mock(\Illuminate\Contracts\Auth\Guard::class);
@@ -348,6 +361,115 @@ class EntryPublicationTest extends TestCase
         \Illuminate\Support\Facades\Auth::shouldReceive('guard')->andReturn($guard);
 
         return [app(\Splicewire\Beam\Ux\Release\ReleaseService::class), $author, $reviewer];
+    }
+
+    // ---- The owner ruling (2026-10-18, launch ticket 00 `5dd27af98`): review off by default, and an upgrade never
+    // makes Publish answer 403 to an author. Pre-Releases, the editor's Publish was gated by `ux.author` alone, so the
+    // fallback is parity with that, not a widening.
+
+    /** A Publish request for the entry's newest draft, through the editor's operation. */
+    private function publishDraftAs(BeamUxEntry $entry, \Illuminate\Contracts\Auth\Authenticatable $actor): EntryPublicationData
+    {
+        $draft = app(EntryPublication::class)->recordDraft($entry->fresh(), self::BODY_TWO);
+
+        return EntryPublishOp::handle($entry->fresh(), Request::create('/', 'POST', ['ref' => $draft->headVersion]), $actor);
+    }
+
+    public function test_by_default_a_sole_author_publish_publishes_at_once(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+
+        $state = $this->publishDraftAs($entry, $author);
+
+        $this->assertSame('published', $state->release->status);
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+    }
+
+    public function test_a_host_that_opts_into_review_holds_a_publish_for_a_second_author(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        config(['beam.ux.releases.review_required' => true]);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        $pin = $entry->fresh()->published_version;
+
+        $state = $this->publishDraftAs($entry, $author);
+
+        $this->assertSame('in_review', $state->release->status);
+        $this->assertSame($pin, $entry->fresh()->published_version);
+    }
+
+    public function test_a_host_that_defines_no_entry_ability_never_refuses_an_author(): void
+    {
+        // audiostud's shape: a global `update` for its own models only, and no `publish`.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::define('update', fn ($user = null, $subject = null) => $subject instanceof BeamParticle);
+
+        $this->assertSame('published', $this->publishDraftAs($entry, $author)->release->status);
+    }
+
+    public function test_a_non_author_is_still_refused(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => false);
+        $pin = $entry->fresh()->published_version;
+
+        try {
+            $this->publishDraftAs($entry, $author);
+            $this->fail('A non-author published.');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertSame($pin, $entry->fresh()->published_version);
+        }
+    }
+
+    public function test_a_declared_entry_policy_that_denies_publish_still_refuses(): void
+    {
+        // The fallback never overrides a policy the host declared for BeamUxEntry.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, DenyPublishEntryPolicy::class);
+        $pin = $entry->fresh()->published_version;
+
+        try {
+            $this->publishDraftAs($entry, $author);
+            $this->fail('A declared policy that denies publish was overridden.');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertSame($pin, $entry->fresh()->published_version);
+        }
+    }
+
+    public function test_a_declared_entry_policy_without_publish_falls_back_to_its_update(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, DenyUpdateEntryPolicy::class);
+
+        $this->expectException(\Illuminate\Auth\Access\AuthorizationException::class);
+        $this->publishDraftAs($entry, $author);
+    }
+
+    public function test_save_draft_keeps_its_pre_releases_gate_and_never_consults_an_entry_policy(): void
+    {
+        // orch-lead 13:14Z: every operation keeps exactly its pre-Releases authorization. At 86d4b98 save-draft was
+        // `ux.author`, subject-free (`abilityModel: false`, pinned by
+        // test_every_operation_declares_its_shape_slots_and_the_one_entitlement_plane), and its write gate consulted
+        // no policy. So an author whom an entry `update` would deny still saves a draft, before and after this change.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::before(fn ($user, string $ability) => $ability === 'update' ? false : null);
+        $head = app(EntryPublication::class)->state($entry->fresh())->headVersion;
+
+        $state = EntryDraftSaveOp::handle($entry->fresh(), Request::create('/', 'POST', ['body' => self::BODY_TWO, 'baseVersion' => $head]), $author);
+
+        $this->assertNotSame($head, $state->headVersion);
     }
 
     public function test_release_batch_compile_failure_keeps_every_pin_and_public_artifact(): void
@@ -1457,5 +1579,28 @@ class PublicationFakeCompiler implements EntryBodyCompiler
         }
 
         return '/* compiled */ export default () => '.json_encode($source);
+    }
+}
+
+/** A host's BeamUxEntry policy that allows editing and denies publishing. */
+class DenyPublishEntryPolicy
+{
+    public function update($user, BeamUxEntry $entry): bool
+    {
+        return true;
+    }
+
+    public function publish($user, BeamUxEntry $entry): bool
+    {
+        return false;
+    }
+}
+
+/** A host's BeamUxEntry policy that declares only `update`, and denies it. */
+class DenyUpdateEntryPolicy
+{
+    public function update($user, BeamUxEntry $entry): bool
+    {
+        return false;
     }
 }

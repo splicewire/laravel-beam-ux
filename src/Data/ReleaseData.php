@@ -50,7 +50,7 @@ final class ReleaseData extends BeamData
                     || $entries[$member->entry_id]->workflow_marking !== $member->observed_marking))->all(),
             $projection === null ? null : WorkflowProjectionData::from($projection),
             app()->bound(\Splicewire\Beam\Calendars\Actions\ActionService::class),
-            (bool) config('beam.ux.releases.review_required', true),
+            (bool) config('beam.ux.releases.review_required', false),
         );
     }
 }
