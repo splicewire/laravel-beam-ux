@@ -187,6 +187,18 @@ class ProfileLegalityTest extends TestCase
         $this->assertSame([], $this->violations($body, $this->constrainedProfile()));
     }
 
+    public function test_a_typed_field_binding_uses_its_schema_not_the_path_string_as_the_prop_value(): void
+    {
+        $profile = $this->constrainedProfile();
+        $profile['x-admits-code'] = false;
+        $profile['x-collections'] = [['name' => 'ratings', 'schema' => ['type' => 'object',
+            'properties' => ['score' => ['type' => 'integer']]]]];
+        $body = [$this->block('Rating', 'r1', props: [['name' => 'stars', 'kind' => 'field', 'value' => 'score']])];
+        $body[0]['repeat'] = ['collection' => 'ratings'];
+        (new \Splicewire\Beam\Ux\Bindings\BindingFieldValidator)->assert($body, $profile);
+        $this->assertSame([], $this->violations($body, $profile));
+    }
+
     public function test_legality_is_narrowed_to_the_checked_ids(): void
     {
         // An unknown block is a LEGALITY failure, so a save that did not touch it (not in checkIds) does

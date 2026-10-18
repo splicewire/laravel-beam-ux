@@ -992,6 +992,54 @@
                 "type": "object",
                 "additionalProperties": false
             }
+        },
+        {
+            "name": "RichMarkdown",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [],
+            "admitsText": false,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "markdown"
+                    }
+                },
+                "required": [
+                    "content"
+                ],
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "RichBlockdoc",
+            "group": "block",
+            "category": "html",
+            "admitsChildCategories": [],
+            "admitsText": false,
+            "contentExpression": null,
+            "attrsSchema": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": [
+                            "object",
+                            "null"
+                        ],
+                        "format": "blockdoc"
+                    }
+                },
+                "required": [
+                    "content"
+                ],
+                "additionalProperties": false
+            }
         }
     ],
     "marks": [],

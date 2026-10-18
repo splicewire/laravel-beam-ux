@@ -8,6 +8,25 @@ use Splicewire\Beam\Ux\Tests\TestCase;
 
 class BindingFieldValidationTest extends TestCase
 {
+    public function test_rich_fields_require_the_matching_safe_component_and_never_admit_mdx_or_html_sinks(): void
+    {
+        $profile = $this->profile();
+        $profile['x-collections'][0]['schema']['properties']['code'] = ['type' => 'string', 'format' => 'mdx'];
+        foreach ([['div', 'content', 'body'], ['RichBlockdoc', 'content', 'body'],
+            ['RichMarkdown', 'content', 'code'], ['div', 'dangerouslySetInnerHTML', 'cover'], ['div', 'srcDoc', 'title']] as [$node, $prop, $field]) {
+            try {
+                (new BindingFieldValidator)->assert([['kind' => 'block', 'name' => $node, 'repeat' => ['collection' => 'articles'],
+                    'props' => [['name' => $prop, 'kind' => 'field', 'value' => $field]]]], $profile);
+                $this->fail('Accepted an unsafe rich field sink '.$node.'.'.$prop);
+            } catch (ValidationException $e) {
+                $this->assertArrayHasKey('body', $e->errors());
+            }
+        }
+        (new BindingFieldValidator)->assert([['kind' => 'block', 'name' => 'RichMarkdown', 'repeat' => ['collection' => 'articles'],
+            'props' => [['name' => 'content', 'kind' => 'field', 'value' => 'body']]]], $profile);
+        $this->addToAssertionCount(1);
+    }
+
     public function test_prop_bindings_must_fit_the_declared_attribute_type_and_enum(): void
     {
         $profile = $this->profile();

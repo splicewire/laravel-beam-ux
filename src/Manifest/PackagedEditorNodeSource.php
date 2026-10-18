@@ -6,6 +6,8 @@ use Schemastud\Blockdoc\Contracts\ManifestNodeSource;
 use Schemastud\Blockdoc\Schema\ManifestBuilder;
 use Splicewire\Beam\Ux\Manifest\Nodes\DemoFeatureRow;
 use Splicewire\Beam\Ux\Manifest\Nodes\DemoHero;
+use Splicewire\Beam\Ux\Manifest\Nodes\RichBlockdoc;
+use Splicewire\Beam\Ux\Manifest\Nodes\RichMarkdown;
 
 /** The components placed by beam-ux's own author-create defaults. Host sources stay separate. */
 final class PackagedEditorNodeSource implements ManifestNodeSource
@@ -17,7 +19,7 @@ final class PackagedEditorNodeSource implements ManifestNodeSource
 
     public function nodeClassesFor(string $profile): array
     {
-        return $profile === 'content' ? [DemoHero::class, DemoFeatureRow::class] : [];
+        return $profile === 'content' ? [DemoHero::class, DemoFeatureRow::class, RichMarkdown::class, RichBlockdoc::class] : [];
     }
 
     public function docAdmitsFor(string $profile): ?array

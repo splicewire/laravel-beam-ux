@@ -43,6 +43,17 @@ final class BindingFieldValidator
             foreach ($node['props'] ?? [] as $prop) {
                 if (($prop['kind'] ?? null) === 'field') {
                     $field = $this->field($prop['value'] ?? null, $current);
+                    $name = $prop['name'] ?? '';
+                    if (in_array(strtolower($name), ['dangerouslysetinnerhtml', 'srcdoc'], true) || preg_match('/^on/i', $name)) {
+                        $this->refuse('A binding cannot target an executable attribute or a raw HTML sink.');
+                    }
+                    $format = $field['format'] ?? null;
+                    if (in_array($format, ['markdown', 'blockdoc', 'jsondoc', 'mdx'], true)) {
+                        $renderer = ['markdown' => 'RichMarkdown', 'blockdoc' => 'RichBlockdoc'][$format] ?? null;
+                        if ($renderer === null || ($node['name'] ?? null) !== $renderer || $name !== 'content') {
+                            $this->refuse('A rich field requires its matching safe content component; MDX is never a rich field.');
+                        }
+                    }
                     $attrs = $entries[$node['name'] ?? '']['attrsSchema'] ?? null;
                     if (is_array($attrs)) {
                         $target = $attrs['properties'][$prop['name'] ?? ''] ?? ($attrs['additionalProperties'] ?? true);

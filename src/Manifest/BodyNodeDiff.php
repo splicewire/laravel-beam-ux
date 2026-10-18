@@ -16,8 +16,8 @@ final class BodyNodeDiff
 {
     /**
      * @param  array<int, array<string, mixed>>  $workingHead  the current stored body
-     * @param  array<int, array<string, mixed>>  $incoming     the body being saved
-     * @return array<string, true>  the ids whose nodes the save adds or changes
+     * @param  array<int, array<string, mixed>>  $incoming  the body being saved
+     * @return array<string, true> the ids whose nodes the save adds or changes
      */
     public function changedIds(array $workingHead, array $incoming): array
     {
@@ -45,7 +45,7 @@ final class BodyNodeDiff
     /**
      * @param  array<int, array<string, mixed>>  $nodes
      * @param  array<string, string>  $signatures  id => content signature (by reference)
-     * @param  array<string, int>|null  $counts     id => occurrence count (by reference)
+     * @param  array<string, int>|null  $counts  id => occurrence count (by reference)
      */
     private function collect(array $nodes, ?string $parentId, array &$signatures, ?array &$counts = null): void
     {
@@ -65,6 +65,7 @@ final class BodyNodeDiff
             }
 
             $children = $node['children'] ?? [];
+            $this->collect($node['repeat']['empty'] ?? [], (is_string($id) ? $id : $parentId).':empty', $signatures, $counts);
             if (is_array($children) && $children !== []) {
                 $this->collect($children, is_string($id) ? $id : $parentId, $signatures, $counts);
             }

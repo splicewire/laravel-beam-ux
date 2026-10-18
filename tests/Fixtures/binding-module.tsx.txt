@@ -1,0 +1,24 @@
+export default function Page({ components = {}, styleRegistry, bindings = {}, bindingRuntime } = {}) {
+  const { RichMarkdown} = components;
+  return (
+    <>
+      {bindingRuntime.repeat(bindings["outer"], (record) => (<>
+        {bindingRuntime.when({"all":[{"field":"title","operator":"is set","value":null}],"any":null}, record) ? (<>
+          <article>
+            {bindingRuntime.text(record, "title", "Fallback")}
+            <RichMarkdown content={bindingRuntime.attribute(record, "body", "content")} />
+            {bindingRuntime.repeat((record.bindings ?? {})["inner"], (record) => (<>
+              <p>
+                {bindingRuntime.text(record, "title", "")}
+              </p>
+            </>), () => (<>
+              No related
+            </>))}
+          </article>
+        </>) : null}
+      </>), () => (<>
+        No records
+      </>))}
+    </>
+  );
+}

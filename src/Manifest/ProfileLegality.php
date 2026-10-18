@@ -174,13 +174,14 @@ final class ProfileLegality
                 continue;
             }
             $attrs[$name] = $prop['value'] ?? null;
-            if (($prop['kind'] ?? null) === 'expression') {
+            if (in_array($prop['kind'] ?? null, ['expression', 'field'], true)) {
                 $dynamic[] = $name;
             }
         }
 
-        // An expression prop's value is dynamic code: keep it present (so a required field is satisfied)
-        // but relax its declared type to "any", since its runtime type is unknown at save.
+        // Keep dynamic props present for required checks. A field carries a path, not its runtime
+        // value: BindingBodyGuard checks the offered field schema against this attribute before
+        // save/publish reaches legality. Expressions remain governed by the whole-body code band.
         foreach ($dynamic as $name) {
             if (isset($schema['properties'][$name])) {
                 $schema['properties'][$name] = new \stdClass;

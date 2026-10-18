@@ -23,7 +23,7 @@ final class BindingBodyGuard
             $offer['source'] = $this->profiles->require($entry, $offer['name']);
         }
         unset($offer);
-        $this->fields->assert($body, ['x-collections' => $offers], fn ($scope, $relation) => $this->relation($scope, $relation));
+        $this->fields->assert($body, [...$profile, 'x-collections' => $offers], fn ($scope, $relation) => $this->relation($scope, $relation));
         $ids = [];
         $this->queries($body, $entry, null, $ids);
     }
@@ -64,13 +64,17 @@ final class BindingBodyGuard
                     $this->refuse('This Repeat query uses an undeclared field.');
                 }
                 // Hydrate independently of a JsonNode caller, so malformed limits never reach the query runtime.
-                RepeatQueryData::from($query);
+                try {
+                    RepeatQueryData::from($query);
+                } catch (\InvalidArgumentException|\TypeError $e) {
+                    $this->refuse($e->getMessage());
+                }
                 $parameters = array_filter($query, fn ($value) => $value !== null);
                 unset($parameters['limit']);
                 if ($parameters !== []) {
                     // The owner's saved-filter validator owns names, types, variants and access. No second vocabulary.
                     app(BindingRequestScope::class)->run(app(Request::class), $current->address,
-                        fn () => app(FilterQuerySelection::class)->validate($current->resource, $parameters));
+                        fn () => app(FilterQuerySelection::class)->validateParticle($current->resource, $parameters));
                 }
                 $this->queries($repeat['empty'] ?? [], $entry, $source, $ids);
             }

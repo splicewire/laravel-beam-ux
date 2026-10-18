@@ -313,7 +313,7 @@ class JsonDocPrinter
         }
 
         return match ($p->kind) {
-            PropKind::Field => ' '.$name.'={'.($module ? 'bindingRuntime.field('.$record.', ' : 'bdField(').json_encode($value, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).')}',
+            PropKind::Field => ' '.$name.'={'.($module ? 'bindingRuntime.attribute('.$record.', ' : 'bdField(').json_encode($value, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).($module ? ', '.json_encode($name, JSON_THROW_ON_ERROR) : '').')}',
             PropKind::BooleanShorthand => " {$name}",
             // UNESCAPED_SLASHES: matches JS's `JSON.stringify` (which never escapes `/`) — plain PHP
             // `json_encode` escapes it by default, which would otherwise diverge from the client-side

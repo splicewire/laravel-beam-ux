@@ -17,6 +17,130 @@ use Splicewire\Beam\Ux\Type\UxType;
 /** Exercise the actual page response and canonical resource read, not an author-side query surrogate. */
 class BindingRenderTest extends TestCase
 {
+    public function test_particle_and_frame_saved_query_validation_use_the_visitors_private_field_boundary(): void
+    {
+        $this->installCollectionFixtures();
+        $author = (new \Illuminate\Foundation\Auth\User)->forceFill(['id' => 7]);
+        $this->actingAs($author);
+        $original = request();
+        $original->setUserResolver(fn () => $author);
+        $visitor = \Illuminate\Http\Request::create('/bound');
+        $visitor->setUserResolver(fn () => null);
+        $visitor->attributes->set('tenant', 'visitor-tenant');
+        $registry = \Mockery::mock(\Schemastud\Frame\Contracts\ResourceRegistry::class);
+        $registry->shouldReceive('find')->with('records')->andReturn(app(ParticleResourceRegistry::class)->get('records')->toResourceDefinition());
+        $this->app->instance(\Schemastud\Frame\Contracts\ResourceRegistry::class, $registry);
+        $gate = \Mockery::mock(\Schemastud\Frame\Contracts\ResourceAccessGate::class);
+        $gate->shouldReceive('allowsResource')->andReturnUsing(function () {
+            $this->assertNull(request()->user(), 'Authorization must see the guest visitor, not the authenticated author');
+            $this->assertSame('visitor-tenant', request()->attributes->get('tenant'));
+
+            return true;
+        });
+        $this->app->instance(\Schemastud\Frame\Contracts\ResourceAccessGate::class, $gate);
+        $scope = app(\Splicewire\Beam\Ux\Bindings\BindingRequestScope::class);
+        $errors = [];
+        foreach (['validate', 'validateParticle'] as $method) {
+            foreach ([['filter' => ['secret' => 'private field']], ['sort' => 'secret']] as $index => $parameters) {
+                try {
+                    $scope->run($visitor, ['collection' => 'https://example.test/articles'], fn () => app(\Splicewire\Beam\Filters\FilterQuerySelection::class)->{$method}('records', $parameters));
+                    $this->fail('A guest saved query used a private field through '.$method);
+                } catch (\Illuminate\Validation\ValidationException $e) {
+                    $errors[$method][$index] = $e->errors();
+                }
+                $this->assertSame($original, request());
+                $this->assertSame($author, request()->user());
+            }
+            $scope->run($visitor, ['collection' => 'https://example.test/articles'], fn () => app(\Splicewire\Beam\Filters\FilterQuerySelection::class)->{$method}('records', ['filter' => ['title' => 'public'], 'sort' => 'title']));
+        }
+        $this->assertSame($errors['validate'], $errors['validateParticle']);
+    }
+
+    public function test_saved_repeat_queries_use_the_canonical_collection_vocabulary(): void
+    {
+        $this->installCollectionFixtures();
+        $entry = BeamUxEntry::where('slug', 'bound')->firstOrFail();
+        $profile = app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve($entry);
+        $guard = app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class);
+        $body = [['kind' => 'block', 'id' => 'query', 'name' => 'p', 'repeat' => ['collection' => 'articles', 'query' => ['filter' => ['title' => 'articles public'], 'sort' => 'title']], 'children' => []]];
+        $guard->assert($entry, $body, $profile);
+        $this->addToAssertionCount(1);
+        foreach ([['filter' => ['notDeclared' => 'x']], ['sort' => 'notDeclared'], ['include' => 'secret'], ['limit' => 101]] as $query) {
+            $body[0]['repeat']['query'] = $query;
+            try {
+                $guard->assert($entry, $body, $profile);
+                $this->fail('Accepted malformed saved query');
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                $this->assertNotEmpty($e->errors());
+            }
+        }
+    }
+
+    public function test_save_and_publish_apply_field_types_from_the_real_manifest(): void
+    {
+        $this->app->instance(\Schemastud\Blockdoc\Contracts\ManifestNodeSource::class, new class implements \Schemastud\Blockdoc\Contracts\ManifestNodeSource
+        {
+            public function profiles(): array
+            {
+                return ['content'];
+            }
+
+            public function nodeClassesFor(string $profile): array
+            {
+                return [BindingCounterBlock::class];
+            }
+
+            public function docAdmitsFor(string $profile): ?array
+            {
+                return ['html'];
+            }
+
+            public function marksFor(string $profile): array
+            {
+                return [];
+            }
+        });
+        $entry = BeamUxEntry::where('slug', 'bound')->firstOrFail();
+        $guard = app(\Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard::class);
+        $body = [['kind' => 'block', 'name' => 'BindingCounter', 'id' => 'counter', 'isComponent' => true, 'dynamic' => false,
+            'repeat' => ['collection' => 'articles'], 'props' => [['kind' => 'field', 'name' => 'count', 'value' => 'title']], 'children' => []]];
+        foreach (['save', 'publish'] as $operation) {
+            try {
+                $operation === 'save' ? $guard->assertAdmitted($entry, $body) : $guard->assertPublishable($entry, $body, $body);
+                $this->fail('Accepted an incompatible field on '.$operation);
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                $this->assertStringContainsString('does not fit the declared attribute', $e->getMessage());
+            }
+        }
+        $body[0]['props'][0]['value'] = 'count';
+        $guard->assertAdmitted($entry, $body);
+        $guard->assertPublishable($entry, $body, []);
+        $this->addToAssertionCount(2);
+    }
+
+    public function test_a_view_gated_repeat_sends_no_binding_payload_to_an_unentitled_visitor(): void
+    {
+        \Illuminate\Support\Facades\Gate::define('entitlement:private-record-list', fn ($user = null) => false);
+        $entry = BeamUxEntry::where('slug', 'bound')->firstOrFail();
+        $body = app(PublishedBindingDocument::class)->read($entry);
+        $body[0]['props'] = [['kind' => 'string', 'name' => 'data-view-gate', 'value' => 'private-record-list']];
+        $request = \Illuminate\Http\Request::create('/bound');
+        $request->setUserResolver(fn () => null);
+        $this->assertSame([], app(\Splicewire\Beam\Ux\Bindings\BindingResolver::class)->resolveDocument($entry, $body, $request, 'site'));
+    }
+
+    public function test_shared_binding_guard_preserves_the_profiles_attribute_contract(): void
+    {
+        $entry = BeamUxEntry::where('slug', 'bound')->firstOrFail();
+        $profile = app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve($entry);
+        $profile['nodes'][] = ['name' => 'Counter', 'attrsSchema' => ['type' => 'object',
+            'properties' => ['count' => ['type' => 'integer']], 'additionalProperties' => false]];
+        $body = [['kind' => 'block', 'id' => 'counter', 'name' => 'Counter', 'repeat' => ['collection' => 'articles'],
+            'props' => [['kind' => 'field', 'name' => 'count', 'value' => 'title']]]];
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $body, $profile);
+    }
+
     public function test_hosted_save_accepts_literal_field_bindings_but_still_refuses_expressions(): void
     {
         $tenancy = \Mockery::mock(\Splicewire\Beam\Realm\Contracts\TenancyContext::class);
@@ -404,7 +528,7 @@ class BindingRenderTest extends TestCase
             $registry->register([
                 '$id' => $stem.'/1', 'type' => 'object',
                 'x-beam-collection' => ['label' => $name, 'nameField' => 'title'],
-                'properties' => ['title' => ['type' => 'string'], 'visible' => ['type' => 'boolean'], 'secret' => [
+                'properties' => ['title' => ['type' => 'string', 'x-filter' => ['name' => 'title', 'operator' => 'exact', 'control' => 'text'], 'x-sort' => ['name' => 'title']], 'visible' => ['type' => 'boolean'], 'secret' => [
                     'type' => 'string', 'x-filter' => ['name' => 'secret', 'operator' => 'exact', 'control' => 'text'],
                     'x-sort' => ['name' => 'secret'],
                 ]],
@@ -499,7 +623,28 @@ class BindingPublicData extends Data
 
 class BindingPrivateData extends Data
 {
-    public function __construct(public string $title, public string $secret) {}
+    public function __construct(public string $title, public string $secret, public int $count = 0) {}
+}
+
+#[\Schemastud\Blockdoc\Attributes\NodeType('BindingCounter')]
+final class BindingCounterBlock extends \Schemastud\Blockdoc\Blocks\Block
+{
+    public function __construct(public int $count = 0) {}
+
+    public function category(): ?string
+    {
+        return 'html';
+    }
+
+    public function admitsChildCategories(): ?array
+    {
+        return [];
+    }
+
+    public static function attrsSchema(): array
+    {
+        return ['type' => 'object', 'properties' => ['count' => ['type' => 'integer']], 'required' => ['count'], 'additionalProperties' => false];
+    }
 }
 
 class BindingDeniedPolicy implements \Splicewire\Beam\Authorization\ResourceReadPolicy

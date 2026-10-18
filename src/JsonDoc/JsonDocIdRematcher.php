@@ -22,8 +22,8 @@ final class JsonDocIdRematcher
 
     /**
      * @param  array<int, array<string, mixed>>  $workingHead  the current stored JsonDoc (carries ids)
-     * @param  array<int, array<string, mixed>>  $parsed       the lens output (id-less)
-     * @return array<int, array<string, mixed>>  $parsed with ids reattached or freshly minted
+     * @param  array<int, array<string, mixed>>  $parsed  the lens output (id-less)
+     * @return array<int, array<string, mixed>> $parsed with ids reattached or freshly minted
      */
     public function rematch(array $workingHead, array $parsed): array
     {
@@ -38,7 +38,7 @@ final class JsonDocIdRematcher
 
     /**
      * @param  array<int, array<string, mixed>>  $nodes
-     * @param  array<string, list<string>>       $bySignature  exact content signature => surviving ids
+     * @param  array<string, list<string>>  $bySignature  exact content signature => surviving ids
      * @param  list<array{id: string, name: string|null, text: string}>  $pool  candidates for similarity
      */
     private function index(array $nodes, array &$bySignature, array &$pool): void
@@ -53,14 +53,15 @@ final class JsonDocIdRematcher
                 $pool[] = ['id' => $id, 'name' => $node['name'] ?? null, 'text' => $this->plainText($node)];
             }
             $this->index($node['children'] ?? [], $bySignature, $pool);
+            $this->index($node['repeat']['empty'] ?? [], $bySignature, $pool);
         }
     }
 
     /**
      * @param  array<int, array<string, mixed>>  $nodes
-     * @param  array<string, list<string>>       $bySignature
+     * @param  array<string, list<string>>  $bySignature
      * @param  list<array{id: string, name: string|null, text: string}>  $pool
-     * @param  array<string, true>               $used
+     * @param  array<string, true>  $used
      * @return array<int, array<string, mixed>>
      */
     private function reattach(array $nodes, array &$bySignature, array &$pool, array &$used): array
@@ -80,6 +81,9 @@ final class JsonDocIdRematcher
 
             $node['id'] = $id;
             $node['children'] = $this->reattach($node['children'] ?? [], $bySignature, $pool, $used);
+            if (isset($node['repeat']['empty'])) {
+                $node['repeat']['empty'] = $this->reattach($node['repeat']['empty'], $bySignature, $pool, $used);
+            }
             $out[] = $node;
         }
 
@@ -88,7 +92,7 @@ final class JsonDocIdRematcher
 
     /**
      * @param  array<string, list<string>>  $bySignature
-     * @param  array<string, true>          $used
+     * @param  array<string, true>  $used
      */
     private function exactId(array $node, array &$bySignature, array $used): ?string
     {

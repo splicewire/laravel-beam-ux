@@ -25,6 +25,8 @@ final class BindingResolver
     /** Internal author-envelope path: the same reader, on the already authorized current body. */
     public function resolveDocument(BeamUxEntry $entry, array $body, Request $request, string $realm): array
     {
+        $gate = app(\Illuminate\Contracts\Auth\Access\Gate::class)->forUser($request->user());
+        $body = (new \Splicewire\Beam\Ux\Canvas\ViewGateFilter($gate))->filter($body);
         $out = [];
         $this->walk($body, $entry, $request, $realm, $out);
 
@@ -43,6 +45,9 @@ final class BindingResolver
                     throw ValidationException::withMessages(['repeat' => 'A Repeat requires a unique block id.']);
                 }
                 $out[$id] = $this->records($node, $entry, $request, $realm);
+                if ($out[$id]->records === []) {
+                    $this->walk($node['repeat']['empty'] ?? [], $entry, $request, $realm, $out);
+                }
             } else {
                 $this->walk($node['children'] ?? [], $entry, $request, $realm, $out);
             }
@@ -203,6 +208,13 @@ final class BindingResolver
         foreach ($node['children'] ?? [] as $child) {
             if (! isset($child['repeat'])) {
                 $fields = [...$fields, ...$this->fields($child)];
+            } else {
+                // An inner Repeat's empty state uses the enclosing Record, not its absent target.
+                foreach ($child['repeat']['empty'] ?? [] as $empty) {
+                    if (! isset($empty['repeat'])) {
+                        $fields = [...$fields, ...$this->fields($empty)];
+                    }
+                }
             }
         }
 

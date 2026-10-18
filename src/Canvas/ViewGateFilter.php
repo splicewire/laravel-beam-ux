@@ -70,6 +70,9 @@ class ViewGateFilter
             }
         }
         $node['children'] = $children;
+        if (isset($node['repeat']['empty'])) {
+            $node['repeat']['empty'] = $this->filter($node['repeat']['empty']);
+        }
 
         return $node;
     }
