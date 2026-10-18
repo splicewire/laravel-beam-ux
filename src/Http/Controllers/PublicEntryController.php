@@ -141,6 +141,8 @@ class PublicEntryController
             'artifact' => [
                 'url' => $this->artifactUrl($request, $entry),
                 'version' => $this->artifacts->version($entry),
+                'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
+                'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
             ],
             // The SECOND half of §7's resolution order, addressed the same way: when a chrome name is
             // another entry's slug, the client "imports the page artifact and its layout artifact and
@@ -203,6 +205,8 @@ class PublicEntryController
         return [
             'url' => $this->artifactUrl($request, $chrome),
             'version' => $this->artifacts->version($chrome),
+            'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
+            'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
         ];
     }
 
@@ -246,6 +250,8 @@ class PublicEntryController
         return route($name, array_filter([
             'entry' => $entry->getKey(),
             'version' => $this->artifacts->version($entry),
+            'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
+            'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
         ]));
     }
 }

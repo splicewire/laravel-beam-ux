@@ -168,7 +168,11 @@ class PageEntryRef
             // The version is pinned INTO the url, not handed over beside it: the browser caches by URL
             // and an unpinned address is how a body edit never reaches a returning reader (ADR-0209 §7).
             'url' => route($name, ['entry' => $entry->getKey(), 'version' => $version]),
+            'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(ThemeResolver::class)->resolve()),
+            'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss(app(ThemeResolver::class)->resolve()),
             'version' => $version,
+            'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(ThemeResolver::class)->resolve()),
+            'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss(app(ThemeResolver::class)->resolve()),
         ];
     }
 }

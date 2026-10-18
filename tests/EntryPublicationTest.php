@@ -238,6 +238,16 @@ class EntryPublicationTest extends TestCase
         $this->assertSame(self::BODY_TWO, $entry->fresh()->particle->payload);
     }
 
+    public function test_next_author_write_migrates_legacy_style_to_the_versioned_block_field(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $body = self::BODY_ONE;
+        $body[0]['props'] = [['name' => 'style', 'kind' => 'string', 'value' => 'color:red']];
+        $written = app(EntryPublication::class)->write($entry, $body);
+        $this->assertSame(['color' => 'red'], $written['body'][0]['style']['layers'][0]['declarations']);
+        $this->assertSame([], $written['body'][0]['props']);
+    }
+
     public function test_named_publish_pins_the_seen_version_without_replacing_a_newer_working_head(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);

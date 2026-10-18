@@ -203,7 +203,7 @@ const compileTsx = async (source, slug, root) => {
 
   return asModule(
     [
-      'const __beamJsx = runtime.createElement, __beamFragment = runtime.Fragment;',
+      'const __beamJsx = runtime.createElement, __beamFragment = runtime.Fragment, __beamBlockStyles = runtime.compileEntryStyles;',
       'const exports = {}, module = { exports };',
       result.code,
       'return module.exports;',

@@ -72,7 +72,14 @@ class JsonDocPrinter
 
         $nodes = self::hydrate($doc);
 
-        $body = implode("\n", array_map(fn (JsonNode $n) => self::printNode($n, 3, module: true), $nodes));
+        $styles = [];
+        $parts = [];
+        foreach ($nodes as $node) {
+            $parts[] = self::printNode($node, 3, true, $styles);
+        }
+        $body = implode("\n", $parts);
+        $styleSetup = $styles === [] ? '' : '  const blockStyles = __beamBlockStyles('.json_encode($styles, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).", styleRegistry);\n";
+        $styleTag = $styles === [] ? '' : "      <style data-beam-block-style=\"\">{blockStyles.css}</style>\n";
         $islands = self::componentNamesOf($nodes);
 
         // Island names are BARE IDENTIFIERS in the printed JSX, and an artifact imports nothing — so
@@ -84,9 +91,9 @@ class JsonDocPrinter
         $destructure = $islands === []
             ? ''
             : '  const { '.implode(', ', $islands)."} = components;\n";
-        $signature = $islands === [] ? 'Page()' : 'Page({ components = {} })';
+        $signature = $styles !== [] ? 'Page({ components = {}, styleRegistry } = {})' : ($islands === [] ? 'Page()' : 'Page({ components = {} })');
 
-        return "export default function {$signature} {\n{$destructure}  return (\n    <>\n{$body}\n    </>\n  );\n}\n";
+        return "export default function {$signature} {\n{$destructure}{$styleSetup}  return (\n    <>\n{$styleTag}{$body}\n    </>\n  );\n}\n";
     }
 
     /**
@@ -147,7 +154,7 @@ class JsonDocPrinter
         return array_keys($found);
     }
 
-    private static function printNode(JsonNode $node, int $depth, bool $module = false): string
+    private static function printNode(JsonNode $node, int $depth, bool $module = false, ?array &$styles = null): string
     {
         $pad = str_repeat(self::INDENT, $depth);
 
@@ -162,7 +169,40 @@ class JsonDocPrinter
         /** @var JsonBlockNode $node */
         $isFragment = $node->name === null;
         $tag = (string) ($node->name ?? '');
-        $attrs = implode('', array_map(fn (JsonProp $prop) => self::printProp($prop, $module), $node->props));
+        $props = $node->props;
+        $style = $node->style?->toArray();
+        if ($style !== null) {
+            if ($isFragment) {
+                throw new \InvalidArgumentException('A fragment cannot carry a Block Style');
+            }
+            // Compile validates values before they can become executable module input.
+            $registry = \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve());
+            \Splicewire\Beam\Ux\Style\BlockStyleCompiler::compile($style, $registry);
+            foreach ($style['layers'] as &$layer) {
+                $layer['declarations'] = (object) $layer['declarations'];
+            }
+            unset($layer);
+        }
+        $attrs = implode('', array_map(fn (JsonProp $prop) => self::printProp($prop, $module), $props));
+        if ($style !== null && ! $isFragment) {
+            if ($module) {
+                $index = count($styles);
+                $styles[] = $style;
+                $class = '""';
+                $props = array_values(array_filter($props, function (JsonProp $p) use (&$class) {
+                    if ($p->name !== 'className') {
+                        return true;
+                    }
+                    $class = $p->kind === PropKind::Expression ? '('.$p->value.')' : json_encode((string) $p->value);
+
+                    return false;
+                }));
+                $attrs = implode('', array_map(fn (JsonProp $p) => self::printProp($p, true), $props));
+                $attrs .= ' className={['.$class.',blockStyles.classes['.$index.']].filter(Boolean).join(" ")}';
+            } else {
+                $attrs .= ' bdStyle={'.json_encode($style, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}';
+            }
+        }
         $open = $isFragment ? '<>' : "<{$tag}{$attrs}>";
         $close = $isFragment ? '</>' : "</{$tag}>";
 
@@ -183,7 +223,11 @@ class JsonDocPrinter
             return "{$pad}{$open}{$inner}{$close}";
         }
 
-        $kids = implode("\n", array_map(fn (JsonNode $c) => self::printNode($c, $depth + 1, $module), $children));
+        $childParts = [];
+        foreach ($children as $child) {
+            $childParts[] = self::printNode($child, $depth + 1, $module, $styles);
+        }
+        $kids = implode("\n", $childParts);
 
         return "{$pad}{$open}\n{$kids}\n{$pad}{$close}";
     }

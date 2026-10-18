@@ -39,6 +39,7 @@ class JsonBlockNode extends JsonNode
         // the base's #[PropertyForMorph] `kind`; this only narrows the GENERATED type of the arm.
         #[LiteralTypeScriptType("'block'")]
         public string $kind = 'block',
+        public ?\Splicewire\Beam\Ux\Style\BlockStyleData $style = null,
     ) {
         parent::__construct($kind);
     }
