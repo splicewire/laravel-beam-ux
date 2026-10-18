@@ -21,16 +21,7 @@ return new class extends Migration
                 $table->string('status')->default('draft');
                 $table->uuid('workflow_version')->nullable();
                 $table->uuid('rollback_of')->nullable();
-                // `direct`: the editor's Publish / the Workflow tab's Take-down (a Release of one), decided on the
-                // single publish ability at every step; `built`: assembled member by member (owner ruling 2026-10-18).
-                $table->string('origin')->default('built');
                 $table->timestamps();
-            });
-        }
-        // A database that ran this stub before `origin` existed.
-        if (Schema::hasTable('beam_ux_releases') && ! Schema::hasColumn('beam_ux_releases', 'origin')) {
-            Schema::table('beam_ux_releases', function (Blueprint $table) {
-                $table->string('origin')->default('built');
             });
         }
         if (! Schema::hasTable('beam_ux_release_members')) {

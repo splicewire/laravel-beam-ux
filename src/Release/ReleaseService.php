@@ -21,12 +21,6 @@ use Rushing\PermissionCascade\Policies\ConfiguredModelPolicy;
 /** ADR-0226: all writes are on the Release's connection and serialized by its row lock. */
 final class ReleaseService
 {
-    /** A Release of one made by the editor's Publish or the Workflow tab's Take-down (`origin` column). */
-    public const ORIGIN_DIRECT = 'direct';
-
-    /** A Release assembled member by member. */
-    public const ORIGIN_BUILT = 'built';
-
     /**
      * ADR-0226 d1: the editor and Workflow tab use the same Release admission as batches.
      *
@@ -40,17 +34,24 @@ final class ReleaseService
     public function requestOne(BeamUxEntry $entry, ?string $ref, Authenticatable $actor): BeamUxRelease
     {
         return $entry->getConnection()->transaction(function () use ($entry, $ref, $actor) {
-            $release = $this->create($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor, self::ORIGIN_DIRECT);
-            $this->putMember($release, $entry->id, $ref, $actor);
+            $release = $this->open($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor, ReleaseOrigin::Direct);
+            $this->place($release, $entry->id, $ref, $actor, null, true);
             $this->transition($release, config('beam.ux.releases.review_required', false) ? 'submit' : 'publish', $actor);
 
             return $release->fresh();
         });
     }
 
-    public function create(BeamUxEntry $context, string $title, Authenticatable $actor, string $origin = self::ORIGIN_BUILT): BeamUxRelease
+    /** A Release built member by member: every member operation is an edit. */
+    public function create(BeamUxEntry $context, string $title, Authenticatable $actor): BeamUxRelease
     {
-        $origin === self::ORIGIN_DIRECT
+        return $this->open($context, $title, $actor, ReleaseOrigin::Built);
+    }
+
+    /** Only create() (`built`) and requestOne() (`direct`) open a Release; `$origin` is never caller-supplied. */
+    private function open(BeamUxEntry $context, string $title, Authenticatable $actor, ReleaseOrigin $origin): BeamUxRelease
+    {
+        $origin === ReleaseOrigin::Direct
             ? $this->authorizeDirect($context, $actor)
             : $this->authorizeEntry($context, $actor, false);
         if (trim($title) === '' || mb_strlen($title) > 255) {
@@ -65,15 +66,24 @@ final class ReleaseService
         return $release;
     }
 
+    /** Add or change a member by hand: always an edit, on a direct Release too. */
     public function putMember(BeamUxRelease $release, string $entryId, ?string $ref, Authenticatable $actor, ?string $redirectTarget = null): void
     {
-        $release->getConnection()->transaction(function () use ($release, $entryId, $ref, $actor, $redirectTarget) {
+        $this->place($release, $entryId, $ref, $actor, $redirectTarget, false);
+    }
+
+    /**
+     * `$directFirst` is true only from requestOne, for the one member of the direct Release it just opened: that
+     * placement is part of the direct request and decides on the publish ladder. Every other placement, including a
+     * re-add after the member was dropped, is an edit (orch-peer, 2026-10-18).
+     */
+    private function place(BeamUxRelease $release, string $entryId, ?string $ref, Authenticatable $actor, ?string $redirectTarget, bool $directFirst): void
+    {
+        $release->getConnection()->transaction(function () use ($release, $entryId, $ref, $actor, $redirectTarget, $directFirst) {
             $locked = $release->newQuery()->lockForUpdate()->findOrFail($release->id);
             $this->assertEditable($locked);
             $entry = $this->entry($locked, $entryId);
-            // The one member of a direct Release, placed by requestOne, is part of that direct request; any other
-            // member operation is an edit.
-            $this->isDirect($locked) && ! $locked->members()->exists()
+            $directFirst && $this->isDirect($locked)
                 ? $this->authorizeDirect($entry, $actor)
                 : $this->authorizeEntry($entry, $actor, false);
             $this->assertMember($entry, $ref, $redirectTarget);
@@ -319,7 +329,7 @@ final class ReleaseService
 
     private function isDirect(BeamUxRelease $release): bool
     {
-        return $release->getAttribute('origin') === self::ORIGIN_DIRECT;
+        return $release->getAttribute('origin') === ReleaseOrigin::Direct;
     }
 
     /**

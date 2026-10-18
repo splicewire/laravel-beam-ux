@@ -36,11 +36,13 @@ Two things do not count as the host defining an entry ability:
   `#[UseCascadePolicy]` registers on every host.
 
 The editor's Publish and the Workflow tab's Take-down make a Release of one (`ReleaseService::requestOne`), recorded
-as `origin = direct` on the Release row. Every check on it decides on ONE ability for its entry, the publish ladder
+as `origin = direct` on the Release row (the `ReleaseOrigin` enum; added by its own
+`add_origin_to_beam_ux_releases_table` stub, so a host that already ran the create gets the column too). Only
+`requestOne` opens a direct Release: public `create()` always opens a `built` one. Every check on it decides on ONE ability for its entry, the publish ladder
 (`publish`, else `update`, else `ux.author`): its creation and member, and, when review is opted in, its later
 approval, scheduling and publication. A host policy that allows `publish` and denies `update` therefore publishes. A
 Release built member by member (`origin = built`) keeps the separate edit check on its member operations and the publish
-check on approval, scheduling and publication, and a member added by hand to a direct Release is an edit.
+check on approval, scheduling and publication, and a member added by hand to a direct Release is an edit, including a re-add after its member was dropped.
 
 This is parity, not widening. Before Releases, the editor's Publish (and www's) was gated by `ux.author` alone. A host
 that wants a stricter gate maps an ability or registers a policy. A policy the host declares is always respected: when

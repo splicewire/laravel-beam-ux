@@ -339,9 +339,8 @@ class EntryPublicationTest extends TestCase
             ]);
         }
         $this->runBeamWorkflowsMigrations();
-        $migration = __DIR__.'/../database/migrations/shared/create_beam_ux_releases_table.php.stub';
-        if (is_file($migration)) {
-            (require $migration)->up();
+        foreach (['create_beam_ux_releases_table', 'add_origin_to_beam_ux_releases_table'] as $stub) {
+            (require __DIR__."/../database/migrations/shared/{$stub}.php.stub")->up();
         }
         $author = new \Illuminate\Foundation\Auth\User;
         $author->setKeyType('string');
@@ -496,7 +495,7 @@ class EntryPublicationTest extends TestCase
         $state = $this->publishDraftAs($entry, $author);
         $this->assertSame('in_review', $state->release->status);
         $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
-        $this->assertSame('direct', $release->origin);
+        $this->assertSame(\Splicewire\Beam\Ux\Release\ReleaseOrigin::Direct, $release->origin);
 
         // A fresh service, as a later request would resolve it.
         $later = app(\Splicewire\Beam\Ux\Release\ReleaseService::class);
@@ -519,7 +518,7 @@ class EntryPublicationTest extends TestCase
         \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, AllowPublishDenyUpdateEntryPolicy::class);
 
         $direct = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($this->publishDraftAs($entry, $author)->release->id);
-        $this->assertSame('direct', $direct->origin);
+        $this->assertSame(\Splicewire\Beam\Ux\Release\ReleaseOrigin::Direct, $direct->origin);
 
         try {
             $service->create($entry, 'By hand', $author);
@@ -535,6 +534,78 @@ class EntryPublicationTest extends TestCase
 
         $this->assertSame(1, $direct->members()->count());
         $this->assertSame(1, \Splicewire\Beam\Ux\Models\BeamUxRelease::count());
+    }
+
+    public function test_an_emptied_direct_release_refilled_by_hand_is_an_edit(): void
+    {
+        // orch-peer HIGH on 980e865: a direct Release in review loses its member through a legitimate edit; refilling it
+        // by hand is an edit too, so a publisher without `update` is refused. Only requestOne's own first placement
+        // takes the publish ladder.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        config(['beam.ux.releases.review_required' => true]);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, ToggleUpdateEntryPolicy::class);
+        ToggleUpdateEntryPolicy::$update = true;
+
+        $state = $this->publishDraftAs($entry, $author);
+        $direct = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $service->dropMember($direct, $entry->id, $author);
+        $this->assertSame(0, $direct->members()->count());
+
+        ToggleUpdateEntryPolicy::$update = false;
+        try {
+            $service->putMember($direct, $entry->id, $state->headVersion, $author);
+            $this->fail('A hand-added member of an emptied direct Release skipped the edit check.');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertSame(0, $direct->members()->count());
+        } finally {
+            ToggleUpdateEntryPolicy::$update = true;
+        }
+    }
+
+    public function test_the_origin_alter_reaches_a_releases_table_made_by_the_earlier_create_and_is_idempotent(): void
+    {
+        // orch-peer HIGH on 980e865: `origin` arrives as its own ALTER stub, because editing the create reaches nothing
+        // already migrated. A table from the create alone gains the column, an existing Release reads as built, and a
+        // second run changes nothing. (A fresh install runs the same two stubs.)
+        Schema::dropIfExists('beam_ux_release_members');
+        Schema::dropIfExists('beam_ux_releases');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_releases_table.php.stub')->up();
+        $this->assertFalse(Schema::hasColumn('beam_ux_releases', 'origin'));
+        \Illuminate\Support\Facades\DB::table('beam_ux_releases')->insert([
+            'id' => '00000000-0000-0000-0000-000000000001', 'title' => 'Earlier', 'realm' => 'site',
+            'created_by' => 'user:1', 'edited_by' => 'user:1', 'status' => 'draft',
+        ]);
+
+        $alter = __DIR__.'/../database/migrations/shared/add_origin_to_beam_ux_releases_table.php.stub';
+        (require $alter)->up();
+        (require $alter)->up();
+
+        $this->assertTrue(Schema::hasColumn('beam_ux_releases', 'origin'));
+        $this->assertSame(
+            \Splicewire\Beam\Ux\Release\ReleaseOrigin::Built,
+            \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail('00000000-0000-0000-0000-000000000001')->origin,
+        );
+    }
+
+    public function test_a_caller_cannot_claim_the_direct_origin(): void
+    {
+        // orch-peer HIGH on 980e865: public create() keeps its three-argument, built-only shape; only requestOne opens a
+        // Direct Release, and the stored value is constrained by the ReleaseOrigin cast.
+        $create = new ReflectionClass(\Splicewire\Beam\Ux\Release\ReleaseService::class);
+        $this->assertCount(3, $create->getMethod('create')->getParameters());
+        $this->assertFalse($create->getMethod('open')->isPublic());
+        $this->assertFalse($create->getMethod('place')->isPublic());
+
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture();
+        $built = $service->create($entry, 'By hand', $author);
+        $this->assertSame(\Splicewire\Beam\Ux\Release\ReleaseOrigin::Built, $built->fresh()->origin);
+
+        \Illuminate\Support\Facades\DB::table('beam_ux_releases')->where('id', $built->id)->update(['origin' => 'direct-ish']);
+        $this->expectException(\ValueError::class);
+        $built->fresh()->origin;
     }
 
     public function test_save_draft_keeps_its_pre_releases_gate_and_never_consults_an_entry_policy(): void
@@ -1693,6 +1764,22 @@ class AllowPublishDenyUpdateEntryPolicy
     public function update($user, BeamUxEntry $entry): bool
     {
         return false;
+    }
+
+    public function publish($user, BeamUxEntry $entry): bool
+    {
+        return true;
+    }
+}
+
+/** A host's BeamUxEntry policy whose `update` a test can flip; `publish` is always allowed. */
+class ToggleUpdateEntryPolicy
+{
+    public static bool $update = true;
+
+    public function update($user, BeamUxEntry $entry): bool
+    {
+        return self::$update;
     }
 
     public function publish($user, BeamUxEntry $entry): bool
