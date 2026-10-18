@@ -96,6 +96,10 @@ class JsonDocPrinter
             $signature = 'Page({ components = {}, styleRegistry, bindings = {}, bindingRuntime } = {})';
         }
 
+        if (self::hasComponentReferences($nodes)) {
+            $signature = 'Page({ components = {}, styleRegistry, bindings = {}, bindingRuntime, ...componentProps } = {})';
+        }
+
         return "export default function {$signature} {\n{$destructure}{$styleSetup}  return (\n    <>\n{$styleTag}{$body}\n    </>\n  );\n}\n";
     }
 
@@ -144,11 +148,14 @@ class JsonDocPrinter
                     continue;
                 }
 
-                if ($node->isComponent && is_string($node->name) && $node->name !== '') {
+                if ($node->isComponent && is_string($node->name) && $node->name !== '' && $node->name !== 'Slot') {
                     $found[$node->name] = true;
                 }
 
                 $walk($node->children);
+                foreach ($node->slots as $children) {
+                    $walk($children);
+                }
                 $walk($node->repeat?->empty ?? []);
             }
         };
@@ -163,6 +170,9 @@ class JsonDocPrinter
         $pad = str_repeat(self::INDENT, $depth);
 
         if ($node instanceof JsonTextNode) {
+            if ($node->prop !== null) {
+                return $pad.'{'.($module ? 'componentProps.' : '').$node->prop.'}';
+            }
             if ($node->field !== null) {
                 if ($module) {
                     return $pad.'{bindingRuntime.text('.$record.', '.json_encode($node->field, JSON_THROW_ON_ERROR).', '.json_encode($node->value, JSON_THROW_ON_ERROR).')}';
@@ -200,6 +210,19 @@ class JsonDocPrinter
             $content = self::printNode($template, $depth + 1, true, $styles, $record, $bindings);
 
             return $pad.'{bindingRuntime.when('.json_encode($node->when->toArray(), JSON_THROW_ON_ERROR).', '.$record.') ? (<>'."\n".$content."\n".$pad.'</>) : null}';
+        }
+        if ($node->name === 'Slot') {
+            $name = 'children';
+            foreach ($node->props as $prop) {
+                if ($prop->name !== 'name' || $prop->kind !== PropKind::StringValue) {
+                    throw new \InvalidArgumentException('Slot accepts only a literal name.');
+                }
+                $name = $prop->value;
+            }
+            \Splicewire\Beam\Ux\JsonDoc\ComponentReference::assert($name);
+            $fallback = $node->children === [] ? '' : ' ?? '.self::slotValue($node->children, $depth, $module, $styles, $record, $bindings);
+
+            return $pad.'{'.($module ? 'componentProps.' : '').$name.$fallback.'}';
         }
         $isFragment = $node->name === null;
         $tag = (string) ($node->name ?? '');
@@ -245,6 +268,9 @@ class JsonDocPrinter
                 $attrs .= ' bdStyle={'.json_encode($style, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}';
             }
         }
+        foreach ($node->slots as $name => $children) {
+            $attrs .= ' '.$name.'={'.self::slotValue($children, $depth, $module, $styles, $record, $bindings).'}';
+        }
         $open = $isFragment ? '<>' : "<{$tag}{$attrs}>";
         $close = $isFragment ? '</>' : "</{$tag}>";
 
@@ -284,7 +310,7 @@ class JsonDocPrinter
         }
 
         foreach ($children as $c) {
-            if (! $c instanceof JsonTextNode || $c->field !== null) {
+            if (! $c instanceof JsonTextNode || $c->field !== null || $c->prop !== null) {
                 return false;
             }
         }
@@ -313,6 +339,7 @@ class JsonDocPrinter
         }
 
         return match ($p->kind) {
+            PropKind::Prop => ' '.$name.'={'.($module ? 'componentProps.' : '').$value.'}',
             PropKind::Field => ' '.$name.'={'.($module ? 'bindingRuntime.attribute('.$record.', ' : 'bdField(').json_encode($value, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).($module ? ', '.json_encode($name, JSON_THROW_ON_ERROR) : '').')}',
             PropKind::BooleanShorthand => " {$name}",
             // UNESCAPED_SLASHES: matches JS's `JSON.stringify` (which never escapes `/`) — plain PHP
@@ -367,6 +394,46 @@ class JsonDocPrinter
         return (string) preg_replace_callback('/[{}<>]/', fn (array $m) => "{'{$m[0]}'}", $s);
     }
 
+    private static function slotValue(array $nodes, int $depth, bool $module, ?array &$styles, string $record, string $bindings): string
+    {
+        if (count($nodes) === 1 && $nodes[0] instanceof JsonBlockNode && $nodes[0]->name !== 'Slot') {
+            return ltrim(self::printNode($nodes[0], $depth, $module, $styles, $record, $bindings));
+        }
+        $parts = [];
+        foreach ($nodes as $node) {
+            $parts[] = self::printNode($node, $depth + 1, $module, $styles, $record, $bindings);
+        }
+
+        return '<>'.implode("\n", $parts).'</>';
+    }
+
+    private static function hasComponentReferences(array $nodes): bool
+    {
+        foreach ($nodes as $node) {
+            if ($node instanceof JsonTextNode && $node->prop !== null) {
+                return true;
+            }
+            if (! $node instanceof JsonBlockNode) {
+                continue;
+            }
+            if ($node->name === 'Slot' || self::hasComponentReferences($node->children) || self::hasComponentReferences($node->repeat?->empty ?? [])) {
+                return true;
+            }
+            foreach ($node->props as $prop) {
+                if ($prop->kind === PropKind::Prop) {
+                    return true;
+                }
+            }
+            foreach ($node->slots as $children) {
+                if (self::hasComponentReferences($children)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private static function hasBindings(array $nodes): bool
     {
         foreach ($nodes as $node) {
@@ -374,6 +441,11 @@ class JsonDocPrinter
                 return true;
             }
             if ($node instanceof JsonBlockNode) {
+                foreach ($node->slots as $children) {
+                    if (self::hasBindings($children)) {
+                        return true;
+                    }
+                }
                 if ($node->repeat !== null || $node->when !== null || self::hasBindings($node->children)) {
                     return true;
                 }

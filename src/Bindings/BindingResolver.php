@@ -49,7 +49,7 @@ final class BindingResolver
                     $this->walk($node['repeat']['empty'] ?? [], $entry, $request, $realm, $out);
                 }
             } else {
-                $this->walk($node['children'] ?? [], $entry, $request, $realm, $out);
+                $this->walk(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node), $entry, $request, $realm, $out);
             }
         }
     }
@@ -112,7 +112,7 @@ final class BindingResolver
 
             return $visible;
         }, $rows);
-        $nested = $this->nestedRepeats($node['children'] ?? []);
+        $nested = $this->nestedRepeats(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node));
         if ($nested === []) {
             return $records;
         }
@@ -174,7 +174,7 @@ final class BindingResolver
                 }
                 $out[$id] = $node;
             } else {
-                foreach ($this->nestedRepeats($node['children'] ?? []) as $id => $repeat) {
+                foreach ($this->nestedRepeats(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node)) as $id => $repeat) {
                     if (isset($out[$id])) {
                         throw ValidationException::withMessages(['repeat' => 'A nested Repeat requires a unique block id.']);
                     }
@@ -205,7 +205,7 @@ final class BindingResolver
                 $fields[] = $prop['value'];
             }
         }
-        foreach ($node['children'] ?? [] as $child) {
+        foreach (\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node) as $child) {
             if (! isset($child['repeat'])) {
                 $fields = [...$fields, ...$this->fields($child)];
             } else {

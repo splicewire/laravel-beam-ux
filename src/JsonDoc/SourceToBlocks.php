@@ -19,10 +19,14 @@ final class SourceToBlocks
 
     /**
      * @param  array<int, array<string, mixed>>  $workingHead  the entry's current stored JsonDoc body
-     * @return array<int, array<string, mixed>>  the lowered JsonDoc with stable ids reattached/minted
+     * @return array<int, array<string, mixed>> the lowered JsonDoc with stable ids reattached/minted
      */
-    public function convert(string $source, array $workingHead): array
+    public function convert(string $source, array $workingHead, ?array $profile = null): array
     {
-        return $this->rematcher->rematch($workingHead, $this->lens->lower($source));
+        $doc = $profile !== null && $this->lens instanceof ProfiledTsxLens
+            ? $this->lens->lowerWithProfile($source, $profile)
+            : $this->lens->lower($source);
+
+        return $this->rematcher->rematch($workingHead, $doc);
     }
 }

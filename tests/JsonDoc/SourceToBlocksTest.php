@@ -13,6 +13,29 @@ use Splicewire\Beam\Ux\Tests\TestCase;
  */
 class SourceToBlocksTest extends TestCase
 {
+    public function test_the_resolved_profile_reaches_a_profile_aware_lens(): void
+    {
+        $lens = new class implements \Splicewire\Beam\Ux\JsonDoc\ProfiledTsxLens
+        {
+            public array $received = [];
+
+            public function lower(string $source): array
+            {
+                throw new \LogicException('profile discarded');
+            }
+
+            public function lowerWithProfile(string $source, array $profile): array
+            {
+                $this->received = $profile;
+
+                return [];
+            }
+        };
+        $profile = ['nodes' => [['name' => 'Card', 'slots' => [['name' => 'media', 'admitsChildCategories' => ['image']]]]]];
+        $this->assertSame([], (new SourceToBlocks($lens))->convert('<Card />', [], $profile));
+        $this->assertSame($profile, $lens->received);
+    }
+
     private function lensReturning(array $doc): TsxLens
     {
         return new class($doc) implements TsxLens

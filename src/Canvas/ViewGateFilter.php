@@ -70,6 +70,9 @@ class ViewGateFilter
             }
         }
         $node['children'] = $children;
+        foreach ($node['slots'] ?? [] as $name => $content) {
+            $node['slots'][$name] = $this->filter($content);
+        }
         if (isset($node['repeat']['empty'])) {
             $node['repeat']['empty'] = $this->filter($node['repeat']['empty']);
         }

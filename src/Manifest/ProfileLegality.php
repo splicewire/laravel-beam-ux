@@ -30,9 +30,9 @@ final class ProfileLegality
      *
      * @throws ValidationException
      */
-    public function assert(array $body, array $profile, ?array $checkIds = null): void
+    public function assert(array $body, array $profile, ?array $checkIds = null, ?string $component = null): void
     {
-        ['code' => $code, 'legality' => $legality] = $this->violations($body, $profile, $checkIds);
+        ['code' => $code, 'legality' => $legality] = $this->violations($body, $profile, $checkIds, $component);
         $violations = [...$code, ...$legality];
 
         if ($violations !== []) {
@@ -49,15 +49,16 @@ final class ProfileLegality
      * @param  array<string, true>|null  $checkIds
      * @return array{code: list<string>, legality: list<string>}
      */
-    public function violations(array $body, array $profile, ?array $checkIds = null): array
+    public function violations(array $body, array $profile, ?array $checkIds = null, ?string $component = null): array
     {
         $admitsCode = (bool) ($profile['x-admits-code'] ?? true);
         $entries = array_column($profile['nodes'] ?? [], null, 'name');
+        $componentEntry = $component === null ? null : ($entries[$component] ?? null);
         $docAdmits = $profile['doc']['admitsChildCategories'] ?? null;
 
         $code = [];
         $violations = [];
-        $this->walk($body, '', $entries, $admitsCode, $checkIds, $docAdmits, false, $violations, $code);
+        $this->walk($body, '', $entries, $admitsCode, $checkIds, $docAdmits, false, $violations, $code, $componentEntry);
 
         return ['code' => $code, 'legality' => $violations];
     }
@@ -70,7 +71,7 @@ final class ProfileLegality
      * @param  list<string>  $violations  the legality band
      * @param  list<string>  $code  the code band (ux-0227 d1)
      */
-    private function walk(array $nodes, string $prefix, array $entries, bool $admitsCode, ?array $checkIds, ?array $parentAdmits, bool $parentAdmitsText, array &$violations, array &$code): void
+    private function walk(array $nodes, string $prefix, array $entries, bool $admitsCode, ?array $checkIds, ?array $parentAdmits, bool $parentAdmitsText, array &$violations, array &$code, ?array $componentEntry): void
     {
         foreach ($nodes as $i => $node) {
             $path = $prefix === '' ? (string) $i : "$prefix.$i";
@@ -86,6 +87,12 @@ final class ProfileLegality
             }
 
             if ($kind === 'text') {
+                if (isset($node['prop']) && ! $this->hasProp($componentEntry, $node['prop'])) {
+                    $code[] = $this->message($path, null, 'uses an undeclared component prop reference');
+                }
+                if (isset($node['prop']) && $this->hasProp($componentEntry, $node['prop']) && ! SchemaCompatibility::fits($componentEntry['attrsSchema']['properties'][$node['prop']], ['type' => 'string'])) {
+                    $violations[] = $this->message($path, null, 'text requires a text component prop');
+                }
                 if (! $parentAdmitsText) {
                     $violations[] = $this->message($path, null, 'has text where the parent admits none');
                 }
@@ -101,11 +108,46 @@ final class ProfileLegality
             $name = $node['name'] ?? null;
             // An empty-state subtree is authored content at the Repeat's own position. It must not
             // become a second route around whole-body code or profile legality admission.
-            $this->walk($node['repeat']['empty'] ?? [], $path.'.empty', $entries, $admitsCode, null, $parentAdmits, $parentAdmitsText, $violations, $code);
+            $this->walk($node['repeat']['empty'] ?? [], $path.'.empty', $entries, $admitsCode, null, $parentAdmits, $parentAdmitsText, $violations, $code, $componentEntry);
+
+            foreach ($node['props'] ?? [] as $prop) {
+                if (($prop['kind'] ?? null) === 'prop' && ! $this->hasProp($componentEntry, $prop['value'] ?? null)) {
+                    $code[] = $this->message($path, $id, 'uses an undeclared component prop reference');
+                }
+            }
+            // Slots are grammar, not registry islands. Their fallback is still ordinary content.
+            if ($name === 'Slot') {
+                $slotName = 'children';
+                foreach ($node['props'] ?? [] as $prop) {
+                    if (($prop['name'] ?? null) === 'name' && ($prop['kind'] ?? null) === 'string') {
+                        $slotName = $prop['value'];
+                    } else {
+                        $code[] = $this->message($path, $id, 'Slot accepts only a literal name');
+                    }
+                }
+                $declarations = array_column($componentEntry['slots'] ?? [], null, 'name');
+                $slot = $slotName === 'children' && $componentEntry !== null ? $componentEntry : ($declarations[$slotName] ?? null);
+                if ($slot === null || ($slot['admitsChildCategories'] ?? null) === []) {
+                    $code[] = $this->message($path, $id, 'uses an undeclared component slot');
+                }
+                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, $slot['admitsChildCategories'] ?? $parentAdmits, $parentAdmitsText, $violations, $code, $componentEntry);
+                // Do not let a malformed Slot carry an unvisited subtree.
+            }
+            $nodeEntry = $entries[$name] ?? null;
+            $slotEntries = array_column($nodeEntry['slots'] ?? [], null, 'name');
+            foreach ($node['slots'] ?? [] as $slotName => $slotChildren) {
+                if (! isset($slotEntries[$slotName])) {
+                    $violations[] = $this->message($path, $id, 'uses undeclared named slot '.$slotName);
+                }
+                $this->walk($slotChildren, $path.'.slots.'.$slotName, $entries, $admitsCode, $checkIds, $slotEntries[$slotName]['admitsChildCategories'] ?? null, false, $violations, $code, $componentEntry);
+            }
+            if ($name === 'Slot') {
+                continue;
+            }
 
             // A fragment is a transparent wrapper: its children are checked against ITS parent.
             if ($name === null) {
-                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, $parentAdmits, $parentAdmitsText, $violations, $code);
+                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, $parentAdmits, $parentAdmitsText, $violations, $code, $componentEntry);
 
                 continue;
             }
@@ -130,7 +172,7 @@ final class ProfileLegality
                 if ($checkLegality) {
                     $violations[] = $this->message($path, $id, "uses the unknown block '$name', which is not in this profile");
                 }
-                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, null, true, $violations, $code);
+                $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, null, true, $violations, $code, $componentEntry);
 
                 continue;
             }
@@ -142,10 +184,10 @@ final class ProfileLegality
                     $violations[] = $this->message($path, $id, "block '$name' (category '$category') is not admitted here (the parent admits: $admitted)");
                 }
 
-                $this->assertAttrsMatchSchema($node, $entry, $path, $id, $violations);
+                $this->assertAttrsMatchSchema($node, $entry, $path, $id, $violations, $componentEntry);
             }
 
-            $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, $entry['admitsChildCategories'] ?? null, (bool) ($entry['admitsText'] ?? false), $violations, $code);
+            $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, $entry['admitsChildCategories'] ?? null, (bool) ($entry['admitsText'] ?? false), $violations, $code, $componentEntry);
         }
     }
 
@@ -159,7 +201,7 @@ final class ProfileLegality
      * @param  array<string, mixed>  $entry
      * @param  list<string>  $violations
      */
-    private function assertAttrsMatchSchema(array $node, array $entry, string $path, ?string $id, array &$violations): void
+    private function assertAttrsMatchSchema(array $node, array $entry, string $path, ?string $id, array &$violations, ?array $componentEntry): void
     {
         $schema = $entry['attrsSchema'] ?? null;
         if (! is_array($schema)) {
@@ -173,8 +215,15 @@ final class ProfileLegality
             if ($name === null) {
                 continue;
             }
+            if (($prop['kind'] ?? null) === 'prop' && $this->hasProp($componentEntry, $prop['value'] ?? null)) {
+                $source = $componentEntry['attrsSchema']['properties'][$prop['value']];
+                $target = $schema['properties'][$name] ?? null;
+                if (! is_array($source) || ! is_array($target) || ! SchemaCompatibility::fits($source, $target)) {
+                    $violations[] = $this->message($path, $id, 'component prop does not fit attribute '.$name);
+                }
+            }
             $attrs[$name] = $prop['value'] ?? null;
-            if (in_array($prop['kind'] ?? null, ['expression', 'field'], true)) {
+            if (in_array($prop['kind'] ?? null, ['expression', 'field', 'prop'], true)) {
                 $dynamic[] = $name;
             }
         }
@@ -197,6 +246,13 @@ final class ProfileLegality
             $errors = (new ErrorFormatter)->formatKeyed($result->error());
             $violations[] = $this->message($path, $id, 'has props that do not match the block schema: '.json_encode($errors, JSON_THROW_ON_ERROR));
         }
+    }
+
+    private function hasProp(?array $entry, mixed $name): bool
+    {
+        return is_string($name) && preg_match('/\A[A-Za-z_$][A-Za-z0-9_$]*\z/', $name) === 1
+            && ! in_array($name, ['__proto__', 'constructor', 'prototype'], true)
+            && array_key_exists($name, $entry['attrsSchema']['properties'] ?? []);
     }
 
     private function message(string $path, ?string $id, string $what): string

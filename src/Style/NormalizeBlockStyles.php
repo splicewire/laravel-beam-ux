@@ -42,6 +42,9 @@ final class NormalizeBlockStyles
                 BlockStyleCompiler::compile($node['style'], $registry);
             }
             $node['children'] = self::apply($node['children'] ?? [], $registry);
+            foreach ($node['slots'] ?? [] as $name => $content) {
+                $node['slots'][$name] = self::apply($content, $registry);
+            }
         }
 
         return $body;

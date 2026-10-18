@@ -59,11 +59,14 @@ final class BodyNodeDiff
             if (is_string($id)) {
                 // The node's own identity: its parent plus everything but its children.
                 $own = $node;
-                unset($own['children']);
+                unset($own['children'], $own['slots']);
                 $signatures[$id] = json_encode([$parentId, $own], JSON_THROW_ON_ERROR);
                 $counts[$id] = ($counts[$id] ?? 0) + 1;
             }
 
+            foreach ($node['slots'] ?? [] as $name => $content) {
+                $this->collect($content, (is_string($id) ? $id : $parentId).':slot:'.$name, $signatures, $counts);
+            }
             $children = $node['children'] ?? [];
             $this->collect($node['repeat']['empty'] ?? [], (is_string($id) ? $id : $parentId).':empty', $signatures, $counts);
             if (is_array($children) && $children !== []) {

@@ -78,7 +78,7 @@ final class BindingBodyGuard
                 }
                 $this->queries($repeat['empty'] ?? [], $entry, $source, $ids);
             }
-            $this->queries($node['children'] ?? [], $entry, $current, $ids);
+            $this->queries(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node), $entry, $current, $ids);
         }
     }
 
@@ -93,7 +93,7 @@ final class BindingBodyGuard
                     return true;
                 }
             }
-            if ($this->hasBindings($node['children'] ?? [])) {
+            if ($this->hasBindings(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node))) {
                 return true;
             }
         }

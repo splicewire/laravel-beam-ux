@@ -18,6 +18,7 @@ use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
+use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
@@ -405,7 +406,7 @@ class RegisterEntriesFromDisk
         // fresh id. Every other kind encodes its text through the codec unchanged. `$lower = false` is the
         // batch's fallback when the Lens cannot read a file (see the caller).
         $body = ($lower && $entry->bodyKind() === BodyKind::Blocks)
-            ? app(SourceToBlocks::class)->convert($source, [])
+            ? app(SourceToBlocks::class)->convert($source, [], app(ManifestProfileResolver::class)->resolve($entry))
             : $entry->codec()->encode($source, $entry->body_style);
         $item = $this->drivers->resolveOnEntryConnection($entry)->write('', $body, $entry->namespace);
         if ($entry->particle_id === null && $item->key !== '') {

@@ -42,7 +42,17 @@ class JsonBlockNode extends JsonNode
         public ?\Splicewire\Beam\Ux\Style\BlockStyleData $style = null,
         public ?\Splicewire\Beam\Ux\Bindings\RepeatData $repeat = null,
         public ?\Splicewire\Beam\Ux\Bindings\ConditionData $when = null,
+        /** @var array<string, list<JsonNode>> */
+        #[LiteralTypeScriptType('Record<string, JsonNode[]>')]
+        public array $slots = [],
     ) {
         parent::__construct($kind);
+        foreach ($slots as $slot => $nodes) {
+            ComponentReference::assert($slot);
+            if ($slot === 'children' || ! is_array($nodes) || ! array_is_list($nodes)) {
+                throw new \InvalidArgumentException('Named slots require a node list and cannot replace children.');
+            }
+            $this->slots[$slot] = array_map(fn ($node) => $node instanceof JsonNode ? $node : JsonNode::from($node), $nodes);
+        }
     }
 }

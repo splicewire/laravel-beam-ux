@@ -52,7 +52,7 @@ final class JsonDocIdRematcher
                 $bySignature[$this->signature($node)][] = $id;
                 $pool[] = ['id' => $id, 'name' => $node['name'] ?? null, 'text' => $this->plainText($node)];
             }
-            $this->index($node['children'] ?? [], $bySignature, $pool);
+            $this->index(NodeChildren::of($node), $bySignature, $pool);
             $this->index($node['repeat']['empty'] ?? [], $bySignature, $pool);
         }
     }
@@ -81,6 +81,9 @@ final class JsonDocIdRematcher
 
             $node['id'] = $id;
             $node['children'] = $this->reattach($node['children'] ?? [], $bySignature, $pool, $used);
+            foreach ($node['slots'] ?? [] as $name => $content) {
+                $node['slots'][$name] = $this->reattach($content, $bySignature, $pool, $used);
+            }
             if (isset($node['repeat']['empty'])) {
                 $node['repeat']['empty'] = $this->reattach($node['repeat']['empty'], $bySignature, $pool, $used);
             }
@@ -150,7 +153,7 @@ final class JsonDocIdRematcher
     private function plainText(array $node): string
     {
         $text = '';
-        foreach ($node['children'] ?? [] as $child) {
+        foreach (NodeChildren::of($node) as $child) {
             if (! is_array($child)) {
                 continue;
             }

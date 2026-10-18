@@ -13,7 +13,7 @@ use Symfony\Component\Process\Process;
  * Composer path-repo resolution trap the compile worker documents); the id-less JsonDoc comes back as
  * JSON on stdout. A lens failure is the author's source, so it surfaces as a 422 on `source`, never a 500.
  */
-final class NodeTsxLens implements TsxLens
+final class NodeTsxLens implements ProfiledTsxLens
 {
     public function __construct(
         private string $binary = 'node',
@@ -23,6 +23,23 @@ final class NodeTsxLens implements TsxLens
     ) {}
 
     public function lower(string $source): array
+    {
+        return $this->run($source, []);
+    }
+
+    /** Explicit enclosing manifest entry; never infer a component interface from source identifiers. */
+    public function lowerInComponent(string $source, array $profile, string $component): array
+    {
+        return $this->run($source, ['profile' => $profile, 'component' => $component]);
+    }
+
+    /** Lower an instance's JSX-valued slots against the same resolved manifest as save. */
+    public function lowerWithProfile(string $source, array $profile): array
+    {
+        return $this->run($source, ['profile' => $profile]);
+    }
+
+    private function run(string $source, array $context): array
     {
         $script = $this->script ?? __DIR__.'/../../resources/lens/tsx-to-blocks.mjs';
 
@@ -36,7 +53,7 @@ final class NodeTsxLens implements TsxLens
             [$this->binary, $script],
             $this->workingDirectory,
             null,
-            json_encode(['source' => $source, 'root' => $root], JSON_THROW_ON_ERROR),
+            json_encode(['source' => $source, 'root' => $root, 'context' => $context], JSON_THROW_ON_ERROR),
             $this->timeout,
         );
 

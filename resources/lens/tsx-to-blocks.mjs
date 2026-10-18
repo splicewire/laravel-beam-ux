@@ -78,7 +78,7 @@ const main = async () => {
 
   let doc
   try {
-    doc = toJson(parse(source))
+    doc = toJson(parse(source, input.context ?? {}))
   } catch (error) {
     // A parse/lower failure is the author's source, not an internal fault: report it for a 422.
     fail(`beam-ux lens: could not lower the source to blocks (${error.message}).`)

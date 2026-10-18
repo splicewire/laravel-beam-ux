@@ -16,8 +16,15 @@ class JsonTextNode extends JsonNode
         #[LiteralTypeScriptType("'text'")]
         public string $kind = 'text',
         public ?string $field = null,
+        public ?string $prop = null,
     ) {
         parent::__construct($kind);
+        if ($prop !== null) {
+            ComponentReference::assert($prop);
+            if ($field !== null) {
+                throw new \InvalidArgumentException('A text node cannot reference both a field and a prop.');
+            }
+        }
         if ($field !== null) {
             \Splicewire\Beam\Ux\Bindings\FieldPath::assert($field);
         }

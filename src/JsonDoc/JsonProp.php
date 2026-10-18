@@ -29,6 +29,9 @@ class JsonProp extends BeamData
         public PropKind $kind,
         public string|int|float|bool|null $value,
     ) {
+        if ($kind === PropKind::Prop) {
+            ComponentReference::assert($value);
+        }
         if ($kind === PropKind::Field) {
             \Splicewire\Beam\Ux\Bindings\FieldPath::assert($value);
         }

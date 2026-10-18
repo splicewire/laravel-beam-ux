@@ -13,6 +13,7 @@ use Splicewire\Beam\Ux\Data\BeamUxEntrySourceInputData;
 use Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard;
 use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
 use Splicewire\Beam\Ux\Manifest\EntryResidency;
+use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -144,7 +145,7 @@ class EntrySourceSaveOp
         // The lowered body is held to the realm's profile at the publication choke (EntryPublication::write);
         // here we only lower + reattach ids against the Working Head.
         $guard = app(CanvasBodyGuard::class);
-        $body = app(SourceToBlocks::class)->convert($source, $guard->workingHead($entry));
+        $body = app(SourceToBlocks::class)->convert($source, $guard->workingHead($entry), app(ManifestProfileResolver::class)->resolve($entry));
 
         return $body;
     }

@@ -56,12 +56,19 @@ class EntryBodyOpsTest extends TestCase
             'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Local unsaved text']]]];
         $parsed = $body;
         unset($parsed[0]['id']);
-        $this->app->instance(TsxLens::class, new class($parsed) implements TsxLens {
+        $this->app->instance(TsxLens::class, new class($parsed) implements TsxLens
+        {
             public function __construct(private array $body) {}
-            public function lower(string $source): array { return $this->body; }
+
+            public function lower(string $source): array
+            {
+                return $this->body;
+            }
         });
         $queries = [];
-        \Illuminate\Support\Facades\DB::listen(function ($event) use (&$queries) { $queries[] = $event->sql; });
+        \Illuminate\Support\Facades\DB::listen(function ($event) use (&$queries) {
+            $queries[] = $event->sql;
+        });
         $printed = \Splicewire\Beam\Ux\Particle\EntrySourcePrintOp::handle($entry, new Request(['body' => $body]), null);
         $this->assertStringContainsString('Local unsaved text', $printed->source);
         $read = \Splicewire\Beam\Ux\Particle\EntrySourceReadOp::handle($entry, new Request(['source' => $printed->source, 'body' => $body]), null);
@@ -72,6 +79,31 @@ class EntryBodyOpsTest extends TestCase
         $this->assertSame(0, \Illuminate\Support\Facades\DB::table(Beam::table('versions'))->count());
         $this->assertSame(0, \Illuminate\Support\Facades\DB::table('activity_log')->count());
         $this->assertSame([], array_values(array_filter($queries, fn ($sql) => preg_match('/^\s*(insert|update|delete|replace|create|alter|drop)\b/i', $sql))));
+    }
+
+    public function test_source_read_forwards_the_entry_profile_to_the_lens(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'profile-source', 'type' => 'page', 'format' => 'tsx']);
+        $expected = app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve($entry);
+        $lens = new class implements \Splicewire\Beam\Ux\JsonDoc\ProfiledTsxLens
+        {
+            public ?array $received = null;
+
+            public function lower(string $source): array
+            {
+                throw new \LogicException('operation discarded profile');
+            }
+
+            public function lowerWithProfile(string $source, array $profile): array
+            {
+                $this->received = $profile;
+
+                return [];
+            }
+        };
+        $this->app->instance(TsxLens::class, $lens);
+        \Splicewire\Beam\Ux\Particle\EntrySourceReadOp::handle($entry, new Request(['source' => '<p/>', 'body' => []]), null);
+        $this->assertSame($expected, $lens->received);
     }
 
     public function test_source_mode_operations_are_declared_read_only_and_author_gated(): void
@@ -91,14 +123,18 @@ class EntryBodyOpsTest extends TestCase
         try {
             \Splicewire\Beam\Ux\Particle\EntrySourcePrintOp::handle($entry, new Request(['body' => []]), null);
             $this->fail('MDX is outside EP-14');
-        } catch (ValidationException $e) { $this->assertArrayHasKey('source', $e->errors()); }
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('source', $e->errors());
+        }
         $entry->format = 'tsx';
         $this->bindSplitTenancy();
         foreach ([\Splicewire\Beam\Ux\Particle\EntrySourcePrintOp::class, \Splicewire\Beam\Ux\Particle\EntrySourceReadOp::class] as $class) {
             try {
                 $class::handle($entry, new Request(['source' => '<p/>', 'body' => []]), null);
                 $this->fail('Hosted Source Mode must refuse');
-            } catch (ValidationException $e) { $this->assertArrayHasKey('source', $e->errors()); }
+            } catch (ValidationException $e) {
+                $this->assertArrayHasKey('source', $e->errors());
+            }
         }
     }
 
@@ -269,15 +305,30 @@ class EntryBodyOpsTest extends TestCase
         {
             public function __construct(private string $central) {}
 
-            public function isMultiTenant(): bool { return true; }
+            public function isMultiTenant(): bool
+            {
+                return true;
+            }
 
-            public function isActive(): bool { return true; }
+            public function isActive(): bool
+            {
+                return true;
+            }
 
-            public function currentTenant(): ?object { return null; }
+            public function currentTenant(): ?object
+            {
+                return null;
+            }
 
-            public function currentTenantId(): int|string|null { return 1; }
+            public function currentTenantId(): int|string|null
+            {
+                return 1;
+            }
 
-            public function centralConnection(): ?string { return $this->central; }
+            public function centralConnection(): ?string
+            {
+                return $this->central;
+            }
         });
     }
 

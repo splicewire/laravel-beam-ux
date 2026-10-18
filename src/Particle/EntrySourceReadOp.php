@@ -11,6 +11,7 @@ use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
 use Splicewire\Beam\Ux\Data\EntrySourceReadInputData;
 use Splicewire\Beam\Ux\JsonDoc\SourceMode;
 use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
+use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
 
 #[ParticleOp(resource: 'beam-ux-entry', name: 'read-source', kind: OperationKind::Read,
     ability: 'ux.author', abilityModel: false, affordance: false,
@@ -22,6 +23,6 @@ class EntrySourceReadOp
         SourceMode::assertAvailable($model);
         $input = EntrySourceReadInputData::validateAndCreate($request->all());
 
-        return new BeamUxEntryBodyInputData(app(SourceToBlocks::class)->convert($input->source, $input->body));
+        return new BeamUxEntryBodyInputData(app(SourceToBlocks::class)->convert($input->source, $input->body, app(ManifestProfileResolver::class)->resolve($model)));
     }
 }
