@@ -483,6 +483,60 @@ class EntryPublicationTest extends TestCase
         $service->create($entry, 'By hand', $author);
     }
 
+    public function test_a_reviewed_direct_release_keeps_the_single_publish_ability_through_approve_and_publish(): void
+    {
+        // orch-peer / orch-lead 13:42Z: with review opted in, the later approve and publish of a direct Release of one
+        // must decide on the same single publish ability; the provenance lives on the Release row, not in process state.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture(reviewedAndMapped: false);
+        config(['beam.ux.releases.review_required' => true]);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, AllowPublishDenyUpdateEntryPolicy::class);
+
+        $state = $this->publishDraftAs($entry, $author);
+        $this->assertSame('in_review', $state->release->status);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $this->assertSame('direct', $release->origin);
+
+        // A fresh service, as a later request would resolve it.
+        $later = app(\Splicewire\Beam\Ux\Release\ReleaseService::class);
+        $later->transition($release, 'approve', $reviewer);
+        $later->transition($release, 'publish', $reviewer);
+
+        $this->assertSame('published', $release->fresh()->status);
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+    }
+
+    public function test_direct_and_built_releases_keep_their_own_gates_side_by_side(): void
+    {
+        // Isolation: the same actor and policy, a direct Release in review next to Releases built by hand. Nothing a
+        // direct request does leaks into a built Release, and a member added by hand to a direct Release is an edit.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $other = $this->publishedPage(self::BODY_TWO);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        config(['beam.ux.releases.review_required' => true]);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, AllowPublishDenyUpdateEntryPolicy::class);
+
+        $direct = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($this->publishDraftAs($entry, $author)->release->id);
+        $this->assertSame('direct', $direct->origin);
+
+        try {
+            $service->create($entry, 'By hand', $author);
+            $this->fail('A built Release borrowed the direct gate.');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+
+        try {
+            $service->putMember($direct, $other->id, app(EntryPublication::class)->state($other->fresh())->headVersion, $author);
+            $this->fail('A member added by hand to a direct Release skipped the edit check.');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+
+        $this->assertSame(1, $direct->members()->count());
+        $this->assertSame(1, \Splicewire\Beam\Ux\Models\BeamUxRelease::count());
+    }
+
     public function test_save_draft_keeps_its_pre_releases_gate_and_never_consults_an_entry_policy(): void
     {
         // orch-lead 13:14Z: every operation keeps exactly its pre-Releases authorization. At 86d4b98 save-draft was

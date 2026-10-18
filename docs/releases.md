@@ -35,10 +35,12 @@ Two things do not count as the host defining an entry ability:
 - this package's own default policy, permission-cascade's `ConfiguredModelPolicy`, which BeamUxEntry's
   `#[UseCascadePolicy]` registers on every host.
 
-The editor's Publish and the Workflow tab's Take-down (a Release of one, `ReleaseService::requestOne`) decide on ONE
-ability for their entry: the publish ladder (`publish`, else `update`, else `ux.author`), at every step of that request.
-A host policy that allows `publish` and denies `update` therefore publishes. A Release built step by step keeps the
-separate edit check on its member operations, and the publish check on approval, scheduling and publication.
+The editor's Publish and the Workflow tab's Take-down make a Release of one (`ReleaseService::requestOne`), recorded
+as `origin = direct` on the Release row. Every check on it decides on ONE ability for its entry, the publish ladder
+(`publish`, else `update`, else `ux.author`): its creation and member, and, when review is opted in, its later
+approval, scheduling and publication. A host policy that allows `publish` and denies `update` therefore publishes. A
+Release built member by member (`origin = built`) keeps the separate edit check on its member operations and the publish
+check on approval, scheduling and publication, and a member added by hand to a direct Release is an edit.
 
 This is parity, not widening. Before Releases, the editor's Publish (and www's) was gated by `ux.author` alone. A host
 that wants a stricter gate maps an ability or registers a policy. A policy the host declares is always respected: when
