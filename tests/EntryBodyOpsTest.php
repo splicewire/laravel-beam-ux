@@ -62,6 +62,20 @@ class EntryBodyOpsTest extends TestCase
         $this->assertNull($envelope->compileError);
     }
 
+    public function test_body_envelope_serves_the_same_profile_as_the_save_guard(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'profile', 'type' => 'page', 'format' => 'tsx']);
+        $resolver = app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class);
+        $envelope = EntryBodyShowOp::handle($entry, new Request, actor: null);
+        $this->assertSame($resolver->resolve($entry), $envelope->profile);
+        $this->assertTrue($envelope->profile['x-admits-code']);
+
+        $this->bindSplitTenancy();
+        $tenantEnvelope = EntryBodyShowOp::handle($entry, new Request, actor: null);
+        $this->assertSame(app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve($entry), $tenantEnvelope->profile);
+        $this->assertFalse($tenantEnvelope->profile['x-admits-code']);
+    }
+
     public function test_a_theme_entry_falls_back_to_the_theme_schemas_when_it_declares_no_schema_ref(): void
     {
         // The one non-trivial branch of the schema resolution the controller carried: a `theme` entry's

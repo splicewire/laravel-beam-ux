@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Particle;
 use Splicewire\Beam\Ux\Canvas\ViewGateFilter;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
+use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Schema\ThemeSchemas;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -28,6 +29,7 @@ class EntryBodyEnvelope
     public function __construct(
         private StorageDriverResolver $drivers,
         private ViewGateFilter $viewGateFilter,
+        private ManifestProfileResolver $profiles,
     ) {}
 
     /**
@@ -64,6 +66,7 @@ class EntryBodyEnvelope
             body: $body,
             source: $this->sourceFor($entry, $body),
             compileError: $compileError,
+            profile: $this->profiles->resolve($entry),
         );
     }
 
