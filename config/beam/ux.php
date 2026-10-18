@@ -2,12 +2,19 @@
 
 return [
 
-    // ADR-0226 leaves review policy to the host. Conservative declared defaults; ticket-00 asks owner confirmation.
+    // ADR-0226 leaves review policy to the host. Owner ruling (2026-10-18, launch ticket 00 `5dd27af98`): review is
+    // OFF by default (a Publish is a Release of one that publishes at once) and a site opts in; an upgrade never makes
+    // Publish answer 403 to an author.
+    //
+    // Abilities: null means unmapped. An unmapped ability is checked through a policy the host registers for
+    // BeamUxEntry, when it has the method: `publish` falls back to the policy's `update`, and `update` falls back to
+    // `ux.author` alone, which every member already needs. Name an ability here to have it checked strictly through
+    // the Gate, whatever defines it. See docs/releases.md.
     'releases' => [
-        'review_required' => true,
+        'review_required' => (bool) env('BEAM_UX_RELEASES_REVIEW_REQUIRED', false),
         'allow_self_approval' => false,
-        'edit_ability' => 'update',
-        'publish_ability' => 'publish',
+        'edit_ability' => env('BEAM_UX_RELEASES_EDIT_ABILITY'),
+        'publish_ability' => env('BEAM_UX_RELEASES_PUBLISH_ABILITY'),
     ],
 
     /*

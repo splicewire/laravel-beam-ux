@@ -16,25 +16,44 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Control\TransitionResult;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
+use Rushing\PermissionCascade\Policies\ConfiguredModelPolicy;
 
 /** ADR-0226: all writes are on the Release's connection and serialized by its row lock. */
 final class ReleaseService
 {
-    /** ADR-0226 d1: the editor and Workflow tab use the same Release admission as batches. */
+    /**
+     * ADR-0226 d1: the editor and Workflow tab use the same Release admission as batches.
+     *
+     * A direct Publish or Take-down is a Release of one with `origin = direct`, recorded on the Release row. Every
+     * check on it, now and at a later approve / schedule / publish (review opted in), decides on ONE ability for its
+     * entry: the publish ladder (`publish`, else `update`, else `ux.author`; see entryAbility()). Checking edit first
+     * would let a host policy's `update` refuse before its own `publish` decision could govern, which is stricter than
+     * the pre-Releases Publish (orch-peer, 2026-10-18). A Release built member by member keeps separate edit and
+     * publish checks.
+     */
     public function requestOne(BeamUxEntry $entry, ?string $ref, Authenticatable $actor): BeamUxRelease
     {
         return $entry->getConnection()->transaction(function () use ($entry, $ref, $actor) {
-            $release = $this->create($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor);
-            $this->putMember($release, $entry->id, $ref, $actor);
-            $this->transition($release, config('beam.ux.releases.review_required', true) ? 'submit' : 'publish', $actor);
+            $release = $this->open($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor, ReleaseOrigin::Direct);
+            $this->place($release, $entry->id, $ref, $actor, null, true);
+            $this->transition($release, config('beam.ux.releases.review_required', false) ? 'submit' : 'publish', $actor);
 
             return $release->fresh();
         });
     }
 
+    /** A Release built member by member: every member operation is an edit. */
     public function create(BeamUxEntry $context, string $title, Authenticatable $actor): BeamUxRelease
     {
-        $this->authorizeEntry($context, $actor, false);
+        return $this->open($context, $title, $actor, ReleaseOrigin::Built);
+    }
+
+    /** Only create() (`built`) and requestOne() (`direct`) open a Release; `$origin` is never caller-supplied. */
+    private function open(BeamUxEntry $context, string $title, Authenticatable $actor, ReleaseOrigin $origin): BeamUxRelease
+    {
+        $origin === ReleaseOrigin::Direct
+            ? $this->authorizeDirect($context, $actor)
+            : $this->authorizeEntry($context, $actor, false);
         if (trim($title) === '' || mb_strlen($title) > 255) {
             $this->refuse('A Release needs a title of at most 255 characters.');
         }
@@ -42,18 +61,31 @@ final class ReleaseService
         $release->setConnection($context->getConnectionName());
         app(\Splicewire\Beam\Workflows\Definition\DefinitionStore::class)->onConnection($context->getConnectionName())
             ->ensureSystemLineage(ReleaseLifecycle::DEFINITION, 'UX Release', ReleaseLifecycle::blueprint());
-        $release->forceFill(['title' => $title, 'realm' => $context->realm, 'created_by' => $this->token($actor), 'edited_by' => $this->token($actor), 'status' => 'draft'])->save();
+        $release->forceFill(['title' => $title, 'realm' => $context->realm, 'created_by' => $this->token($actor), 'edited_by' => $this->token($actor), 'status' => 'draft', 'origin' => $origin])->save();
 
         return $release;
     }
 
+    /** Add or change a member by hand: always an edit, on a direct Release too. */
     public function putMember(BeamUxRelease $release, string $entryId, ?string $ref, Authenticatable $actor, ?string $redirectTarget = null): void
     {
-        $release->getConnection()->transaction(function () use ($release, $entryId, $ref, $actor, $redirectTarget) {
+        $this->place($release, $entryId, $ref, $actor, $redirectTarget, false);
+    }
+
+    /**
+     * `$directFirst` is true only from requestOne, for the one member of the direct Release it just opened: that
+     * placement is part of the direct request and decides on the publish ladder. Every other placement, including a
+     * re-add after the member was dropped, is an edit (orch-peer, 2026-10-18).
+     */
+    private function place(BeamUxRelease $release, string $entryId, ?string $ref, Authenticatable $actor, ?string $redirectTarget, bool $directFirst): void
+    {
+        $release->getConnection()->transaction(function () use ($release, $entryId, $ref, $actor, $redirectTarget, $directFirst) {
             $locked = $release->newQuery()->lockForUpdate()->findOrFail($release->id);
             $this->assertEditable($locked);
             $entry = $this->entry($locked, $entryId);
-            $this->authorizeEntry($entry, $actor, false);
+            $directFirst && $this->isDirect($locked)
+                ? $this->authorizeDirect($entry, $actor)
+                : $this->authorizeEntry($entry, $actor, false);
             $this->assertMember($entry, $ref, $redirectTarget);
             $this->transition($locked, 'revise', $actor);
             $member = $locked->members()->where('entry_id', $entryId)->first()
@@ -167,7 +199,9 @@ final class ReleaseService
         $prototype->newQuery()->orderBy('id')->lockForUpdate()->get();
         foreach ($members as $member) {
             $entry = $this->entry($release, $member->entry_id);
-            $this->authorizeEntry($entry, $actor, in_array($transition, ['approve', 'schedule', 'publish'], true));
+            $this->isDirect($release)
+                ? $this->authorizeDirect($entry, $actor)
+                : $this->authorizeEntry($entry, $actor, in_array($transition, ['approve', 'schedule', 'publish'], true));
             if ($transition === 'publish') {
                 if ($entry->published_version !== $member->observed_pin || $entry->workflow_marking !== $member->observed_marking) {
                     $this->refuse('A publication pin or marking moved. Rebase or drop that member.');
@@ -203,7 +237,7 @@ final class ReleaseService
             if (str_starts_with($context->causationId ?? '', 'ux-release:') && $context->causationId !== $release->schedule_token) {
                 throw new AuthorizationException('The scheduled Release membership changed; schedule the reviewed revision again.');
             }
-            if (config('beam.ux.releases.review_required', true) && (! in_array($release->status, ['approved', 'scheduled'], true) || $release->reviewed_by === null)) {
+            if (config('beam.ux.releases.review_required', false) && (! in_array($release->status, ['approved', 'scheduled'], true) || $release->reviewed_by === null)) {
                 $this->refuse('This Release requires approval before publication.');
             }
             $refs = $pins = [];
@@ -271,11 +305,64 @@ final class ReleaseService
 
     private function authorizeEntry(BeamUxEntry $entry, Authenticatable $actor, bool $publish): void
     {
-        Gate::forUser($actor)->authorize('ux.author');
-        Gate::forUser($actor)->authorize(config('beam.ux.releases.edit_ability', 'update'), $entry);
-        if ($publish) {
-            Gate::forUser($actor)->authorize(config('beam.ux.releases.publish_ability', 'publish'), $entry);
+        $gate = Gate::forUser($actor);
+        $gate->authorize('ux.author');
+
+        foreach ($publish ? ['edit', 'publish'] : ['edit'] as $kind) {
+            $ability = $this->entryAbility($entry, $kind);
+            if ($ability !== null) {
+                $gate->authorize($ability, $entry);
+            }
         }
+    }
+
+    /** A direct Release's single check: `ux.author`, then the publish ladder alone. */
+    private function authorizeDirect(BeamUxEntry $entry, Authenticatable $actor): void
+    {
+        $gate = Gate::forUser($actor);
+        $gate->authorize('ux.author');
+        $ability = $this->entryAbility($entry, 'publish');
+        if ($ability !== null) {
+            $gate->authorize($ability, $entry);
+        }
+    }
+
+    private function isDirect(BeamUxRelease $release): bool
+    {
+        return $release->getAttribute('origin') === ReleaseOrigin::Direct;
+    }
+
+    /**
+     * The ability a Release checks on a member for `edit` or `publish`, or null when only `ux.author` applies (owner
+     * ruling 2026-10-18: an upgrade never makes Publish answer 403 to an author).
+     *
+     * A host maps an ability explicitly in `beam.ux.releases.{edit,publish}_ability`; that is checked strictly through
+     * the Gate. Otherwise the ability is the method of a policy the HOST registered for BeamUxEntry: `publish` falls
+     * back to that policy's `update`, and `update` to nothing beyond `ux.author`. Two things do not count:
+     *  - a global `Gate::define` closure for a common name such as `update`: nothing can tell what subject it was
+     *    written for, and a host that defines `update` for its own models only would otherwise refuse every author;
+     *  - this package's own default, permission-cascade's ConfiguredModelPolicy, which BeamUxEntry's
+     *    `#[UseCascadePolicy]` registers on every host. Pre-Releases Publish never consulted it (`ux.author` only), so
+     *    counting it would make an upgrade refuse an author who could publish before.
+     */
+    private function entryAbility(BeamUxEntry $entry, string $kind): ?string
+    {
+        $configured = config("beam.ux.releases.{$kind}_ability");
+        if (is_string($configured) && $configured !== '') {
+            return $configured;
+        }
+
+        $policy = Gate::getPolicyFor($entry);
+        if ($policy instanceof ConfiguredModelPolicy) {
+            $policy = null;
+        }
+        foreach ($kind === 'publish' ? ['publish', 'update'] : ['update'] as $method) {
+            if ($policy !== null && method_exists($policy, $method)) {
+                return $method;
+            }
+        }
+
+        return null;
     }
 
     private function actor(?string $token): Authenticatable

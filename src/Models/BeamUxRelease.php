@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Splicewire\Beam\Ux\Release\ReleaseOrigin;
 use Splicewire\Beam\Ux\Release\ReleaseService;
 use Splicewire\Beam\Workflows\Control\Contracts\ParticipatesInWorkflowTransaction;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
@@ -19,6 +20,12 @@ class BeamUxRelease extends Model implements ParticipatesInWorkflowTransaction, 
     protected $table = 'beam_ux_releases';
 
     protected $guarded = ['*'];
+
+    /** @return array<string, string> */
+    protected function casts(): array
+    {
+        return ['origin' => ReleaseOrigin::class];
+    }
 
     public function workflowType(): string
     {

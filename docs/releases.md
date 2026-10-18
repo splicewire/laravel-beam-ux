@@ -19,17 +19,39 @@ System registration retains its separate, existing born-published contract.
 
 ## Admission and review
 
-Every member needs `ux.author` and the configured edit ability. Approval,
-scheduling and publishing additionally check the publish ability on every member.
-The defaults are `update` and `publish`, configurable under `beam.ux.releases`.
-All checks repeat at execution, including a scheduled execution; they are not
-frozen permissions. A Release cannot mix realms or database connections.
+Every member needs `ux.author`. Beyond that, a Release checks an edit ability on every member, and approval,
+scheduling and publishing check a publish ability. Owner ruling 2026-10-18 (launch ticket 00 `5dd27af98`): an upgrade
+never makes Publish answer 403 to an author, so the abilities resolve as follows.
 
-The ADRs declare a workflow but do not decide whether review is mandatory or
-self-approval is allowed. Per the lead's EP-15 ruling, declared defaults are
-`review_required=true`, `allow_self_approval=false`. Approval cannot be by the
-creator or latest editor. Membership edits revoke approval. These defaults are
-an owner-policy question, not a new ADR decision.
+| `beam.ux.releases.*` | Checked |
+|---|---|
+| `edit_ability` / `publish_ability` set (for example `'update'`, `'publish'`) | Strictly, through the Gate, whatever defines it |
+| unset (the default), and the host registered its own policy class for `BeamUxEntry` | That policy's `publish`, else its `update`, for publish; its `update` for edit |
+| unset, and no host policy | Nothing beyond `ux.author` |
+
+Two things do not count as the host defining an entry ability:
+- a global `Gate::define()` for a common name such as `update`, because nothing can tell which subject it was
+  written for (audiostud defines `update` for its own particles only);
+- this package's own default policy, permission-cascade's `ConfiguredModelPolicy`, which BeamUxEntry's
+  `#[UseCascadePolicy]` registers on every host.
+
+The editor's Publish and the Workflow tab's Take-down make a Release of one (`ReleaseService::requestOne`), recorded
+as `origin = direct` on the Release row (the `ReleaseOrigin` enum; added by its own
+`add_origin_to_beam_ux_releases_table` stub, so a host that already ran the create gets the column too). Only
+`requestOne` opens a direct Release: public `create()` always opens a `built` one. Every check on it decides on ONE ability for its entry, the publish ladder
+(`publish`, else `update`, else `ux.author`): its creation and member, and, when review is opted in, its later
+approval, scheduling and publication. A host policy that allows `publish` and denies `update` therefore publishes. A
+Release built member by member (`origin = built`) keeps the separate edit check on its member operations and the publish
+check on approval, scheduling and publication, and a member added by hand to a direct Release is an edit, including a re-add after its member was dropped.
+
+This is parity, not widening. Before Releases, the editor's Publish (and www's) was gated by `ux.author` alone. A host
+that wants a stricter gate maps an ability or registers a policy. A policy the host declares is always respected: when
+it denies, the Release is refused.
+
+Review is OFF by default (`review_required = false`, `BEAM_UX_RELEASES_REVIEW_REQUIRED`): the editor's Publish is a
+Release of one that publishes at once. A site opts in with `review_required = true`. A Release then waits for a
+reviewer other than its creator or latest editor (`allow_self_approval = false`), and membership edits revoke
+approval.
 
 Pins and entry visibility are observed when membership is saved. A changed pin
 or marking refuses publication until explicit rebase or drop. Versions never

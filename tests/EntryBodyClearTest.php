@@ -234,6 +234,7 @@ class EntryBodyClearTest extends TestCase
         $actor = new ClearingUser;
         $actor->setAttribute('id', '00000000-0000-4000-8000-000000000008');
         (require __DIR__.'/../database/migrations/shared/create_beam_ux_releases_table.php.stub')->up();
+        (require __DIR__.'/../database/migrations/shared/add_origin_to_beam_ux_releases_table.php.stub')->up();
         config(['beam.ux.releases.review_required' => false]);
         Gate::before(fn () => true);
         $provider = \Mockery::mock(\Illuminate\Contracts\Auth\UserProvider::class);
