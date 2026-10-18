@@ -67,6 +67,11 @@ class EntryBodyEnvelope
             source: $this->sourceFor($entry, $body),
             compileError: $compileError,
             profile: $this->profiles->resolve($entry),
+            pageSettings: $this->typeValue($entry) === 'page'
+                ? (($settings = $entry->particle?->meta['pageSettings'] ?? null) !== null
+                    ? \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from($settings)
+                    : \Splicewire\Beam\Ux\Data\EntryPageSettingsData::fromEntry($entry))
+                : null,
         );
     }
 

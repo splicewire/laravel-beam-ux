@@ -118,6 +118,18 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertArrayHasKey('x-stud-resource-ref', $schema['properties']['parentId']);
     }
 
+    public function test_new_page_does_not_occupy_its_draft_url(): void
+    {
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+        $data = $this->postJson('/frame/resources/beam-ux-entry', [
+            'type' => 'page', 'title' => 'Draft page', 'slug' => 'draft-page', 'realm' => 'site', 'segment' => '/new-page',
+        ])->assertSuccessful()->json('data');
+        $entry = BeamUxEntry::findOrFail($data['id']);
+        $this->assertNull($entry->segment);
+        $this->assertSame('/new-page', $entry->particle->meta['pageSettings']['segment']);
+    }
+
     public function test_mounted_create_generates_identity_and_body_and_edit_preserves_them(): void
     {
         $this->actingAs((new User)->forceFill(['id' => 1]));
@@ -138,9 +150,10 @@ class BeamUxEntryDataTest extends TestCase
         $driver->write($particleId, $body, $entry->namespace);
         $this->getJson('/frame/resources/beam-ux-entry/records/'.$entry->id)->assertOk()
             ->assertJsonPath('data.type', 'page')->assertJsonPath('data.title', 'New page');
-        $this->putJson('/frame/resources/beam-ux-entry/records/'.$entry->id, [...$input, 'title' => 'Edited page'])->assertSuccessful();
+        $this->putJson('/frame/resources/beam-ux-entry/records/'.$entry->id, [...$input, 'title' => 'Edited page'])->assertUnprocessable()->assertJsonValidationErrors('pageSettings');
         $entry->refresh();
-        $this->assertSame('Edited page', $entry->title);
+        $this->assertSame('New page', $entry->title);
+        $this->putJson('/frame/resources/beam-ux-entry/records/'.$entry->id, [...$input, 'slug' => 'renamed-page'])->assertSuccessful();
         $this->assertSame($particleId, $entry->particle_id);
         $this->assertSame('docs', $entry->namespace);
         $this->assertSame($body, $driver->read($particleId)?->body);
@@ -356,7 +369,7 @@ class BeamUxEntryDataTest extends TestCase
 
         $this->assertSame('/songs', $data->segment);
         $this->assertSame(30, $data->navOrder);
-        $this->assertSame('/songs', $data->toModelAttributes()['segment']);
+        $this->assertNull($data->toModelAttributes()['segment']); // New pages do not occupy a draft URL.
         $this->assertSame(30, $data->toModelAttributes()['nav_order']);
     }
 

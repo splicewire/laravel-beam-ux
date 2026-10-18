@@ -116,6 +116,10 @@ class BeamUxEntryData extends BeamData
     {
         if ($model instanceof BeamUxEntry && ! $model->exists) {
             $model->namespace = '';
+            if ($model->type === UxType::Page) {
+                $model->parent_id = null;
+                $model->segment = null;
+            }
         }
     }
 
@@ -145,5 +149,16 @@ class BeamUxEntryData extends BeamData
 
         $model->particle_id = $item->key;
         $model->saveQuietly();
+        if ($model->type === UxType::Page && $input instanceof BeamUxEntryInputData) {
+            $settings = new EntryPageSettingsData(
+                title: $input->title, parentId: $input->parentId, segment: $input->segment,
+                navOrder: $input->navOrder,
+            );
+            $particle = $model->fresh()->particle;
+            $meta = $particle->meta ?? [];
+            $meta['pageSettings'] = $settings->toArray();
+            $particle->meta = $meta;
+            $particle->save();
+        }
     }
 }

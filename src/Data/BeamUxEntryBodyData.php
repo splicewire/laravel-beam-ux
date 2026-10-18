@@ -82,5 +82,6 @@ class BeamUxEntryBodyData extends BeamData
         public ?string $compileError = null,
         /** @var array<string, mixed>|null The same Manifest Profile used by the save guard. */
         public ?array $profile = null,
+        public ?EntryPageSettingsData $pageSettings = null,
     ) {}
 }
