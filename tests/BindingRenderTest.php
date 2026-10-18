@@ -107,7 +107,8 @@ class BindingRenderTest extends TestCase
 
     public function test_condition_fields_are_included_only_after_the_visitor_projection(): void
     {
-        $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument {
+        $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument
+        {
             public function read(BeamUxEntry $entry): array
             {
                 return [['kind' => 'block', 'id' => 'conditional', 'name' => 'article',
@@ -129,6 +130,13 @@ class BindingRenderTest extends TestCase
     {
         app(ParticleResourceRegistry::class)->get('binding-records')->publicRead = null;
         $this->assertSame([], $this->get('/bound')->assertOk()->json('props.bindings.repeat-one.records'));
+    }
+
+    public function test_a_denied_signed_in_reader_keeps_the_public_read_floor(): void
+    {
+        app(ParticleResourceRegistry::class)->get('binding-records')->readPolicy = BindingDeniedPolicy::class;
+        $this->actingAs((new \Illuminate\Foundation\Auth\User)->forceFill(['id' => 7]));
+        $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.repeat-one.records', [['title' => 'Visible A', 'url' => null]]);
     }
 
     public function test_binding_document_reads_only_the_named_publication_snapshot(): void
@@ -169,6 +177,54 @@ class BindingRenderTest extends TestCase
         $collections = app(\Splicewire\Beam\Ux\Bindings\ProfileCollections::class)->manifest($entry, 'content');
         $this->assertSame('https://example.test/articles/1', $collections[0]['schema']['$id']);
         $this->assertSame('https://example.test/events/1', $collections[1]['schema']['$id']);
+    }
+
+    public function test_nested_relation_bindings_batch_target_public_reads_for_all_outer_rows(): void
+    {
+        $this->installCollectionFixtures();
+        $registry = new \Splicewire\Beam\Schema\DatabaseSchemaRegistry;
+        $schema = app(\Splicewire\Beam\Collections\CollectionSchemaResolver::class)->resolve('https://example.test/articles')->schema;
+        $schema['$id'] = 'https://example.test/articles/2';
+        $schema['properties']['related'] = ['type' => 'array', 'items' => ['type' => 'string'], 'x-beam-relation' => ['collection' => 'https://example.test/events']];
+        $schema['x-beam-public-read']['fields'][] = 'related';
+        $registry->register($schema);
+        $table = \Splicewire\Beam\Facades\Beam::table('particles');
+        foreach (range(1, 12) as $i) {
+            \Illuminate\Support\Facades\DB::table($table)->insert([
+                'id' => 'source-'.$i, 'schema_ref' => 'https://example.test/articles/1', 'schema_id' => 'https://example.test/articles/1',
+                'payload' => json_encode(['title' => 'source '.$i, 'visible' => true, 'related' => ['events-1', 'events-0', 'missing']]),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+        $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument
+        {
+            public function read(BeamUxEntry $entry): array
+            {
+                return [['kind' => 'block', 'id' => 'outer', 'name' => 'article', 'repeat' => ['collection' => 'articles'],
+                    'children' => [['kind' => 'block', 'id' => 'inner', 'name' => 'p', 'repeat' => ['relation' => 'related'],
+                        'children' => [['kind' => 'text', 'value' => '', 'field' => 'fields.title'], ['kind' => 'text', 'value' => '', 'field' => 'fields.secret']]]]]];
+            }
+        });
+        \Illuminate\Support\Facades\DB::enableQueryLog();
+        \Illuminate\Support\Facades\DB::flushQueryLog();
+        $response = $this->getJson('/bound')->assertOk();
+        $queries = \Illuminate\Support\Facades\DB::getQueryLog();
+        \Illuminate\Support\Facades\DB::disableQueryLog();
+        $targets = array_filter($queries, fn ($q) => str_contains($q['query'], $table) && in_array('https://example.test/events/1', $q['bindings'], true));
+        $this->assertCount(1, $targets);
+        $rows = $response->json('props.bindings.outer.records');
+        $this->assertCount(13, $rows);
+        $populated = 0;
+        foreach ($rows as $row) {
+            $nested = $row['bindings']['inner'];
+            if ($nested['records'] !== []) {
+                $populated++;
+                $this->assertSame([['fields' => ['title' => 'events public'], 'url' => null]], $nested['records']);
+            }
+        }
+        $this->assertSame(12, $populated);
+        $this->assertStringNotContainsString('author only', $response->getContent());
+        $this->assertStringNotContainsString('private field', $response->getContent());
     }
 
     public function test_hidden_collection_filter_refuses_and_the_next_render_has_no_stale_address(): void
@@ -352,4 +408,12 @@ class BindingPublicData extends Data
 class BindingPrivateData extends Data
 {
     public function __construct(public string $title, public string $secret) {}
+}
+
+class BindingDeniedPolicy implements \Splicewire\Beam\Authorization\ResourceReadPolicy
+{
+    public function inspect(?\Illuminate\Contracts\Auth\Authenticatable $actor, ParticleResource $resource, \Illuminate\Http\Request $request): \Illuminate\Auth\Access\Response
+    {
+        return \Illuminate\Auth\Access\Response::deny();
+    }
 }

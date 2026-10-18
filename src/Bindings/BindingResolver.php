@@ -75,6 +75,14 @@ final class BindingResolver
             }
         }
         $more = count($rows) > $limit;
+        $records = $this->project($node, array_slice($rows, 0, $limit), $source, $request, true);
+
+        return new RepeatRecordsData($records, $more, $page);
+    }
+
+    /** Project each level as a batch; never resolve a relation inside an outer-record loop. */
+    private function project(array $node, array $rows, CollectionSource $source, Request $request, bool $enriched): array
+    {
         $fields = $this->fields($node);
         $records = array_map(function (array $row) use ($fields, $source): array {
             $visible = [];
@@ -87,9 +95,79 @@ final class BindingResolver
             $visible['url'] = $source->parentEntryId !== null ? $row['url'] : null;
 
             return $visible;
-        }, array_slice($rows, 0, $limit));
+        }, $rows);
+        $nested = $this->nestedRepeats($node['children'] ?? []);
+        if ($nested === []) {
+            return $records;
+        }
+        if (! isset($source->address['collection'])) {
+            throw ValidationException::withMessages(['repeat.relation' => 'Nested Repeat requires an owner-declared Collection relation.']);
+        }
+        $definition = app(\Splicewire\Beam\Collections\CollectionSchemaResolver::class)->resolve($source->address['collection']);
+        if (! $enriched && $rows !== []) {
+            $relationData = app(\Splicewire\Beam\Collections\CollectionRelations::class)->resolve(
+                array_map(fn ($row) => \Splicewire\Beam\Collections\CollectionRecordData::from($row), $rows), $request->user());
+            foreach ($rows as &$row) {
+                $row['relations'] = $relationData[$row['id']] ?? [];
+            }
+            unset($row);
+        }
+        foreach ($nested as $id => $child) {
+            $repeat = $child['repeat'];
+            $relation = is_string($repeat['relation'] ?? null) ? $repeat['relation'] : '';
+            $edge = $definition->relations()[$relation] ?? null;
+            if ($edge === null || ! $edge['many'] || isset($repeat['collection'])) {
+                throw ValidationException::withMessages(['repeat.relation' => 'Nested Repeat must name a declared to-many relation.']);
+            }
+            $query = $repeat['query'] ?? [];
+            $limit = $query['limit'] ?? 25;
+            if (! is_array($query) || array_diff(array_keys($query), ['limit']) || ! is_int($limit) || $limit < 1 || $limit > 100) {
+                throw ValidationException::withMessages(['repeat.query' => 'A relation Repeat accepts only a limit between 1 and 100.']);
+            }
+            $page = max(1, min(10000, (int) $request->query('repeat_'.$id, 1)));
+            $flat = $windows = [];
+            foreach ($rows as $index => $row) {
+                // These values already came through the target's read/projection, not raw FK ids.
+                $items = $row['relations'][$relation] ?? [];
+                $window = array_slice($items, ($page - 1) * $limit, $limit + 1);
+                $more = count($window) > $limit;
+                $window = array_slice($window, 0, $limit);
+                $windows[$index] = [count($flat), count($window), $more];
+                foreach ($window as $item) {
+                    $flat[] = is_array($item) ? $item : $item->toArray();
+                }
+            }
+            $target = new CollectionSource($source->name, $source->resource, ['collection' => $edge['collection']]);
+            $projected = $flat === [] ? [] : $this->project($child, $flat, $target, $request, false);
+            foreach ($windows as $index => [$offset, $count, $more]) {
+                $records[$index]['bindings'][$id] = (new RepeatRecordsData(array_slice($projected, $offset, $count), $more, $page))->toArray();
+            }
+        }
 
-        return new RepeatRecordsData($records, $more, $page);
+        return $records;
+    }
+
+    private function nestedRepeats(array $nodes): array
+    {
+        $out = [];
+        foreach ($nodes as $node) {
+            if (isset($node['repeat'])) {
+                $id = $node['id'] ?? null;
+                if (! is_string($id) || $id === '' || isset($out[$id])) {
+                    throw ValidationException::withMessages(['repeat' => 'A nested Repeat requires a unique block id.']);
+                }
+                $out[$id] = $node;
+            } else {
+                foreach ($this->nestedRepeats($node['children'] ?? []) as $id => $repeat) {
+                    if (isset($out[$id])) {
+                        throw ValidationException::withMessages(['repeat' => 'A nested Repeat requires a unique block id.']);
+                    }
+                    $out[$id] = $repeat;
+                }
+            }
+        }
+
+        return $out;
     }
 
     /** The resolver projects only referenced fields; nested repeat scopes are resolved separately. */
