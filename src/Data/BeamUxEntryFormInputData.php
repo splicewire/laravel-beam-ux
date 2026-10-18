@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Data;
 
 use Schemastud\DataSchemas\Attributes\Description;
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\Particle\EntryFormSaveOp;
@@ -16,6 +17,7 @@ use Splicewire\Beam\Ux\Particle\EntryFormSaveOp;
  * bare `array` that no axis explains. `present` allows `{}`, which clears the form to its defaults.
  */
 #[TypeScript]
+#[Title('Entry form')]
 class BeamUxEntryFormInputData extends BeamData
 {
     /**
