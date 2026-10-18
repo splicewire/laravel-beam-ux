@@ -47,6 +47,7 @@ final class ManifestProfileResolver
             'marks' => $base['marks'],
             'x-prose' => $base['x-prose'],
             'x-admits-code' => $this->residency->isCentralResident($entry),
+            ...(($collections = app(\Splicewire\Beam\Ux\Bindings\ProfileCollections::class)->manifest($entry, $profile)) === [] ? [] : ['x-collections' => $collections]),
         ];
     }
 }

@@ -124,7 +124,10 @@ class PublicEntryController
         // only reason these travel in the payload at all is that the client cannot walk the tree.
         $chrome = $this->chrome->resolve($chain);
 
+        $bindings = app(\Splicewire\Beam\Ux\Bindings\BindingResolver::class)->resolve($entry, $request, $realm);
+
         $response = $this->renderer->render($page, [
+            ...($bindings === [] ? [] : ['bindings' => array_map(fn ($binding) => $binding->toArray(), $bindings)]),
             'entry' => [
                 'id' => (string) $entry->getKey(),
                 'slug' => (string) $entry->slug,
@@ -162,7 +165,7 @@ class PublicEntryController
             ...$this->pageProps->for($chrome['layout'], $entry, $chain, $actor),
         ], );
 
-        if ($this->gate->isRestricted($chain)) {
+        if ($bindings !== [] || $this->gate->isRestricted($chain)) {
             // Post-gate output for a restricted body: never stored, so a revoked grant bites on the
             // next request rather than living on in a shared cache (ADR-0122, ADR-0209 §8).
             $response->headers->set('Cache-Control', 'no-store, private');
