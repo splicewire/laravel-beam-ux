@@ -45,6 +45,7 @@ final class ManifestProfileResolver
             'doc' => $base['doc'],
             'nodes' => $nodes,
             'marks' => $base['marks'],
+            'x-prose' => $base['x-prose'],
             'x-admits-code' => $this->residency->isCentralResident($entry),
         ];
     }

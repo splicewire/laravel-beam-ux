@@ -994,5 +994,30 @@
             }
         }
     ],
-    "marks": []
+    "marks": [],
+    "x-prose": {
+        "p": "block",
+        "h1": "block",
+        "h2": "block",
+        "h3": "block",
+        "h4": "block",
+        "h5": "block",
+        "h6": "block",
+        "pre": "block",
+        "blockquote": "container",
+        "ul": "container",
+        "ol": "container",
+        "li": "container",
+        "strong": "mark",
+        "em": "mark",
+        "a": "mark",
+        "code": "mark",
+        "span": "mark",
+        "small": "mark",
+        "br": "inline",
+        "td": "cell",
+        "th": "cell",
+        "label": "cell",
+        "button": "cell"
+    }
 }

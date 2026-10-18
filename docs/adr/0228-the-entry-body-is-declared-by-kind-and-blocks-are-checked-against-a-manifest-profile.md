@@ -114,6 +114,17 @@ page holds `[]`.
 
 ## Consequences
 
+### EP-14 amendment: editor prose representation (2026-10-18)
+
+The same resolved Manifest Profile carries `x-prose`, a map from declared node names to editor roles:
+`block` (text block), `container` (prose lists/quotes), `mark` (inline formatting), `inline` (inline leaf),
+or `cell` (a run of one). This is editor-only metadata, following `x-admits-code`'s envelope extension
+precedent; it does not change node schemas, containment, save validation or profile admission. A node
+without a declared prose role ends a run. In particular, host components acquire no prose behavior
+merely by admitting text. The editor derives its blockdoc representation from this profile, preserving
+JsonDoc inline blocks and their identities through editing marks and back. Layout and table boundaries
+remain outside the run; table cells are independent runs of one (beam JS ADR-0006).
+
 - **`array_is_list` retires**, along with `JsonDocShape::is`. `AcceptsJsonDoc` comes to mean "this kind is blocks".
 - **The generators need a union projection.** Spatie's TypeScript transformer and `schemastud/laravel-data-schemas` must
   project a `PropertyMorphableData` base as the union of its morph subclasses, and neither reads a morph today. A

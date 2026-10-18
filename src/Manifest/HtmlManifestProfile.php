@@ -64,6 +64,15 @@ final class HtmlManifestProfile
             'doc' => ['admitsChildCategories' => [self::CATEGORY]],
             'nodes' => array_map(static fn (string $tag): array => self::node($tag), self::ELEMENTS),
             'marks' => [],
+            // ADR-0228 EP-14 amendment: editing representation only. Never admission rules.
+            'x-prose' => [
+                'p' => 'block', 'h1' => 'block', 'h2' => 'block', 'h3' => 'block',
+                'h4' => 'block', 'h5' => 'block', 'h6' => 'block', 'pre' => 'block',
+                'blockquote' => 'container', 'ul' => 'container', 'ol' => 'container', 'li' => 'container',
+                'strong' => 'mark', 'em' => 'mark', 'a' => 'mark', 'code' => 'mark',
+                'span' => 'mark', 'small' => 'mark', 'br' => 'inline',
+                'td' => 'cell', 'th' => 'cell', 'label' => 'cell', 'button' => 'cell',
+            ],
         ];
     }
 
