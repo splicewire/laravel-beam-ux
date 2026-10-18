@@ -129,13 +129,22 @@ class EntryArtifactStore
         $this->disk->delete($this->path($entry, $this->versionKey($versionId)));
     }
 
-    /** Only the publication pin and working head currently have lifecycle owners (EP-15 adds Releases). */
+    /** Keep the publication pin, working head and every fixed version held by an open Release. */
     public function prune(BeamUxEntry $entry): void
     {
         $keep = [$this->path($entry)];
         $head = $entry->particle?->getAttribute('head_version');
         if ($head !== null) {
             $keep[] = $this->path($entry, $this->versionKey((string) $head));
+        }
+        if ($entry->getConnection()->getSchemaBuilder()->hasTable('beam_ux_release_members')) {
+            $refs = $entry->getConnection()->table('beam_ux_release_members as member')
+                ->join('beam_ux_releases as release', 'release.id', '=', 'member.release_id')
+                ->where('member.entry_id', $entry->getKey())->where('release.status', '!=', 'published')
+                ->whereNotNull('member.version_id')->pluck('member.version_id');
+            foreach ($refs as $ref) {
+                $keep[] = $this->path($entry, $this->versionKey($ref));
+            }
         }
         foreach ($this->disk->files("{$this->root}/{$entry->getKey()}") as $existing) {
             if (! in_array($existing, $keep, true)) {

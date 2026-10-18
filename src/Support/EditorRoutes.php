@@ -8,12 +8,13 @@ use Splicewire\Beam\Ux\Particle\EntryMakeEditableOp;
 /** Called by the host inside its auth/verified group; every operation also declares ux.author. */
 final class EditorRoutes
 {
-    public static function mount(string $uri = 'beam-ux-entries'): void
+    public static function mount(string $uri = 'beam-ux-entries', string $releasesUri = 'beam-ux-releases'): void
     {
         // NoSubject must precede any {id} route; no hidden package route registration.
         Particle::ops($uri, 'beam-ux-entry', [EntryMakeEditableOp::class]);
-        foreach (['body', 'save-body', 'save-draft', 'publish', 'versions', 'restore', 'clear-body', 'print-source', 'read-source'] as $op) {
+        foreach (['body', 'save-body', 'save-draft', 'publish', 'versions', 'restore', 'clear-body', 'print-source', 'read-source', 'create-release'] as $op) {
             Particle::ops($uri, 'beam-ux-entry', $op);
         }
+        Particle::mount($releasesUri, 'beam-ux-release')->only(['index', 'show'])->ops(['command']);
     }
 }

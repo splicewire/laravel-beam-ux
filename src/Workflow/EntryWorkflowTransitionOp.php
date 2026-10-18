@@ -34,13 +34,25 @@ use Splicewire\Beam\Workflows\Data\WorkflowTransitionRequestData;
     // gate alone.
     abilityModel: false,
     input: WorkflowTransitionRequestData::class,
-    output: WorkflowTransitionAttemptData::class,
+    output: \Splicewire\Beam\Ux\Data\EntryWorkflowAttemptData::class,
 )]
 class EntryWorkflowTransitionOp
 {
     public static function handle(Model $model, Request $request, mixed $actor): mixed
     {
         $input = WorkflowTransitionRequestData::from($request->all());
+
+        if ($input->transition === 'unpublish') {
+            $workflow = app(WorkflowActuator::class);
+            if (! in_array('unpublish', $workflow->available($model), true)) {
+                return new TransitionResult([], 'unpublish', false, ['Take-down is not available from this entry state.']);
+            }
+            if (! $actor instanceof \Illuminate\Contracts\Auth\Authenticatable) {
+                throw new \Illuminate\Auth\Access\AuthorizationException;
+            }
+
+            return app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->requestOne($model, null, $actor);
+        }
 
         return app(WorkflowActuator::class)->transition(
             $model,
@@ -51,6 +63,18 @@ class EntryWorkflowTransitionOp
 
     public static function respond(mixed $payload, Model $model): mixed
     {
+        $projection = app(WorkflowActuator::class)->projection($model->fresh());
+        if ($payload instanceof \Splicewire\Beam\Ux\Models\BeamUxRelease) {
+            $response = new \Splicewire\Beam\Ux\Data\EntryWorkflowAttemptData(
+                $payload->status === 'published',
+                $payload->status === 'published' ? [] : ['Take-down submitted for Release review: '.$payload->id],
+                $projection === null ? null : \Splicewire\Beam\Workflows\Data\WorkflowProjectionData::from($projection),
+            );
+            $response->release = \Splicewire\Beam\Ux\Data\ReleaseData::project($payload);
+
+            return $response;
+        }
+
         /** @var TransitionResult $payload */
         return WorkflowTransitionAttemptData::fromResult(
             $payload,

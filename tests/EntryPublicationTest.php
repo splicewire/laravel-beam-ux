@@ -84,6 +84,250 @@ class EntryPublicationTest extends TestCase
         $this->assertSame('one', $two->fresh()->segment);
     }
 
+    public function test_release_requires_an_independent_review_and_publishes_its_fixed_member(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $pub = app(EntryPublication::class);
+        $draft = $pub->recordDraft($entry, self::BODY_TWO);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $release = $service->create($entry, 'Launch', $author);
+        $service->putMember($release, $entry->id, $draft->headVersion, $author);
+        try {
+            $service->transition($release, 'publish', $author);
+            $this->fail('review was bypassed');
+        } catch (ValidationException) {
+            $this->assertNotSame($draft->headVersion, $entry->fresh()->published_version);
+        }
+        $service->transition($release, 'submit', $author);
+        try {
+            $service->transition($release, 'approve', $author);
+            $this->fail('self-approval was admitted');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertSame('in_review', $release->fresh()->status);
+        }
+        $service->transition($release, 'approve', $reviewer);
+        $later = $pub->recordDraft($entry->fresh(), self::BODY_ONE);
+        $service->transition($release, 'publish', $reviewer);
+        $this->assertSame('published', $release->fresh()->status);
+        $this->assertSame($draft->headVersion, $entry->fresh()->published_version);
+        $this->assertSame($later->headVersion, $pub->state($entry->fresh())->headVersion);
+    }
+
+    public function test_release_member_changes_reset_approval_and_take_down_requires_a_published_target(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $release = $service->create($entry, 'Take down', $author);
+        try {
+            $service->putMember($release, $entry->id, null, $author, '/missing');
+            $this->fail('unmanaged take-down was admitted');
+        } catch (ValidationException) {
+            $this->assertCount(0, $release->fresh()->members);
+        }
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => 'published'])->save();
+        try {
+            $service->putMember($release, $entry->id, null, $author, '/missing');
+            $this->fail('unknown redirect target was admitted');
+        } catch (ValidationException) {
+            $this->assertCount(0, $release->fresh()->members);
+        }
+        $target = $this->publishedPage(self::BODY_TWO);
+        $target->forceFill(['segment' => '/target', 'workflow_marking' => 'published'])->save();
+        $service->putMember($release, $entry->id, null, $author, $target->id);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $service->dropMember($release, $entry->id, $author);
+        $this->assertSame('draft', $release->fresh()->status);
+        $this->assertNull($release->fresh()->reviewed_by);
+    }
+
+    public function test_release_retains_its_artifact_and_rollback_creates_a_new_reviewable_release(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $oldPin = $entry->published_version;
+        $pub = app(EntryPublication::class);
+        $draft = $pub->recordDraft($entry, self::BODY_TWO);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $release = $service->create($entry, 'Release', $author);
+        $service->putMember($release, $entry->id, $draft->headVersion, $author);
+        $pub->recordDraft($entry->fresh(), self::BODY_ONE);
+        $this->assertTrue($this->artifacts()->disk()->exists($this->artifacts()->path($entry, $this->artifacts()->versionKey($draft->headVersion))));
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $service->transition($release, 'publish', $reviewer);
+        $rollback = $service->rollback($release, $author);
+        $this->assertNotSame($release->id, $rollback->id);
+        $this->assertSame('draft', $rollback->status);
+        $this->assertSame($oldPin, $rollback->members->first()->version_id);
+        $this->assertSame($draft->headVersion, $entry->fresh()->published_version);
+    }
+
+    public function test_editor_publish_and_workflow_take_down_create_reviewed_releases_of_one(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $pin = $entry->fresh()->published_version;
+        $request = Request::create('/', 'POST', ['ref' => $pin]);
+        $state = EntryPublishOp::handle($entry, $request, $author);
+        $this->assertNotNull($state->release);
+        $this->assertSame('in_review', $state->release->status);
+        $this->assertSame($pin, $entry->fresh()->published_version);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $service->transition($release, 'approve', $reviewer);
+        $service->transition($release, 'publish', $reviewer);
+        $this->assertSame('published', $release->fresh()->status);
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => 'published'])->save();
+        $result = \Splicewire\Beam\Ux\Workflow\EntryWorkflowTransitionOp::handle($entry,
+            Request::create('/', 'POST', ['transition' => 'unpublish']), $author);
+        $response = \Splicewire\Beam\Ux\Workflow\EntryWorkflowTransitionOp::respond($result, $entry);
+        $this->assertSame('published', $entry->fresh()->workflow_marking);
+        $this->assertSame('in_review', $response->release->status);
+        $takeDown = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($response->release->id);
+        $service->transition($takeDown, 'approve', $reviewer);
+        $service->transition($takeDown, 'publish', $reviewer);
+        $this->assertNotSame('published', $entry->fresh()->workflow_marking);
+    }
+
+    public function test_release_without_calendars_refuses_schedule_but_can_publish_now(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $release = $service->create($entry, 'Immediate', $author);
+        $service->putMember($release, $entry->id, $entry->published_version, $author);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        try {
+            $service->schedule($release, '2030-01-01T00:00:00Z', 'UTC', $reviewer);
+            $this->fail('schedule without calendars succeeded');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('calendars ActionService', $exception->getMessage());
+            $this->assertSame('approved', $release->fresh()->status);
+        }
+        $service->transition($release, 'publish', $reviewer);
+        $this->assertSame('published', $release->fresh()->status);
+    }
+
+    public function test_release_resource_and_commands_mount_through_the_existing_particle_surface(): void
+    {
+        $discovery = app(\Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery::class);
+        foreach ([\Splicewire\Beam\Ux\Data\ReleaseData::class, \Splicewire\Beam\Ux\Particle\ReleaseCommandOp::class,
+            \Splicewire\Beam\Ux\Particle\EntryReleaseCreateOp::class] as $class) {
+            $discovery->registerClass($class);
+        }
+        \Splicewire\Beam\Facades\Particle::mount('beam-ux-releases', 'beam-ux-release')->only(['index', 'show'])->ops(['command']);
+        \Splicewire\Beam\Facades\Particle::ops('beam-ux-entries', 'beam-ux-entry', 'create-release');
+        $routes = collect(app('router')->getRoutes()->getRoutes())->map(fn ($route) => $route->uri())->all();
+        $this->assertContains('beam-ux-releases', $routes);
+        $this->assertContains('beam-ux-releases/{id}/command', $routes);
+        $this->assertContains('beam-ux-entries/{id}/create-release', $routes);
+    }
+
+    public function test_release_schedule_uses_the_existing_calendar_runner_and_rejects_a_revised_intent(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $draft = app(EntryPublication::class)->recordDraft($entry, self::BODY_TWO);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $this->calendarFixture();
+        $release = $service->create($entry, 'Scheduled', $author);
+        $service->putMember($release, $entry->id, $draft->headVersion, $author);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $service->schedule($release, '2030-01-01T00:00:00Z', 'UTC', $reviewer);
+        $action = \Splicewire\Beam\Calendars\Models\CalendarAction::firstOrFail();
+        $this->assertSame('scheduled', $release->fresh()->status);
+        $service->rebase($release, $entry->id, $author);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $attempt = app(\Splicewire\Beam\Calendars\Actions\ActionScheduler::class)->run($action->id, 'tenant:test', \Carbon\CarbonImmutable::parse('2030-01-02T00:00:00Z'));
+        $this->assertSame('blocked', $attempt->status);
+        $this->assertSame($entry->published_version, $entry->fresh()->published_version);
+        $service->schedule($release, '2030-01-02T00:00:00Z', 'UTC', $reviewer);
+        $next = \Splicewire\Beam\Calendars\Models\CalendarAction::whereKeyNot($action->id)->firstOrFail();
+        $attempt = app(\Splicewire\Beam\Calendars\Actions\ActionScheduler::class)->run($next->id, 'tenant:test', \Carbon\CarbonImmutable::parse('2030-01-03T00:00:00Z'));
+        $this->assertSame('applied', $attempt->status, json_encode($attempt->result));
+        $this->assertSame($draft->headVersion, $entry->fresh()->published_version);
+        $this->assertNull(app(\Splicewire\Beam\Calendars\Actions\ActionScheduler::class)->run($next->id, 'tenant:test', \Carbon\CarbonImmutable::parse('2030-01-03T00:00:00Z')));
+    }
+
+    private function calendarFixture(): void
+    {
+        $root = dirname((new ReflectionClass(\Splicewire\Beam\Calendars\Actions\ActionService::class))->getFileName(), 3);
+        foreach (['create_calendar_actions_table', 'create_calendar_action_attempts_table'] as $name) {
+            (require $root.'/database/migrations/shared/'.$name.'.php.stub')->up();
+        }
+        config(['beam.calendars.action_handlers' => ['kind.workflow-transition' => \Splicewire\Beam\Workflows\Calendar\WorkflowActionHandler::class]]);
+        $this->app->singleton(\Splicewire\Beam\Calendars\Actions\ActionService::class);
+        $this->app->instance(\Splicewire\Beam\Calendars\Contracts\ActionContextProvider::class,
+            new class implements \Splicewire\Beam\Calendars\Contracts\ActionContextProvider
+            {
+                public function current(): \Splicewire\Beam\Calendars\Actions\ActionContext
+                {
+                    return new \Splicewire\Beam\Calendars\Actions\ActionContext('user:reviewer', 'user:reviewer', 'tenant:test');
+                }
+            });
+        // The host authenticates the tenant context; Release participation still rechecks every member gate.
+        $this->app->instance(\Splicewire\Beam\Workflows\Actions\Contracts\WorkflowActionAuthority::class,
+            new class implements \Splicewire\Beam\Workflows\Actions\Contracts\WorkflowActionAuthority
+            {
+                public function authorize(\Illuminate\Database\Eloquent\Model $subject, string $transition, \Splicewire\Beam\Workflows\Actions\WorkflowActionContext $context): void {}
+            });
+    }
+
+    public function test_release_rechecks_publish_authority_on_every_member_and_refuses_atomically(): void
+    {
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_TWO);
+        $pub = app(EntryPublication::class);
+        $refs = [$one->id => $pub->recordDraft($one, self::BODY_TWO)->headVersion,
+            $two->id => $pub->recordDraft($two, self::BODY_ONE)->headVersion];
+        $deny = false;
+        [$service, $author, $reviewer] = $this->releaseFixture(function ($actor, $ability, $arguments) use (&$deny, $two) {
+            return ! ($deny && $ability === 'publish' && ($arguments[0]->id ?? null) === $two->id);
+        });
+        $release = $service->create($one, 'Both', $author);
+        foreach ($refs as $id => $ref) {
+            $service->putMember($release, $id, $ref, $author);
+        }
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $deny = true;
+        try {
+            $service->transition($release, 'publish', $reviewer);
+            $this->fail('revoked member authority was ignored');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertSame('approved', $release->fresh()->status);
+            $this->assertSame($one->published_version, $one->fresh()->published_version);
+            $this->assertSame($two->published_version, $two->fresh()->published_version);
+        }
+    }
+
+    private function releaseFixture(?\Closure $authorize = null): array
+    {
+        $this->runBeamWorkflowsMigrations();
+        $migration = __DIR__.'/../database/migrations/shared/create_beam_ux_releases_table.php.stub';
+        if (is_file($migration)) {
+            (require $migration)->up();
+        }
+        $author = new \Illuminate\Foundation\Auth\User;
+        $author->setKeyType('string');
+        $author->forceFill(['id' => 'author']);
+        $reviewer = new \Illuminate\Foundation\Auth\User;
+        $reviewer->setKeyType('string');
+        $reviewer->forceFill(['id' => 'reviewer']);
+        \Illuminate\Support\Facades\Gate::before($authorize ?? fn () => true);
+        $provider = \Mockery::mock(\Illuminate\Contracts\Auth\UserProvider::class);
+        $provider->shouldReceive('retrieveById')->andReturnUsing(fn ($id) => $id === 'author' ? $author : ($id === 'reviewer' ? $reviewer : null));
+        $guard = \Mockery::mock(\Illuminate\Contracts\Auth\Guard::class);
+        $guard->shouldReceive('user')->andReturn(null);
+        $guard->shouldReceive('id')->andReturn(null);
+        \Illuminate\Support\Facades\Auth::shouldReceive('createUserProvider')->andReturn($provider);
+        \Illuminate\Support\Facades\Auth::shouldReceive('guard')->andReturn($guard);
+
+        return [app(\Splicewire\Beam\Ux\Release\ReleaseService::class), $author, $reviewer];
+    }
+
     public function test_release_batch_compile_failure_keeps_every_pin_and_public_artifact(): void
     {
         $one = $this->publishedPage(self::BODY_ONE);
@@ -239,8 +483,7 @@ class EntryPublicationTest extends TestCase
     {
         $entry = $this->publishedPage(self::BODY_ONE);
         $pub = app(EntryPublication::class);
-        $first = $pub->draftFromBase($entry, self::BODY_TWO, $pub->state($entry)->headVersion, pageSettings:
-            new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'Draft', segment: 'draft'));
+        $first = $pub->draftFromBase($entry, self::BODY_TWO, $pub->state($entry)->headVersion, pageSettings: new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'Draft', segment: 'draft'));
         $next = $pub->recordDraft($entry->fresh(), self::BODY_ONE);
         $pub->publishVersion($entry->fresh(), $next->headVersion);
         $this->assertSame('Draft', $entry->fresh()->title);
@@ -271,8 +514,7 @@ class EntryPublicationTest extends TestCase
         $publication = app(EntryPublication::class);
         $before = $publication->state($entry)->headVersion;
         try {
-            $publication->draftFromBase($entry, self::BODY_TWO, $before, pageSettings:
-                new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'Not a page'));
+            $publication->draftFromBase($entry, self::BODY_TWO, $before, pageSettings: new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'Not a page'));
             $this->fail('component accepted page settings');
         } catch (ValidationException) {
             $this->assertSame($before, $publication->state($entry->fresh())->headVersion);
@@ -309,11 +551,13 @@ class EntryPublicationTest extends TestCase
 
     public function test_named_publish_pins_the_seen_version_without_replacing_a_newer_working_head(): void
     {
+        [, $author] = $this->releaseFixture();
+        config(['beam.ux.releases.review_required' => false]);
         $entry = $this->publishedPage(self::BODY_ONE);
         $publication = app(EntryPublication::class);
         $seen = $publication->recordDraft($entry->fresh(), self::BODY_TWO);
         $later = $publication->recordDraft($entry->fresh(), self::BODY_ONE);
-        $published = EntryPublishOp::handle($entry->fresh(), Request::create('/', 'POST', ['ref' => $seen->headVersion]), null);
+        $published = EntryPublishOp::handle($entry->fresh(), Request::create('/', 'POST', ['ref' => $seen->headVersion]), $author);
         $this->assertSame($seen->headVersion, $published->publishedVersion);
         $this->assertSame($later->headVersion, $published->headVersion);
         $this->assertTrue($published->draftPending);
@@ -743,6 +987,8 @@ class EntryPublicationTest extends TestCase
 
     public function test_the_publish_and_draft_operations_round_trip_through_their_declared_inputs(): void
     {
+        [, $author] = $this->releaseFixture();
+        config(['beam.ux.releases.review_required' => false]);
         $entry = $this->publishedPage(self::BODY_ONE);
 
         $drafted = EntryDraftSaveOp::handle(
@@ -754,7 +1000,7 @@ class EntryPublicationTest extends TestCase
         $this->assertTrue($drafted->draftPending);
         $this->assertSame('from the op', $drafted->versions[0]->label);
 
-        $published = EntryPublishOp::handle($entry->fresh(), Request::create('/x', 'POST', ['ref' => $drafted->headVersion]), actor: null);
+        $published = EntryPublishOp::handle($entry->fresh(), Request::create('/x', 'POST', ['ref' => $drafted->headVersion]), actor: $author);
         $this->assertFalse($published->draftPending);
 
         $restored = EntryVersionRestoreOp::handle(

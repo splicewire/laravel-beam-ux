@@ -46,6 +46,13 @@ class EntryPublishOp
         /** @var BeamUxEntry $model */
         $input = EntryPublishInputData::validateAndCreate($request->all());
 
-        return app(EntryPublication::class)->publishVersion($model, $input->ref, $actor instanceof Model ? $actor : null);
+        if (! $actor instanceof \Illuminate\Contracts\Auth\Authenticatable) {
+            throw new \Illuminate\Auth\Access\AuthorizationException;
+        }
+        $release = app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->requestOne($model, $input->ref, $actor);
+        $state = app(EntryPublication::class)->state($model->fresh());
+        $state->release = \Splicewire\Beam\Ux\Data\ReleaseData::project($release);
+
+        return $state;
     }
 }

@@ -233,6 +233,16 @@ class EntryBodyClearTest extends TestCase
         $entry = $this->savedPage(self::BODY);
         $actor = new ClearingUser;
         $actor->setAttribute('id', '00000000-0000-4000-8000-000000000008');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_releases_table.php.stub')->up();
+        config(['beam.ux.releases.review_required' => false]);
+        Gate::before(fn () => true);
+        $provider = \Mockery::mock(\Illuminate\Contracts\Auth\UserProvider::class);
+        $provider->shouldReceive('retrieveById')->andReturn($actor);
+        $guard = \Mockery::mock(\Illuminate\Contracts\Auth\Guard::class);
+        $guard->shouldReceive('user')->andReturn(null);
+        $guard->shouldReceive('id')->andReturn(null);
+        \Illuminate\Support\Facades\Auth::shouldReceive('createUserProvider')->andReturn($provider);
+        \Illuminate\Support\Facades\Auth::shouldReceive('guard')->andReturn($guard);
         $publication = app(EntryPublication::class);
         $base = $publication->state($entry)->headVersion;
         $draft = \Splicewire\Beam\Ux\Particle\EntryDraftSaveOp::handle($entry, Request::create('/x', 'POST', ['body' => self::DRAFT, 'baseVersion' => $base]), $actor);

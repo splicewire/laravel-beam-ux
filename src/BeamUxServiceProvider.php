@@ -104,6 +104,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 // and each no-ops for the other.
                 'shared/add_published_version_to_beam_ux_entries_table',
                 'shared/add_page_settings_to_beam_ux_entries_table',
+                'shared/create_beam_ux_releases_table',
                 // The BASELINE (ADR-0225 decision 2; launch ticket 00, 2026-10-16): pins every already-written
                 // entry to its live body inside `migrate`, so the pin is never required-but-missing. A
                 // separate file because hosts that already ran the ALTER (or got the column from the create)

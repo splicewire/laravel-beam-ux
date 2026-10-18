@@ -2,6 +2,14 @@
 
 return [
 
+    // ADR-0226 leaves review policy to the host. Conservative declared defaults; ticket-00 asks owner confirmation.
+    'releases' => [
+        'review_required' => true,
+        'allow_self_approval' => false,
+        'edit_ability' => 'update',
+        'publish_ability' => 'publish',
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | beam-ux's owner-tier URI prefix + route-name stem (ADR-0124 owner-tier seam)

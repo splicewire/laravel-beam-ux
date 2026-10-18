@@ -38,6 +38,16 @@ trait WiresEntryWorkflow
         $this->app->make(WorkflowRegistry::class)
             ->register(EntryPublishLifecycle::DEFINITION, EntryPublishLifecycle::blueprint());
 
+        $this->app->make(WorkflowRegistry::class)->register(
+            \Splicewire\Beam\Ux\Release\ReleaseLifecycle::DEFINITION,
+            \Splicewire\Beam\Ux\Release\ReleaseLifecycle::blueprint(),
+        );
+        $this->app->make(WorkflowBindingRegistry::class)->bind('beam-ux-release', \Splicewire\Beam\Ux\Release\ReleaseLifecycle::DEFINITION);
+        $this->app->make(\Splicewire\Beam\Workflows\Control\SubjectResolverRegistry::class)->register(
+            'beam-ux-release', fn (string $id) => \Splicewire\Beam\Ux\Models\BeamUxRelease::find($id),
+        );
+        \Illuminate\Database\Eloquent\Relations\Relation::morphMap(['beam_ux_release' => \Splicewire\Beam\Ux\Models\BeamUxRelease::class]);
+
         if (class_exists(WorkflowTypeRegistry::class) && $this->app->bound(WorkflowTypeRegistry::class)) {
             $this->app->make(WorkflowTypeRegistry::class)
                 ->register(UxType::Page->value, 'Page')

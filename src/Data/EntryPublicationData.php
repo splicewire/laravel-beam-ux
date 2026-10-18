@@ -53,5 +53,7 @@ class EntryPublicationData extends BeamData
         /** @var list<string> */
         #[Description("Profile legality the restored version breaks (an unknown block, illegal containment, a schema fail), by node id and path. A restore records these and does not refuse (ADR-0228 d9); empty on every other path.")]
         public array $diagnostics = [],
+        #[Description('The Release created by a publish request; its workflow may still require review.')]
+        public ?ReleaseData $release = null,
     ) {}
 }
