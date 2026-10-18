@@ -131,6 +131,98 @@ class BindingRenderTest extends TestCase
         $entry->published_version = null;
         $this->assertSame([], (new PublishedBindingDocument)->read($entry));
     }
+
+    public function test_two_collection_addresses_in_one_render_keep_their_own_public_scope(): void
+    {
+        $this->installCollectionFixtures();
+        $response = $this->get('/bound')->assertOk();
+        $this->assertSame([['fields' => ['title' => 'articles public'], 'url' => null]], $response->json('props.bindings.articles.records'));
+        $this->assertSame([['fields' => ['title' => 'events public'], 'url' => null]], $response->json('props.bindings.events.records'));
+        $this->assertStringNotContainsString('author only', $response->getContent());
+        $this->assertStringNotContainsString('private field', $response->getContent());
+    }
+
+    public function test_hidden_collection_filter_refuses_and_the_next_render_has_no_stale_address(): void
+    {
+        $this->installCollectionFixtures();
+        $documents = app(PublishedBindingDocument::class);
+        foreach ([['filter' => ['secret' => 'private field']], ['sort' => 'secret'], ['sort' => '-secret']] as $query) {
+            $documents->savedQuery = $query;
+            $this->getJson('/bound')->assertUnprocessable();
+            $documents->savedQuery = [];
+            $response = $this->getJson('/bound')->assertOk();
+            $this->assertSame('articles public', $response->json('props.bindings.articles.records.0.fields.title'));
+            $this->assertSame('events public', $response->json('props.bindings.events.records.0.fields.title'));
+        }
+    }
+
+    private function installCollectionFixtures(): void
+    {
+        Schema::create(\Splicewire\Beam\Facades\Beam::table('schemas'), function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->string('schema_id')->unique();
+            $table->string('schema_name');
+            $table->integer('version');
+            $table->string('fingerprint');
+            $table->json('artifact');
+            $table->timestamps();
+        });
+        Schema::create(\Splicewire\Beam\Facades\Beam::table('particles'), function (Blueprint $table) {
+            $table->string('id')->primary();
+            $table->string('schema_ref');
+            $table->string('schema_id');
+            $table->string('source_tier')->default('local');
+            $table->string('migration_status')->default('current');
+            $table->json('payload');
+            $table->string('head_version')->nullable();
+            $table->json('meta')->nullable();
+            $table->timestamps();
+        });
+        $registry = new \Splicewire\Beam\Schema\DatabaseSchemaRegistry;
+        foreach (['articles', 'events'] as $name) {
+            $stem = 'https://example.test/'.$name;
+            $registry->register([
+                '$id' => $stem.'/1', 'type' => 'object',
+                'x-beam-collection' => ['label' => $name, 'nameField' => 'title'],
+                'properties' => ['title' => ['type' => 'string'], 'visible' => ['type' => 'boolean'], 'secret' => [
+                    'type' => 'string', 'x-filter' => ['name' => 'secret', 'operator' => 'exact', 'control' => 'text'],
+                    'x-sort' => ['name' => 'secret'],
+                ]],
+                'x-beam-public-read' => ['fields' => ['title'], 'where' => ['all' => [['field' => 'visible', 'operator' => 'equals', 'value' => true]]]],
+            ]);
+            foreach ([true, false] as $visible) {
+                \Illuminate\Support\Facades\DB::table(\Splicewire\Beam\Facades\Beam::table('particles'))->insert([
+                    'id' => $name.'-'.(int) $visible, 'schema_ref' => $stem.'/1', 'schema_id' => $stem.'/1',
+                    'payload' => json_encode(['title' => $name.($visible ? ' public' : ' author only'), 'visible' => $visible, 'secret' => 'private field']),
+                    'created_at' => now(), 'updated_at' => now(),
+                ]);
+            }
+        }
+        $reconciler = \Mockery::mock(\Rushing\Versioning\Contracts\RecordReconciler::class);
+        $reconciler->shouldReceive('currentId')->andReturnUsing(fn ($stem) => $stem.'/1');
+        $reconciler->shouldReceive('reconcile')->andReturnUsing(fn ($payload, $id) => \Rushing\Versioning\MigrationOutcome::current($id));
+        $this->app->instance(\Rushing\Versioning\Contracts\RecordReconciler::class, $reconciler);
+        $this->app->instance(\Splicewire\Beam\Collections\CollectionSchemaResolver::class,
+            new \Splicewire\Beam\Collections\CollectionSchemaResolver(new \Splicewire\Beam\Schema\RegistrySchemaTargetResolver($registry), $registry));
+        $this->app->instance(ManifestCollectionSource::class, new class implements ManifestCollectionSource {
+            public function collections(BeamUxEntry $entry, string $profile): array
+            {
+                return array_map(fn ($name) => new CollectionSource($name, 'records', ['collection' => 'https://example.test/'.$name]), ['articles', 'events']);
+            }
+        });
+        $this->app->instance(PublishedBindingDocument::class, new class extends PublishedBindingDocument {
+            public array $savedQuery = [];
+
+            public function read(BeamUxEntry $entry): array
+            {
+                return array_map(fn ($name) => [
+                    'kind' => 'block', 'id' => $name, 'name' => 'article',
+                    'repeat' => ['collection' => $name, 'query' => $this->savedQuery],
+                    'children' => [['kind' => 'text', 'value' => '', 'field' => 'fields.title'], ['kind' => 'text', 'value' => '', 'field' => 'fields.secret']],
+                ], ['articles', 'events']);
+            }
+        });
+    }
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {
