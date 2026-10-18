@@ -197,6 +197,9 @@ class EntryPublication
     public function recordDraft(BeamUxEntry $entry, array $body, ?string $label = null, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): EntryPublicationData
     {
         $this->assertStorable($entry, $body);
+        if ($pageSettings !== null && $entry->type !== \Splicewire\Beam\Ux\Type\UxType::Page) {
+            throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);
+        }
         $this->requireVersionStore();
         $this->baseline($entry);
         $priorSettings = $this->particle($entry)?->meta['pageSettings'] ?? null;
