@@ -10,10 +10,10 @@ final class BindingFieldValidator
     public function assert(array $body, array $profile, ?callable $relation = null): void
     {
         $offers = array_column($profile['x-collections'] ?? [], null, 'name');
-        $this->walk($body, $offers, null, $relation);
+        $this->walk($body, $offers, null, $relation, array_column($profile['nodes'] ?? [], null, 'name'));
     }
 
-    private function walk(array $nodes, array $offers, ?array $scope, ?callable $relation): void
+    private function walk(array $nodes, array $offers, ?array $scope, ?callable $relation, array $entries): void
     {
         foreach ($nodes as $node) {
             $current = $scope;
@@ -30,7 +30,7 @@ final class BindingFieldValidator
                     $this->refuse('The Repeat source is not offered by this Manifest Profile.');
                 }
                 // The empty subtree replaces the Repeat, so it has the enclosing scope, not a nonexistent Record.
-                $this->walk($repeat['empty'] ?? [], $offers, $scope, $relation);
+                $this->walk($repeat['empty'] ?? [], $offers, $scope, $relation, $entries);
             }
             if (isset($node['field'])) {
                 $field = $this->field($node['field'], $current);
@@ -42,14 +42,62 @@ final class BindingFieldValidator
             }
             foreach ($node['props'] ?? [] as $prop) {
                 if (($prop['kind'] ?? null) === 'field') {
-                    $this->field($prop['value'] ?? null, $current);
+                    $field = $this->field($prop['value'] ?? null, $current);
+                    $attrs = $entries[$node['name'] ?? '']['attrsSchema'] ?? null;
+                    if (is_array($attrs)) {
+                        $target = $attrs['properties'][$prop['name'] ?? ''] ?? ($attrs['additionalProperties'] ?? true);
+                        if ($target === false || (is_array($target) && ! $this->fits($field, $target))) {
+                            $this->refuse('The binding field does not fit the declared attribute ['.($prop['name'] ?? '?').'].');
+                        }
+                    }
                 }
             }
             foreach (($node['when']['all'] ?? $node['when']['any'] ?? []) as $rule) {
                 $this->field($rule['field'] ?? null, $current);
             }
-            $this->walk($node['children'] ?? [], $offers, $current, $relation);
+            $this->walk($node['children'] ?? [], $offers, $current, $relation, $entries);
         }
+    }
+
+    /** Conservative schema containment: never infer compatibility from one sample Record. */
+    private function fits(array $source, array $target): bool
+    {
+        if (isset($source['enum']) || array_key_exists('const', $source)) {
+            $values = $source['enum'] ?? [$source['const']];
+            $validator = new \Opis\JsonSchema\Validator;
+            $schema = json_decode(json_encode((object) $target, JSON_THROW_ON_ERROR));
+            foreach ($values as $value) {
+                if (! $validator->validate(json_decode(json_encode($value, JSON_THROW_ON_ERROR)), $schema)->isValid()) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        if (isset($target['type'])) {
+            $types = (array) ($source['type'] ?? []);
+            $allowed = (array) $target['type'];
+            if ($types === []) {
+                return false;
+            }
+            foreach ($types as $type) {
+                if (! in_array($type, $allowed, true) && ! ($type === 'integer' && in_array('number', $allowed, true))) {
+                    return false;
+                }
+            }
+        }
+        // An arbitrary source string is not a member of a target enum. Other constraints must
+        // be carried by the source verbatim until a dedicated containment rule supports them.
+        foreach ($target as $key => $value) {
+            if (in_array($key, ['type', 'title', 'description', '$comment', 'default', 'examples', '$schema', '$id'], true)) {
+                continue;
+            }
+            if (! array_key_exists($key, $source) || $source[$key] !== $value) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function field(mixed $path, ?array $scope): array

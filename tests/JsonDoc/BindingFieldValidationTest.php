@@ -8,6 +8,32 @@ use Splicewire\Beam\Ux\Tests\TestCase;
 
 class BindingFieldValidationTest extends TestCase
 {
+    public function test_prop_bindings_must_fit_the_declared_attribute_type_and_enum(): void
+    {
+        $profile = $this->profile();
+        $profile['nodes'] = [['name' => 'Card', 'attrsSchema' => ['type' => 'object', 'properties' => [
+            'count' => ['type' => 'number'],
+            'tone' => ['type' => 'string', 'enum' => ['quiet', 'loud']],
+        ], 'additionalProperties' => false]]];
+        $profile['x-collections'][0]['schema']['properties'] += [
+            'count' => ['type' => 'integer'],
+            'tone' => ['type' => 'string', 'enum' => ['quiet']],
+        ];
+        foreach ([['count', 'title'], ['tone', 'title'], ['unknown', 'title']] as [$name, $field]) {
+            $body = [['kind' => 'block', 'name' => 'Card', 'repeat' => ['collection' => 'articles'],
+                'props' => [['kind' => 'field', 'name' => $name, 'value' => $field]]]];
+            try {
+                (new BindingFieldValidator)->assert($body, $profile);
+                $this->fail('Accepted incompatible binding '.$name.' <- '.$field);
+            } catch (ValidationException $e) {
+                $this->assertArrayHasKey('body', $e->errors());
+            }
+        }
+        (new BindingFieldValidator)->assert([['kind' => 'block', 'name' => 'Card', 'repeat' => ['collection' => 'articles'],
+            'props' => [['kind' => 'field', 'name' => 'count', 'value' => 'count'], ['kind' => 'field', 'name' => 'tone', 'value' => 'tone']]]], $profile);
+        $this->addToAssertionCount(1);
+    }
+
     public function test_paths_use_the_offered_schema_and_plain_text_refuses_rich_fields(): void
     {
         foreach (['missing', 'url', 'body', 'cover.missing'] as $field) {
