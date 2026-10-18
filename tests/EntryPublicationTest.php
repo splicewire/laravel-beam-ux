@@ -66,6 +66,65 @@ class EntryPublicationTest extends TestCase
         $this->app->forgetInstance(EntryArtifactStore::class);
     }
 
+    public function test_release_batch_publishes_fixed_versions_and_validates_url_swaps_together(): void
+    {
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_TWO);
+        $one->forceFill(['segment' => 'one'])->save();
+        $two->forceFill(['segment' => 'two'])->save();
+        $pub = app(EntryPublication::class);
+        $a = $pub->recordDraft($one, self::BODY_TWO, pageSettings: new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'A', segment: 'two'));
+        $b = $pub->recordDraft($two, self::BODY_ONE, pageSettings: new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'B', segment: 'one'));
+        $newer = $pub->recordDraft($one->fresh(), self::BODY_ONE);
+        $pub->publishVersions($one, [$one->id => $a->headVersion, $two->id => $b->headVersion]);
+        $this->assertSame($a->headVersion, $one->fresh()->published_version);
+        $this->assertSame($b->headVersion, $two->fresh()->published_version);
+        $this->assertSame($newer->headVersion, $pub->state($one->fresh())->headVersion);
+        $this->assertSame('two', $one->fresh()->segment);
+        $this->assertSame('one', $two->fresh()->segment);
+    }
+
+    public function test_release_batch_compile_failure_keeps_every_pin_and_public_artifact(): void
+    {
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_TWO);
+        $pub = app(EntryPublication::class);
+        $before = [$one->published_version, $two->published_version];
+        $oldArtifacts = [$this->artifacts()->read($one), $this->artifacts()->read($two)];
+        $a = $pub->recordDraft($one, self::BODY_TWO);
+        $b = $pub->recordDraft($two, self::BODY_ONE);
+        $this->artifacts()->forgetVersion($two, $b->headVersion);
+        PublicationFakeCompiler::$fails = true;
+        try {
+            $pub->publishVersions($one, [$one->id => $a->headVersion, $two->id => $b->headVersion]);
+            $this->fail('failed compilation published a Release');
+        } catch (CompilationFailed) {
+            $this->assertSame($before, [$one->fresh()->published_version, $two->fresh()->published_version]);
+            $this->assertSame($oldArtifacts, [$this->artifacts()->read($one->fresh()), $this->artifacts()->read($two->fresh())]);
+        } finally {
+            PublicationFakeCompiler::$fails = false;
+        }
+    }
+
+    public function test_release_batch_refuses_a_stale_pin_before_any_member_moves(): void
+    {
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_TWO);
+        $pub = app(EntryPublication::class);
+        $pins = [$one->id => $one->published_version, $two->id => $two->published_version];
+        $a = $pub->recordDraft($one, self::BODY_TWO);
+        $b = $pub->recordDraft($two, self::BODY_ONE);
+        $pub->publishVersion($two, $b->headVersion);
+        try {
+            $pub->publishVersions($one, [$one->id => $a->headVersion, $two->id => $b->headVersion], expectedPins: $pins);
+            $this->fail('stale Release was published');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('release', $exception->errors());
+            $this->assertSame($pins[$one->id], $one->fresh()->published_version);
+            $this->assertSame($b->headVersion, $two->fresh()->published_version);
+        }
+    }
+
     public function test_page_settings_are_drafted_with_body_and_only_published_from_the_named_version(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);

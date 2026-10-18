@@ -150,47 +150,82 @@ class EntryPublication
     /** Publish precisely the version the author saw; do not overwrite a newer working copy. */
     public function publishVersion(BeamUxEntry $entry, string $ref, ?Model $actor = null): EntryPublicationData
     {
+        return $this->publishVersions($entry, [(string) $entry->getKey() => $ref], $actor)[(string) $entry->getKey()];
+    }
+
+    /**
+     * Publish fixed member versions on one entry connection. Authorization belongs to the caller.
+     * The Release participant calls this inside its workflow transaction; single publish shares it.
+     *
+     * @param array<string, string> $refs Entry id => fixed version id.
+     * @param array<string, ?string>|null $expectedPins Complete observed-pin map, when publishing a Release.
+     * @return array<string, EntryPublicationData>
+     */
+    public function publishVersions(BeamUxEntry $context, array $refs, ?Model $actor = null, ?array $expectedPins = null): array
+    {
         $this->requireVersionStore();
 
-        return $entry->getConnection()->transaction(function () use ($entry, $ref, $actor) {
-            $entry->newQuery()->orderBy('id')->lockForUpdate()->get();
-            $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
-            $particle = $this->particle($locked);
-            $version = $particle === null ? null : $this->versions->version($particle, $ref);
-            if ($version === null) {
-                throw ValidationException::withMessages(['ref' => 'The named version does not belong to this entry.']);
-            }
-            $body = $version->snapshot['payload'] ?? null;
-            if (! is_array($body)) {
-                throw ValidationException::withMessages(['ref' => 'The named version has no valid body snapshot.']);
-            }
-            // Publish compares legality against what readers see, not a newer working head.
-            $pinned = $this->publishedVersionId($locked);
-            $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
-            app(CanvasBodyGuard::class)->assertPublishable($locked, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
-
-            $this->applyPageSettings($locked, $version);
-
-            // Compile before any publication or workflow write; failure leaves the site unchanged.
-            app(CompileEntryBody::class)->forVersion($locked, (string) $version->id, $body);
-            $workflow = app(\Splicewire\Beam\Workflows\Control\WorkflowActuator::class);
-            if ($workflow->manages($locked) && $locked->workflow_marking !== BeamUxEntry::MARKING_PUBLISHED) {
-                $result = $workflow->transition($locked, 'publish', new \Splicewire\Beam\Workflows\Control\TransitionContext(
-                    actor: $actor === null ? null : 'user:'.$actor->getKey(),
-                ));
-                if (! $result->applied) {
-                    throw ValidationException::withMessages(['publish' => 'The entry lifecycle refused the publish transition.']);
+        return $context->getConnection()->transaction(function () use ($context, $refs, $actor, $expectedPins) {
+            // Match the URL validator's global lock order, including entries outside this Release.
+            $entries = $context->newQuery()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+            $prepared = [];
+            $changes = [];
+            foreach ($refs as $id => $ref) {
+                $entry = $entries->get($id);
+                if ($entry === null) {
+                    throw ValidationException::withMessages(['release' => 'A Release entry no longer exists.']);
                 }
-                $locked->refresh();
+                if ($expectedPins !== null && (! array_key_exists($id, $expectedPins) || $this->publishedVersionId($entry) !== $expectedPins[$id])) {
+                    throw ValidationException::withMessages(['release' => 'A publication pin moved. Rebase or drop that Release member before publishing.']);
+                }
+                $particle = $this->particle($entry);
+                $version = $particle === null ? null : $this->versions->version($particle, $ref);
+                if ($version === null || ! is_array($version->snapshot['payload'] ?? null)) {
+                    throw ValidationException::withMessages(['ref' => 'The named version does not belong to this entry or has no valid body snapshot.']);
+                }
+                $body = $version->snapshot['payload'];
+                $pin = $this->publishedVersionId($entry);
+                $publishedBody = $pin === null ? null : ($this->versions->version($particle, $pin)?->snapshot['payload'] ?? null);
+                app(CanvasBodyGuard::class)->assertPublishable($entry, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
+                $settings = $version->snapshot['meta']['pageSettings'] ?? null;
+                if ($settings !== null) {
+                    $data = \Splicewire\Beam\Ux\Data\EntryPageSettingsData::validateAndCreate($settings);
+                    $changes[$id] = ['parentId' => $data->parentId, 'segment' => $data->segment];
+                }
+                $prepared[$id] = [$entry, $version, $body];
             }
-            $locked->published_version = (string) $version->id;
-            $locked->save();
-            $this->mirror->mirror($locked, $this->placements->resolve($locked)->pathFor($locked), $body);
-            app(CompileEntryBody::class)->artifacts()->prune($locked->refresh());
-            $state = $this->state($locked);
-            $this->audit($locked, 'published', $actor, $state);
+            app(EntryUrlChanges::class)->assertAllowed($context, $changes);
+            // Compile every fixed snapshot before any member's marking, fields or pin changes.
+            foreach ($prepared as [$entry, $version, $body]) {
+                $this->applyPageSettings($entry, $version, validateUrl: false);
+                app(CompileEntryBody::class)->forVersion($entry, (string) $version->id, $body);
+            }
+            $states = [];
+            $workflow = app(\Splicewire\Beam\Workflows\Control\WorkflowActuator::class);
+            foreach ($prepared as $id => [$entry, $version, $body]) {
+                if ($workflow->manages($entry) && $entry->workflow_marking !== BeamUxEntry::MARKING_PUBLISHED) {
+                    $result = $workflow->transition($entry, 'publish', new \Splicewire\Beam\Workflows\Control\TransitionContext(
+                        actor: $actor === null ? null : 'user:'.$actor->getKey(),
+                    ));
+                    if (! $result->applied) {
+                        throw ValidationException::withMessages(['publish' => 'The entry lifecycle refused the publish transition.']);
+                    }
+                    $entry->refresh();
+                    $this->applyPageSettings($entry, $version, validateUrl: false);
+                }
+                $entry->published_version = (string) $version->id;
+                $entry->save();
+                $states[$id] = $this->state($entry);
+                $this->audit($entry, 'published', $actor, $states[$id]);
+                // A later member may still refuse: no disk mirror escapes a rolled-back Release.
+                $snapshot = clone $entry;
+                $entry->getConnection()->afterCommit(function () use ($snapshot, $body) {
+                    $this->mirror->mirror($snapshot, $this->placements->resolve($snapshot)->pathFor($snapshot), $body);
+                    app(CompileEntryBody::class)->artifacts()->prune($snapshot->fresh());
+                });
+            }
 
-            return $state;
+            return $states;
         });
     }
 
@@ -620,16 +655,18 @@ class EntryPublication
     }
 
     /** Assign only in memory; the caller persists these with the pin after compilation succeeds. */
-    private function applyPageSettings(BeamUxEntry $entry, Version $version): void
+    private function applyPageSettings(BeamUxEntry $entry, Version $version, bool $validateUrl = true): void
     {
         $settings = $version->snapshot['meta']['pageSettings'] ?? null;
         if ($settings === null) {
             return; // Historical versions predate page settings; do not invent their old values.
         }
         $data = \Splicewire\Beam\Ux\Data\EntryPageSettingsData::validateAndCreate($settings);
-        app(EntryUrlChanges::class)->assertAllowed($entry, [$entry->id => [
-            'parentId' => $data->parentId, 'segment' => $data->segment,
-        ]]);
+        if ($validateUrl) {
+            app(EntryUrlChanges::class)->assertAllowed($entry, [$entry->id => [
+                'parentId' => $data->parentId, 'segment' => $data->segment,
+            ]]);
+        }
         $entry->forceFill([
             'title' => $data->title, 'parent_id' => $data->parentId, 'segment' => $data->segment,
             'nav_order' => $data->navOrder, 'nav_group' => $data->navGroup,
