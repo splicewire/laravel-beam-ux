@@ -56,6 +56,17 @@ The default compiler shells out to Node against **your** `node_modules` (`@mdx-j
 host with its own build service binds `Splicewire\Beam\Ux\Compile\EntryBodyCompiler` and keeps
 everything above it.
 
+Publishing compiles, so code that writes entries and then publishes them (a data migration, an import)
+needs that toolchain mid-run. Check it before the first write:
+
+```php
+app(\Splicewire\Beam\Ux\Compile\CompileEntryBody::class)->preflight(UxFormat::Tsx); // or the entries themselves
+```
+
+It compiles nothing and starts Node only for formats that compile. When a dependency is missing it
+throws, naming the fix: `npm ci` when your `package.json` declares the dependency, `npm i -D <name>`
+when it does not.
+
 ### The docs surface, out of the box
 
 `splicewire:beam:seed` provisions the `site` realm root and, under `beam.ux.docs.seed`, a `/docs`

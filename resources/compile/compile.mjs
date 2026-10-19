@@ -13,9 +13,17 @@
  * exactly the silent regression ADR-0209 §7 rules out.
  */
 
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+
+/**
+ * What each format compiles with. The toolchain probe (`{ probe: true, format }`, see `main()`) resolves
+ * exactly these through the same `load()` a compile uses, so "the preflight passed" and "a compile of
+ * this format can start" are one claim rather than two resolvers that can disagree.
+ */
+const DEPENDENCIES = { mdx: ['@mdx-js/mdx'], tsx: ['esbuild'] }
 
 const read = (stream) =>
   new Promise((resolve, reject) => {
@@ -46,18 +54,47 @@ const fail = (message) => {
  *
  * `createRequire` against the host's own `package.json` makes resolution start where the docblock
  * always claimed it did. PHP passes the root because PHP is the only side that knows it.
+ *
+ * The failure names the remedy that fits the host ({@link remedyFor}), because the two ways a dependency
+ * goes missing need different commands.
  */
-const load = async (specifier, root) => {
+const load = async (specifier, root, format) => {
   try {
     const require = createRequire(join(root, 'package.json'))
 
     return await import(pathToFileURL(require.resolve(specifier)).href)
   } catch (error) {
     fail(
-      `beam-ux compile: cannot resolve [${specifier}] from the host at ${root} (${error.message}). ` +
-        `Install it in the host (npm i -D ${specifier}) — beam-ux compiles with the host's toolchain.`,
+      `beam-ux compile: ${specifier} is required to compile ${format} entries and cannot be resolved from ` +
+        `the host at ${root} (${error.message}). ${remedyFor(specifier, root)} ` +
+        `beam-ux compiles with the host's toolchain.`,
     )
   }
+}
+
+/**
+ * The fix for a dependency that did not resolve, chosen by whether the host's `package.json` declares it.
+ *
+ * Declared means the host's install never ran or is stale, so the fix is `npm ci`, which installs what
+ * the lock already names. Undeclared means the host has to add it. Schemastud (SS-02, 2026-10-19) had
+ * `esbuild` in package.json and not in node_modules, and the old message told the operator to run
+ * `npm i -D esbuild`, a manifest edit, when the fix was the install.
+ */
+const remedyFor = (specifier, root) => {
+  const manifest = join(root, 'package.json')
+  let declared
+  try {
+    const json = JSON.parse(readFileSync(manifest, 'utf8'))
+    declared = ['dependencies', 'devDependencies', 'optionalDependencies'].some(
+      (field) => typeof json?.[field]?.[specifier] === 'string',
+    )
+  } catch {
+    return `There is no readable ${manifest}: install the host's Node toolchain there (npm i -D ${specifier}), then retry.`
+  }
+
+  return declared
+    ? `${manifest} declares it, so the host's node_modules is not installed or is stale: run \`npm ci\` in ${root}, then retry.`
+    : `${manifest} does not declare it: run \`npm i -D ${specifier}\` in ${root}, then retry.`
 }
 
 /**
@@ -154,7 +191,7 @@ const warnHardWrappedLists = (warnings) => () => (tree) => {
 }
 
 const compileMdx = async (source, slug, root, warnings) => {
-  const { compile } = await load('@mdx-js/mdx', root)
+  const { compile } = await load('@mdx-js/mdx', root, 'mdx')
 
   const compiled = await compile(stripFrontmatter(source), {
     remarkPlugins: [stripCommentExpressions, warnHardWrappedLists(warnings)],
@@ -179,7 +216,7 @@ const compileMdx = async (source, slug, root, warnings) => {
  * `default` is the component — so the page shell has one code path for every format.
  */
 const compileTsx = async (source, slug, root) => {
-  const esbuild = await load('esbuild', root)
+  const esbuild = await load('esbuild', root, 'tsx')
 
   const result = await esbuild.transform(source, {
     loader: 'tsx',
@@ -219,7 +256,23 @@ const main = async () => {
     fail(`beam-ux compile: unreadable input (${error.message})`)
   }
 
-  const { format, source, slug = 'entry', root = process.cwd() } = input
+  const { format, source, slug = 'entry', root = process.cwd(), probe = false } = input
+
+  // The toolchain probe: resolve what this format compiles with and compile nothing. PHP runs it before a
+  // caller's first write (`CompileEntryBody::preflight()`), so a host missing its toolchain fails before a
+  // batch has half-written anything rather than in the middle of it.
+  if (probe === true) {
+    const dependencies = DEPENDENCIES[format]
+    if (dependencies === undefined) {
+      fail(`beam-ux compile: unsupported format [${format}].`)
+    }
+    for (const specifier of dependencies) {
+      await load(specifier, root, format)
+    }
+    process.stdout.write(JSON.stringify({ ok: true, format, dependencies }))
+
+    return
+  }
 
   if (typeof source !== 'string') {
     fail('beam-ux compile: input carried no `source` string.')

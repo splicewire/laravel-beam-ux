@@ -7,6 +7,7 @@ use Splicewire\Beam\Ux\Codec\JsonDocPrinter;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Console\CompileEntriesCommand;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
+use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -119,6 +120,43 @@ class CompileEntryBody
             : $entry->codec()->decode($body);
 
         return $this->artifacts->putVersion($entry, $versionId, $this->compiler->compile($entry, $source));
+    }
+
+    /**
+     * Fail **before the caller writes anything** when this host cannot compile the given entries or
+     * formats (SS-02). For a caller that writes several things before its first compile, such as a host
+     * data migration that copies legacy pages and then publishes them: run this first, with what you are
+     * about to publish, and a missing toolchain stops you with nothing written, naming the fix
+     * (`npm ci` when package.json declares the dependency).
+     *
+     * Only what will compile is checked. An entry {@see compilable()} rejects (a component, a css theme)
+     * needs no toolchain, and a host whose batch holds no such page never starts Node, so a host with no
+     * tsx pages still migrates without one. A bound compiler that cannot preflight
+     * ({@see PreflightsToolchain}) is trusted to fail loudly at compile time, as before.
+     *
+     * @throws CompilationFailed naming the missing toolchain piece and the command that installs it
+     */
+    public function preflight(UxFormat|BeamUxEntry ...$subjects): void
+    {
+        if (! $this->compiler instanceof PreflightsToolchain) {
+            return;
+        }
+
+        $formats = [];
+
+        foreach ($subjects as $subject) {
+            $format = $subject instanceof BeamUxEntry
+                ? ($this->compilable($subject) ? $subject->format : null)
+                : $subject;
+
+            if ($format !== null) {
+                $formats[$format->value] = $format;
+            }
+        }
+
+        foreach ($formats as $format) {
+            $this->compiler->preflight($format);
+        }
     }
 
     /** Whether this entry is one the action compiles at all. */

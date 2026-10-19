@@ -21,6 +21,15 @@ class CompilationFailed extends RuntimeException
         );
     }
 
+    /**
+     * The host cannot compile `$format` at all: its toolchain is missing (SS-02). Not about any one entry,
+     * so it names the format and carries the reason the toolchain gave, which names the fix.
+     */
+    public static function toolchain(string $format, string $reason): self
+    {
+        return new self("beam-ux cannot compile [{$format}] entries on this host: {$reason}");
+    }
+
     /** No registered strategy for the entry's format — a configuration gap, not a broken body. */
     public static function unsupported(BeamUxEntry $entry): self
     {

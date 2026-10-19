@@ -22,7 +22,7 @@ use Symfony\Component\Process\Process;
  * `beam.ux.compile.binary` / `.script` / `.timeout` exist so a host with a pinned Node, a wrapper, or a
  * warm compile service points at it without re-implementing this class.
  */
-class NodeEntryBodyCompiler implements EntryBodyCompiler
+class NodeEntryBodyCompiler implements EntryBodyCompiler, PreflightsToolchain
 {
     /** The formats `compile.mjs` knows how to turn into an ES module. `css` is a theme body, not a page. */
     public const FORMATS = [UxFormat::Mdx->value, UxFormat::Tsx->value];
@@ -48,30 +48,17 @@ class NodeEntryBodyCompiler implements EntryBodyCompiler
             throw CompilationFailed::unsupported($entry);
         }
 
-        $script = $this->script ?? __DIR__.'/../../resources/compile/compile.mjs';
+        $script = $this->script();
 
         if (! is_file($script)) {
             throw CompilationFailed::for($entry, "the compile script is missing at [{$script}].");
         }
 
-        $process = new Process(
-            [$this->binary, $script],
-            $this->workingDirectory,
-            null,
-            json_encode([
-                'format' => $entry->format?->value,
-                'slug' => (string) $entry->slug,
-                'source' => $source,
-                // The host root, passed explicitly because PHP is the only side that knows it. Node
-                // resolves bare specifiers from the importing module's REAL path, and `compile.mjs`
-                // lives in this package — which reaches the host's node_modules only when the package
-                // is physically nested under it. A Composer path repository symlinks it out of the
-                // tree entirely, so the script would look for `@mdx-js/mdx` beside the package source
-                // and report it missing while it sat installed in the host. See `load()` in the script.
-                'root' => $this->workingDirectory ?? base_path(),
-            ], JSON_THROW_ON_ERROR),
-            $this->timeout,
-        );
+        $process = $this->process($script, [
+            'format' => $entry->format?->value,
+            'slug' => (string) $entry->slug,
+            'source' => $source,
+        ]);
 
         try {
             $process->mustRun();
@@ -79,7 +66,7 @@ class NodeEntryBodyCompiler implements EntryBodyCompiler
             // stderr carries the compiler's own diagnostic (an MDX syntax error, a missing dependency).
             // Surfacing it verbatim is the point: "compilation failed" with no reason is what sends
             // someone to the browser-fallback that §7 forbids.
-            throw CompilationFailed::for($entry, trim($process->getErrorOutput()) ?: $e->getMessage());
+            throw CompilationFailed::for($entry, $this->reason($process, $e));
         }
 
         $decoded = json_decode($process->getOutput(), true);
@@ -98,6 +85,32 @@ class NodeEntryBodyCompiler implements EntryBodyCompiler
     }
 
     /**
+     * Resolve `$format`'s dependencies from the host through `compile.mjs`'s own `load()`, compiling
+     * nothing (SS-02). One resolver for the probe and the compile, so a passing preflight means the
+     * compile's resolution passes too.
+     */
+    public function preflight(UxFormat $format): void
+    {
+        if (! in_array($format->value, self::FORMATS, true)) {
+            return;
+        }
+
+        $script = $this->script();
+
+        if (! is_file($script)) {
+            throw CompilationFailed::toolchain($format->value, "the compile script is missing at [{$script}].");
+        }
+
+        $process = $this->process($script, ['format' => $format->value, 'probe' => true]);
+
+        try {
+            $process->mustRun();
+        } catch (ProcessFailedException $e) {
+            throw CompilationFailed::toolchain($format->value, $this->reason($process, $e));
+        }
+    }
+
+    /**
      * The warnings the last compile reported (DOC-15), each `{rule, line, message}`.
      *
      * @return list<array{rule: string, line: int, message: string}>
@@ -105,5 +118,47 @@ class NodeEntryBodyCompiler implements EntryBodyCompiler
     public function lastWarnings(): array
     {
         return $this->lastWarnings;
+    }
+
+    private function script(): string
+    {
+        return $this->script ?? __DIR__.'/../../resources/compile/compile.mjs';
+    }
+
+    /** @param  array<string, mixed>  $input */
+    private function process(string $script, array $input): Process
+    {
+        return new Process(
+            [$this->binary, $script],
+            $this->workingDirectory,
+            null,
+            json_encode($input + [
+                // The host root, passed explicitly because PHP is the only side that knows it. Node
+                // resolves bare specifiers from the importing module's REAL path, and `compile.mjs`
+                // lives in this package — which reaches the host's node_modules only when the package
+                // is physically nested under it. A Composer path repository symlinks it out of the
+                // tree entirely, so the script would look for `@mdx-js/mdx` beside the package source
+                // and report it missing while it sat installed in the host. See `load()` in the script.
+                'root' => $this->workingDirectory ?? base_path(),
+            ], JSON_THROW_ON_ERROR),
+            $this->timeout,
+        );
+    }
+
+    /**
+     * Why the process failed, in words that name the fix. Exit 126/127 is the shell reporting that the
+     * binary itself could not run (no Node on the PATH, or a wrong `beam.ux.compile.binary`), which the
+     * script's own diagnostics never cover because the script never started.
+     */
+    private function reason(Process $process, ProcessFailedException $e): string
+    {
+        $stderr = trim($process->getErrorOutput());
+
+        if (in_array($process->getExitCode(), [126, 127], true)) {
+            return "Node could not run as [{$this->binary}] ({$stderr}). beam-ux compiles with the host's Node: "
+                .'install it, or point `beam.ux.compile.binary` (BEAM_UX_NODE_BINARY) at it.';
+        }
+
+        return $stderr ?: $e->getMessage();
     }
 }
