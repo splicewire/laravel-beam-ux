@@ -14,7 +14,9 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * both read this one helper, so the save and the palette never disagree.
  *
  * It asks laravel-beam's {@see TenancyContext} for the central connection and **fails closed**: an entry
- * whose residency cannot be determined is treated as tenant-owned (code refused).
+ * whose residency cannot be determined is treated as tenant-owned (code refused). An entry on the DEFAULT
+ * connection is central exactly when no tenant is initialized (the flagship reads central entries there;
+ * L2 r6 found every central docs page refused as tenant-owned before this).
  */
 final class EntryResidency
 {
@@ -22,20 +24,35 @@ final class EntryResidency
 
     public function isCentralResident(BeamUxEntry $entry): bool
     {
-        $central = $this->tenancy->centralConnection();
+        try {
+            $central = $this->tenancy->centralConnection();
 
-        // No central_connection configured means the host runs no split, so its single connection is
-        // central and a single-tenant host keeps authoring code (ADR-0239 / ux-0227 d1).
-        if ($central === null) {
-            return true;
+            // No central_connection configured means the host runs no split, so its single connection is
+            // central and a single-tenant host keeps authoring code (ADR-0239 / ux-0227 d1).
+            if ($central === null) {
+                return true;
+            }
+
+            $own = $entry->getConnectionName();
+
+            // An entry on the DEFAULT connection: an unpinned model's null, or the default's own name, which
+            // Eloquent stamps on every model a query hydrates. A host that reads entries on its default
+            // connection (the flagship's docs ops, mounted with no tenancy) reaches here for every CENTRAL
+            // entry. Which database the default connection is at this moment is exactly whether a tenant is
+            // initialized (stancl switches it, or the search_path, per tenant), so: central iff no tenant.
+            // Checked FIRST: a schema-per-tenant host may name its default connection as central, and a
+            // tenant's entry hydrated on it would otherwise pass as central.
+            if ($own === null || $own === config('database.default')) {
+                return ! $this->tenancy->isActive();
+            }
+
+            // A split host: an entry demonstrably PINNED to the central connection is central — its configured
+            // name, or the fabricated 'central' alias ({@see EntryPromoter::CENTRAL_CONNECTION}).
+            // Any other connection (a tenant's) is tenant-owned.
+            return $own === $central || $own === EntryPromoter::CENTRAL_CONNECTION;
+        } catch (\Throwable) {
+            // Residency that cannot be determined fails closed to tenant-owned: code is refused.
+            return false;
         }
-
-        $own = $entry->getConnectionName();
-
-        // A split host: the entry is central only when it demonstrably lives on the central connection
-        // — its configured name, or the fabricated 'central' alias ({@see EntryPromoter::CENTRAL_CONNECTION}).
-        // A tenant schema, or an undeterminable (null/default) connection, FAILS CLOSED to tenant-owned.
-        return $own !== null
-            && ($own === $central || $own === EntryPromoter::CENTRAL_CONNECTION);
     }
 }
