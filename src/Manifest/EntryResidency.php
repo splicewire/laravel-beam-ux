@@ -27,10 +27,12 @@ final class EntryResidency
         try {
             $central = $this->tenancy->centralConnection();
 
-            // No central_connection configured means the host runs no split, so its single connection is
-            // central and a single-tenant host keeps authoring code (ADR-0239 / ux-0227 d1).
+            // No central_connection configured: normally a host with no split, whose single connection is central,
+            // so a single-tenant host keeps authoring code (ADR-0239 / ux-0227 d1). But null does not promise no
+            // tenant (an adapter answers null for an absent or dangling central config while a tenant is live), so
+            // it is central only while no tenant is initialized (review-r1 on 09c60e5).
             if ($central === null) {
-                return true;
+                return ! $this->tenancy->isActive();
             }
 
             $own = $entry->getConnectionName();

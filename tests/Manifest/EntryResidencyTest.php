@@ -121,6 +121,16 @@ class EntryResidencyTest extends TestCase
         $this->assertTrue($residency->isCentralResident(new BeamUxEntry));
     }
 
+    public function test_no_central_connection_does_not_admit_code_while_a_tenant_is_initialized(): void
+    {
+        // review-r1 on 09c60e5: an adapter may answer null for an absent or dangling central config while a tenant
+        // is live. Null is "no split" only when no tenant is initialized.
+        $residency = new EntryResidency($this->tenancy(null, active: true));
+
+        $this->assertFalse($residency->isCentralResident($this->hydratedOnDefault()));
+        $this->assertFalse($residency->isCentralResident(new BeamUxEntry));
+    }
+
     public function test_a_default_connection_entry_is_central_while_no_tenant_is_initialized(): void
     {
         // The flagship's case: a split host reading a central docs entry on its default connection.
