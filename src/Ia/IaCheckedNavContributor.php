@@ -33,7 +33,8 @@ class IaCheckedNavContributor implements FrameNavContributor
     public function contributeNav(?string $realm): ?array
     {
         $block = $this->inner->contributeNav($realm);
-        $realm ??= config('beam.ux.frame_nav.default_realm');
+        // The package contributor reports its selected default; validate that same realm.
+        $realm ??= $block['nav']['realm'] ?? config('beam.ux.frame_nav.default_realm');
 
         if ($block === null || ! is_string($realm) || $realm === '' || ! is_array($block['nav'] ?? null)) {
             return $block;

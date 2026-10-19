@@ -631,6 +631,71 @@ class RealmDashboardTest extends TestCase
 
     // ---------------------------------------------------------------- the manifest
 
+    public function test_teamless_unstamped_manifest_selects_the_user_welcome_without_opening_tenant(): void
+    {
+        $this->app['config']->set('beam.ux.frame_nav.default_realm', 'tenant');
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => null);
+        $this->actingAs($this->member());
+        $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+        $this->assertContains('user-dashboard.index', array_column($manifest['routeContext'], 'routeName'));
+        $this->assertSame('user', $manifest['nav']['realm'] ?? null);
+        $this->assertNotContains('tenant-dashboard', array_column($manifest['resources'], 'key'));
+        $this->getJson('frame/resources/user-dashboard')->assertOk()->assertJsonPath('data.0.id', 'welcome');
+        $this->getJson('frame/resources/tenant-dashboard')->assertForbidden();
+    }
+
+    public function test_foreign_team_and_failed_team_resolution_do_not_select_the_personal_fallback(): void
+    {
+        $this->app['config']->set('beam.ux.frame_nav.default_realm', 'tenant');
+        $this->actingAs($this->member());
+        foreach ([fn () => new DashTeam(seats: [99]), fn () => throw new \RuntimeException('unavailable')] as $resolver) {
+            $this->app['config']->set('beam.accounts.teams.resolver', $resolver);
+            $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+            $this->assertSame('tenant', $manifest['nav']['realm'] ?? null);
+            $this->assertNotContains('tenant-dashboard.index', array_column($manifest['routeContext'], 'routeName'));
+            $this->assertNotContains('user-dashboard.index', array_column($manifest['routeContext'], 'routeName'));
+        }
+    }
+
+    public function test_personal_fallback_is_not_collapsed_back_into_tenant(): void
+    {
+        $this->app['config']->set('beam.ux.frame_nav.default_realm', 'tenant');
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => null);
+        $this->actingAs($this->member());
+        foreach ([true, false] as $collapsed) {
+            $this->app['config']->set('frame.collapse_user_realm', $collapsed);
+            $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+            $this->assertSame('user', $manifest['nav']['realm'] ?? null);
+            $this->assertContains('user-dashboard.index', array_column($manifest['routeContext'], 'routeName'));
+            $this->assertNotContains('tenant-dashboard.index', array_column($manifest['routeContext'], 'routeName'));
+        }
+    }
+
+    public function test_member_unstamped_manifest_keeps_the_tenant_dashboard(): void
+    {
+        $this->app['config']->set('beam.ux.frame_nav.default_realm', 'tenant');
+        $team = new DashTeam(seats: [8]);
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => $team);
+        $this->actingAs($this->member());
+        $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+        $this->assertSame('tenant', $manifest['nav']['realm'] ?? null);
+        $this->assertContains('tenant-dashboard.index', array_column($manifest['routeContext'], 'routeName'));
+    }
+
+    public function test_stamped_tenant_manifest_never_falls_back_for_a_non_member(): void
+    {
+        $this->app['config']->set('beam.ux.frame_nav.default_realm', 'tenant');
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => null);
+        $this->app['router']->get('tenant-manifest', \Schemastud\Frame\Http\Controllers\FrameManifestController::class)
+            ->defaults('realm', 'tenant');
+        $this->actingAs($this->member());
+        $manifest = $this->getJson('tenant-manifest')->assertOk()->json();
+        $this->assertSame('tenant', $manifest['nav']['realm'] ?? null);
+        $this->assertNotContains('tenant-dashboard.index', array_column($manifest['routeContext'], 'routeName'));
+        $this->assertNotContains('user-dashboard.index', array_column($manifest['routeContext'], 'routeName'));
+        $this->getJson('frame/resources/tenant-dashboard')->assertForbidden();
+    }
+
     public function test_the_manifest_carries_the_dashboard_resource_its_list_leaf_its_nav_leaf_and_its_contexts(): void
     {
         $this->actingAs($this->staff());

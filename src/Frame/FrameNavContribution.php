@@ -20,7 +20,8 @@ use Splicewire\Beam\Realm\RealmRegistry;
  *
  * A host mounting the manifest once per realm stamps `->defaults('realm', …)` and gets a
  * realm-scoped answer; a host mounting frame's single default route stamps nothing, and the realm
- * falls back to `config('beam.ux.frame_nav.default_realm')`. Neither is discovery — the realm's
+ * falls back to {@see DefaultDashboardRealm}: the configured realm, or the personal user surface for
+ * an authenticated caller with no current team when that default is tenant. Neither is discovery — the realm's
  * resource MEMBERSHIP is still `config('frame.realms')`, a list the host spells out
  * (api-surface-coherence 142).
  *
@@ -51,7 +52,7 @@ class FrameNavContribution implements FrameNavContributor
 
     public function contributeNav(?string $realm): ?array
     {
-        $realm ??= config('beam.ux.frame_nav.default_realm');
+        $realm = app(DefaultDashboardRealm::class)->resolve($realm, $this->request);
 
         if (! is_string($realm) || $realm === '') {
             return null;
@@ -73,7 +74,7 @@ class FrameNavContribution implements FrameNavContributor
         $this->validator->assert($routeContext, $nav);
 
         return [
-            'nav' => $nav->toArray(),
+            'nav' => [...$nav->toArray(), 'realm' => $realm],
             'routeContext' => $routeContext,
         ];
     }
