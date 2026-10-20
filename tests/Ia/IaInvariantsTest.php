@@ -10,6 +10,7 @@ use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavRegistry;
 use Rushing\DataNav\NavTree;
 use Schemastud\Frame\Contracts\FrameNavContributor;
+use Schemastud\Frame\Registry\RouteContextEntry;
 use Splicewire\Beam\Authorization\SeatGate;
 use Splicewire\Beam\Http\Particle\ParticleController;
 use Splicewire\Beam\Http\Particle\ParticleOperationController;
@@ -50,6 +51,10 @@ class IaInvariantsTest extends TestCase
         Route::get('operator/tenants', fn () => 'tenants')->name('operator.tenants')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
         Route::get('settings/profile', fn () => 'profile')->name('settings.profile')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
         Route::get('projects/{project}', fn () => 'project')->name('projects.show')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
+        Route::get('usage', fn () => 'usage')->name('usage.index')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
+        Route::get('cost', fn () => 'cost')->name('cost.index')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
+        Route::get('guest-links', fn () => 'guest-links')->name('guest-links.index')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
+        Route::get('circuits/{circuit}/guest-links', fn () => 'circuit guest-links')->name('circuits.guest-links.index')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
         // The public site's entry route, mounted last as a host mounts it: it answers every other path.
         Route::get('{path}', fn () => 'site entry')->where('path', '.*')->name('site.entry')
             ->defaults('beamUxRealm', 'site')->defaults(SeatGate::OPEN_TO_MEMBERS, true);
@@ -89,15 +94,15 @@ class IaInvariantsTest extends TestCase
     }
 
     /** A host contributor that hands back exactly this nav, whatever builder made it. */
-    private function bindContributor(array $items): void
+    private function bindContributor(array $items, array $routeContext = []): void
     {
-        $this->app->bind(FrameNavContributor::class, fn () => new class($items) implements FrameNavContributor
+        $this->app->bind(FrameNavContributor::class, fn () => new class($items, $routeContext) implements FrameNavContributor
         {
-            public function __construct(private array $items) {}
+            public function __construct(private array $items, private array $routeContext) {}
 
             public function contributeNav(?string $realm): ?array
             {
-                return ['nav' => NavTree::make($this->items)->toArray(), 'routeContext' => []];
+                return ['nav' => NavTree::make($this->items)->toArray(), 'routeContext' => $this->routeContext];
             }
         });
     }
@@ -420,6 +425,62 @@ class IaInvariantsTest extends TestCase
         $pruned = $invariants->prune('tenant', $nav);
 
         $this->assertSame([], $pruned['items']);
+    }
+
+    public function test_i7_two_seats_for_the_same_resource_throw_even_when_route_names_differ(): void
+    {
+        $links = [
+            NavLink::make(title: 'Usage', href: '/usage', routeName: 'usage.index'),
+            NavLink::make(title: 'Cost', href: '/cost', routeName: 'cost.index'),
+        ];
+        $nav = NavTree::make($links)->toArray();
+        $routeContext = [
+            new RouteContextEntry('usage.index', 'usage', mounts: 'list', resource: 'usage'),
+            new RouteContextEntry('cost.index', 'cost', mounts: 'list', resource: 'usage'),
+        ];
+
+        $this->hostNav('tenant', $links);
+        $this->bindContributor($links, $routeContext);
+        $this->expectException(IaInvariantViolation::class);
+        $this->expectExceptionMessageMatches('#I7 tenant /cost#');
+
+        $this->app->make(FrameNavContributor::class)->contributeNav('tenant');
+    }
+
+    public function test_i7_a_resource_seat_and_its_parent_scoped_record_tab_are_allowed(): void
+    {
+        $nav = NavTree::make([
+            NavLink::make(title: 'Guest links', href: '/guest-links', routeName: 'guest-links.index'),
+            NavLink::make(title: 'Circuit guest links', href: '/circuits/42/guest-links', routeName: 'circuits.guest-links.index'),
+        ])->toArray();
+        $routeContext = [
+            new RouteContextEntry('guest-links.index', 'guest-links', mounts: 'list', resource: 'guest-links'),
+            new RouteContextEntry('circuits.guest-links.index', 'circuits/:circuit/guest-links', mounts: 'list', resource: 'guest-links'),
+        ];
+
+        $this->app->make(IaInvariants::class)->assert('tenant', $nav, routeContext: $routeContext);
+        $this->assertSame([], $this->app->make(IaInvariants::class)->violations('tenant', $nav, routeContext: $routeContext));
+    }
+
+    public function test_i7_a_duplicate_package_resource_seat_is_pruned(): void
+    {
+        $nav = NavTree::make([
+            NavLink::make(title: 'Usage', href: '/usage', routeName: 'usage.index'),
+            NavLink::make(title: 'Cost', href: '/cost', routeName: 'cost.index'),
+        ])->toArray();
+        $routeContext = [
+            new RouteContextEntry('usage.index', 'usage', mounts: 'list', resource: 'usage'),
+            new RouteContextEntry('cost.index', 'cost', mounts: 'list', resource: 'usage'),
+        ];
+
+        $pruned = $this->app->make(IaInvariants::class)->prune('tenant', $nav, routeContext: $routeContext);
+
+        $this->assertSame(['/usage'], $this->hrefs(['nav' => $pruned]));
+    }
+
+    public function test_i7_is_part_of_the_installed_invariant_set(): void
+    {
+        $this->assertContains('I7', $this->app->make(IaInvariants::class)->ids());
     }
 }
 
