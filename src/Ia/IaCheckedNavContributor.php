@@ -41,9 +41,9 @@ class IaCheckedNavContributor implements FrameNavContributor
         }
 
         if ($this->contributedByThePackage($realm)) {
-            $block['nav'] = $this->invariants->prune($realm, $block['nav']);
+            $block['nav'] = $this->invariants->prune($realm, $block['nav'], routeContext: $block['routeContext'] ?? []);
         } else {
-            $block['nav'] = $this->invariants->enforce($realm, $block['nav']);
+            $block['nav'] = $this->invariants->enforce($realm, $block['nav'], routeContext: $block['routeContext'] ?? []);
         }
 
         return $block;
