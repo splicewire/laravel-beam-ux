@@ -194,10 +194,9 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "scripts": {
-        "test": "@php vendor/bin/phpunit",
-        "test:toolchain": [
-            "@putenv BEAM_UX_NODE_MODULES=../../../../laravel/starters/laravel-beam-starter/node_modules",
-            "@test"
+        "test": [
+            "npm ci --prefix tests/Fixtures/entry-body-host --ignore-scripts",
+            "@php vendor/bin/phpunit"
         ],
         "pint": "@php -d memory_limit=512M vendor/bin/pint"
     },

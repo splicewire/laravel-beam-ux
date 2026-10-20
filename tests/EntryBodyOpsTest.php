@@ -14,6 +14,8 @@ use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Particle\ParticleOperationRegistry;
 use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
+use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
+use Splicewire\Beam\Ux\Compile\NodeEntryBodyCompiler;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyData;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
@@ -45,6 +47,16 @@ class EntryBodyOpsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $toolchainRoot = __DIR__.'/Fixtures/entry-body-host';
+        foreach (['esbuild', '@mdx-js/mdx'] as $dependency) {
+            if (! is_file($toolchainRoot.'/node_modules/'.$dependency.'/package.json')) {
+                throw new \RuntimeException("EntryBodyOpsTest owns its Node toolchain; run `npm ci --prefix tests/Fixtures/entry-body-host` (missing {$dependency}).");
+            }
+        }
+        $this->app->singleton(EntryBodyCompiler::class, fn () => new NodeEntryBodyCompiler(
+            workingDirectory: $toolchainRoot,
+        ));
+        $this->app->forgetInstance(CompileEntryBody::class);
         $this->createTables();
     }
 
