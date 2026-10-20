@@ -27,7 +27,10 @@ class IaInvariants
         return $clone;
     }
 
-    /** @return list<string> the ids of the invariants this instance runs */
+    /**
+     * @return list<string> the ids of the invariants this instance runs; I7 is a contextual built-in, not a NavInvariant
+     *                      strategy, because it compares route-backed seats across the projected tree
+     */
     public function ids(): array
     {
         return [...array_map(fn (NavInvariant $invariant): string => $invariant->id(), $this->invariants), 'I7'];
@@ -194,8 +197,9 @@ class IaInvariants
         }
 
         // I7 is over glossary objects, not route names. RouteContextEntry::resource is the stable object identity;
-        // routeName is only the join from the projected seat to that descriptor. Doors never enter this tree, and
-        // group headers are labels rather than seats. A parameterized resource list is a parent-scoped record tab.
+        // routeName is only the join from the projected seat to that descriptor. Seats without a matching route-context
+        // entry (for example, bespoke HostPages) are outside I7. Doors never enter this tree, and group headers are
+        // labels rather than seats. A parameterized resource list is a parent-scoped record tab.
         if ($out === [] && ! self::isGroupHeader($node)) {
             $entry = $this->routeEntry($node, $routeContext);
             $resource = $entry['resource'] ?? null;
