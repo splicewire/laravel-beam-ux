@@ -196,7 +196,7 @@ class DeclaredSectionNavigationTest extends TestCase
     {
         $hrefs = [];
 
-        foreach ($this->app->make(NavSectionProjector::class)->project($realm, new NavContext(user: new User)) as $node) {
+        foreach ($this->app->make(NavSectionProjector::class)->project($realm, new NavContext(user: $this->teamMember())) as $node) {
             $hrefs[] = (string) $node->href;
 
             foreach (($node instanceof InvocableNavItem ? $node->input['static'] ?? [] : []) as $row) {
@@ -240,7 +240,7 @@ class DeclaredSectionNavigationTest extends TestCase
     {
         $this->declareWithStatic([['title' => 'Home', 'href' => '/dashboard', 'icon' => 'House']]);
 
-        $nodes = $this->app->make(NavSectionProjector::class)->project('tenant', new NavContext(user: new User));
+        $nodes = $this->app->make(NavSectionProjector::class)->project('tenant', new NavContext(user: $this->teamMember()));
 
         $this->assertSame('Home', $nodes[0]->title);
         $this->assertSame('House', $nodes[0]->icon);
@@ -258,7 +258,7 @@ class DeclaredSectionNavigationTest extends TestCase
         $row = ['title' => 'Connectors', 'href' => '/connectors', 'icon' => 'Plug', 'navOrder' => 5];
         $this->declareWithStatic([$row]);
 
-        $nodes = $this->app->make(NavSectionProjector::class)->project('tenant', new NavContext(user: new User));
+        $nodes = $this->app->make(NavSectionProjector::class)->project('tenant', new NavContext(user: $this->teamMember()));
 
         $this->assertSame('/dashboard', $nodes[0]->href, 'the leaf is present, so the collapse arm was live');
         $this->assertSame([$row], $this->seatIn($nodes, 'platform')->input['static']);
@@ -274,6 +274,16 @@ class DeclaredSectionNavigationTest extends TestCase
         }
 
         $this->fail("no seat [{$key}] in the projection");
+    }
+
+    /** A real non-Root tenant member: the tenant dashboard is membership-gated (APP-07/I6). */
+    private function teamMember(): User
+    {
+        $member = (new User)->forceFill(['id' => 42]);
+        $team = new SectionNavigationTeam([42]);
+        $this->app['config']->set('beam.accounts.teams.resolver', fn () => $team);
+
+        return $member;
     }
 
     /**
@@ -304,4 +314,31 @@ class DeclaredSectionNavigationTest extends TestCase
         $this->assertCount(1, $pruned->items);
         $this->assertSame('Full', $pruned->items[0]->title);
     }
+}
+
+/** Minimal team contract fixture with a member role; it deliberately has no Root or owner seat. */
+final class SectionNavigationTeam implements \Splicewire\Beam\Accounts\Contracts\TeamContract
+{
+    /** @param list<int> $memberIds */
+    public function __construct(private array $memberIds) {}
+
+    public function teamKey(): int|string { return 42; }
+
+    public function members(): \Illuminate\Support\Collection { return collect(); }
+
+    public function hasMember(\Illuminate\Contracts\Auth\Authenticatable $user): bool
+    {
+        return in_array($user->getAuthIdentifier(), $this->memberIds, true);
+    }
+
+    public function memberRole(\Illuminate\Contracts\Auth\Authenticatable $user): ?\Splicewire\Beam\Accounts\Enums\Role
+    {
+        return $this->hasMember($user) ? \Splicewire\Beam\Accounts\Enums\Role::Member : null;
+    }
+
+    public function assignMember(\Illuminate\Contracts\Auth\Authenticatable $user, \Splicewire\Beam\Accounts\Enums\Role $role): void {}
+
+    public function removeMember(\Illuminate\Contracts\Auth\Authenticatable $user): void {}
+
+    public function invitations(): \Illuminate\Support\Collection { return collect(); }
 }
