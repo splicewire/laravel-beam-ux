@@ -58,7 +58,9 @@ return new class extends Migration
 
         $publication = app(EntryPublication::class);
 
-        $pinless->orderBy('id')->each(fn (BeamUxEntry $entry) => $publication->baseline($entry));
+        // This is a migration repair, not an author publication: pin the current body without projecting
+        // system-owned content into the host's git-tracked mirror tree (ADR-0165).
+        $pinless->orderBy('id')->each(fn (BeamUxEntry $entry) => $publication->baseline($entry, mirror: false));
     }
 
     public function down(): void

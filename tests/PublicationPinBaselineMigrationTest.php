@@ -85,6 +85,32 @@ class PublicationPinBaselineMigrationTest extends TestCase
         $this->assertSame(2, $this->versionRows());
     }
 
+    public function test_a_migration_baseline_does_not_write_the_host_mirror_tree(): void
+    {
+        $this->createTables();
+        $disk = Storage::fake('mirror-tree');
+        $this->app->instance(
+            \Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class,
+            new \Splicewire\Beam\Ux\Storage\PlacedDiskMirror($disk),
+        );
+        $particle = BeamParticle::create(['payload' => ['canvas' => ['accent' => '#123456']]]);
+        $entry = BeamUxEntry::create([
+            'namespace' => ThemeResolver::NAMESPACE,
+            'slug' => ThemeResolver::SLUG,
+            'type' => UxType::Theme->value,
+            'particle_id' => $particle->id,
+        ]);
+
+        $this->migration()->up();
+
+        $this->assertNotNull($entry->fresh()->getAttribute('published_version'));
+        $this->assertFalse(
+            $disk->exists('theme/theme/default.css'),
+            'the migration wrote a system baseline into the host theme mirror tree',
+        );
+        $this->assertSame([], $disk->allFiles(), 'the migration wrote a system baseline into the host mirror tree');
+    }
+
     public function test_an_entry_with_history_but_no_pin_stays_unpinned_and_unserved(): void
     {
         // History without a pin means a draft was saved and never published: its working copy is NOT what
