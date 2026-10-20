@@ -269,7 +269,7 @@ class FailingOncePublication extends EntryPublication
 {
     public static bool $fail = true;
 
-    public function publishWritten(BeamUxEntry $entry, ?string $label = null): ?string
+    public function publishWritten(BeamUxEntry $entry, ?string $label = null, bool $mirror = true): ?string
     {
         if (self::$fail) {
             self::$fail = false;
@@ -277,6 +277,6 @@ class FailingOncePublication extends EntryPublication
             throw new \RuntimeException('simulated failure while pinning');
         }
 
-        return parent::publishWritten($entry, $label);
+        return parent::publishWritten($entry, $label, $mirror);
     }
 }

@@ -417,10 +417,14 @@ class EntryPublication
      * Separate from {@see publish()} only in that it skips the baseline: the caller has already written
      * over the working copy, so the body a baseline would freeze is gone. The save op takes the baseline
      * itself, before its write, for exactly that reason.
+     *
+     * `$mirror = false` is for a body the caller just READ from its placement file (register-from-disk and its
+     * hydration): the file is the source of that write, so projecting the lowered body back would rewrite a tracked
+     * source into canonical form. Every other publish, an editor save included, still mirrors (ADR-0165).
      */
-    public function publishWritten(BeamUxEntry $entry, ?string $label = null): ?string
+    public function publishWritten(BeamUxEntry $entry, ?string $label = null, bool $mirror = true): ?string
     {
-        return $this->publishWorkingCopy($entry, $label, false);
+        return $this->publishWorkingCopy($entry, $label, false, $mirror);
     }
 
     /** Programmatic author save: retain its written draft, but never publish a failed compile. */
@@ -429,7 +433,7 @@ class EntryPublication
         return $this->publishWorkingCopy($entry, $label, true);
     }
 
-    private function publishWorkingCopy(BeamUxEntry $entry, ?string $label, bool $requireCompiled): ?string
+    private function publishWorkingCopy(BeamUxEntry $entry, ?string $label, bool $requireCompiled, bool $mirror = true): ?string
     {
         if ($entry->particle_id === null) {
             return null;
@@ -444,7 +448,7 @@ class EntryPublication
             return null;
         }
 
-        return $this->pinAndCompile($entry, $this->versionForWorkingCopy($particle, $label ?? 'published'), $requireCompiled);
+        return $this->pinAndCompile($entry, $this->versionForWorkingCopy($particle, $label ?? 'published'), $requireCompiled, $mirror);
     }
 
     /**
@@ -653,7 +657,7 @@ class EntryPublication
      * Explicit author publication compiles at the snapshot address first. System publication
      * retains its established pin-first diagnostic behavior pending its separately nominated policy.
      */
-    private function pinAndCompile(BeamUxEntry $entry, Version $version, bool $requireCompiled = false): ?string
+    private function pinAndCompile(BeamUxEntry $entry, Version $version, bool $requireCompiled = false, bool $mirror = true): ?string
     {
         $body = $version->snapshot['payload'] ?? null;
         if (! is_array($body)) {
@@ -665,7 +669,7 @@ class EntryPublication
             $entry->setAttribute('published_version', (string) $version->id);
             $entry->save();
 
-            return $this->mirrorAndCompile($entry);
+            return $this->mirrorAndCompile($entry, $mirror);
         }
         $particle = $this->requireParticle($entry);
         $pinned = $this->publishedVersionId($entry);
@@ -675,7 +679,9 @@ class EntryPublication
         app(CompileEntryBody::class)->forVersion($entry, (string) $version->id, $body);
         $entry->setAttribute('published_version', (string) $version->id);
         $entry->save();
-        $this->mirror->mirror($entry, $this->placements->resolve($entry)->pathFor($entry), $body);
+        if ($mirror) {
+            $this->mirror->mirror($entry, $this->placements->resolve($entry)->pathFor($entry), $body);
+        }
         app(CompileEntryBody::class)->artifacts()->prune($entry->refresh());
 
         return null;
@@ -727,17 +733,19 @@ class EntryPublication
      * Split out because the pin is the only step that needs the version store; every publish reaches this
      * only after {@see requireVersionStore()} has passed and the pin is set, so it never publishes unpinned.
      */
-    private function mirrorAndCompile(BeamUxEntry $entry): ?string
+    private function mirrorAndCompile(BeamUxEntry $entry, bool $mirror = true): ?string
     {
-        $item = $entry->particle_id === null
-            ? null
-            : $this->drivers->resolveOnEntryConnection($entry)->read((string) $entry->particle_id);
+        if ($mirror) {
+            $item = $entry->particle_id === null
+                ? null
+                : $this->drivers->resolveOnEntryConnection($entry)->read((string) $entry->particle_id);
 
-        $this->mirror->mirror(
-            $entry,
-            $this->placements->resolve($entry)->pathFor($entry),
-            $item?->body ?? [],
-        );
+            $this->mirror->mirror(
+                $entry,
+                $this->placements->resolve($entry)->pathFor($entry),
+                $item?->body ?? [],
+            );
+        }
 
         try {
             // Resolved lazily rather than injected, so this service still constructs on a host that has

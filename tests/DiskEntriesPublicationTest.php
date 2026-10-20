@@ -119,6 +119,78 @@ class DiskEntriesPublicationTest extends TestCase
         @unlink($this->root.'/page/home.tsx');
     }
 
+    /** A fake lens (the Node run is proven end-to-end elsewhere) and a mirror disk rooted at the scanned tree. */
+    private function mirrorOverScannedTree(): \Illuminate\Contracts\Filesystem\Filesystem
+    {
+        $this->app->bind(TsxLens::class, fn () => new class implements TsxLens
+        {
+            public function lower(string $source): array
+            {
+                return [['kind' => 'block', 'name' => 'section', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'From disk']], 'dynamic' => false]];
+            }
+        });
+        $disk = Storage::fake('mirror-source');
+        $this->app->instance(PlacedDiskMirror::class, new PlacedDiskMirror($disk));
+        $this->app->forgetInstance(EntryPublication::class);
+        $this->app->forgetInstance(RegisterEntriesFromDisk::class);
+
+        return $disk;
+    }
+
+    public function test_registering_a_tsx_page_never_rewrites_the_file_it_read(): void
+    {
+        // Lowering is not byte-preserving (ADR-0228 d9): mirroring the registered body back rewrote the authored file into
+        // canonical TSX, so a dev seed dirtied tracked sources (launch row qitem-20261020153346-104d5668).
+        $disk = $this->mirrorOverScannedTree();
+        $authored = "// Authored.\nexport default function Home() {\n    return <section>From disk</section>;\n}\n";
+        $disk->put('page/home.tsx', $authored);
+        touch($disk->path('page/home.tsx'), $before = time() - 3600);
+        clearstatcache();
+
+        app(RegisterEntriesFromDisk::class)->scan($disk->path(''));
+
+        $entry = BeamUxEntry::query()->where('slug', 'home')->whereNull('namespace')->firstOrFail();
+        $this->assertNotNull($entry->published_version, 'the entry was not born published');
+        $this->assertSame('page/home.tsx', app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry),
+            'the mirror target is not the file that was read, so this test proves nothing');
+        clearstatcache();
+        $this->assertSame($authored, $disk->get('page/home.tsx'));
+        $this->assertSame($before, filemtime($disk->path('page/home.tsx')));
+    }
+
+    public function test_hydrating_an_empty_entry_from_its_file_never_rewrites_that_file(): void
+    {
+        $disk = $this->mirrorOverScannedTree();
+        $authored = "// Authored.\nexport default function Home() {\n    return <section>From disk</section>;\n}\n";
+        $disk->put('page/home.tsx', $authored);
+        touch($disk->path('page/home.tsx'), $before = time() - 3600);
+        clearstatcache();
+        $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'title' => 'Home']);
+
+        $this->assertTrue(app(RegisterEntriesFromDisk::class)->hydrateEmpty($entry, $authored));
+
+        $this->assertNotNull($entry->fresh()->published_version);
+        clearstatcache();
+        $this->assertSame($authored, $disk->get('page/home.tsx'));
+        $this->assertSame($before, filemtime($disk->path('page/home.tsx')));
+    }
+
+    public function test_an_editor_publish_still_writes_its_placement_file(): void
+    {
+        // The other half of the rule: only a body read from its own file skips the mirror; a save is its own publish and
+        // lands the git-trackable file (ADR-0165).
+        $disk = $this->mirrorOverScannedTree();
+        $entry = BeamUxEntry::create(['slug' => 'home', 'type' => 'page', 'format' => 'tsx', 'title' => 'Home']);
+        $body = [['kind' => 'block', 'name' => 'section', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Edited']], 'dynamic' => false]];
+        app(EntryPublication::class)->write($entry, $body);
+
+        app(EntryPublication::class)->publishWritten($entry->fresh());
+
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry->fresh())->pathFor($entry->fresh());
+        $this->assertTrue($disk->exists($path), 'an editor publish no longer writes its file');
+        $this->assertStringContainsString('Edited', $disk->get($path));
+    }
+
     public function test_a_registered_entry_is_born_published_with_a_pin_and_a_compiled_artifact(): void
     {
         $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);

@@ -320,8 +320,9 @@ class RegisterEntriesFromDisk
                 $this->writeBody($entry, $source, lower: false);
             }
 
-            // Compiles too; its compile error is kept with this run's failures below rather than thrown.
-            if (($error = $publication->publishWritten($entry->refresh(), 'registered')) !== null) {
+            // Compiles too; its compile error is kept with this run's failures below rather than thrown. No mirror: the
+            // body was read from the file the mirror would write, and lowering is not byte-preserving.
+            if (($error = $publication->publishWritten($entry->refresh(), 'registered', mirror: false)) !== null) {
                 $this->failures[$relative] = $error;
             }
 
@@ -378,7 +379,7 @@ class RegisterEntriesFromDisk
             $current->format = $format;
             $this->writeBody($current, $source);
             $this->inference->forEntry($current, $source, persist: true);
-            $compileError = $publication->publishWritten($current->refresh(), 'hydrated');
+            $compileError = $publication->publishWritten($current->refresh(), 'hydrated', mirror: false);
 
             return true;
         });
