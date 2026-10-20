@@ -32,6 +32,9 @@ class ProviderChainTest extends TestCase
 {
     /** `packageRegistered()`'s hand-written block, verbatim. Change only with the reason written down. */
     private const HISTORICAL_REGISTER_ORDER = [
+        // Added by EP-34 / ADR-0235 d3: entry-owned particles are excluded from standalone records.
+        // This is a real order-5 registration link even though it was added after the hand-written block.
+        'registerStandaloneRecordExclusion',
         'registerCodecs',
         'registerCompile',
         'registerPublic',
@@ -135,7 +138,7 @@ class ProviderChainTest extends TestCase
         // Guards the dead-seam shape from the other side: a rename that unhooked every link would leave
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
-        $this->assertCount(12, $this->chain('register'));
+        $this->assertCount(13, $this->chain('register'));
         $this->assertCount(13, $this->chain('boot'));
     }
 
