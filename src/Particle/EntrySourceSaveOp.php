@@ -77,7 +77,7 @@ class EntrySourceSaveOp
         $publication->requireVersionStore();
 
         // Baseline the currently-live body before the write destroys it (no-op once there is history).
-        $publication->baseline($model);
+        $publication->baseline($model, mirror: true);
 
         $written = $publication->write($model, $body);
 

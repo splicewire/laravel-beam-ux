@@ -65,7 +65,7 @@ class EntryFormSaveOp
 
         // ADR-0225 d2: a save is its own publish; the publish needs the version store. Refuse first.
         $publication->requireVersionStore();
-        $publication->baseline($model);
+        $publication->baseline($model, mirror: true);
 
         $written = $publication->write($model, $input->form);
 

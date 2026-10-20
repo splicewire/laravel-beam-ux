@@ -60,7 +60,7 @@ return new class extends Migration
 
         // This is a migration repair, not an author publication: pin the current body without projecting
         // system-owned content into the host's git-tracked mirror tree (ADR-0165).
-        $pinless->orderBy('id')->each(fn (BeamUxEntry $entry) => $publication->baseline($entry, mirror: false));
+        $pinless->orderBy('id')->each(fn (BeamUxEntry $entry) => $publication->baseline($entry));
     }
 
     public function down(): void

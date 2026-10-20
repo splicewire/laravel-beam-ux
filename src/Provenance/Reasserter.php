@@ -55,7 +55,7 @@ final class Reasserter
                 $this->reassertBody($existing, $attributes['title'] ?? null, $body, $origin);
                 // Same repair as SeedsEntries: baseline only pins a body with no history,
                 // never an unpublished draft which already has history.
-                $publication->baseline($existing->refresh());
+                $publication->baseline($existing->refresh(), mirror: false);
 
                 return $existing->refresh();
             }

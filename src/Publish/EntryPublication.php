@@ -263,7 +263,8 @@ class EntryPublication
             throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);
         }
         $this->requireVersionStore();
-        $this->baseline($entry);
+        // An author-requested draft still needs the current public body mirrored as its baseline.
+        $this->baseline($entry, mirror: true);
         $priorSettings = $this->particle($entry)?->meta['pageSettings'] ?? null;
         $this->write($entry, $body);
         if ($pageSettings !== null || $priorSettings !== null) {
@@ -320,7 +321,7 @@ class EntryPublication
         $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
         $guard->assertPublishable($entry, $guard->workingHead($entry), JsonDocShape::is($publishedBody) ? $publishedBody : []);
 
-        $this->baseline($entry);
+        $this->baseline($entry, mirror: true);
         $particle = $this->particle($entry->refresh()) ?? $particle;
 
         $version = $this->versionForWorkingCopy($particle, $label ?? 'published');
@@ -460,9 +461,10 @@ class EntryPublication
      * because pinning moves its address; the body being compiled is the one already on the page, so a
      * reader sees nothing change.
      *
-     * `$mirror = false` for the seed and register-from-disk repairs: a system write never projects onto the host tree.
+     * System repairs default to no mirror: pinning legacy state must not write into a host's source tree. Author
+     * save paths that need to preserve the currently served body pass `mirror: true` explicitly.
      */
-    public function baseline(BeamUxEntry $entry, bool $mirror = true): void
+    public function baseline(BeamUxEntry $entry, bool $mirror = false): void
     {
         $particle = $this->recordsVersions() ? $this->particle($entry) : null;
 
