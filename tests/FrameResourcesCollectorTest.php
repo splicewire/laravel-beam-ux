@@ -83,10 +83,11 @@ class FrameResourcesCollectorTest extends TestCase
         // navOrder 2 and are registered Plans-then-Packs while their labels sort Packs-then-Plans,
         // so the label tiebreak is what decides and registration order cannot be mistaken for it.
         //
-        // Each is a REAL model with a declared row scope AND an explicit policy whose viewAny admits every
-        // reader ({@see OpenFixtureModel}, {@see OpenFixturePolicy}), so the list admits it to anyone. Both are
+        // Each is a REAL model with a declared row scope, an explicit viewAny policy, and a publicRead shape
+        // ({@see OpenFixtureModel}, {@see OpenFixturePolicy}), so the list admits it to guests and actors. Both are
         // needed: since laravel-beam 01abf93 (2026-10-13) a row scope is the population, never the authority —
         // a policy-less scoped model falls through to an undefined viewAny and every seat here vanished again.
+        // ADR-0230 / laravel-beam 96483c21 requires publicRead for guest reads; viewAny alone is insufficient.
         // Before that, a phantom backing class (`Acme\\Particles\\…`, until 2026-10-06) could not build its
         // authorization bases and laravel-beam 65f7761's fail-closed read hid them the same way (APP-15 PROOF).
         Gate::policy(OpenFixtureModel::class, OpenFixturePolicy::class);
@@ -105,6 +106,7 @@ class FrameResourcesCollectorTest extends TestCase
                 key: $key,
                 backing: OpenFixtureModel::class,
                 data: CollectorFixtureData::class,
+                publicRead: CollectorFixtureData::class,
                 scope: OpenFixtureModel::rowScope(...),
                 label: $label,
                 section: $section,
@@ -230,8 +232,8 @@ class FrameResourcesCollectorTest extends TestCase
      *
      * A null actor is denied by a `viewAny` that does not admit guests, exactly as a real actor failing
      * that policy is. Anonymous is now bounded above by authenticated. The shared fixture seats stay listed
-     * to anonymous only because their bound {@see OpenFixturePolicy} explicitly admits a guest; a row scope
-     * alone no longer admits anyone (laravel-beam 01abf93). A resource with NO model used to stay public
+     * to anonymous because they explicitly declare a `publicRead` projection (ADR-0230); a row scope or
+     * `viewAny` alone no longer admits guests. A resource with NO model used to stay public
      * too, by an arm that returned before this rule could run; it no longer does — see
      * {@see test_an_anonymous_reader_is_never_shown_a_model_less_resource()}.
      */
@@ -347,6 +349,7 @@ class FrameResourcesCollectorTest extends TestCase
             key: 'orphan',
             backing: OpenFixtureModel::class,
             data: CollectorFixtureData::class,
+            publicRead: CollectorFixtureData::class,
             scope: OpenFixtureModel::rowScope(...),
             label: 'Orphan',
             section: 'platform',

@@ -4,6 +4,6 @@
   "type": "module",
   "dependencies": {
     "@mdx-js/mdx": "3.1.1",
-    "esbuild": "0.28.2"
+    "esbuild": "0.27.7"
   }
 }
