@@ -263,6 +263,19 @@ class FrameRouteContextProjectionTest extends TestCase
         $this->assertNotEmpty($block['routeContext']);
     }
 
+    public function test_structural_hrefs_are_not_filtered_by_the_request_actor(): void
+    {
+        $visibility = \Mockery::mock(ResourceVisibility::class);
+        $visibility->shouldReceive('listable')->andReturnFalse();
+        $this->app->instance(ResourceVisibility::class, $visibility);
+
+        $projector = $this->app->make(RouteContextProjector::class);
+
+        $this->assertSame([], $projector->routeContext('tenant'));
+        $this->assertArrayHasKey('circuits.index', $projector->hrefs('tenant'));
+        $this->assertArrayHasKey('tenant-dashboard.index', $projector->hrefs('tenant'));
+    }
+
     public function test_a_denied_resolved_list_gate_removes_every_client_leaf_for_that_resource(): void
     {
         $this->app->bind(RouteContextPlan::class, fn (): RouteContextPlan => new RouteContextPlan(

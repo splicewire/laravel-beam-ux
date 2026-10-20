@@ -82,7 +82,8 @@ class RealmDashboardTest extends TestCase
         // realm off this default — asserted on the manifest below.
         $app['config']->set('beam.ux.frame_nav.default_realm', 'operator');
         $app['config']->set('frame.realms', [
-            'operator' => ['gizmos', 'streams', 'declined', 'hidden', 'orphan', 'unseated', 'optin', 'members'],
+            'operator' => ['gizmos', 'streams', 'declined', 'hidden', 'orphan', 'unseated', 'optin', 'members', 'saved-filters'],
+            'tenant' => ['saved-filters'],
         ]);
     }
 
@@ -643,6 +644,21 @@ class RealmDashboardTest extends TestCase
             ['participates' => true, 'widget' => 'figure-card'],
             $manifest['contexts']['optin']['byNode']['']['overview'],
         );
+    }
+
+    public function test_the_manifest_and_route_context_agree_on_contextual_resources(): void
+    {
+        $this->actingAs($this->staff());
+
+        $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+        $advertised = array_column($manifest['resources'], 'key');
+        $routed = array_values(array_unique(array_filter(array_column($manifest['routeContext'], 'resource'))));
+
+        $this->assertContains('gizmos', $advertised);
+        $this->assertContains('gizmos', $routed);
+        $this->assertNotContains('saved-filters', $advertised);
+        $this->assertNotContains('saved-filters', $routed);
+        $this->assertSame([], array_values(array_diff($routed, $advertised)), 'routeContext must not advertise a refused resource surface.');
     }
 
     /**
