@@ -219,7 +219,7 @@ class RegisterEntriesFromDisk
                 // Born published (ADR-0225 decision 2; launch row qitem-20261016215906-483ede25): a row registered before
                 // entries were pinned is repaired here. baseline() pins only a body with NO history, so an unpublished
                 // draft is never published, and it snapshots + pins atomically, so a failure surfaces and a rerun retries.
-                app(EntryPublication::class)->baseline($existing->refresh());
+                app(EntryPublication::class)->baseline($existing->refresh(), mirror: false);
 
                 continue;
             }

@@ -418,9 +418,9 @@ class EntryPublication
      * over the working copy, so the body a baseline would freeze is gone. The save op takes the baseline
      * itself, before its write, for exactly that reason.
      *
-     * `$mirror = false` is for a body the caller just READ from its placement file (register-from-disk and its
-     * hydration): the file is the source of that write, so projecting the lowered body back would rewrite a tracked
-     * source into canonical form. Every other publish, an editor save included, still mirrors (ADR-0165).
+     * `$mirror = false` is for a system write: register-from-disk and its hydration, a seed and a re-seed. A body read
+     * from its placement file would be rewritten into canonical form, and a seeded one would land files nobody authored
+     * in the host's tree (launch row qitem-20261020153346-104d5668). An author's save still mirrors (ADR-0165).
      */
     public function publishWritten(BeamUxEntry $entry, ?string $label = null, bool $mirror = true): ?string
     {
@@ -459,8 +459,10 @@ class EntryPublication
      * restorable and gives the publication pin something true to point at. The artifact is recompiled
      * because pinning moves its address; the body being compiled is the one already on the page, so a
      * reader sees nothing change.
+     *
+     * `$mirror = false` for the seed and register-from-disk repairs: a system write never projects onto the host tree.
      */
-    public function baseline(BeamUxEntry $entry): void
+    public function baseline(BeamUxEntry $entry, bool $mirror = true): void
     {
         $particle = $this->recordsVersions() ? $this->particle($entry) : null;
 
@@ -477,7 +479,7 @@ class EntryPublication
         // which every later baseline() reads as an unpublished draft and skips, so it could never be repaired. Rolled
         // back together, a failure leaves the row exactly as it was and a retry pins it.
         $entry->getConnection()->transaction(
-            fn () => $this->pinAndCompile($entry, $this->versions->snapshot($particle, 'baseline')),
+            fn () => $this->pinAndCompile($entry, $this->versions->snapshot($particle, 'baseline'), false, $mirror),
         );
     }
 

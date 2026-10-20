@@ -55,6 +55,24 @@ class SeededEntryPublicationTest extends TestCase
         $this->assertStringContainsString('Seeded body.', (string) app(EntryArtifactStore::class)->read($entry->fresh()));
     }
 
+    public function test_seeding_never_writes_the_host_mirror_tree(): void
+    {
+        // A system seed is not an author save: neither a seeded page nor shipped structured content (the starter's auth
+        // pages, a theme) lands files in the host's git-tracked mirror (launch row qitem-20261020153346-104d5668).
+        $disk = Storage::fake('mirror-tree');
+        $this->app->instance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class, new \Splicewire\Beam\Ux\Storage\PlacedDiskMirror($disk));
+        $this->app->forgetInstance(EntryPublication::class);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Provenance\Reasserter::class);
+
+        $page = (new PageSeedingSeeder)->seed('guide', "# Guide\n\nSeeded body.");
+        $body = [['kind' => 'block', 'name' => 'AuthLogin', 'isComponent' => true, 'props' => [], 'children' => [], 'dynamic' => false]];
+        $login = app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->seedBody(['namespace' => 'starter', 'slug' => 'login'], ['type' => 'page', 'format' => 'tsx', 'title' => 'Login'], $body, 'package:starter/auth');
+
+        $this->assertNotNull($page->published_version);
+        $this->assertNotNull($login->published_version);
+        $this->assertSame([], $disk->allFiles(), 'a seed wrote the host mirror tree');
+    }
+
     public function test_reseeding_is_idempotent_the_pin_and_the_history_do_not_move(): void
     {
         $first = (new PageSeedingSeeder)->seed('guide', "# Guide\n\nSeeded body.");

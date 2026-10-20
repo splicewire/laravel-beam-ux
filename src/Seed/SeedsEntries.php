@@ -83,7 +83,7 @@ trait SeedsEntries
             // born published, or by a run that failed while pinning) is pinned here, so re-running the seeder recovers it.
             // baseline() only pins a written body with NO history: a row that has history but no pin is an unpublished
             // draft, and this never publishes it. A no-op where the version store is absent or the row is pinned.
-            app(EntryPublication::class)->baseline($existing->refresh());
+            app(EntryPublication::class)->baseline($existing->refresh(), mirror: false);
 
             return $existing->refresh();
         }
@@ -147,7 +147,8 @@ trait SeedsEntries
             // Pin the written body and compile it at the pinned address: what a reader is served from now on. A failure
             // to pin propagates and rolls the row back (EntryPublication already tolerates a compile failure, returning
             // it rather than throwing).
-            $publication->publishWritten($entry->refresh(), 'seeded');
+            // A system seed, not an author save: it never writes the host's mirror tree.
+            $publication->publishWritten($entry->refresh(), 'seeded', mirror: false);
 
             // A body the entry's storage driver doesn't keep as a particle has no version to pin: it compiles as it always
             // did, and only THAT compile's failure is tolerated (reported by BeamUxArtifactAudit).

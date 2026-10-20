@@ -143,7 +143,8 @@ final class Reasserter
             $entry->particle_id = $written->key;
             $entry->save();
         }
-        $publication->publishWritten($entry->refresh(), $label);
+        // Every caller is a seed or a re-import (seeded / reasserted), never an author save: no mirror write.
+        $publication->publishWritten($entry->refresh(), $label, mirror: false);
     }
 
     private function asserts(string $origin): bool
