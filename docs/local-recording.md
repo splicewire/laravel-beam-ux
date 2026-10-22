@@ -6,6 +6,7 @@ authority; Git is a local record of published mirror projections, never the Vers
 ReleaseService's publish participant collects EntryPublication's fixed prepared snapshots.
 The Release-only completion coordinator runs after outer commit, locks current entries, refuses
 superseded pins/markings, completes and reads back every mirror, then records the whole Release.
+Completion reserves and locks entries in the same deterministic entry-ID order as publication.
 Non-Release publication retains its existing callbacks. Optional failures are contained; pruning
 is independent and later callbacks still run. Nonlocal mirrors keep their publication behavior
 but do not get local Git recording.
@@ -67,7 +68,11 @@ resource in a realm and map a console path distinct from /beam-ux-release-files.
 Enabled local mirrors in one normal/linked, born attached Git worktree are supported. Discovery
 uses rev-parse, including .git files. Symlinks/escapes/submodules/nested repositories/duplicates/
 case collisions, unsupported sparse/split/worktree config, locks and unfinished Git operations
-refuse. Missing/drifted mirrors are never overwritten by retry. External branch advancement is
+refuse Git recording. These Git eligibility rules do not suppress ordinary published mirrors.
+A configured mirror root may use a filesystem alias or symlink; each resolved child must remain
+inside that configured root. Git path/case/nested-repository/index inspection refusal still completes
+all legitimate mirrors and leaves the whole Release unrecorded. A real mirror failure remains a
+reported failure and no partial Git commit is installed. Missing/drifted mirrors are never overwritten by retry. External branch advancement is
 protected by CAS; concurrent external checkout/rebase/reset is unsupported and detected changes
 refuse. A host may choose its Git executable via beam.ux.recording.git; no request can override it.
 
@@ -79,3 +84,12 @@ fresh/upgrade and ordinary hook-failure/Files-retry journey. Focused tests and m
 are separate; existing full-suite compatibility limitations are not erased by this feature.
 
 Current-pin comparison, bounded draft import and missing-only Restore are described in [Theme files](theme-files.md). Existing-file overwrite and broader EP16 reconciliation remain unfinished.
+
+## Test fixtures
+
+Ordinary CI runs file inspection, bounded import/color/path checks, exclusive Restore and SQLite
+refusal controls in a new canonical system-temporary directory outside checkouts. The fixture
+checks its ownership marker before using Laravel's filesystem cleanup. Base tests configure Git
+unavailable; no suite may discover an enclosing source repository. Only native Git cases require
+an explicitly supplied disposable `BEAM_RECORDING_TEST_ROOT` and opt into Git after admission.
+Compiler and paired-JS integration cases retain their explicit toolchain bindings.

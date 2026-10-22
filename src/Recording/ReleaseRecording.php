@@ -87,6 +87,8 @@ class ReleaseRecording
         $git = null;
         $lock = null;
         $reason = 'git-failed';
+        // Match publication's global entry-ID lock order before SQLite reservation or row reads.
+        usort($prepared, fn (array $left, array $right): int => strcmp((string) $left[0]->getKey(), (string) $right[0]->getKey()));
         try {
             try {
                 $this->authorize($release, $actor);
@@ -96,15 +98,14 @@ class ReleaseRecording
                 }
                 $git = new LocalGit($this->disk()->path(''));
                 $lock = $git->lock();
-            } catch (\Throwable $error) {
+                foreach ($receipt->manifest as $file) {
+                    $this->contained($this->disk()->path(''), $file['path']);
+                    $git->relative($file['absolute']);
+                }
+            } catch (RecordingFailure|\Illuminate\Auth\Access\AuthorizationException $error) {
                 $git = null;
                 $reason = $error instanceof RecordingFailure ? $error->reason : 'unavailable';
                 // Mirror publication remains supported without Git.
-            }
-            if ($git !== null) {
-                foreach ($receipt->manifest as $file) {
-                    $git->relative($file['absolute']);
-                }
             }
             // Keep entry rows locked while completing mirrors; a concurrent publication cannot move
             // their pins between this stale check and the writes. Git does not hold a DB transaction.
@@ -129,7 +130,7 @@ class ReleaseRecording
                         throw new RecordingFailure('mirror-disabled', 'No mirror disk is enabled.');
                     }
                     if (config('filesystems.disks.'.$diskName.'.driver') === 'local') {
-                        $this->contained($disk->path(''), $path);
+                        $this->mirrorContained($disk->path(''), $path);
                     } else {
                         // Existing remote mirrors still publish; only local Git recording is unavailable.
                         $this->relativeParts($path);
@@ -334,6 +335,42 @@ class ReleaseRecording
         }
 
         return Storage::disk($name);
+    }
+
+    /** Configured root aliases are supported; user-resolved child paths must remain inside it. */
+    private function mirrorContained(string $root, string $path): void
+    {
+        clearstatcache(true);
+        $parts = $this->relativeParts($path);
+        $cursor = rtrim($root, '/');
+        if (! str_starts_with($cursor, '/')) {
+            throw new RecordingFailure('path', 'The configured mirror root must be absolute.');
+        }
+        $missing = [];
+        while (($canonical = realpath($cursor)) === false) {
+            if (is_link($cursor) || $cursor === dirname($cursor)) {
+                throw new RecordingFailure('path', 'The configured mirror root cannot be resolved.');
+            }
+            $part = basename($cursor);
+            if ($part === '.' || $part === '..') {
+                throw new RecordingFailure('path', 'The configured mirror root cannot be resolved.');
+            }
+            $missing[] = $part;
+            $cursor = dirname($cursor);
+        }
+        $canonical = rtrim($canonical, '/');
+        foreach (array_reverse($missing) as $part) {
+            $canonical .= '/'.$part;
+        }
+        $cursor = rtrim($root, '/');
+        foreach ($parts as $part) {
+            $cursor .= '/'.$part;
+            $resolved = realpath($cursor);
+            if ((is_link($cursor) && $resolved === false)
+                || ($resolved !== false && $resolved !== $canonical && ! str_starts_with($resolved, $canonical.'/'))) {
+                throw new RecordingFailure('path', 'A resolved mirror path leaves its configured root.');
+            }
+        }
     }
 
     private function contained(string $root, string $path): void

@@ -24,6 +24,54 @@ abstract class TestCase extends Orchestra
     {
         $app['config']->set('data.name_mapping_strategy.input', CamelCaseMapper::class);
         $app['config']->set('data.structure_caching.enabled', false);
+        // Actual Git tests opt in only after admitting their own disposable repository root.
+        $app['config']->set('beam.ux.recording.git', PHP_BINARY.'-beam-ux-tests-no-git');
+    }
+
+    private ?string $ownedFileRoot = null;
+
+    private ?string $fileRootOwner = null;
+
+    /** Portable non-Git file controls run in ordinary CI, outside every checkout. */
+    protected function ownedFileFixtureRoot(): string
+    {
+        if ($this->ownedFileRoot !== null) {
+            return $this->ownedFileRoot;
+        }
+        $temporary = realpath(sys_get_temp_dir());
+        if ($temporary === false) {
+            throw new RuntimeException('A canonical temporary directory is required.');
+        }
+        for ($parent = $temporary; $parent !== dirname($parent); $parent = dirname($parent)) {
+            if (file_exists($parent.'/.git')) {
+                throw new RuntimeException('File fixtures cannot be created inside a checkout.');
+            }
+        }
+        $this->ownedFileRoot = $temporary.'/beam-ux-files-'.bin2hex(random_bytes(12));
+        $this->fileRootOwner = bin2hex(random_bytes(16));
+        if (! mkdir($this->ownedFileRoot, 0700)) {
+            throw new RuntimeException('The owned file fixture cannot be created.');
+        }
+        file_put_contents($this->ownedFileRoot.'/.beam-ux-file-owner', $this->fileRootOwner);
+
+        return $this->ownedFileRoot;
+    }
+
+    protected function tearDown(): void
+    {
+        try {
+            if ($this->ownedFileRoot !== null) {
+                if (is_link($this->ownedFileRoot) || realpath($this->ownedFileRoot) !== $this->ownedFileRoot
+                    || file_get_contents($this->ownedFileRoot.'/.beam-ux-file-owner') !== $this->fileRootOwner) {
+                    throw new RuntimeException('File fixture ownership changed; preserve it for inspection.');
+                }
+                if (! (new \Illuminate\Filesystem\Filesystem)->deleteDirectory($this->ownedFileRoot)) {
+                    throw new RuntimeException('Owned file fixture cleanup failed; preserve it for inspection.');
+                }
+            }
+        } finally {
+            parent::tearDown();
+        }
     }
 
     /**

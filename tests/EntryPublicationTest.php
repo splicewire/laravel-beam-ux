@@ -42,10 +42,7 @@ class EntryPublicationTest extends TestCase
 {
     private function themeFileFixture(): array
     {
-        $root = getenv('BEAM_RECORDING_TEST_ROOT');
-        if (! is_string($root) || ! is_dir($root)) {
-            $this->markTestSkipped('An owned disposable file fixture root is required.');
-        }
+        $root = $this->ownedFileFixtureRoot();
         $directory = $root.'/theme-'.bin2hex(random_bytes(6));
         mkdir($directory, 0700);
         config(['filesystems.disks.theme-file' => ['driver' => 'local', 'root' => $directory], 'beam.ux.storage.mirror_disk' => 'theme-file']);
@@ -64,6 +61,192 @@ class EntryPublicationTest extends TestCase
         $target = app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class)->target($entry->fresh());
 
         return [$entry->fresh(), $member, $author, $body, $target, $publication];
+    }
+
+    public static function recordingPreflightRefusals(): array
+    {
+        return [['case-alias'], ['nested-repository'], ['ls-files-failure'], ['git-unavailable']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('recordingPreflightRefusals')]
+    public function test_git_preflight_refusal_still_completes_every_published_mirror(string $mode): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $paths = [];
+        foreach ([$one, $two] as $entry) {
+            $paths[] = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        }
+        if ($mode === 'case-alias') {
+            $alias = dirname($paths[0]).'/'.strtoupper(basename($paths[0]));
+            rename($repo.'/'.$paths[0], $repo.'/'.$alias);
+            $git(['add', '--', $alias]);
+            $git(['commit', '-m', 'Existing case alias']);
+        } elseif ($mode === 'nested-repository') {
+            $nested = new \Symfony\Component\Process\Process(['git', 'init', '-b', 'main'], dirname($repo.'/'.$paths[0]));
+            $nested->mustRun();
+        } elseif ($mode === 'ls-files-failure') {
+            $wrapper = dirname($repo).'/ls-files-refusal-'.bin2hex(random_bytes(6));
+            file_put_contents($wrapper, "#!/bin/sh\nfor arg in \"\$@\"; do [ \"\$arg\" != ls-files ] || exit 1; done\nexec git \"\$@\"\n");
+            chmod($wrapper, 0700);
+            config(['beam.ux.recording.git' => $wrapper]);
+        } else {
+            config(['beam.ux.recording.git' => PHP_BINARY.'-unavailable-git']);
+        }
+        $base = $git(['rev-parse', 'HEAD']);
+        $index = hash_file('sha256', $repo.'/.git/index');
+        $pub = app(EntryPublication::class);
+        $a = $pub->recordDraft($one, self::BODY_TWO);
+        $b = $pub->recordDraft($two, self::BODY_TWO);
+        $release = $service->create($one, 'All mirrors despite Git refusal', $author);
+        $service->putMember($release, $two->id, $b->headVersion, $author);
+        $service->putMember($release, $one->id, $a->headVersion, $author);
+        $service->transition($release, 'publish', $author);
+        $this->assertSame('published', $release->fresh()->status);
+        $this->assertSame($a->headVersion, $one->fresh()->published_version);
+        $this->assertSame($b->headVersion, $two->fresh()->published_version);
+        foreach ([$one, $two] as $position => $entry) {
+            $this->assertSame($entry->codec()->decode(self::BODY_TWO), file_get_contents($repo.'/'.$paths[$position]), $mode);
+        }
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release);
+        $this->assertContains($receipt->state, ['failed', 'unavailable']);
+        $this->assertNull($receipt->sha);
+        $this->assertNull($receipt->candidate);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+        $this->assertSame($index, hash_file('sha256', $repo.'/.git/index'));
+    }
+
+    public static function configuredMirrorRoots(): array
+    {
+        return [['configured-link'], ['platform-temp-alias']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('configuredMirrorRoots')]
+    public function test_configured_symlink_mirror_root_publishes_without_git_recording(string $mode): void
+    {
+        $root = $this->ownedFileFixtureRoot();
+        mkdir($root.'/real');
+        symlink($root.'/real', $root.'/configured');
+        $configured = $mode === 'configured-link' ? $root.'/configured' : rtrim(sys_get_temp_dir(), '/').'/'.basename($root).'/real';
+        config(['filesystems.disks.alias-mirror' => ['driver' => 'local', 'root' => $configured], 'beam.ux.storage.mirror_disk' => 'alias-mirror']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $state = $this->publishDraftAs($entry, $author);
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+        $this->assertSame('published', $state->release->status);
+        $this->assertSame($entry->codec()->decode(self::BODY_TWO), file_get_contents($root.'/real/'.$path));
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release);
+        $this->assertNotSame('recorded', $receipt->state);
+        $this->assertNull($receipt->sha);
+    }
+
+    public function test_restore_rejects_known_symlink_before_creating_directories_outside_root(): void
+    {
+        $root = $this->ownedFileFixtureRoot();
+        mkdir($root.'/mirror');
+        mkdir($root.'/outside');
+        symlink($root.'/outside', $root.'/mirror/escape');
+        $target = ['absolute' => $root.'/mirror/escape/new/member.css', 'path' => 'escape/new/member.css', 'fingerprint' => 'captured-before-directory-change'];
+        $this->assertFileConflict('placement-moved', fn () => app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class)->create($target, 'body'));
+        $this->assertDirectoryDoesNotExist($root.'/outside/new');
+    }
+
+    public function test_configured_root_does_not_admit_a_child_symlink_escape(): void
+    {
+        $root = $this->ownedFileFixtureRoot();
+        mkdir($root.'/mirror');
+        mkdir($root.'/outside');
+        config(['filesystems.disks.contained-mirror' => ['driver' => 'local', 'root' => $root.'/mirror'], 'beam.ux.storage.mirror_disk' => 'contained-mirror']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        unlink($root.'/mirror/'.$path);
+        rmdir(dirname($root.'/mirror/'.$path));
+        symlink($root.'/outside', dirname($root.'/mirror/'.$path));
+        $state = $this->publishDraftAs($entry, $author);
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+        $this->assertFileDoesNotExist($root.'/outside/'.basename($path));
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release);
+        $this->assertNotSame('recorded', $receipt->state);
+        $this->assertSame('path', $receipt->error);
+        $this->assertNull($receipt->candidate);
+    }
+
+    public function test_default_file_fixture_is_owned_canonical_and_git_is_unavailable(): void
+    {
+        $root = $this->ownedFileFixtureRoot();
+        $this->assertSame(realpath($root), $root);
+        $this->assertSame(realpath(sys_get_temp_dir()), dirname($root));
+        $this->assertFileExists($root.'/.beam-ux-file-owner');
+        $this->assertNotSame('git', config('beam.ux.recording.git'));
+        for ($parent = $root; $parent !== dirname($parent); $parent = dirname($parent)) {
+            $this->assertFileDoesNotExist($parent.'/.git');
+            $this->assertDirectoryDoesNotExist($parent.'/.git');
+        }
+    }
+
+    public function test_completion_reserves_and_mirrors_entries_in_global_id_order(): void
+    {
+        $root = $this->ownedFileFixtureRoot();
+        config(['filesystems.disks.ordered-mirror' => ['driver' => 'local', 'root' => $root], 'beam.ux.storage.mirror_disk' => 'ordered-mirror']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $pub = app(EntryPublication::class);
+        $a = $pub->recordDraft($one, self::BODY_TWO);
+        $b = $pub->recordDraft($two, self::BODY_TWO);
+        $release = $service->create($one, 'Ordered completion', $author);
+        $service->putMember($release, $two->id, $b->headVersion, $author);
+        $service->putMember($release, $one->id, $a->headVersion, $author);
+        $service->transition($release, 'publish', $author);
+        $prepared = [];
+        foreach ([$one->fresh(), $two->fresh()] as $entry) {
+            $member = $release->members()->where('entry_id', $entry->id)->firstOrFail();
+            $prepared[] = [$entry, (object) ['id' => $member->version_id], self::BODY_TWO];
+        }
+        usort($prepared, fn (array $left, array $right): int => strcmp((string) $right[0]->id, (string) $left[0]->id));
+        $mirrors = new class(Storage::disk('ordered-mirror')) extends \Splicewire\Beam\Ux\Storage\PlacedDiskMirror
+        {
+            public array $entryIds = [];
+
+            public function mirror(BeamUxEntry $entry, string $path, array $body): bool
+            {
+                $this->entryIds[] = (string) $entry->id;
+
+                return parent::mirror($entry, $path, $body);
+            }
+        };
+        $this->app->instance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class, $mirrors);
+        $reservations = [];
+        $one->getConnection()->listen(function ($query) use (&$reservations) {
+            if (str_starts_with($query->sql, 'update "beam_ux_entries" set "id" =')) {
+                $reservations[] = $query->bindings[0];
+            }
+        });
+        // Supply reverse order directly to the completion boundary: member insertion order cannot
+        // change the entry lock order used by publication and completion.
+        (new \ReflectionMethod(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class, 'complete'))
+            ->invoke(app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class), $release->fresh(), $prepared, $author);
+        $expected = [(string) $one->id, (string) $two->id];
+        sort($expected);
+        $this->assertSame([$expected[0]], $reservations);
+        $this->assertSame($expected, $mirrors->entryIds);
     }
 
     private function fileInput($inspection): \Splicewire\Beam\Ux\Data\FileReconcileInputData

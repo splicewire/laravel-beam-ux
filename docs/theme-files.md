@@ -37,7 +37,8 @@ publication’s database writer serialization and does not add a second Git lock
 ## Missing-only Restore
 
 Restore decodes the current published snapshot, never the working draft. It checks head/pin/placement
-and exact inspected absence, then uses exclusive `fopen(x)` creation, flush/fsync and bounded readback.
+and exact inspected absence, validates known existing ancestors before creating any directories, rechecks the resulting
+ancestry, then uses exclusive `fopen(x)` creation, flush/fsync and bounded readback.
 If any file appears, creation fails without replacement. A fresh explicit inspection of identical bytes
 can return unchanged; a different existing file returns conflict with preserve/move guidance.
 Partial writes, failed durability/readback and ambiguous results preserve the created file. Inspect

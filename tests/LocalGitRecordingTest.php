@@ -19,6 +19,8 @@ class LocalGitRecordingTest extends TestCase
         if (! is_string($root) || ! is_dir($root)) {
             $this->markTestSkipped('BEAM_RECORDING_TEST_ROOT must name a registered disposable root.');
         }
+        // Explicit native-Git admission follows the required disposable root check.
+        config(['beam.ux.recording.git' => 'git']);
         $id = bin2hex(random_bytes(8));
         $this->repo = $root.'/git-'.$id;
         $this->work = $root.'/preparation-'.$id;

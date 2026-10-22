@@ -121,6 +121,8 @@ class LocalThemeFile
     public function create(array $target, string $bytes): void
     {
         $path = $target['absolute'];
+        // Refuse known changed ancestors before mkdir can follow a symlink outside the root.
+        $this->checkAncestors($path, allowMissing: true);
         if (! is_dir(dirname($path)) && ! @mkdir(dirname($path), 0755, true) && ! is_dir(dirname($path))) {
             throw new FileConflict('incomplete', 'The mirror directory could not be created. Nothing was replaced.', 503);
         }
@@ -160,11 +162,11 @@ class LocalThemeFile
         }
     }
 
-    private function checkAncestors(string $path): void
+    private function checkAncestors(string $path, bool $allowMissing = false): void
     {
         clearstatcache();
         for ($parent = dirname($path); $parent !== '/'; $parent = dirname($parent)) {
-            if (is_link($parent) || ! is_dir($parent)) {
+            if (is_link($parent) || (file_exists($parent) && ! is_dir($parent)) || (! $allowMissing && ! is_dir($parent))) {
                 throw new FileConflict('placement-moved', 'The mirror directory changed. Nothing was overwritten.');
             }
         }
