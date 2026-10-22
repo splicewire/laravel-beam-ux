@@ -40,6 +40,777 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class EntryPublicationTest extends TestCase
 {
+    private function themeFileFixture(): array
+    {
+        $root = getenv('BEAM_RECORDING_TEST_ROOT');
+        if (! is_string($root) || ! is_dir($root)) {
+            $this->markTestSkipped('An owned disposable file fixture root is required.');
+        }
+        $directory = $root.'/theme-'.bin2hex(random_bytes(6));
+        mkdir($directory, 0700);
+        config(['filesystems.disks.theme-file' => ['driver' => 'local', 'root' => $directory], 'beam.ux.storage.mirror_disk' => 'theme-file']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+        [$releases, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        $entry = BeamUxEntry::create(['slug' => 'file-theme', 'type' => 'theme', 'format' => 'css', 'realm' => 'site', 'namespace' => 'theme']);
+        $body = ['canvas' => ['accent' => '#112233', 'fontBody' => 'system-ui'], 'shell' => ['surface' => '#ffffff', 'radius' => '14px', 'shadow' => '0 40px 90px -40px rgba(0,0,0,.7)'], 'site' => ['accent' => '#334455']];
+        $publication = app(EntryPublication::class);
+        $publication->write($entry, $body);
+        $publication->publishAuthoredBody($entry);
+        $state = $publication->state($entry->fresh());
+        $release = $releases->requestOne($entry->fresh(), $state->headVersion, $author);
+        $member = $release->members()->firstOrFail();
+        $target = app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class)->target($entry->fresh());
+
+        return [$entry->fresh(), $member, $author, $body, $target, $publication];
+    }
+
+    private function fileInput($inspection): \Splicewire\Beam\Ux\Data\FileReconcileInputData
+    {
+        return new \Splicewire\Beam\Ux\Data\FileReconcileInputData($inspection->workingHeadVersion, $inspection->publishedVersion,
+            $inspection->fileExists, $inspection->fileSha256, $inspection->fingerprint, true);
+    }
+
+    public function test_file_import_preserves_all_namespaces_pin_mirror_and_records_only_a_draft(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $body['canvas']['accent'] = '#102030';
+        $body['shell']['surface'] = '#405060';
+        $body['site']['accent'] = '#abcdef';
+        $bytes = $entry->codec()->decode($body);
+        file_put_contents($target['absolute'], $bytes);
+        $before = $publication->state($entry);
+        $inspection = $service->inspect($member, $author);
+        $this->assertSame('differs', $inspection->state);
+        $result = $service->take($member, $author, $this->fileInput($inspection));
+        $after = $publication->state($entry->fresh());
+        $this->assertSame('drafted', $result->status);
+        $this->assertSame($before->publishedVersion, $after->publishedVersion);
+        $this->assertNotSame($before->headVersion, $after->headVersion);
+        $this->assertCount(count($before->versions) + 1, $after->versions);
+        $this->assertSame($bytes, file_get_contents($target['absolute']));
+        $actual = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($entry->fresh()->versionable(), $after->headVersion)->snapshot['payload'];
+        $this->assertSame($body, $actual);
+    }
+
+    public function test_file_import_rejects_pin_moved_with_same_head_and_keeps_every_effect(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $body['site']['accent'] = '#abcdef';
+        $draft = $publication->draftFromBase($entry, $body, $publication->state($entry)->headVersion);
+        $local = $body;
+        $local['site']['accent'] = '#123abc';
+        $bytes = $entry->codec()->decode($local);
+        file_put_contents($target['absolute'], $bytes);
+        $inspection = $service->inspect($member, $author);
+        // Move only the pin; the inspected working head is unchanged.
+        $publication->publishVersion($entry->fresh(), $draft->headVersion);
+        file_put_contents($target['absolute'], $bytes);
+        $before = $publication->state($entry->fresh());
+        try {
+            $service->take($member, $author, $this->fileInput($inspection));
+            $this->fail('A moved pin was ignored');
+        } catch (\Splicewire\Beam\Ux\Files\FileConflict $failure) {
+            $this->assertSame('pin-moved', $failure->reason);
+            $this->assertEquals($before, $publication->state($entry->fresh()));
+            $this->assertSame($bytes, file_get_contents($target['absolute']));
+        }
+    }
+
+    public function test_missing_file_restore_is_exclusive_and_preserves_draft_history(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $published = file_get_contents($target['absolute']);
+        $body['site']['accent'] = '#abcdef';
+        $publication->draftFromBase($entry, $body, $publication->state($entry)->headVersion);
+        unlink($target['absolute']);
+        $inspection = $service->inspect($member, $author);
+        $this->assertSame('missing', $inspection->state);
+        $before = $publication->state($entry->fresh());
+        $result = $service->restore($member, $author, $this->fileInput($inspection));
+        $this->assertSame('restored', $result->status);
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+        $this->assertSame($published, file_get_contents($target['absolute']));
+        unlink($target['absolute']);
+        $inspection = $service->inspect($member, $author);
+        file_put_contents($target['absolute'], 'later manual bytes');
+        try {
+            $service->restore($member, $author, $this->fileInput($inspection));
+            $this->fail('An appearing file was overwritten');
+        } catch (\Splicewire\Beam\Ux\Files\FileConflict $failure) {
+            $this->assertSame('file-moved', $failure->reason);
+            $this->assertSame('later manual bytes', file_get_contents($target['absolute']));
+            $this->assertEquals($before, $publication->state($entry->fresh()));
+        }
+    }
+
+    public function test_file_invalid_sources_never_create_versions_or_change_pin_file_or_receipt(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $canonical = $entry->codec()->decode($body);
+        $dropped = $body;
+        unset($dropped['shell']);
+        $font = $body;
+        $font['canvas']['fontBody'] = '#abcdef';
+        $badColor = $body;
+        $badColor['site']['accent'] = 'not-color';
+        $sources = ['garbage', '', ':root { nope }', $canonical.'/* ignored */',
+            str_replace('--theme-site-accent:', '--theme-site-accent: #000; --theme-site-accent:', $canonical),
+            $entry->codec()->decode($dropped), $entry->codec()->decode($font), $entry->codec()->decode($badColor),
+            $entry->codec()->decode([]), str_repeat('x', 4194305), "\xff\xfe"];
+        $before = $publication->state($entry);
+        foreach ($sources as $source) {
+            file_put_contents($target['absolute'], $source);
+            $inspection = $service->inspect($member, $author);
+            $this->assertFalse($inspection->canTake);
+            // Direct clients cannot bypass the inspected refusal with otherwise current preconditions.
+            $input = new \Splicewire\Beam\Ux\Data\FileReconcileInputData($before->headVersion, $before->publishedVersion,
+                true, hash('sha256', $source), $target['fingerprint'], true);
+            try {
+                $service->take($member, $author, $input);
+                $this->fail('Invalid import accepted: '.substr(json_encode($source), 0, 240));
+            } catch (\Splicewire\Beam\Ux\Files\FileConflict $failure) {
+                $this->assertSame(422, $failure->status);
+            }
+            $this->assertEquals($before, $publication->state($entry->fresh()));
+            $this->assertSame($source, file_get_contents($target['absolute']));
+        }
+    }
+
+    public function test_file_stale_head_hash_placement_and_validation_race_refuse_without_write(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $body['site']['accent'] = '#abcdef';
+        file_put_contents($target['absolute'], $entry->codec()->decode($body));
+        $inspection = $service->inspect($member, $author);
+        $publication->draftFromBase($entry, $body, $inspection->workingHeadVersion);
+        $this->assertFileConflict('head-moved', fn () => $service->take($member, $author, $this->fileInput($inspection)));
+        $inspection = $service->inspect($member, $author);
+        $before = $publication->state($entry->fresh());
+        file_put_contents($target['absolute'], 'new bytes');
+        $this->assertFileConflict('file-moved', fn () => $service->take($member, $author, $this->fileInput($inspection)));
+        file_put_contents($target['absolute'], $entry->codec()->decode($body));
+        $input = $this->fileInput($service->inspect($member, $author));
+        $input->fingerprint = str_repeat('0', 64);
+        $this->assertFileConflict('placement-moved', fn () => $service->take($member, $author, $input));
+        $inspection = $service->inspect($member, $author);
+        $validator = new class($target['absolute']) extends \Splicewire\Beam\Ux\Files\CanonicalTheme
+        {
+            public function __construct(private string $path) {}
+
+            public function decode(string $bytes, array $published): array
+            {
+                $body = parent::decode($bytes, $published);
+                file_put_contents($this->path, 'external change during validation');
+
+                return $body;
+            }
+        };
+        $racing = new \Splicewire\Beam\Ux\Files\ThemeReconciliation(app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class), $validator);
+        $this->assertFileConflict('file-moved', fn () => $racing->take($member, $author, $this->fileInput($inspection)));
+        $this->assertSame('external change during validation', file_get_contents($target['absolute']));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    private function assertFileConflict(string $reason, callable $operation): void
+    {
+        try {
+            $operation();
+            $this->fail('Expected file conflict '.$reason);
+        } catch (\Splicewire\Beam\Ux\Files\FileConflict $failure) {
+            $this->assertSame($reason, $failure->reason);
+        }
+    }
+
+    public function test_file_restore_refuses_actual_exclusive_create_race_and_preserves_short_write(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $before = $publication->state($entry);
+        unlink($target['absolute']);
+        $base = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $input = $this->fileInput($base->inspect($member, $author));
+        $files = new class extends \Splicewire\Beam\Ux\Files\LocalThemeFile
+        {
+            public function create(array $target, string $bytes): void
+            {
+                file_put_contents($target['absolute'], 'external file at exclusive create');
+                parent::create($target, $bytes);
+            }
+        };
+        $racing = new \Splicewire\Beam\Ux\Files\ThemeReconciliation($files, app(\Splicewire\Beam\Ux\Files\CanonicalTheme::class));
+        $this->assertFileConflict('file-moved', fn () => $racing->restore($member, $author, $input));
+        $this->assertSame('external file at exclusive create', file_get_contents($target['absolute']));
+        unlink($target['absolute']);
+        $files = new class extends \Splicewire\Beam\Ux\Files\LocalThemeFile
+        {
+            private int $writes = 0;
+
+            protected function write($stream, string $bytes): int|false
+            {
+                return $this->writes++ === 0 ? fwrite($stream, substr($bytes, 0, 7)) : false;
+            }
+        };
+        $broken = new \Splicewire\Beam\Ux\Files\ThemeReconciliation($files, app(\Splicewire\Beam\Ux\Files\CanonicalTheme::class));
+        $input = $this->fileInput($base->inspect($member, $author));
+        $this->assertFileConflict('incomplete', fn () => $broken->restore($member, $author, $input));
+        $partial = file_get_contents($target['absolute']);
+        $this->assertSame(7, strlen($partial));
+        $this->assertFileConflict('file-moved', fn () => $base->restore($member, $author, $input));
+        $this->assertFileConflict('file-exists', fn () => $base->restore($member, $author, $this->fileInput($base->inspect($member, $author))));
+        $this->assertSame($partial, file_get_contents($target['absolute']));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_file_restore_identical_is_explicit_noop_and_symlink_is_not_read(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $before = $publication->state($entry);
+        $this->assertSame('unchanged', $service->restore($member, $author, $this->fileInput($service->inspect($member, $author)))->status);
+        unlink($target['absolute']);
+        $outside = dirname($target['absolute']).'/private.txt';
+        file_put_contents($outside, 'private');
+        symlink($outside, $target['absolute']);
+        $inspection = $service->inspect($member, $author);
+        $this->assertSame('unsupported', $inspection->state);
+        $this->assertNull($inspection->localSource);
+        $this->assertNull($inspection->fileSha256);
+        $this->assertSame('private', file_get_contents($outside));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_file_direct_publisher_without_edit_cannot_inspect_or_import_or_restore(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $input = $this->fileInput($service->inspect($member, $author));
+        \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, AllowPublishDenyUpdateEntryPolicy::class);
+        $before = $publication->state($entry);
+        foreach ([fn () => $service->inspect($member, $author), fn () => $service->take($member, $author, $input), fn () => $service->restore($member, $author, $input)] as $operation) {
+            try {
+                $operation();
+                $this->fail('Direct publication granted file edit');
+            } catch (\Illuminate\Auth\Access\AuthorizationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_file_path_case_alias_submodule_and_nonregular_refuse_without_source_exposure(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $parent = dirname($target['absolute']);
+        $name = basename($target['absolute']);
+        $alias = $parent.'/'.strtoupper($name);
+        rename($target['absolute'], $alias);
+        $this->assertSame('unsupported', $service->inspect($member, $author)->state);
+        rename($alias, $target['absolute']);
+        unlink($target['absolute']);
+        mkdir($target['absolute']);
+        $this->assertNull($service->inspect($member, $author)->localSource);
+        rmdir($target['absolute']);
+        $root = config('filesystems.disks.theme-file.root');
+        mkdir($root.'/.git');
+        file_put_contents($root.'/.gitmodules', "[submodule \"mirror\"]\npath = ".explode('/', $target['path'])[0]."\n");
+        $this->assertSame('unsupported', $service->inspect($member, $author)->state);
+    }
+
+    public function test_file_active_unknown_tenancy_and_revoked_author_refuse_before_local_io(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $input = $this->fileInput($service->inspect($member, $author));
+        $before = $publication->state($entry);
+        foreach (['active', 'unknown', 'throwing'] as $mode) {
+            $context = \Mockery::mock(TenancyContext::class);
+            if ($mode === 'throwing') {
+                $context->shouldReceive('isActive')->andThrow(new \RuntimeException('private tenancy problem'));
+            } else {
+                $context->shouldReceive('isActive')->andReturn($mode === 'active');
+                $context->shouldReceive('isMultiTenant')->andReturn(true);
+                $context->shouldReceive('centralConnection')->andReturn(null);
+            }
+            $this->app->instance(TenancyContext::class, $context);
+            foreach ([fn () => $service->inspect($member, $author), fn () => $service->take($member, $author, $input), fn () => $service->restore($member, $author, $input)] as $operation) {
+                try {
+                    $operation();
+                    $this->fail('Unverified tenancy read a file');
+                } catch (\Illuminate\Auth\Access\AuthorizationException $failure) {
+                    $this->assertStringNotContainsString('private tenancy problem', $failure->getMessage());
+                }
+            }
+        }
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => false);
+        try {
+            $service->inspect($member, $author);
+            $this->fail('Revoked author inspected a file');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->addToAssertionCount(1);
+        }
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_public_file_overlap_conflict_only_translates_sqlite_busy_after_rollback(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $state = $publication->state($entry);
+        $count = \Splicewire\Beam\Ux\Models\BeamUxRelease::count();
+        $code = 5;
+        $entry->getConnection()->listen(function ($query) use (&$code) {
+            if (str_starts_with($query->sql, 'insert into "beam_ux_releases"')) {
+                $previous = new \PDOException('controlled database fault');
+                $previous->errorInfo = ['HY000', $code, 'controlled database fault'];
+                throw new \Illuminate\Database\QueryException($query->connectionName, $query->sql, $query->bindings, $previous);
+            }
+        });
+        foreach ([5, 6, 19] as $code) {
+            try {
+                app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->requestOne($entry->fresh(), $state->headVersion, $author);
+                $this->fail('Expected controlled database fault');
+            } catch (\Symfony\Component\HttpKernel\Exception\ConflictHttpException $failure) {
+                $this->assertContains($code, [5, 6]);
+                $this->assertStringContainsString('Reload and explicitly retry', $failure->getMessage());
+            } catch (\Illuminate\Database\QueryException) {
+                $this->assertSame(19, $code, 'Only unrelated database faults retain their original failure');
+            }
+            $this->assertSame(0, $entry->getConnection()->transactionLevel());
+            $this->assertSame($count, \Splicewire\Beam\Ux\Models\BeamUxRelease::count());
+            $this->assertEquals($state, $publication->state($entry->fresh()));
+        }
+    }
+
+    public function test_canonical_file_retains_extension_and_responsive_shape_and_refuses_ambiguous_keys(): void
+    {
+        $validator = app(\Splicewire\Beam\Ux\Files\CanonicalTheme::class);
+        $codec = new \Splicewire\Beam\Ux\Codec\CssBodyCodec;
+        $body = ['site' => ['accent' => '#123456'], 'extension' => ['retained' => 'value'],
+            'responsive' => ['breakpoints' => ['wide' => '60rem'], 'tokens' => ['wide' => ['site' => ['accent' => '#111111']]]]];
+        $local = $body;
+        $local['site']['accent'] = '#abcdef';
+        $this->assertSame($local, $validator->decode($codec->decode($local), $body));
+        $changed = $local;
+        $changed['responsive']['tokens']['wide']['site']['accent'] = '#222222';
+        $this->assertFileConflict('unsupported', fn () => $validator->decode($codec->decode($changed), $body));
+        $ambiguous = ['site' => ['accent' => '#123456'], 'extension' => ['literal.key' => 'value']];
+        $this->assertFileConflict('invalid', fn () => $validator->decode($codec->decode($ambiguous), $ambiguous));
+    }
+
+    public function test_file_restore_readback_mismatch_preserves_created_bytes_and_refuses_blind_retry(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $base = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        unlink($target['absolute']);
+        $input = $this->fileInput($base->inspect($member, $author));
+        $files = new class extends \Splicewire\Beam\Ux\Files\LocalThemeFile
+        {
+            protected function write($stream, string $bytes): int|false
+            {
+                return fwrite($stream, str_repeat('x', strlen($bytes)));
+            }
+        };
+        $service = new \Splicewire\Beam\Ux\Files\ThemeReconciliation($files, app(\Splicewire\Beam\Ux\Files\CanonicalTheme::class));
+        $before = $publication->state($entry);
+        $this->assertFileConflict('incomplete', fn () => $service->restore($member, $author, $input));
+        $actual = file_get_contents($target['absolute']);
+        $this->assertNotSame('', $actual);
+        $this->assertFileConflict('file-moved', fn () => $base->restore($member, $author, $input));
+        $this->assertSame($actual, file_get_contents($target['absolute']));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_file_import_refuses_declared_noncolor_shell_changes_without_effects(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $before = $publication->state($entry);
+        foreach (['radius', 'shadow'] as $key) {
+            $changed = $body;
+            $changed['shell'][$key] = '#abcdef';
+            $bytes = $entry->codec()->decode($changed);
+            file_put_contents($target['absolute'], $bytes);
+            $inspection = $service->inspect($member, $author);
+            $this->assertSame('unsupported', $inspection->state, $key.' is a generic string, not a declared color');
+            $this->assertFalse($inspection->canTake);
+            $this->assertFileConflict('unsupported', fn () => $service->take($member, $author, $this->fileInput($inspection)));
+            $this->assertEquals($before, $publication->state($entry->fresh()));
+            $this->assertSame($bytes, file_get_contents($target['absolute']));
+        }
+    }
+
+    /** Disposable repositories only: caller supplies a registered scratch root. */
+    private function recordingRepository(): array
+    {
+        $root = getenv('BEAM_RECORDING_TEST_ROOT');
+        if (! is_string($root) || ! is_dir($root)) {
+            $this->markTestSkipped('Set BEAM_RECORDING_TEST_ROOT to an owned registered scratch root.');
+        }
+        $repo = $root.'/repo-'.bin2hex(random_bytes(6));
+        mkdir($repo, 0700);
+        $git = function (array $args) use ($repo): string {
+            $process = new \Symfony\Component\Process\Process(['git', ...$args], $repo);
+            $process->mustRun();
+
+            return trim($process->getOutput());
+        };
+        $git(['init', '-b', 'main']);
+        $this->assertSame(realpath($repo), realpath($git(['rev-parse', '--show-toplevel'])));
+        $git(['config', 'user.name', 'Release test']);
+        $git(['config', 'user.email', 'release@example.invalid']);
+        file_put_contents($repo.'/unrelated', "base\n");
+        $git(['add', '--', 'unrelated']);
+        $git(['commit', '-m', 'baseline']);
+        config(['filesystems.disks.recording-test' => ['driver' => 'local', 'root' => $repo, 'throw' => true],
+            'beam.ux.storage.mirror_disk' => 'recording-test', 'beam.ux.recording.git' => 'git']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+
+        return [$repo, $git];
+    }
+
+    public function test_release_records_exact_member_and_preserves_real_index_then_no_change_republication(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        file_put_contents($repo.'/unrelated', "staged by developer\n");
+        $git(['add', '--', 'unrelated']);
+        file_put_contents($repo.'/untracked', 'untouched');
+        $index = hash_file('sha256', $repo.'/.git/index');
+        $base = $git(['rev-parse', 'HEAD']);
+        $state = $this->publishDraftAs($entry, $author);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release);
+        $this->assertSame('recorded', $receipt?->state, $receipt?->error ?? '');
+        $this->assertSame($git(['rev-parse', 'HEAD']), $receipt->sha);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD^']));
+        $this->assertSame($index, hash_file('sha256', $repo.'/.git/index'));
+        $this->assertSame('untouched', file_get_contents($repo.'/untracked'));
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        $this->assertSame($path, $git(['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD']));
+        $blob = new \Symfony\Component\Process\Process(['git', 'show', 'HEAD:'.$path], $repo);
+        $blob->mustRun();
+        $this->assertSame(file_get_contents($repo.'/'.$path), $blob->getOutput());
+        $again = $service->requestOne($entry->fresh(), $state->headVersion, $author);
+        $second = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($again);
+        $this->assertSame('recorded', $second?->state, $second?->error ?? '');
+        $this->assertTrue($second->no_change);
+        $this->assertSame($receipt->sha, $second->sha);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+    }
+
+    public function test_failed_hook_keeps_publication_success_and_files_retry_uses_same_receipt(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        file_put_contents($repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 1\n");
+        chmod($repo.'/.git/hooks/pre-commit', 0755);
+        $base = $git(['rev-parse', 'HEAD']);
+        $state = $this->publishDraftAs($entry, $author);
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+        $this->assertSame('published', $state->release->status);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $recorder = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class);
+        $failed = $recorder->receipt($release);
+        $this->assertSame('failed', $failed->state);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+        file_put_contents($repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 0\n");
+        $recorder->retry($release, $author);
+        $recovered = $recorder->receipt($release);
+        $this->assertSame($failed->id, $recovered->id);
+        $this->assertSame('recorded', $recovered->state, $recovered->error ?? '');
+        $recorder->retry($release, $author);
+        $this->assertSame($recovered->sha, $recorder->receipt($release)->sha);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+    }
+
+    public function test_real_result_database_failure_after_git_install_recovers_same_commit(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $base = $git(['rev-parse', 'HEAD']);
+        $hidden = false;
+        \Splicewire\Beam\Ux\Models\BeamUxReleaseRecording::updating(function ($row) use (&$hidden) {
+            if (! $hidden && $row->state === 'recorded' && $row->candidate !== null) {
+                $row->getConnection()->statement('ALTER TABLE beam_ux_release_recordings RENAME TO recording_store_unavailable');
+                $hidden = true;
+            }
+        });
+        $state = $this->publishDraftAs($entry, $author);
+        $this->assertTrue($hidden);
+        $sha = $git(['rev-parse', 'HEAD']);
+        $this->assertNotSame($base, $sha);
+        $entry->getConnection()->statement('ALTER TABLE recording_store_unavailable RENAME TO beam_ux_release_recordings');
+        \Splicewire\Beam\Ux\Models\BeamUxReleaseRecording::flushEventListeners();
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $recorder = new \Splicewire\Beam\Ux\Recording\ReleaseRecording;
+        $pending = $recorder->receipt($release);
+        $this->assertSame($sha, $pending->candidate);
+        $this->assertNull($pending->sha);
+        $recorder->retry($release, $author);
+        $this->assertSame($sha, $recorder->receipt($release)->sha);
+        $this->assertSame('recorded', $recorder->receipt($release)->state);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+    }
+
+    public static function mirrorFailurePositions(): array
+    {
+        return [[1, false], [2, false], [1, true], [2, true]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('mirrorFailurePositions')]
+    public function test_multi_member_false_mirror_cannot_commit_and_does_not_stop_later_callbacks(int $position, bool $throws): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $pub = app(EntryPublication::class);
+        $a = $pub->recordDraft($one, self::BODY_TWO);
+        $b = $pub->recordDraft($two, self::BODY_TWO);
+        $release = $service->create($one, 'Both members', $author);
+        $service->putMember($release, $one->id, $a->headVersion, $author);
+        $service->putMember($release, $two->id, $b->headVersion, $author);
+        $base = $git(['rev-parse', 'HEAD']);
+        $this->app->instance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class,
+            new class(Storage::disk('recording-test'), $position, $throws) extends \Splicewire\Beam\Ux\Storage\PlacedDiskMirror
+            {
+                public int $calls = 0;
+
+                public function __construct($disk, private int $position, private bool $throws)
+                {
+                    parent::__construct($disk);
+                }
+
+                public function mirror(BeamUxEntry $entry, string $path, array $body): bool
+                {
+                    $this->calls++;
+
+                    if ($this->calls === $this->position && $this->throws) {
+                        throw new \RuntimeException('owned mirror failure');
+                    }
+
+                    return $this->calls === $this->position ? false : parent::mirror($entry, $path, $body);
+                }
+            });
+        $later = false;
+        $one->getConnection()->transaction(function () use ($service, $release, $author, $one, &$later) {
+            $service->transition($release, 'publish', $author);
+            $one->getConnection()->afterCommit(function () use (&$later) {
+                $later = true;
+            });
+        });
+        $this->assertTrue($later);
+        $this->assertSame('published', $release->fresh()->status);
+        $this->assertSame($a->headVersion, $one->fresh()->published_version);
+        $this->assertSame($b->headVersion, $two->fresh()->published_version);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+        $this->assertSame($throws ? 'completion' : 'mirror', app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release)->error);
+    }
+
+    public function test_recording_refusals_check_live_authority_and_tenancy_before_any_git_process(): void
+    {
+        [$repo] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author, $other] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $state = $this->publishDraftAs($entry, $author);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $recorder = new \Splicewire\Beam\Ux\Recording\ReleaseRecording;
+        $marker = dirname($repo).'/git-refusal-'.bin2hex(random_bytes(4));
+        $wrapper = $marker.'.sh';
+        file_put_contents($wrapper, "#!/bin/sh\nprintf called >> ".escapeshellarg($marker)."\nexit 1\n");
+        chmod($wrapper, 0755);
+        config(['beam.ux.recording.git' => $wrapper]);
+        try {
+            $recorder->retry($release, $other);
+            $this->fail('An unauthorized actor reached recording.');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertFileDoesNotExist($marker);
+        }
+        config(['beam.ux.releases.publish_ability' => 'host.publish']);
+        \Illuminate\Support\Facades\Gate::define('host.publish', fn () => false);
+        try {
+            $recorder->retry($release, $author);
+            $this->fail('A revoked host publication decision was ignored.');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertFileDoesNotExist($marker);
+        }
+        config(['beam.ux.releases.publish_ability' => null]);
+        foreach ([false, true] as $throwing) {
+            $this->app->instance(TenancyContext::class, new class($throwing) implements TenancyContext
+            {
+                public function __construct(private bool $throwing) {}
+
+                public function isMultiTenant(): bool
+                {
+                    return true;
+                }
+
+                public function isActive(): bool
+                {
+                    if ($this->throwing) {
+                        throw new \RuntimeException('unknown topology');
+                    }
+
+                    return true;
+                }
+
+                public function currentTenant(): ?object
+                {
+                    return null;
+                }
+
+                public function currentTenantId(): int|string|null
+                {
+                    return 'tenant';
+                }
+
+                public function centralConnection(): ?string
+                {
+                    return 'central';
+                }
+            });
+            $probe = (new BeamUxEntry)->setConnection('central');
+            if (! $throwing) {
+                $this->assertTrue(app(\Splicewire\Beam\Ux\Manifest\EntryResidency::class)->isCentralResident($probe),
+                    'A central-pinned model alone is insufficient while tenancy is active.');
+            }
+            try {
+                $recorder->retry($release, $author);
+                $this->fail('Active or unknown tenancy reached Git.');
+            } catch (\Splicewire\Beam\Ux\Recording\RecordingFailure $failure) {
+                $this->assertSame('tenancy', $failure->reason);
+                $this->assertFileDoesNotExist($marker);
+            }
+        }
+        // Exercise model connection residency on a shared disposable SQLite PDO, without
+        // pretending this is a physical multi-database/PostgreSQL tenancy proof.
+        $pdo = $entry->getConnection()->getPdo();
+        \Illuminate\Support\Facades\DB::extend('recording-shared', fn ($config, $name) => new \Illuminate\Database\SQLiteConnection($pdo, ':memory:', '', ['name' => $name, 'driver' => 'sqlite']));
+        config(['database.connections.tenant_probe' => ['driver' => 'recording-shared'],
+            'database.connections.central_db' => ['driver' => 'recording-shared']]);
+        foreach ([null, 'central_db'] as $central) {
+            $this->app->instance(TenancyContext::class, new class($central) implements TenancyContext
+            {
+                public function __construct(private ?string $central) {}
+
+                public function isMultiTenant(): bool
+                {
+                    return true;
+                }
+
+                public function isActive(): bool
+                {
+                    return false;
+                }
+
+                public function currentTenant(): ?object
+                {
+                    return null;
+                }
+
+                public function currentTenantId(): int|string|null
+                {
+                    return null;
+                }
+
+                public function centralConnection(): ?string
+                {
+                    return $this->central;
+                }
+            });
+            $tenantRelease = \Splicewire\Beam\Ux\Models\BeamUxRelease::on('tenant_probe')->findOrFail($release->id);
+            try {
+                $recorder->retry($tenantRelease, $author);
+                $this->fail('An inactive explicit tenant or dangling split reached Git.');
+            } catch (\Splicewire\Beam\Ux\Recording\RecordingFailure $failure) {
+                $this->assertSame('tenancy', $failure->reason);
+                $this->assertFileDoesNotExist($marker);
+            }
+        }
+        $centralRelease = \Splicewire\Beam\Ux\Models\BeamUxRelease::on('central_db')->findOrFail($release->id);
+        $recorder->authorize($centralRelease, $author);
+        $this->assertFileDoesNotExist($marker, 'The positive central-residency check itself does not invoke Git.');
+    }
+
+    public function test_files_scope_requires_every_member_and_explicit_release_input_rejects_other_membership(): void
+    {
+        $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author, $other] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $state = $this->publishDraftAs($entry, $author);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $member = $release->members()->first();
+        request()->setUserResolver(fn () => $author);
+        $this->assertSame(1, \Splicewire\Beam\Ux\Data\ReleaseFilesData::scope(\Splicewire\Beam\Ux\Models\BeamUxReleaseMember::query())->count());
+        request()->setUserResolver(fn () => $other);
+        $this->assertSame(0, \Splicewire\Beam\Ux\Data\ReleaseFilesData::scope(\Splicewire\Beam\Ux\Models\BeamUxReleaseMember::query())->count());
+        request()->setUserResolver(fn () => null);
+        $this->assertSame(0, \Splicewire\Beam\Ux\Data\ReleaseFilesData::scope(\Splicewire\Beam\Ux\Models\BeamUxReleaseMember::query())->count());
+        try {
+            \Splicewire\Beam\Ux\Particle\ReleaseFilesRecordOp::handle($member, Request::create('/', 'POST',
+                ['releaseId' => '00000000-0000-4000-8000-000000000001']), $author);
+            $this->fail('An unrelated Release ID was accepted.');
+        } catch (ValidationException $failure) {
+            $this->assertArrayHasKey('releaseId', $failure->errors());
+        }
+    }
+
+    public function test_outer_rollback_discards_recording_and_a_superseded_completion_cannot_remirror(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $pub = app(EntryPublication::class);
+        $draft = $pub->recordDraft($entry, self::BODY_TWO);
+        $base = $git(['rev-parse', 'HEAD']);
+        try {
+            $entry->getConnection()->transaction(function () use ($service, $entry, $draft, $author) {
+                $service->requestOne($entry, $draft->headVersion, $author);
+                throw new \RuntimeException('abort outer');
+            });
+        } catch (\RuntimeException $error) {
+            $this->assertSame('abort outer', $error->getMessage());
+        }
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+        $this->assertSame(0, \Splicewire\Beam\Ux\Models\BeamUxReleaseRecording::count());
+        $this->assertNotSame($draft->headVersion, $entry->fresh()->published_version);
+        $first = $second = null;
+        $entry->getConnection()->transaction(function () use ($service, $entry, $draft, $author, $pub, &$first, &$second) {
+            $first = $service->requestOne($entry->fresh(), $draft->headVersion, $author);
+            $next = $pub->recordDraft($entry->fresh(), self::BODY_ONE);
+            $second = $service->requestOne($entry->fresh(), $next->headVersion, $author);
+        });
+        $recorder = new \Splicewire\Beam\Ux\Recording\ReleaseRecording;
+        $this->assertSame('superseded', $recorder->receipt($first)->error);
+        $this->assertSame('recorded', $recorder->receipt($second)->state);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+    }
+
     public function test_seeded_unauthored_first_save_pins_visible_baseline_then_reloads_and_publishes_draft(): void
     {
         $entry = BeamUxEntry::create(['slug' => 'seeded-home', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
@@ -155,6 +926,8 @@ class EntryPublicationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // Fake disks may sit inside a checkout; dedicated recordingRepository explicitly opts in.
+        config(['beam.ux.recording.git' => PHP_BINARY.'-publication-test-no-git']);
         $this->createTables();
 
         Storage::fake('artifacts');
@@ -980,6 +1753,7 @@ class EntryPublicationTest extends TestCase
         $this->assertSame($seen->headVersion, $published->publishedVersion);
         $this->assertSame($later->headVersion, $published->headVersion);
         $this->assertTrue($published->draftPending);
+        $this->assertFalse($published->release->members[0]->stale, 'A Release is not stale after its own successful pin move.');
         $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
         $this->assertSame(self::BODY_ONE, $entry->fresh()->particle->payload);
     }

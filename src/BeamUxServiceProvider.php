@@ -108,6 +108,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 // A Release's provenance (`origin`: direct | built). An ALTER beside the create for the same reason
                 // as its siblings; existing Releases are `built`.
                 'shared/add_origin_to_beam_ux_releases_table',
+                'shared/create_beam_ux_release_recordings_table',
                 // The BASELINE (ADR-0225 decision 2; launch ticket 00, 2026-10-16): pins every already-written
                 // entry to its live body inside `migrate`, so the pin is never required-but-missing. A
                 // separate file because hosts that already ran the ALTER (or got the column from the create)
@@ -122,7 +123,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
     public function packageRegistered(): void
     {
         // DOCS-06b: the templates the provenance backfill may match an unstamped row against; packages register theirs.
-        $this->app->singleton(\Splicewire\Beam\Ux\Provenance\ProvenanceTemplates::class);
+        $this->app->singleton(Provenance\ProvenanceTemplates::class);
 
         // Merge `config('beam.ux.*')`. Both keys OUTLIVED the retired `Route::beamUxEntries()` macro
         // they were introduced for (ADR-0214 §6, as amended): `api_root` positions beam core's Scribe

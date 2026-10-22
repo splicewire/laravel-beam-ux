@@ -113,6 +113,17 @@ trait WiresRealmDashboards
     {
         $ability = RealmDashboard::abilityFor($realm, $realms);
 
+        // Older supported beam-core releases use one shared authenticated fallback. Keep that
+        // contract when adopting Releases alone; newer cores retain their realm-specific gates.
+        if (! method_exists(RealmDashboard::class, 'openAbilityFor')) {
+            $gate = $this->app->make(Gate::class);
+            if ($ability === RealmDashboard::OPEN_ABILITY && ! $gate->has($ability)) {
+                $gate->define($ability, fn (?Authenticatable $user = null): bool => $user !== null);
+            }
+
+            return;
+        }
+
         if ($ability !== RealmDashboard::openAbilityFor($realm)) {
             return;
         }

@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Data;
 use Rushing\Versioning\Models\Version;
 use Schemastud\DataSchemas\Attributes\Description;
 use Schemastud\DataSchemas\Attributes\Example;
+use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
@@ -56,6 +57,8 @@ class EntryVersionData extends BeamData
         public bool $isHead = false,
         #[Description('Whether this version is the PUBLISHED body — the one a guest reader is served.')]
         public bool $isPublished = false,
+        #[DataCollectionOf(ReleaseRecordingData::class)]
+        public array $recordings = [],
     ) {}
 
     /**
@@ -73,6 +76,31 @@ class EntryVersionData extends BeamData
             createdAt: $version->created_at?->toIso8601String(),
             isHead: $isHead,
             isPublished: $isPublished,
+            recordings: self::recordings($version),
         );
+    }
+
+    private static function recordings(Version $version): array
+    {
+        if (! $version->getConnection()->getSchemaBuilder()->hasTable('beam_ux_release_members')) {
+            return [];
+        }
+        $actor = request()->user();
+        if ($actor === null) {
+            return [];
+        }
+        $ids = \Splicewire\Beam\Ux\Models\BeamUxReleaseMember::on($version->getConnectionName())
+            ->where('version_id', $version->id)->pluck('release_id');
+        $result = [];
+        foreach (\Splicewire\Beam\Ux\Models\BeamUxRelease::on($version->getConnectionName())->whereKey($ids)->where('status', 'published')->get() as $release) {
+            try {
+                app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->authorize($release, $actor);
+                $result[] = ReleaseRecordingData::project($release, $actor);
+            } catch (\Throwable) {
+                // History does not disclose a Release with another inaccessible member.
+            }
+        }
+
+        return $result;
     }
 }

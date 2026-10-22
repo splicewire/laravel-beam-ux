@@ -85,3 +85,28 @@ Package proofs exercise immediate and scheduled paths, fixed versions, review,
 stale pins, compile refusal, authority revocation, rollback, retention, Take-down,
 resource mounting, and theme draft/join. They do not claim a fresh host install,
 Postgres contention proof, Release preview, git commits, or redirect emission.
+
+## Local adoption over earlier Beam hosts
+
+Release publication requires the workflow transaction-participant contract. A host whose locked
+workflows predates `1ad7270f5d5d5689ab19e7f04cc44817a0d3fbb9` must explicitly adopt that prerequisite;
+its interface and six-line invocation keep Release pins, workflow marking and facts in one transaction.
+Do not substitute an empty compatibility interface. EP-15 adoption alone has no Git recorder;
+the subsequent [local recording increment](local-recording.md) supplies that separate behavior.
+
+When this UX is paired with an older beam-core without `RealmDashboard::openAbilityFor`, the kit
+retains that core's shared authenticated `OPEN_ABILITY` fallback only where `abilityFor` selects it.
+A host-defined gate is preserved. Newer cores keep realm-specific defaults. This compatibility does
+not claim the newer realm-security behavior on older core.
+
+The ordinary Theme editor saves drafts and calls the existing publish operation with the chosen
+saved reference. It receives the direct Release projection for existing ReleasePanel controls;
+review and publication admission remain server-side. A published Release's observed pre-publication
+pin is historical context, not a stale-member warning after its own successful publication.
+
+The first EP-16 increment adds [local recording and scoped Files recovery](local-recording.md).
+EP-15 review/fixed-version/admission remain authoritative; recording failure cannot undo publication.
+
+The starter's `docs/examples/service-desk-releases.md` documents explicit local overlays, the
+build-only workflow projection/action-form export, deliberate migration-stub refresh, and separate
+fresh and copied-old-schema journeys. Package tests are distinct from those mounted host proofs.

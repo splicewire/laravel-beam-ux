@@ -34,13 +34,30 @@ final class ReleaseService
      */
     public function requestOne(BeamUxEntry $entry, ?string $ref, Authenticatable $actor): BeamUxRelease
     {
-        return $entry->getConnection()->transaction(function () use ($entry, $ref, $actor) {
-            $release = $this->open($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor, ReleaseOrigin::Direct);
-            $this->place($release, $entry->id, $ref, $actor, null, true);
-            $this->transition($release, config('beam.ux.releases.review_required', false) ? 'submit' : 'publish', $actor);
+        $connection = $entry->getConnection();
+        $initialDepth = $connection->transactionLevel();
+        $bodyCompleted = false;
+        try {
+            return $connection->transaction(function () use ($entry, $ref, $actor, &$bodyCompleted) {
+                $release = $this->open($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor, ReleaseOrigin::Direct);
+                $this->place($release, $entry->id, $ref, $actor, null, true);
+                $this->transition($release, config('beam.ux.releases.review_required', false) ? 'submit' : 'publish', $actor);
+                $result = $release->fresh();
+                $bodyCompleted = true;
 
-            return $release->fresh();
-        });
+                return $result;
+            });
+        } catch (\Illuminate\Database\QueryException $failure) {
+            // Only a failed SQLite statement in this rolled-back request is retryable. In
+            // particular, never relabel a commit/after-commit/Git failure as an unpublished result.
+            $code = (int) ($failure->errorInfo[1] ?? 0);
+            if (! $bodyCompleted && $initialDepth === 0 && $connection->transactionLevel() === 0
+                && $connection->getDriverName() === 'sqlite' && in_array($code & 0xFF, [5, 6], true)) {
+                throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException(
+                    'Publication conflicted with another local write. Nothing was published. Reload and explicitly retry.', $failure);
+            }
+            throw $failure;
+        }
     }
 
     /** A Release built member by member: every member operation is an edit. */
@@ -249,7 +266,8 @@ final class ReleaseService
                 }
             }
             if ($refs !== []) {
-                app(EntryPublication::class)->publishVersions($prototype, $refs, $actor instanceof Model ? $actor : null, $pins);
+                app(EntryPublication::class)->publishVersions($prototype, $refs, $actor instanceof Model ? $actor : null, $pins,
+                    fn (array $prepared) => app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->prepare($release, $prepared, $actor));
             }
             foreach ($members as $member) {
                 if ($member->version_id === null) {
@@ -302,6 +320,26 @@ final class ReleaseService
         }
 
         return $entry;
+    }
+
+    /** Shared by initial completion and Files recovery; no recording privilege is introduced. */
+    public function authorizeRecording(BeamUxRelease $release, Authenticatable $actor): void
+    {
+        if ($release->status !== 'published' || $release->members()->count() === 0) {
+            throw new AuthorizationException('Only a published nonempty Release can be recorded.');
+        }
+        foreach ($release->members()->get() as $member) {
+            $entry = $this->entry($release, $member->entry_id);
+            $this->isDirect($release)
+                ? $this->authorizeDirect($entry, $actor)
+                : $this->authorizeEntry($entry, $actor, true);
+        }
+    }
+
+    /** File import edits an entry; missing-file restoration additionally requires publication reach. */
+    public function authorizeFileEdit(BeamUxEntry $entry, Authenticatable $actor, bool $restore = false): void
+    {
+        $this->authorizeEntry($entry, $actor, $restore);
     }
 
     private function authorizeEntry(BeamUxEntry $entry, Authenticatable $actor, bool $publish): void
