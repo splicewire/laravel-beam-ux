@@ -385,6 +385,22 @@ class EntryPublicationTest extends TestCase
         }
     }
 
+    public function test_canonical_file_retains_extension_and_responsive_shape_and_refuses_ambiguous_keys(): void
+    {
+        $validator = app(\Splicewire\Beam\Ux\Files\CanonicalTheme::class);
+        $codec = new \Splicewire\Beam\Ux\Codec\CssBodyCodec;
+        $body = ['site' => ['accent' => '#123456'], 'extension' => ['retained' => 'value'],
+            'responsive' => ['breakpoints' => ['wide' => '60rem'], 'tokens' => ['wide' => ['site' => ['accent' => '#111111']]]]];
+        $local = $body;
+        $local['site']['accent'] = '#abcdef';
+        $this->assertSame($local, $validator->decode($codec->decode($local), $body));
+        $changed = $local;
+        $changed['responsive']['tokens']['wide']['site']['accent'] = '#222222';
+        $this->assertFileConflict('unsupported', fn () => $validator->decode($codec->decode($changed), $body));
+        $ambiguous = ['site' => ['accent' => '#123456'], 'extension' => ['literal.key' => 'value']];
+        $this->assertFileConflict('invalid', fn () => $validator->decode($codec->decode($ambiguous), $ambiguous));
+    }
+
     /** Disposable repositories only: caller supplies a registered scratch root. */
     private function recordingRepository(): array
     {

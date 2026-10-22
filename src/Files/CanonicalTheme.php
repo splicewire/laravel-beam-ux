@@ -70,7 +70,8 @@ class CanonicalTheme
     {
         $out = [];
         foreach ($body as $key => $value) {
-            $path = $prefix === '' ? (string) $key : $prefix.'.'.$key;
+            $segment = str_replace(['~', '.'], ['~0', '~1'], (string) $key);
+            $path = $prefix === '' ? $segment : $prefix.'.'.$segment;
             if (is_array($value) && $value !== []) {
                 $out += $this->leaves($value, $path);
             } else {
