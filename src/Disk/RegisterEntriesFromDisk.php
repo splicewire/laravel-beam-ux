@@ -14,13 +14,18 @@ use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Access\EntryAccessGate;
 use Splicewire\Beam\Ux\Access\Right;
 use Splicewire\Beam\Ux\Body\BodyKind;
+use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
+use Splicewire\Beam\Ux\Containment\EntryPathResolver;
+use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
 use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\DefaultPlacement;
+use Splicewire\Beam\Ux\Provenance\Provenance;
+use Splicewire\Beam\Ux\Provenance\Reasserter;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -104,10 +109,19 @@ class RegisterEntriesFromDisk
      * path's answer, so a mixed tree imports correctly under one default. See {@see unresolved()} for
      * what happens when neither source answers.
      *
+     * @param  list<string>  $only  Exact root-relative files; empty preserves the unfiltered batch.
+     * @param  ?string  $expectedPlan  Optional selected dry-run hash; mismatch refuses before writes.
      * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, ignored: array<int, string>, failed: array<string, string>, unresolved: array<int, string>, recognized: int}
      */
-    public function scan(string $root, ?BeamUxEntry $under = null, ?UxType $default = null, array $ignore = [], ?string $package = null): array
+    public function scan(string $root, ?BeamUxEntry $under = null, ?UxType $default = null, array $ignore = [], ?string $package = null, array $only = [], ?string $expectedPlan = null): array
     {
+        if ($only !== []) {
+            return $this->scanSelected($root, $under, $default, $ignore, $package, $only, $expectedPlan);
+        }
+        if ($expectedPlan !== null) {
+            throw new InvalidArgumentException('An expected plan requires an explicit --only selection.');
+        }
+
         $root = rtrim($root, '/');
 
         $this->failures = [];
@@ -211,7 +225,7 @@ class RegisterEntriesFromDisk
                 // An edited row is left for docs.diverged; cms is untouched. No-op pre-migration.
                 $src = (string) file_get_contents($absolute);
                 $title = $this->containmentFor($src, $relative, $envelope)['title'] ?? null;
-                if (app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->reassert($existing, $title, $src, $this->originFor($relative))) {
+                if (app(Reasserter::class)->reassert($existing, $title, $src, $this->originFor($relative))) {
                     $reasserted[] = $relative;
                 } else {
                     $skipped[] = $relative;
@@ -254,8 +268,8 @@ class RegisterEntriesFromDisk
     protected function originFor(string $relative): string
     {
         return $this->package !== null
-            ? \Splicewire\Beam\Ux\Provenance\Provenance::package($this->package)
-            : \Splicewire\Beam\Ux\Provenance\Provenance::disk($relative);
+            ? Provenance::package($this->package)
+            : Provenance::disk($relative);
     }
 
     protected function register(array $envelope, string $source, string $relative = ''): BeamUxEntry
@@ -289,11 +303,11 @@ class RegisterEntriesFromDisk
                 'type' => $envelope['type'],
                 'namespace' => $envelope['namespace'],
                 'format' => $envelope['format'],
-            ], BeamUxEntry::publishedMarkingAttributes(), $containment, \Splicewire\Beam\Ux\Provenance\Provenance::stamp(
+            ], BeamUxEntry::publishedMarkingAttributes(), $containment, Provenance::stamp(
                 $this->originFor($relative),
                 $containment['title'] ?? null,
                 $source,
-                app(\Splicewire\Beam\Ux\Codec\CodecRegistry::class)->for($envelope['format']),
+                app(CodecRegistry::class)->for($envelope['format']),
             )));
 
             // The body rides the beam-core StorageDriver (ParticleWriter under the default Stacked
@@ -702,10 +716,15 @@ class RegisterEntriesFromDisk
      * The same files, envelopes and idempotency key as scan(), so `register-from-disk --dry-run` and the
      * `docs.unregistered` audit cannot disagree with the importer (docs-walkthrough DOCS-01, DOC-3).
      *
+     * @param  list<string>  $only  Exact root-relative files; selected plans also expose entries and sha256.
      * @return array{matched: list<string>, unregistered: list<string>, ignored: list<string>, unresolved: list<string>}
      */
-    public function plan(string $root, ?UxType $default = null, array $ignore = []): array
+    public function plan(string $root, ?UxType $default = null, array $ignore = [], array $only = [], ?BeamUxEntry $under = null): array
     {
+        if ($only !== []) {
+            return $this->selectedPlan($root, $default, $ignore, $only, $under);
+        }
+
         $plan = ['matched' => [], 'unregistered' => [], 'ignored' => [], 'unresolved' => []];
         $root = rtrim($root, '/');
         if (! is_dir($root)) {
@@ -731,6 +750,166 @@ class RegisterEntriesFromDisk
 
             return $paths;
         }, $plan);
+    }
+
+    /** Selected mode never reasserts, baselines or reparents an existing entry. */
+    private function scanSelected(string $root, ?BeamUxEntry $under, ?UxType $default, array $ignore, ?string $package, array $only, ?string $expectedPlan): array
+    {
+        $plan = $this->selectedPlan($root, $default, $ignore, $only, $under);
+        if ($expectedPlan !== null && ! hash_equals($plan['sha256'], $expectedPlan)) {
+            throw new InvalidArgumentException('Selected registration plan changed; dry-run again. Nothing was imported.');
+        }
+        if ($plan['unresolved'] !== []) {
+            throw new InvalidArgumentException('Selected files have no type: '.implode(', ', $plan['unresolved']));
+        }
+        // Capture the complete selected source snapshot before the first write. A later disk edit is
+        // not silently substituted for the bytes whose hash was planned; external editors are not locked.
+        $sources = [];
+        foreach ($plan['entries'] as $item) {
+            $source = file_get_contents($plan['root'].'/'.$item['path']);
+            if ($source === false || ! hash_equals($item['source_sha256'], hash('sha256', $source))) {
+                throw new InvalidArgumentException('Selected source changed; dry-run again. Nothing was imported.');
+            }
+            $sources[$item['path']] = $source;
+        }
+        $this->failures = [];
+        $this->seen = [];
+        $this->under = $under;
+        $this->package = $package;
+        $created = [];
+        $skipped = [];
+        foreach ($plan['entries'] as $item) {
+            $existing = $this->existing($item['envelope']);
+            if ($existing !== null) {
+                $this->seen[$this->key($existing->namespace, $existing->slug)] = $existing;
+                $skipped[] = $item['path'];
+
+                continue;
+            }
+            $created[] = $this->register($item['envelope'], $sources[$item['path']], $item['path']);
+        }
+
+        return ['created' => $created, 'skipped' => $skipped, 'reasserted' => [], 'ignored' => [],
+            'failed' => $this->failures, 'unresolved' => [], 'recognized' => count($plan['entries']), 'plan_sha256' => $plan['sha256']];
+    }
+
+    /** Same native selection and containment calculation for dry-run and selected application. */
+    private function selectedPlan(string $root, ?UxType $default, array $ignore, array $only, ?BeamUxEntry $under): array
+    {
+        $root = realpath($root);
+        if ($root === false || ! is_dir($root)) {
+            throw new InvalidArgumentException('The selection requires an existing scan root.');
+        }
+        $all = [];
+        foreach ($this->files($root) as $absolute) {
+            $all[ltrim(substr($absolute, strlen($root)), '/')] = $absolute;
+        }
+        $selected = [];
+        foreach ($only as $relative) {
+            if (! is_string($relative) || $relative === '' || preg_match('/[\\\\*?\[\]{}:]/', $relative)
+                || str_starts_with($relative, '/') || array_intersect(explode('/', $relative), ['', '.', '..']) !== []) {
+                throw new InvalidArgumentException('Each --only must be an exact root-relative file path.');
+            }
+            if (isset($selected[$relative])) {
+                throw new InvalidArgumentException("Duplicate selection: {$relative}");
+            }
+            $aliases = array_filter(array_keys($all), fn (string $path): bool => strcasecmp($path, $relative) === 0);
+            if (count($aliases) !== 1 || ! isset($all[$relative])) {
+                throw new InvalidArgumentException("Unknown or ambiguous selection: {$relative}");
+            }
+            $walk = $root;
+            foreach (explode('/', $relative) as $piece) {
+                $walk .= '/'.$piece;
+                if (is_link($walk)) {
+                    throw new InvalidArgumentException("Symlink selection is unsupported: {$relative}");
+                }
+            }
+            $absolute = realpath($all[$relative]);
+            $envelope = $this->disk->envelopeForPath($relative);
+            if ($absolute === false || ! str_starts_with($absolute, $root.'/') || ! is_file($absolute)
+                || self::ignores($ignore, $relative) || $envelope === null) {
+                throw new InvalidArgumentException("Not an eligible body file: {$relative}");
+            }
+            // A second format at the same coordinate is ambiguous even when only one is requested.
+            foreach (array_keys($all) as $other) {
+                if ($other !== $relative && $this->disk->envelopeForPath($other) !== null) {
+                    $alias = $this->disk->envelopeForPath($other);
+                    if ($this->key($alias['namespace'], $alias['slug']) === $this->key($envelope['namespace'], $envelope['slug'])) {
+                        throw new InvalidArgumentException("Ambiguous body envelope: {$relative} and {$other}");
+                    }
+                }
+            }
+            $envelope['type'] ??= $default?->value;
+            $selected[$relative] = $envelope;
+        }
+        uksort($selected, fn (string $a, string $b): int => ($this->depth($selected[$a]) <=> $this->depth($selected[$b])) ?: strcmp($a, $b));
+        $this->seen = [];
+        $this->under = $under;
+        $plan = ['root' => $root, 'matched' => [], 'unregistered' => [], 'ignored' => [], 'unresolved' => [], 'entries' => []];
+        $addresses = [];
+        foreach ($selected as $relative => $envelope) {
+            $matches = BeamUxEntry::query()->where('namespace', $envelope['namespace'])->where('slug', $envelope['slug'])->get();
+            if ($matches->count() > 1) {
+                throw new InvalidArgumentException("Ambiguous existing envelope: {$relative}");
+            }
+            $existing = $matches->first();
+            $source = file_get_contents($root.'/'.$relative);
+            if ($source === false) {
+                throw new InvalidArgumentException("Cannot read selected body: {$relative}");
+            }
+            $placement = $this->containmentFor($source, $relative, $envelope);
+            $fm = $this->frontmatter($source);
+            $parent = $this->parentFor($envelope, $fm['realm'] ?? $this->realmByConvention($relative));
+            $node = $existing ?? new BeamUxEntry(array_merge($envelope, $placement));
+            if ($existing === null) {
+                $node->setRelation('parent', $parent);
+            }
+            $chain = [];
+            $cursor = $node;
+            $visited = [];
+            while ($cursor !== null) {
+                $identity = $cursor->getKey() ?? spl_object_id($cursor);
+                if (isset($visited[$identity])) {
+                    throw new InvalidArgumentException("Cyclic selected parent chain: {$relative}");
+                }
+                $visited[$identity] = true;
+                array_unshift($chain, $cursor);
+                $cursor = $cursor->parent;
+            }
+            $address = app(UrlResolver::class)->resolveChain($chain);
+            if ($existing === null && $envelope['type'] === UxType::Page->value && ($placement['segment'] ?? '') !== '') {
+                $realm = $placement['realm'] ?? BeamUxEntry::REALM_SITE;
+                $addressKey = $realm.'|'.$address;
+                if (isset($addresses[$addressKey])) {
+                    throw new InvalidArgumentException("Selected public address collision: {$address}");
+                }
+                foreach (BeamUxEntry::query()->where('type', UxType::Page->value)->get() as $candidate) {
+                    if ($candidate->realm !== $realm && ! in_array($realm, $candidate->realms ?? [], true)) {
+                        continue;
+                    }
+                    $ancestry = app(EntryPathResolver::class)->ancestry($candidate);
+                    if ($ancestry !== null && app(UrlResolver::class)->resolveChain($ancestry) === $address) {
+                        throw new InvalidArgumentException("Selected public address already occupied: {$address}");
+                    }
+                }
+                $addresses[$addressKey] = true;
+            }
+            $plan[$existing === null ? 'unregistered' : 'matched'][] = $relative;
+            if ($envelope['type'] === null) {
+                $plan['unresolved'][] = $relative;
+            }
+            $plan['entries'][] = ['path' => $relative, 'source_sha256' => hash('sha256', $source), 'envelope' => $envelope,
+                'action' => $existing === null ? 'register' : 'skip-existing', 'existing_id' => $existing?->getKey(),
+                'inferred_parent' => $parent === null ? null : ['id' => $parent->getKey(), 'namespace' => $parent->namespace, 'slug' => $parent->slug],
+                'parent' => ($actual = $node->parent) === null ? null : ['id' => $actual->getKey(), 'namespace' => $actual->namespace, 'slug' => $actual->slug],
+                'placement' => $existing === null ? $placement : array_intersect_key($existing->getAttributes(), array_flip(['parent_id', 'realm', 'segment', 'nav_order', 'title'])),
+                'composed_path' => $address,
+                'ancestry' => array_map(fn (BeamUxEntry $ancestor): array => ['id' => $ancestor->getKey(), 'namespace' => $ancestor->namespace, 'slug' => $ancestor->slug, 'parent_id' => $ancestor->parent_id, 'realm' => $ancestor->realm, 'segment' => $ancestor->segment], $chain)];
+            $this->seen[$this->key($envelope['namespace'], $envelope['slug'])] = $node;
+        }
+        $plan['sha256'] = hash('sha256', json_encode($plan, JSON_THROW_ON_ERROR));
+
+        return $plan;
     }
 
     /**

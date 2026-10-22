@@ -40,6 +40,8 @@ class RegisterFromDiskCommand extends Command
         {path : The directory to scan for un-registered body files}
         {--under= : Public path or entry id of the entry scan-root files hang from (default: the realm root)}
         {--type= : The UxType for files whose directory does not name one (layout|template|page|component|theme)}
+        {--only=* : Exact body path relative to the unchanged scan root (repeat for each file)}
+        {--expect-plan= : Refuse selected apply unless this native dry-run SHA256 still matches}
         {--dry-run : Report which files are already registered and which would be, and write nothing}';
 
     protected $description = 'Register on-disk BeamUx bodies (every format) not yet in the DB; infer type+namespace+containment from path; run S9 draft inference at import.';
@@ -95,13 +97,33 @@ class RegisterFromDiskCommand extends Command
         // constructor-injected `WriteGate` — before the rebind happens, so the permissive binding lands
         // behind an object graph that already closed over the old gate and the import is refused anyway.
         // A container rebind only reaches what has not been constructed yet.
-        if ($this->option('dry-run')) {
-            return $this->dryRun($path, $type);
-        }
+        $only = (array) $this->option('only');
+        if ($only !== [] || $this->option('expect-plan') !== null) {
+            try {
+                if ($only === []) {
+                    throw new \InvalidArgumentException('--expect-plan requires --only.');
+                }
+                if ($this->option('dry-run')) {
+                    $plan = $this->laravel->make(RegisterEntriesFromDisk::class)->plan($path, $type, only: $only, under: $under);
+                    $this->line(json_encode($plan, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 
-        $result = $this->asSystemWriter(
-            fn () => $this->laravel->make(RegisterEntriesFromDisk::class)->scan($path, $under, $type),
-        );
+                    return $plan['unresolved'] === [] ? self::SUCCESS : self::FAILURE;
+                }
+                $result = $this->asSystemWriter(fn () => $this->laravel->make(RegisterEntriesFromDisk::class)->scan(
+                    $path, $under, $type, only: $only, expectedPlan: $this->option('expect-plan'),
+                ));
+            } catch (\InvalidArgumentException $e) {
+                $this->components->error($e->getMessage());
+
+                return self::FAILURE;
+            }
+        } elseif ($this->option('dry-run')) {
+            return $this->dryRun($path, $type);
+        } else {
+            $result = $this->asSystemWriter(
+                fn () => $this->laravel->make(RegisterEntriesFromDisk::class)->scan($path, $under, $type),
+            );
+        }
 
         // The `type` refusal (ticket 42). Nothing was written — the batch enumerates the whole tree before
         // its first write precisely so this can be true — so this reports and leaves, ahead of the

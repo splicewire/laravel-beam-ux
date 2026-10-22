@@ -7,3 +7,6 @@ CLAUDE.md
 
 # Generated FilesystemSchemaRegistry artifacts (regenerated from ThemeSchemas on every boot).
 /resources/schemas/theme/
+
+# Installed by the declared compiler test fixture preparation.
+/tests/Fixtures/entry-body-host/node_modules

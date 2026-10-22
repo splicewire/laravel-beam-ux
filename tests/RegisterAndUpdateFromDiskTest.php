@@ -2,16 +2,26 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Storage\StorageDriver;
+use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
+use Splicewire\Beam\Ux\Compile\NodeEntryBodyCompiler;
+use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
+use Splicewire\Beam\Ux\Disk\RegisterFromDisk;
 use Splicewire\Beam\Ux\Disk\UpdateFromNewer;
+use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Nav\NavSource;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
+use Splicewire\Beam\Ux\Provenance\Provenance;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
+use Symfony\Component\Console\Output\BufferedOutput;
 
 /**
  * beamux-build S8 (`beamux-build/issues/05`) — the two explicit-operator disk batches.
@@ -37,11 +47,14 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         // A migrated host: register-from-disk publishes through EntryPublication, which needs the version store and the pin
         // (ADR-0225 decision 2; disk-registered entries are born published).
         (require dirname(__DIR__).'/database/migrations/shared/add_published_version_to_beam_ux_entries_table.php.stub')->up();
-        (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_versions_table.php.stub')->up();
-        (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_particles_table.php.stub')->up();
+        (require dirname((new \ReflectionClass(BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_versions_table.php.stub')->up();
+        (require dirname((new \ReflectionClass(BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_particles_table.php.stub')->up();
 
         $this->root = sys_get_temp_dir().'/beamux-disk-'.uniqid();
         mkdir($this->root, 0777, true);
+
+        config()->set('filesystems.disks.registration-tests', ['driver' => 'local', 'root' => $this->root.'/artifacts']);
+        config()->set('beam.ux.compile.disk', 'registration-tests');
 
         // Swap the default StorageDriver for a recording fake so the batch's write path needs no
         // beam-core particle table — the batch's OWN behavior is under test, not the driver's.
@@ -413,14 +426,14 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         $this->writeFile('guides/page/laravel.mdx', $this->page('Beam on Laravel', 'laravel'));
 
         $batch = new DeepestFirstRegisterBatch(
-            $this->app->make(\Splicewire\Beam\Ux\Disk\RegisterFromDisk::class),
+            $this->app->make(RegisterFromDisk::class),
             $this->app->make(StorageDriverResolver::class),
-            $this->app->make(\Splicewire\Beam\Ux\Inference\InferDraftSchema::class),
+            $this->app->make(InferDraftSchema::class),
         );
 
         $batch->scan($this->root);
 
-        $chain = $this->app->make(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)
+        $chain = $this->app->make(EntryPathResolver::class)
             ->resolve('/laravel/setup/config');
 
         $this->assertNotNull($chain, 'the imported tree must resolve as a path, which is what containment buys');
@@ -638,9 +651,9 @@ class RegisterAndUpdateFromDiskTest extends TestCase
     /** Run the operator command over the scan root and return its rendered output, ANSI stripped. */
     private function runReconcile(): string
     {
-        $buffer = new \Symfony\Component\Console\Output\BufferedOutput;
+        $buffer = new BufferedOutput;
 
-        $this->app->make(\Illuminate\Contracts\Console\Kernel::class)->call(
+        $this->app->make(Kernel::class)->call(
             'splicewire:beam:ux:update-from-newer',
             ['path' => $this->root],
             $buffer,
@@ -663,7 +676,7 @@ class RegisterAndUpdateFromDiskTest extends TestCase
 
         $this->assertCount(1, $result['created']);
         $row = BeamUxEntry::query()->where('slug', 'install')->firstOrFail();
-        $this->assertSame(\Splicewire\Beam\Ux\Provenance\Provenance::package('splicewire/tower'), $row->origin);
+        $this->assertSame(Provenance::package('splicewire/tower'), $row->origin);
     }
 
     public function test_an_undeclared_disk_source_still_stamps_a_disk_origin(): void
@@ -677,7 +690,7 @@ class RegisterAndUpdateFromDiskTest extends TestCase
 
         $this->assertCount(1, $result['created']);
         $row = BeamUxEntry::query()->where('slug', 'install')->firstOrFail();
-        $this->assertSame(\Splicewire\Beam\Ux\Provenance\Provenance::disk('docs/page/install.mdx'), $row->origin);
+        $this->assertSame(Provenance::disk('docs/page/install.mdx'), $row->origin);
     }
 
     public function test_a_bundle_under_its_own_root_keeps_the_docs_namespace_so_a_move_preserves_coordinates(): void
@@ -694,6 +707,176 @@ class RegisterAndUpdateFromDiskTest extends TestCase
         $this->assertCount(2, $result['created']);
         $this->assertNotNull(BeamUxEntry::query()->where('namespace', 'docs')->where('slug', 'build')->first());
         $this->assertNotNull(BeamUxEntry::query()->where('namespace', 'docs')->where('slug', 'using')->first());
+    }
+
+    public function test_selected_eight_guides_leave_the_alternate_docs_landing_and_unselected_bodies_untouched(): void
+    {
+        $this->useFixtureCompiler();
+        $root = BeamUxEntry::rootFor('site');
+        $docs = BeamUxEntry::create(['slug' => 'docs', 'type' => 'page', 'parent_id' => $root->id, 'segment' => '/beam/docs']);
+        $laravel = BeamUxEntry::create(['namespace' => 'beam.docs', 'slug' => 'laravel', 'type' => 'page', 'parent_id' => $docs->id, 'segment' => 'laravel']);
+        $this->writeFile('beam/page/docs.mdx', $this->page('Competing landing', '/beam/docs'));
+        $only = [];
+        foreach (['adoption', 'backings', 'capabilities', 'extensions', 'operations', 'reference', 'service-desk', 'ui-catalogue'] as $slug) {
+            $only[] = "beam/docs/laravel/page/{$slug}.mdx";
+            $this->writeFile(end($only), $this->page($slug, $slug));
+        }
+        $batch = $this->app->make(RegisterEntriesFromDisk::class);
+        $this->assertContains('beam/page/docs.mdx', $batch->plan($this->root)['unregistered'], 'The old whole scan includes a competing landing.');
+        $before = $docs->fresh()->getRawOriginal();
+        $plan = $batch->plan($this->root, only: $only);
+        $this->assertCount(8, $plan['entries']);
+        foreach ($plan['entries'] as $entry) {
+            $this->assertSame($laravel->id, $entry['parent']['id']);
+            $this->assertSame('beam.docs.laravel', $entry['envelope']['namespace']);
+            $this->assertSame(hash_file('sha256', $this->root.'/'.$entry['path']), $entry['source_sha256']);
+        }
+        $result = $batch->scan($this->root, only: $only, expectedPlan: $plan['sha256']);
+        $this->assertCount(8, $result['created']);
+        $this->assertSame($before, $docs->fresh()->getRawOriginal());
+        $this->assertSame(1, BeamUxEntry::where('segment', '/beam/docs')->count());
+        foreach ($result['created'] as $entry) {
+            $this->assertSame($laravel->id, $entry->parent_id);
+        }
+        $this->assertSame([], $result['failed']);
+    }
+
+    public function test_selected_existing_entry_is_never_reasserted_or_baselined(): void
+    {
+        $this->migrateProvenance();
+        $path = 'docs/page/intro.mdx';
+        $this->writeFile($path, $this->page('Original', 'intro'));
+        $batch = $this->app->make(RegisterEntriesFromDisk::class);
+        $entry = $batch->scan($this->root)['created'][0];
+        $before = $entry->getRawOriginal();
+        $versions = DB::table('beam_versions')->get()->toJson();
+        $this->writeFile($path, $this->page('Changed disk', 'elsewhere'));
+        $result = $batch->scan($this->root, only: [$path]);
+        $this->assertSame([$path], $result['skipped']);
+        $this->assertSame([], $result['reasserted']);
+        $this->assertSame($before, $entry->fresh()->getRawOriginal());
+        $this->assertSame($versions, DB::table('beam_versions')->get()->toJson());
+    }
+
+    public function test_selected_invalid_paths_and_envelope_aliases_refuse_before_any_write(): void
+    {
+        $this->writeFile('page/good.mdx', $this->page('Good', 'good'));
+        $this->writeFile('notes.txt', 'not a body');
+        $batch = $this->app->make(RegisterEntriesFromDisk::class);
+        foreach (['../page/good.mdx', '/page/good.mdx', 'page/*.mdx', 'page/./good.mdx', '', 'missing.mdx', 'notes.txt', 'page/GOOD.mdx', 'page\\good.mdx'] as $bad) {
+            try {
+                $batch->scan($this->root, only: ['page/good.mdx', $bad]);
+                $this->fail("Accepted invalid selector {$bad}");
+            } catch (\InvalidArgumentException $e) {
+                $this->assertSame(0, BeamUxEntry::count(), $e->getMessage());
+            }
+        }
+        $this->writeFile('page/good.tsx', 'export default function Good() { return <div/>; }');
+        $this->expectException(\InvalidArgumentException::class);
+        $batch->scan($this->root, only: ['page/good.mdx']);
+    }
+
+    public function test_selected_plan_hash_refuses_source_and_selection_drift_without_writes(): void
+    {
+        $this->writeFile('page/one.mdx', $this->page('One', 'one'));
+        $this->writeFile('page/two.mdx', $this->page('Two', 'two'));
+        $batch = $this->app->make(RegisterEntriesFromDisk::class);
+        $plan = $batch->plan($this->root, only: ['page/one.mdx']);
+        foreach ([['page/two.mdx'], ['page/one.mdx', 'page/two.mdx']] as $changed) {
+            try {
+                $batch->scan($this->root, only: $changed, expectedPlan: $plan['sha256']);
+                $this->fail('Selection drift accepted.');
+            } catch (\InvalidArgumentException $e) {
+                $this->assertSame(0, BeamUxEntry::count());
+            }
+        }
+        $this->writeFile('page/one.mdx', $this->page('Changed', 'one'));
+        $this->expectException(\InvalidArgumentException::class);
+        $batch->scan($this->root, only: ['page/one.mdx'], expectedPlan: $plan['sha256']);
+    }
+
+    public function test_unfiltered_scan_retains_its_existing_landing_behavior_and_output(): void
+    {
+        $root = BeamUxEntry::rootFor('site');
+        BeamUxEntry::create(['slug' => 'docs', 'type' => 'page', 'parent_id' => $root->id, 'segment' => '/beam/docs']);
+        $this->writeFile('beam/page/docs.mdx', $this->page('Alternate envelope', '/beam/docs'));
+        $batch = $this->app->make(RegisterEntriesFromDisk::class);
+        $this->assertSame(['matched' => [], 'unregistered' => ['beam/page/docs.mdx'], 'ignored' => [], 'unresolved' => []], $batch->plan($this->root));
+        $result = $batch->scan($this->root);
+        $this->assertCount(1, $result['created']);
+        $this->assertSame(2, BeamUxEntry::where('segment', '/beam/docs')->count(), 'Unfiltered behavior is deliberately unchanged, not silently widened by a selected-mode fix.');
+    }
+
+    public function test_selected_competing_public_address_refuses_before_any_write(): void
+    {
+        $root = BeamUxEntry::rootFor('site');
+        BeamUxEntry::create(['slug' => 'docs', 'type' => 'page', 'parent_id' => $root->id, 'segment' => '/beam/docs']);
+        $before = BeamUxEntry::query()->get()->toJson();
+        $this->writeFile('beam/page/docs.mdx', $this->page('Alternate envelope', '/beam/docs'));
+        $this->writeFile('page/ok.mdx', $this->page('Good', '/good'));
+        try {
+            $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, only: ['page/ok.mdx', 'beam/page/docs.mdx']);
+            $this->fail('Occupied public address was imported.');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringContainsString('already occupied', $e->getMessage());
+            $this->assertSame($before, BeamUxEntry::query()->get()->toJson());
+        }
+    }
+
+    public function test_selected_native_cli_reports_the_plan_and_applies_its_exact_parent(): void
+    {
+        $this->useFixtureCompiler();
+        $root = BeamUxEntry::rootFor('site');
+        $docs = BeamUxEntry::create(['namespace' => 'beam.docs', 'slug' => 'laravel', 'type' => 'page', 'parent_id' => $root->id, 'segment' => '/beam/docs/laravel']);
+        $path = 'beam/docs/laravel/page/service-desk.mdx';
+        $this->writeFile($path, $this->page('Service desk', 'service-desk'));
+        $plan = $this->app->make(RegisterEntriesFromDisk::class)->plan($this->root, only: [$path]);
+        $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root, '--only' => [$path], '--dry-run' => true])
+            ->expectsOutputToContain($plan['sha256'])->assertSuccessful();
+        $this->assertSame(2, BeamUxEntry::count());
+        $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root, '--only' => [$path], '--expect-plan' => $plan['sha256']])->assertSuccessful();
+        $this->assertSame($docs->id, BeamUxEntry::where('slug', 'service-desk')->firstOrFail()->parent_id);
+        $before = BeamUxEntry::count();
+        $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root, '--only' => [$path], '--expect-plan' => $plan['sha256']])->assertFailed();
+        $this->assertSame($before, BeamUxEntry::count(), 'An already-applied plan is stale, not silently acknowledged.');
+    }
+
+    public function test_selected_symlink_and_case_alias_refuse_without_writes(): void
+    {
+        $this->writeFile('page/real.mdx', $this->page('Real', 'real'));
+        symlink($this->root.'/page/real.mdx', $this->root.'/page/link.mdx');
+        $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root, '--only' => ['page/link.mdx']])->assertFailed();
+        $this->assertSame(0, BeamUxEntry::count());
+        $this->expectException(\InvalidArgumentException::class);
+        $this->app->make(RegisterEntriesFromDisk::class)->plan($this->root, only: ['page/REAL.mdx']);
+    }
+
+    public function test_selected_parent_drift_and_duplicate_selectors_refuse_without_importing(): void
+    {
+        $root = BeamUxEntry::rootFor('site');
+        $parent = BeamUxEntry::create(['namespace' => 'docs', 'slug' => 'guides', 'type' => 'page', 'parent_id' => $root->id, 'segment' => '/guides']);
+        $path = 'docs/guides/page/intro.mdx';
+        $this->writeFile($path, $this->page('Intro', 'intro'));
+        $batch = $this->app->make(RegisterEntriesFromDisk::class);
+        $plan = $batch->plan($this->root, only: [$path]);
+        $parent->update(['segment' => '/moved']);
+        foreach ([[$path], [$path, $path]] as $only) {
+            try {
+                $batch->scan($this->root, only: $only, expectedPlan: $plan['sha256']);
+                $this->fail('Parent/selection drift was accepted.');
+            } catch (\InvalidArgumentException $e) {
+                $this->assertSame(2, BeamUxEntry::count());
+                $this->assertSame(0, DB::table('beam_particles')->count());
+                $this->assertSame(0, DB::table('beam_versions')->count());
+            }
+        }
+    }
+
+    private function useFixtureCompiler(): void
+    {
+        $this->app->singleton(EntryBodyCompiler::class, fn () => new NodeEntryBodyCompiler(
+            workingDirectory: __DIR__.'/Fixtures/entry-body-host',
+        ));
     }
 
     private function migrateProvenance(): void
