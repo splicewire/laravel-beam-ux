@@ -40,6 +40,14 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class EntryPublicationTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Publication-only fake disks can sit below a checkout. Git is unavailable unless
+        // the dedicated fixture below has initialized its own disposable repository.
+        config(['beam.ux.recording.git' => PHP_BINARY.'-publication-test-no-git']);
+    }
+
     /** Disposable repositories only: caller supplies a registered scratch root. */
     private function recordingRepository(): array
     {
@@ -56,13 +64,14 @@ class EntryPublicationTest extends TestCase
             return trim($process->getOutput());
         };
         $git(['init', '-b', 'main']);
+        $this->assertSame(realpath($repo), realpath($git(['rev-parse', '--show-toplevel'])));
         $git(['config', 'user.name', 'Release test']);
         $git(['config', 'user.email', 'release@example.invalid']);
         file_put_contents($repo.'/unrelated', "base\n");
         $git(['add', '--', 'unrelated']);
         $git(['commit', '-m', 'baseline']);
         config(['filesystems.disks.recording-test' => ['driver' => 'local', 'root' => $repo, 'throw' => true],
-            'beam.ux.storage.mirror_disk' => 'recording-test']);
+            'beam.ux.storage.mirror_disk' => 'recording-test', 'beam.ux.recording.git' => 'git']);
         $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
         $this->app->forgetInstance(EntryPublication::class);
 
