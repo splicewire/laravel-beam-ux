@@ -193,6 +193,10 @@ class EntryPublication
         $this->requireVersionStore();
 
         return $context->getConnection()->transaction(function () use ($context, $refs, $actor, $expectedPins, $completion) {
+            // SQLite ignores FOR UPDATE; reserve its writer before reading pins. No model events or timestamps.
+            if ($context->getConnection()->getDriverName() === 'sqlite') {
+                $context->newQuery()->whereKey($context->getKey())->toBase()->update(['id' => $context->getKey()]);
+            }
             // Match the URL validator's global lock order, including entries outside this Release.
             $entries = $context->newQuery()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             $prepared = [];

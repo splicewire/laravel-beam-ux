@@ -109,6 +109,11 @@ class ReleaseRecording
             // Keep entry rows locked while completing mirrors; a concurrent publication cannot move
             // their pins between this stale check and the writes. Git does not hold a DB transaction.
             $release->getConnection()->transaction(function () use ($prepared) {
+                // Reserve SQLite before pin reads; other drivers retain the existing sorted row locks.
+                if ($prepared !== [] && $release->getConnection()->getDriverName() === 'sqlite') {
+                    $first = $prepared[0][0];
+                    $first->newQuery()->whereKey($first->getKey())->toBase()->update(['id' => $first->getKey()]);
+                }
                 foreach ($prepared as [$entry, $version]) {
                     $current = $entry->newQuery()->lockForUpdate()->find($entry->id);
                     if ($current === null || $current->published_version !== (string) $version->id
