@@ -319,6 +319,12 @@ final class ReleaseService
         }
     }
 
+    /** File import edits an entry; missing-file restoration additionally requires publication reach. */
+    public function authorizeFileEdit(BeamUxEntry $entry, Authenticatable $actor, bool $restore = false): void
+    {
+        $this->authorizeEntry($entry, $actor, $restore);
+    }
+
     private function authorizeEntry(BeamUxEntry $entry, Authenticatable $actor, bool $publish): void
     {
         $gate = Gate::forUser($actor);

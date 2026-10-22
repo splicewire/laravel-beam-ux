@@ -40,6 +40,287 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class EntryPublicationTest extends TestCase
 {
+    private function themeFileFixture(): array
+    {
+        $root = getenv('BEAM_RECORDING_TEST_ROOT');
+        if (! is_string($root) || ! is_dir($root)) {
+            $this->markTestSkipped('An owned disposable file fixture root is required.');
+        }
+        $directory = $root.'/theme-'.bin2hex(random_bytes(6));
+        mkdir($directory, 0700);
+        config(['filesystems.disks.theme-file' => ['driver' => 'local', 'root' => $directory], 'beam.ux.storage.mirror_disk' => 'theme-file']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+        [$releases, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        $entry = BeamUxEntry::create(['slug' => 'file-theme', 'type' => 'theme', 'format' => 'css', 'realm' => 'site', 'namespace' => 'theme']);
+        $body = ['canvas' => ['accent' => '#112233', 'fontBody' => 'system-ui'], 'shell' => ['surface' => '#ffffff'], 'site' => ['accent' => '#334455']];
+        $publication = app(EntryPublication::class);
+        $publication->write($entry, $body);
+        $publication->publishAuthoredBody($entry);
+        $state = $publication->state($entry->fresh());
+        $release = $releases->requestOne($entry->fresh(), $state->headVersion, $author);
+        $member = $release->members()->firstOrFail();
+        $target = app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class)->target($entry->fresh());
+
+        return [$entry->fresh(), $member, $author, $body, $target, $publication];
+    }
+
+    private function fileInput($inspection): \Splicewire\Beam\Ux\Data\FileReconcileInputData
+    {
+        return new \Splicewire\Beam\Ux\Data\FileReconcileInputData($inspection->workingHeadVersion, $inspection->publishedVersion,
+            $inspection->fileExists, $inspection->fileSha256, $inspection->fingerprint, true);
+    }
+
+    public function test_file_import_preserves_all_namespaces_pin_mirror_and_records_only_a_draft(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $body['site']['accent'] = '#abcdef';
+        $bytes = $entry->codec()->decode($body);
+        file_put_contents($target['absolute'], $bytes);
+        $before = $publication->state($entry);
+        $inspection = $service->inspect($member, $author);
+        $this->assertSame('differs', $inspection->state);
+        $result = $service->take($member, $author, $this->fileInput($inspection));
+        $after = $publication->state($entry->fresh());
+        $this->assertSame('drafted', $result->status);
+        $this->assertSame($before->publishedVersion, $after->publishedVersion);
+        $this->assertNotSame($before->headVersion, $after->headVersion);
+        $this->assertCount(count($before->versions) + 1, $after->versions);
+        $this->assertSame($bytes, file_get_contents($target['absolute']));
+        $actual = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($entry->fresh()->versionable(), $after->headVersion)->snapshot['payload'];
+        $this->assertSame($body, $actual);
+    }
+
+    public function test_file_import_rejects_pin_moved_with_same_head_and_keeps_every_effect(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $body['site']['accent'] = '#abcdef';
+        $draft = $publication->draftFromBase($entry, $body, $publication->state($entry)->headVersion);
+        $local = $body;
+        $local['site']['accent'] = '#123abc';
+        $bytes = $entry->codec()->decode($local);
+        file_put_contents($target['absolute'], $bytes);
+        $inspection = $service->inspect($member, $author);
+        // Move only the pin; the inspected working head is unchanged.
+        $publication->publishVersion($entry->fresh(), $draft->headVersion);
+        file_put_contents($target['absolute'], $bytes);
+        $before = $publication->state($entry->fresh());
+        try {
+            $service->take($member, $author, $this->fileInput($inspection));
+            $this->fail('A moved pin was ignored');
+        } catch (\Splicewire\Beam\Ux\Files\FileConflict $failure) {
+            $this->assertSame('pin-moved', $failure->reason);
+            $this->assertEquals($before, $publication->state($entry->fresh()));
+            $this->assertSame($bytes, file_get_contents($target['absolute']));
+        }
+    }
+
+    public function test_missing_file_restore_is_exclusive_and_preserves_draft_history(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $published = file_get_contents($target['absolute']);
+        $body['site']['accent'] = '#abcdef';
+        $publication->draftFromBase($entry, $body, $publication->state($entry)->headVersion);
+        unlink($target['absolute']);
+        $inspection = $service->inspect($member, $author);
+        $this->assertSame('missing', $inspection->state);
+        $before = $publication->state($entry->fresh());
+        $result = $service->restore($member, $author, $this->fileInput($inspection));
+        $this->assertSame('restored', $result->status);
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+        $this->assertSame($published, file_get_contents($target['absolute']));
+        unlink($target['absolute']);
+        $inspection = $service->inspect($member, $author);
+        file_put_contents($target['absolute'], 'later manual bytes');
+        try {
+            $service->restore($member, $author, $this->fileInput($inspection));
+            $this->fail('An appearing file was overwritten');
+        } catch (\Splicewire\Beam\Ux\Files\FileConflict $failure) {
+            $this->assertSame('file-moved', $failure->reason);
+            $this->assertSame('later manual bytes', file_get_contents($target['absolute']));
+            $this->assertEquals($before, $publication->state($entry->fresh()));
+        }
+    }
+
+    public function test_file_invalid_sources_never_create_versions_or_change_pin_file_or_receipt(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $canonical = $entry->codec()->decode($body);
+        $dropped = $body;
+        unset($dropped['shell']);
+        $font = $body;
+        $font['canvas']['fontBody'] = '#abcdef';
+        $badColor = $body;
+        $badColor['site']['accent'] = 'not-color';
+        $sources = ['garbage', '', ':root { nope }', $canonical.'/* ignored */',
+            str_replace('--theme-site-accent:', '--theme-site-accent: #000; --theme-site-accent:', $canonical),
+            $entry->codec()->decode($dropped), $entry->codec()->decode($font), $entry->codec()->decode($badColor),
+            $entry->codec()->decode([]), str_repeat('x', 4194305), "\xff\xfe"];
+        $before = $publication->state($entry);
+        foreach ($sources as $source) {
+            file_put_contents($target['absolute'], $source);
+            $inspection = $service->inspect($member, $author);
+            $this->assertFalse($inspection->canTake);
+            // Direct clients cannot bypass the inspected refusal with otherwise current preconditions.
+            $input = new \Splicewire\Beam\Ux\Data\FileReconcileInputData($before->headVersion, $before->publishedVersion,
+                true, hash('sha256', $source), $target['fingerprint'], true);
+            try {
+                $service->take($member, $author, $input);
+                $this->fail('Invalid import accepted: '.substr(json_encode($source), 0, 240));
+            } catch (\Splicewire\Beam\Ux\Files\FileConflict $failure) {
+                $this->assertSame(422, $failure->status);
+            }
+            $this->assertEquals($before, $publication->state($entry->fresh()));
+            $this->assertSame($source, file_get_contents($target['absolute']));
+        }
+    }
+
+    public function test_file_stale_head_hash_placement_and_validation_race_refuse_without_write(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $body['site']['accent'] = '#abcdef';
+        file_put_contents($target['absolute'], $entry->codec()->decode($body));
+        $inspection = $service->inspect($member, $author);
+        $publication->draftFromBase($entry, $body, $inspection->workingHeadVersion);
+        $this->assertFileConflict('head-moved', fn () => $service->take($member, $author, $this->fileInput($inspection)));
+        $inspection = $service->inspect($member, $author);
+        $before = $publication->state($entry->fresh());
+        file_put_contents($target['absolute'], 'new bytes');
+        $this->assertFileConflict('file-moved', fn () => $service->take($member, $author, $this->fileInput($inspection)));
+        file_put_contents($target['absolute'], $entry->codec()->decode($body));
+        $input = $this->fileInput($service->inspect($member, $author));
+        $input->fingerprint = str_repeat('0', 64);
+        $this->assertFileConflict('placement-moved', fn () => $service->take($member, $author, $input));
+        $inspection = $service->inspect($member, $author);
+        $validator = new class($target['absolute']) extends \Splicewire\Beam\Ux\Files\CanonicalTheme
+        {
+            public function __construct(private string $path) {}
+
+            public function decode(string $bytes, array $published): array
+            {
+                $body = parent::decode($bytes, $published);
+                file_put_contents($this->path, 'external change during validation');
+
+                return $body;
+            }
+        };
+        $racing = new \Splicewire\Beam\Ux\Files\ThemeReconciliation(app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class), $validator);
+        $this->assertFileConflict('file-moved', fn () => $racing->take($member, $author, $this->fileInput($inspection)));
+        $this->assertSame('external change during validation', file_get_contents($target['absolute']));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    private function assertFileConflict(string $reason, callable $operation): void
+    {
+        try {
+            $operation();
+            $this->fail('Expected file conflict '.$reason);
+        } catch (\Splicewire\Beam\Ux\Files\FileConflict $failure) {
+            $this->assertSame($reason, $failure->reason);
+        }
+    }
+
+    public function test_file_restore_refuses_actual_exclusive_create_race_and_preserves_short_write(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $before = $publication->state($entry);
+        unlink($target['absolute']);
+        $base = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $input = $this->fileInput($base->inspect($member, $author));
+        $files = new class extends \Splicewire\Beam\Ux\Files\LocalThemeFile
+        {
+            public function create(array $target, string $bytes): void
+            {
+                file_put_contents($target['absolute'], 'external file at exclusive create');
+                parent::create($target, $bytes);
+            }
+        };
+        $racing = new \Splicewire\Beam\Ux\Files\ThemeReconciliation($files, app(\Splicewire\Beam\Ux\Files\CanonicalTheme::class));
+        $this->assertFileConflict('file-moved', fn () => $racing->restore($member, $author, $input));
+        $this->assertSame('external file at exclusive create', file_get_contents($target['absolute']));
+        unlink($target['absolute']);
+        $files = new class extends \Splicewire\Beam\Ux\Files\LocalThemeFile
+        {
+            private int $writes = 0;
+
+            protected function write($stream, string $bytes): int|false
+            {
+                return $this->writes++ === 0 ? fwrite($stream, substr($bytes, 0, 7)) : false;
+            }
+        };
+        $broken = new \Splicewire\Beam\Ux\Files\ThemeReconciliation($files, app(\Splicewire\Beam\Ux\Files\CanonicalTheme::class));
+        $input = $this->fileInput($base->inspect($member, $author));
+        $this->assertFileConflict('incomplete', fn () => $broken->restore($member, $author, $input));
+        $partial = file_get_contents($target['absolute']);
+        $this->assertSame(7, strlen($partial));
+        $this->assertFileConflict('file-moved', fn () => $base->restore($member, $author, $input));
+        $this->assertFileConflict('file-exists', fn () => $base->restore($member, $author, $this->fileInput($base->inspect($member, $author))));
+        $this->assertSame($partial, file_get_contents($target['absolute']));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_file_restore_identical_is_explicit_noop_and_symlink_is_not_read(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $before = $publication->state($entry);
+        $this->assertSame('unchanged', $service->restore($member, $author, $this->fileInput($service->inspect($member, $author)))->status);
+        unlink($target['absolute']);
+        $outside = dirname($target['absolute']).'/private.txt';
+        file_put_contents($outside, 'private');
+        symlink($outside, $target['absolute']);
+        $inspection = $service->inspect($member, $author);
+        $this->assertSame('unsupported', $inspection->state);
+        $this->assertNull($inspection->localSource);
+        $this->assertNull($inspection->fileSha256);
+        $this->assertSame('private', file_get_contents($outside));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_file_direct_publisher_without_edit_cannot_inspect_or_import_or_restore(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $input = $this->fileInput($service->inspect($member, $author));
+        \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, AllowPublishDenyUpdateEntryPolicy::class);
+        $before = $publication->state($entry);
+        foreach ([fn () => $service->inspect($member, $author), fn () => $service->take($member, $author, $input), fn () => $service->restore($member, $author, $input)] as $operation) {
+            try {
+                $operation();
+                $this->fail('Direct publication granted file edit');
+            } catch (\Illuminate\Auth\Access\AuthorizationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_file_path_case_alias_submodule_and_nonregular_refuse_without_source_exposure(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $parent = dirname($target['absolute']);
+        $name = basename($target['absolute']);
+        $alias = $parent.'/'.strtoupper($name);
+        rename($target['absolute'], $alias);
+        $this->assertSame('unsupported', $service->inspect($member, $author)->state);
+        rename($alias, $target['absolute']);
+        unlink($target['absolute']);
+        mkdir($target['absolute']);
+        $this->assertNull($service->inspect($member, $author)->localSource);
+        rmdir($target['absolute']);
+        $root = config('filesystems.disks.theme-file.root');
+        mkdir($root.'/.git');
+        file_put_contents($root.'/.gitmodules', "[submodule \"mirror\"]\npath = ".explode('/', $target['path'])[0]."\n");
+        $this->assertSame('unsupported', $service->inspect($member, $author)->state);
+    }
+
     /** Disposable repositories only: caller supplies a registered scratch root. */
     private function recordingRepository(): array
     {

@@ -76,3 +76,5 @@ Files import/Take all as drafts/Restore published file, generic version panel ad
 push remain broader EP-16 work. See the starter's docs/examples/service-desk-recording.md for the
 fresh/upgrade and ordinary hook-failure/Files-retry journey. Focused tests and mounted UI/Git proof
 are separate; existing full-suite compatibility limitations are not erased by this feature.
+
+Current-pin comparison, bounded draft import and missing-only Restore are described in [Theme files](theme-files.md). Existing-file overwrite and broader EP16 reconciliation remain unfinished.
