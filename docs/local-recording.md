@@ -72,8 +72,9 @@ protected by CAS; concurrent external checkout/rebase/reset is unsupported and d
 refuse. A host may choose its Git executable via beam.ux.recording.git; no request can override it.
 
 Take-down/null-ref/deletion/move recording remains unavailable while publication stays intact.
-Files import/Take all as drafts/Restore published file, generic version panel adoption and remote
-push remain broader EP-16 work. See the starter's docs/examples/service-desk-recording.md for the
+Canonical Theme import and missing-only Restore are available through the current-file panel.
+Batch Take all, existing-file Restore overwrite, generic version panel adoption and remote push
+remain broader EP-16 work. See the starter's docs/examples/service-desk-recording.md for the
 fresh/upgrade and ordinary hook-failure/Files-retry journey. Focused tests and mounted UI/Git proof
 are separate; existing full-suite compatibility limitations are not erased by this feature.
 
