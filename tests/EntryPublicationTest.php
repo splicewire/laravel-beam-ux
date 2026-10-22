@@ -321,6 +321,41 @@ class EntryPublicationTest extends TestCase
         $this->assertSame('unsupported', $service->inspect($member, $author)->state);
     }
 
+    public function test_file_active_unknown_tenancy_and_revoked_author_refuse_before_local_io(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $input = $this->fileInput($service->inspect($member, $author));
+        $before = $publication->state($entry);
+        foreach (['active', 'unknown', 'throwing'] as $mode) {
+            $context = \Mockery::mock(TenancyContext::class);
+            if ($mode === 'throwing') {
+                $context->shouldReceive('isActive')->andThrow(new \RuntimeException('private tenancy problem'));
+            } else {
+                $context->shouldReceive('isActive')->andReturn($mode === 'active');
+                $context->shouldReceive('isMultiTenant')->andReturn(true);
+                $context->shouldReceive('centralConnection')->andReturn(null);
+            }
+            $this->app->instance(TenancyContext::class, $context);
+            foreach ([fn () => $service->inspect($member, $author), fn () => $service->take($member, $author, $input), fn () => $service->restore($member, $author, $input)] as $operation) {
+                try {
+                    $operation();
+                    $this->fail('Unverified tenancy read a file');
+                } catch (\Illuminate\Auth\Access\AuthorizationException $failure) {
+                    $this->assertStringNotContainsString('private tenancy problem', $failure->getMessage());
+                }
+            }
+        }
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => false);
+        try {
+            $service->inspect($member, $author);
+            $this->fail('Revoked author inspected a file');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->addToAssertionCount(1);
+        }
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
     /** Disposable repositories only: caller supplies a registered scratch root. */
     private function recordingRepository(): array
     {
