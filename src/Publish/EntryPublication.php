@@ -184,15 +184,15 @@ class EntryPublication
      * Publish fixed member versions on one entry connection. Authorization belongs to the caller.
      * The Release participant calls this inside its workflow transaction; single publish shares it.
      *
-     * @param array<string, string> $refs Entry id => fixed version id.
-     * @param array<string, ?string>|null $expectedPins Complete observed-pin map, when publishing a Release.
+     * @param  array<string, string>  $refs  Entry id => fixed version id.
+     * @param  array<string, ?string>|null  $expectedPins  Complete observed-pin map, when publishing a Release.
      * @return array<string, EntryPublicationData>
      */
-    public function publishVersions(BeamUxEntry $context, array $refs, ?Model $actor = null, ?array $expectedPins = null): array
+    public function publishVersions(BeamUxEntry $context, array $refs, ?Model $actor = null, ?array $expectedPins = null, ?callable $completion = null): array
     {
         $this->requireVersionStore();
 
-        return $context->getConnection()->transaction(function () use ($context, $refs, $actor, $expectedPins) {
+        return $context->getConnection()->transaction(function () use ($context, $refs, $actor, $expectedPins, $completion) {
             // Match the URL validator's global lock order, including entries outside this Release.
             $entries = $context->newQuery()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             $prepared = [];
@@ -246,10 +246,15 @@ class EntryPublication
                 $this->audit($entry, 'published', $actor, $states[$id]);
                 // A later member may still refuse: no disk mirror escapes a rolled-back Release.
                 $snapshot = clone $entry;
-                $entry->getConnection()->afterCommit(function () use ($snapshot, $body) {
-                    $this->mirror->mirror($snapshot, $this->placements->resolve($snapshot)->pathFor($snapshot), $body);
-                    app(CompileEntryBody::class)->artifacts()->prune($snapshot->fresh());
-                });
+                if ($completion === null) {
+                    $entry->getConnection()->afterCommit(function () use ($snapshot, $body) {
+                        $this->mirror->mirror($snapshot, $this->placements->resolve($snapshot)->pathFor($snapshot), $body);
+                        app(CompileEntryBody::class)->artifacts()->prune($snapshot->fresh());
+                    });
+                }
+            }
+            if ($completion !== null) {
+                $completion($prepared);
             }
 
             return $states;

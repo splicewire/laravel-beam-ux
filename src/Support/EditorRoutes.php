@@ -17,5 +17,6 @@ final class EditorRoutes
             Particle::ops($uri, 'beam-ux-entry', $op);
         }
         Particle::mount($releasesUri, 'beam-ux-release')->only(['index', 'show'])->ops(['command']);
+        Particle::mount('beam-ux-release-files', 'beam-ux-release-files')->only(['index', 'show'])->ops(['commit-now']);
     }
 }

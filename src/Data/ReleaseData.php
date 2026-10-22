@@ -29,6 +29,9 @@ final class ReleaseData extends BeamData
         public ?WorkflowProjectionData $workflow,
         public bool $canSchedule,
         public bool $reviewRequired,
+        public ?ReleaseRecordingData $recording = null,
+        public ?string $filesMemberId = null,
+        public ?string $filesHref = null,
     ) {}
 
     public static function scope(Builder $query): Builder
@@ -51,6 +54,28 @@ final class ReleaseData extends BeamData
             $projection === null ? null : WorkflowProjectionData::from($projection),
             app()->bound(\Splicewire\Beam\Calendars\Actions\ActionService::class),
             (bool) config('beam.ux.releases.review_required', false),
+            ReleaseRecordingData::project($model, request()->user()),
+            $members->first()?->id,
+            $model->status === 'published' ? self::filesHref($members->first()?->id) : null,
         );
+    }
+
+    private static function filesHref(?string $member): ?string
+    {
+        if ($member === null) {
+            return null;
+        }
+        foreach (array_keys(config('frame.realms', [])) as $realm) {
+            try {
+                $href = app(\Splicewire\Beam\Ux\Frame\RouteContextProjector::class)->hrefs($realm)['beam-ux-release-files.edit'] ?? null;
+                if (is_string($href)) {
+                    return str_replace(':id', rawurlencode($member), $href);
+                }
+            } catch (\Throwable) {
+                // A host without this optional Files seat gets a status without a broken link.
+            }
+        }
+
+        return null;
     }
 }

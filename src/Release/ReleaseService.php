@@ -249,7 +249,8 @@ final class ReleaseService
                 }
             }
             if ($refs !== []) {
-                app(EntryPublication::class)->publishVersions($prototype, $refs, $actor instanceof Model ? $actor : null, $pins);
+                app(EntryPublication::class)->publishVersions($prototype, $refs, $actor instanceof Model ? $actor : null, $pins,
+                    fn (array $prepared) => app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->prepare($release, $prepared, $actor));
             }
             foreach ($members as $member) {
                 if ($member->version_id === null) {
@@ -302,6 +303,20 @@ final class ReleaseService
         }
 
         return $entry;
+    }
+
+    /** Shared by initial completion and Files recovery; no recording privilege is introduced. */
+    public function authorizeRecording(BeamUxRelease $release, Authenticatable $actor): void
+    {
+        if ($release->status !== 'published' || $release->members()->count() === 0) {
+            throw new AuthorizationException('Only a published nonempty Release can be recorded.');
+        }
+        foreach ($release->members()->get() as $member) {
+            $entry = $this->entry($release, $member->entry_id);
+            $this->isDirect($release)
+                ? $this->authorizeDirect($entry, $actor)
+                : $this->authorizeEntry($entry, $actor, true);
+        }
     }
 
     private function authorizeEntry(BeamUxEntry $entry, Authenticatable $actor, bool $publish): void

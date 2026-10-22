@@ -40,6 +40,371 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class EntryPublicationTest extends TestCase
 {
+    /** Disposable repositories only: caller supplies a registered scratch root. */
+    private function recordingRepository(): array
+    {
+        $root = getenv('BEAM_RECORDING_TEST_ROOT');
+        if (! is_string($root) || ! is_dir($root)) {
+            $this->markTestSkipped('Set BEAM_RECORDING_TEST_ROOT to an owned registered scratch root.');
+        }
+        $repo = $root.'/repo-'.bin2hex(random_bytes(6));
+        mkdir($repo, 0700);
+        $git = function (array $args) use ($repo): string {
+            $process = new \Symfony\Component\Process\Process(['git', ...$args], $repo);
+            $process->mustRun();
+
+            return trim($process->getOutput());
+        };
+        $git(['init', '-b', 'main']);
+        $git(['config', 'user.name', 'Release test']);
+        $git(['config', 'user.email', 'release@example.invalid']);
+        file_put_contents($repo.'/unrelated', "base\n");
+        $git(['add', '--', 'unrelated']);
+        $git(['commit', '-m', 'baseline']);
+        config(['filesystems.disks.recording-test' => ['driver' => 'local', 'root' => $repo, 'throw' => true],
+            'beam.ux.storage.mirror_disk' => 'recording-test']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+
+        return [$repo, $git];
+    }
+
+    public function test_release_records_exact_member_and_preserves_real_index_then_no_change_republication(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        file_put_contents($repo.'/unrelated', "staged by developer\n");
+        $git(['add', '--', 'unrelated']);
+        file_put_contents($repo.'/untracked', 'untouched');
+        $index = hash_file('sha256', $repo.'/.git/index');
+        $base = $git(['rev-parse', 'HEAD']);
+        $state = $this->publishDraftAs($entry, $author);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release);
+        $this->assertSame('recorded', $receipt?->state, $receipt?->error ?? '');
+        $this->assertSame($git(['rev-parse', 'HEAD']), $receipt->sha);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD^']));
+        $this->assertSame($index, hash_file('sha256', $repo.'/.git/index'));
+        $this->assertSame('untouched', file_get_contents($repo.'/untracked'));
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        $this->assertSame($path, $git(['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD']));
+        $blob = new \Symfony\Component\Process\Process(['git', 'show', 'HEAD:'.$path], $repo);
+        $blob->mustRun();
+        $this->assertSame(file_get_contents($repo.'/'.$path), $blob->getOutput());
+        $again = $service->requestOne($entry->fresh(), $state->headVersion, $author);
+        $second = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($again);
+        $this->assertSame('recorded', $second?->state, $second?->error ?? '');
+        $this->assertTrue($second->no_change);
+        $this->assertSame($receipt->sha, $second->sha);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+    }
+
+    public function test_failed_hook_keeps_publication_success_and_files_retry_uses_same_receipt(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        file_put_contents($repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 1\n");
+        chmod($repo.'/.git/hooks/pre-commit', 0755);
+        $base = $git(['rev-parse', 'HEAD']);
+        $state = $this->publishDraftAs($entry, $author);
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+        $this->assertSame('published', $state->release->status);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $recorder = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class);
+        $failed = $recorder->receipt($release);
+        $this->assertSame('failed', $failed->state);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+        file_put_contents($repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 0\n");
+        $recorder->retry($release, $author);
+        $recovered = $recorder->receipt($release);
+        $this->assertSame($failed->id, $recovered->id);
+        $this->assertSame('recorded', $recovered->state, $recovered->error ?? '');
+        $recorder->retry($release, $author);
+        $this->assertSame($recovered->sha, $recorder->receipt($release)->sha);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+    }
+
+    public function test_real_result_database_failure_after_git_install_recovers_same_commit(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $base = $git(['rev-parse', 'HEAD']);
+        $hidden = false;
+        \Splicewire\Beam\Ux\Models\BeamUxReleaseRecording::updating(function ($row) use (&$hidden) {
+            if (! $hidden && $row->state === 'recorded' && $row->candidate !== null) {
+                $row->getConnection()->statement('ALTER TABLE beam_ux_release_recordings RENAME TO recording_store_unavailable');
+                $hidden = true;
+            }
+        });
+        $state = $this->publishDraftAs($entry, $author);
+        $this->assertTrue($hidden);
+        $sha = $git(['rev-parse', 'HEAD']);
+        $this->assertNotSame($base, $sha);
+        $entry->getConnection()->statement('ALTER TABLE recording_store_unavailable RENAME TO beam_ux_release_recordings');
+        \Splicewire\Beam\Ux\Models\BeamUxReleaseRecording::flushEventListeners();
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $recorder = new \Splicewire\Beam\Ux\Recording\ReleaseRecording;
+        $pending = $recorder->receipt($release);
+        $this->assertSame($sha, $pending->candidate);
+        $this->assertNull($pending->sha);
+        $recorder->retry($release, $author);
+        $this->assertSame($sha, $recorder->receipt($release)->sha);
+        $this->assertSame('recorded', $recorder->receipt($release)->state);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+    }
+
+    public static function mirrorFailurePositions(): array
+    {
+        return [[1, false], [2, false], [1, true], [2, true]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('mirrorFailurePositions')]
+    public function test_multi_member_false_mirror_cannot_commit_and_does_not_stop_later_callbacks(int $position, bool $throws): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $pub = app(EntryPublication::class);
+        $a = $pub->recordDraft($one, self::BODY_TWO);
+        $b = $pub->recordDraft($two, self::BODY_TWO);
+        $release = $service->create($one, 'Both members', $author);
+        $service->putMember($release, $one->id, $a->headVersion, $author);
+        $service->putMember($release, $two->id, $b->headVersion, $author);
+        $base = $git(['rev-parse', 'HEAD']);
+        $this->app->instance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class,
+            new class(Storage::disk('recording-test'), $position, $throws) extends \Splicewire\Beam\Ux\Storage\PlacedDiskMirror
+            {
+                public int $calls = 0;
+
+                public function __construct($disk, private int $position, private bool $throws)
+                {
+                    parent::__construct($disk);
+                }
+
+                public function mirror(BeamUxEntry $entry, string $path, array $body): bool
+                {
+                    $this->calls++;
+
+                    if ($this->calls === $this->position && $this->throws) {
+                        throw new \RuntimeException('owned mirror failure');
+                    }
+
+                    return $this->calls === $this->position ? false : parent::mirror($entry, $path, $body);
+                }
+            });
+        $later = false;
+        $one->getConnection()->transaction(function () use ($service, $release, $author, $one, &$later) {
+            $service->transition($release, 'publish', $author);
+            $one->getConnection()->afterCommit(function () use (&$later) {
+                $later = true;
+            });
+        });
+        $this->assertTrue($later);
+        $this->assertSame('published', $release->fresh()->status);
+        $this->assertSame($a->headVersion, $one->fresh()->published_version);
+        $this->assertSame($b->headVersion, $two->fresh()->published_version);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+        $this->assertSame($throws ? 'completion' : 'mirror', app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release)->error);
+    }
+
+    public function test_recording_refusals_check_live_authority_and_tenancy_before_any_git_process(): void
+    {
+        [$repo] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author, $other] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $state = $this->publishDraftAs($entry, $author);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $recorder = new \Splicewire\Beam\Ux\Recording\ReleaseRecording;
+        $marker = dirname($repo).'/git-refusal-'.bin2hex(random_bytes(4));
+        $wrapper = $marker.'.sh';
+        file_put_contents($wrapper, "#!/bin/sh\nprintf called >> ".escapeshellarg($marker)."\nexit 1\n");
+        chmod($wrapper, 0755);
+        config(['beam.ux.recording.git' => $wrapper]);
+        try {
+            $recorder->retry($release, $other);
+            $this->fail('An unauthorized actor reached recording.');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertFileDoesNotExist($marker);
+        }
+        config(['beam.ux.releases.publish_ability' => 'host.publish']);
+        \Illuminate\Support\Facades\Gate::define('host.publish', fn () => false);
+        try {
+            $recorder->retry($release, $author);
+            $this->fail('A revoked host publication decision was ignored.');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertFileDoesNotExist($marker);
+        }
+        config(['beam.ux.releases.publish_ability' => null]);
+        foreach ([false, true] as $throwing) {
+            $this->app->instance(TenancyContext::class, new class($throwing) implements TenancyContext
+            {
+                public function __construct(private bool $throwing) {}
+
+                public function isMultiTenant(): bool
+                {
+                    return true;
+                }
+
+                public function isActive(): bool
+                {
+                    if ($this->throwing) {
+                        throw new \RuntimeException('unknown topology');
+                    }
+
+                    return true;
+                }
+
+                public function currentTenant(): ?object
+                {
+                    return null;
+                }
+
+                public function currentTenantId(): int|string|null
+                {
+                    return 'tenant';
+                }
+
+                public function centralConnection(): ?string
+                {
+                    return 'central';
+                }
+            });
+            $probe = (new BeamUxEntry)->setConnection('central');
+            if (! $throwing) {
+                $this->assertTrue(app(\Splicewire\Beam\Ux\Manifest\EntryResidency::class)->isCentralResident($probe),
+                    'A central-pinned model alone is insufficient while tenancy is active.');
+            }
+            try {
+                $recorder->retry($release, $author);
+                $this->fail('Active or unknown tenancy reached Git.');
+            } catch (\Splicewire\Beam\Ux\Recording\RecordingFailure $failure) {
+                $this->assertSame('tenancy', $failure->reason);
+                $this->assertFileDoesNotExist($marker);
+            }
+        }
+        // Exercise model connection residency on a shared disposable SQLite PDO, without
+        // pretending this is a physical multi-database/PostgreSQL tenancy proof.
+        $pdo = $entry->getConnection()->getPdo();
+        \Illuminate\Support\Facades\DB::extend('recording-shared', fn ($config, $name) => new \Illuminate\Database\SQLiteConnection($pdo, ':memory:', '', ['name' => $name, 'driver' => 'sqlite']));
+        config(['database.connections.tenant_probe' => ['driver' => 'recording-shared'],
+            'database.connections.central_db' => ['driver' => 'recording-shared']]);
+        foreach ([null, 'central_db'] as $central) {
+            $this->app->instance(TenancyContext::class, new class($central) implements TenancyContext
+            {
+                public function __construct(private ?string $central) {}
+
+                public function isMultiTenant(): bool
+                {
+                    return true;
+                }
+
+                public function isActive(): bool
+                {
+                    return false;
+                }
+
+                public function currentTenant(): ?object
+                {
+                    return null;
+                }
+
+                public function currentTenantId(): int|string|null
+                {
+                    return null;
+                }
+
+                public function centralConnection(): ?string
+                {
+                    return $this->central;
+                }
+            });
+            $tenantRelease = \Splicewire\Beam\Ux\Models\BeamUxRelease::on('tenant_probe')->findOrFail($release->id);
+            try {
+                $recorder->retry($tenantRelease, $author);
+                $this->fail('An inactive explicit tenant or dangling split reached Git.');
+            } catch (\Splicewire\Beam\Ux\Recording\RecordingFailure $failure) {
+                $this->assertSame('tenancy', $failure->reason);
+                $this->assertFileDoesNotExist($marker);
+            }
+        }
+        $centralRelease = \Splicewire\Beam\Ux\Models\BeamUxRelease::on('central_db')->findOrFail($release->id);
+        $recorder->authorize($centralRelease, $author);
+        $this->assertFileDoesNotExist($marker, 'The positive central-residency check itself does not invoke Git.');
+    }
+
+    public function test_files_scope_requires_every_member_and_explicit_release_input_rejects_other_membership(): void
+    {
+        $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author, $other] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $state = $this->publishDraftAs($entry, $author);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $member = $release->members()->first();
+        request()->setUserResolver(fn () => $author);
+        $this->assertSame(1, \Splicewire\Beam\Ux\Data\ReleaseFilesData::scope(\Splicewire\Beam\Ux\Models\BeamUxReleaseMember::query())->count());
+        request()->setUserResolver(fn () => $other);
+        $this->assertSame(0, \Splicewire\Beam\Ux\Data\ReleaseFilesData::scope(\Splicewire\Beam\Ux\Models\BeamUxReleaseMember::query())->count());
+        request()->setUserResolver(fn () => null);
+        $this->assertSame(0, \Splicewire\Beam\Ux\Data\ReleaseFilesData::scope(\Splicewire\Beam\Ux\Models\BeamUxReleaseMember::query())->count());
+        try {
+            \Splicewire\Beam\Ux\Particle\ReleaseFilesRecordOp::handle($member, Request::create('/', 'POST',
+                ['releaseId' => '00000000-0000-4000-8000-000000000001']), $author);
+            $this->fail('An unrelated Release ID was accepted.');
+        } catch (ValidationException $failure) {
+            $this->assertArrayHasKey('releaseId', $failure->errors());
+        }
+    }
+
+    public function test_outer_rollback_discards_recording_and_a_superseded_completion_cannot_remirror(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user) => $user->getAuthIdentifier() === 'author');
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $pub = app(EntryPublication::class);
+        $draft = $pub->recordDraft($entry, self::BODY_TWO);
+        $base = $git(['rev-parse', 'HEAD']);
+        try {
+            $entry->getConnection()->transaction(function () use ($service, $entry, $draft, $author) {
+                $service->requestOne($entry, $draft->headVersion, $author);
+                throw new \RuntimeException('abort outer');
+            });
+        } catch (\RuntimeException $error) {
+            $this->assertSame('abort outer', $error->getMessage());
+        }
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+        $this->assertSame(0, \Splicewire\Beam\Ux\Models\BeamUxReleaseRecording::count());
+        $this->assertNotSame($draft->headVersion, $entry->fresh()->published_version);
+        $first = $second = null;
+        $entry->getConnection()->transaction(function () use ($service, $entry, $draft, $author, $pub, &$first, &$second) {
+            $first = $service->requestOne($entry->fresh(), $draft->headVersion, $author);
+            $next = $pub->recordDraft($entry->fresh(), self::BODY_ONE);
+            $second = $service->requestOne($entry->fresh(), $next->headVersion, $author);
+        });
+        $recorder = new \Splicewire\Beam\Ux\Recording\ReleaseRecording;
+        $this->assertSame('superseded', $recorder->receipt($first)->error);
+        $this->assertSame('recorded', $recorder->receipt($second)->state);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+    }
+
     public function test_seeded_unauthored_first_save_pins_visible_baseline_then_reloads_and_publishes_draft(): void
     {
         $entry = BeamUxEntry::create(['slug' => 'seeded-home', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
