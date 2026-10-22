@@ -14,7 +14,7 @@ final class ReleaseCommandData extends BeamData
     use RejectsUnknownInputKeys;
 
     public function __construct(
-        #[Description('What to do to the Release: `member` places an entry, `drop` removes one, `rebase` / `use-latest` move a member to its newer saved version, and `submit`, `approve`, `publish`, `schedule` and `rollback` move the Release itself.')]
+        #[Description('What to do to the Release: `member` places an entry, `drop` removes one, `rebase` re-checks a member against the entry as it is now while keeping its selected version, `use-latest` moves a member to the entry's newest saved version, and `submit`, `approve`, `publish`, `schedule` and `rollback` move the Release itself.')]
         public string $action,
         #[Description('The entry the member actions (`member`, `drop`, `rebase`, `use-latest`) act on: its uuid. Required for those, ignored by the others.')]
         public ?string $entryId = null,
