@@ -35,6 +35,7 @@ class EntryDraftInputData extends BeamData
         public ?string $baseVersion,
         #[Description('An optional annotation for the version this draft records, e.g. "before the rewrite".')]
         public ?string $label = null,
+        #[Description('The page\'s settings (title, place in the tree, navigation, layout and metadata) to record with this draft, so they publish as part of its version. Pages only; omitted, the settings are unchanged.')]
         public ?EntryPageSettingsInputData $pageSettings = null,
     ) {}
 
