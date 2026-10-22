@@ -101,8 +101,8 @@ class LocalThemeFile
             throw new FileConflict('invalid', 'The local mirror cannot be read.', 422);
         }
         try {
-            $stat = fstat($stream);
-            $bytes = stream_get_contents($stream, self::LIMIT + 1);
+            $stat = @fstat($stream);
+            $bytes = @stream_get_contents($stream, self::LIMIT + 1);
             clearstatcache(true, $path);
             $current = @lstat($path);
             if (! is_array($current) || ! is_array($stat) || $current['ino'] !== $stat['ino'] || $current['dev'] !== $stat['dev'] || is_link($path) || ($stat['mode'] & 0170000) !== 0100000 || $bytes === false || strlen($bytes) > self::LIMIT) {
@@ -138,16 +138,21 @@ class LocalThemeFile
                 }
                 $written += $count;
             }
-            if (! fflush($stream) || ! fsync($stream)) {
+            if (! @fflush($stream) || ! @fsync($stream)) {
                 throw new FileConflict('incomplete', 'Restore could not confirm durable bytes. The created file is preserved; inspect it before retrying.', 503);
             }
-            rewind($stream);
-            $actual = stream_get_contents($stream, self::LIMIT + 1);
-            $opened = fstat($stream);
+            @rewind($stream);
+            $actual = @stream_get_contents($stream, self::LIMIT + 1);
+            $opened = @fstat($stream);
             clearstatcache(true, $path);
             $current = @lstat($path);
+            try {
+                $readback = $this->read($target)['bytes'];
+            } catch (FileConflict $failure) {
+                throw new FileConflict('incomplete', 'The created file cannot be verified. Preserve it and inspect or move it before retrying.', 503);
+            }
             if ($actual !== $bytes || ! is_array($current) || ! is_array($opened) || $current['ino'] !== $opened['ino'] || $current['dev'] !== $opened['dev'] || is_link($path)
-                || $this->read($target)['bytes'] !== $bytes) {
+                || $readback !== $bytes) {
                 throw new FileConflict('incomplete', 'Restore result changed or could not be verified. Preserve the local file and inspect before retrying.', 503);
             }
         } finally {
@@ -168,6 +173,6 @@ class LocalThemeFile
     /** @param resource $stream */
     protected function write($stream, string $bytes): int|false
     {
-        return fwrite($stream, $bytes);
+        return @fwrite($stream, $bytes);
     }
 }

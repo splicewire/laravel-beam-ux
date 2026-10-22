@@ -401,6 +401,29 @@ class EntryPublicationTest extends TestCase
         $this->assertFileConflict('invalid', fn () => $validator->decode($codec->decode($ambiguous), $ambiguous));
     }
 
+    public function test_file_restore_readback_mismatch_preserves_created_bytes_and_refuses_blind_retry(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $base = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        unlink($target['absolute']);
+        $input = $this->fileInput($base->inspect($member, $author));
+        $files = new class extends \Splicewire\Beam\Ux\Files\LocalThemeFile
+        {
+            protected function write($stream, string $bytes): int|false
+            {
+                return fwrite($stream, str_repeat('x', strlen($bytes)));
+            }
+        };
+        $service = new \Splicewire\Beam\Ux\Files\ThemeReconciliation($files, app(\Splicewire\Beam\Ux\Files\CanonicalTheme::class));
+        $before = $publication->state($entry);
+        $this->assertFileConflict('incomplete', fn () => $service->restore($member, $author, $input));
+        $actual = file_get_contents($target['absolute']);
+        $this->assertNotSame('', $actual);
+        $this->assertFileConflict('file-moved', fn () => $base->restore($member, $author, $input));
+        $this->assertSame($actual, file_get_contents($target['absolute']));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
     /** Disposable repositories only: caller supplies a registered scratch root. */
     private function recordingRepository(): array
     {
