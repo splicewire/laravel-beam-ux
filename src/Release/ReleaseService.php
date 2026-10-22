@@ -34,13 +34,30 @@ final class ReleaseService
      */
     public function requestOne(BeamUxEntry $entry, ?string $ref, Authenticatable $actor): BeamUxRelease
     {
-        return $entry->getConnection()->transaction(function () use ($entry, $ref, $actor) {
-            $release = $this->open($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor, ReleaseOrigin::Direct);
-            $this->place($release, $entry->id, $ref, $actor, null, true);
-            $this->transition($release, config('beam.ux.releases.review_required', false) ? 'submit' : 'publish', $actor);
+        $connection = $entry->getConnection();
+        $initialDepth = $connection->transactionLevel();
+        $bodyCompleted = false;
+        try {
+            return $connection->transaction(function () use ($entry, $ref, $actor, &$bodyCompleted) {
+                $release = $this->open($entry, ($ref === null ? 'Take down: ' : 'Publish: ').$entry->slug, $actor, ReleaseOrigin::Direct);
+                $this->place($release, $entry->id, $ref, $actor, null, true);
+                $this->transition($release, config('beam.ux.releases.review_required', false) ? 'submit' : 'publish', $actor);
+                $result = $release->fresh();
+                $bodyCompleted = true;
 
-            return $release->fresh();
-        });
+                return $result;
+            });
+        } catch (\Illuminate\Database\QueryException $failure) {
+            // Only a failed SQLite statement in this rolled-back request is retryable. In
+            // particular, never relabel a commit/after-commit/Git failure as an unpublished result.
+            $code = (int) ($failure->errorInfo[1] ?? 0);
+            if (! $bodyCompleted && $initialDepth === 0 && $connection->transactionLevel() === 0
+                && $connection->getDriverName() === 'sqlite' && in_array($code & 0xFF, [5, 6], true)) {
+                throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException(
+                    'Publication conflicted with another local write. Nothing was published. Reload and explicitly retry.', $failure);
+            }
+            throw $failure;
+        }
     }
 
     /** A Release built member by member: every member operation is an edit. */

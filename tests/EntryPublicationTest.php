@@ -356,6 +356,35 @@ class EntryPublicationTest extends TestCase
         $this->assertEquals($before, $publication->state($entry->fresh()));
     }
 
+    public function test_public_file_overlap_conflict_only_translates_sqlite_busy_after_rollback(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $state = $publication->state($entry);
+        $count = \Splicewire\Beam\Ux\Models\BeamUxRelease::count();
+        $code = 5;
+        $entry->getConnection()->listen(function ($query) use (&$code) {
+            if (str_starts_with($query->sql, 'insert into "beam_ux_releases"')) {
+                $previous = new \PDOException('controlled database fault');
+                $previous->errorInfo = ['HY000', $code, 'controlled database fault'];
+                throw new \Illuminate\Database\QueryException($query->connectionName, $query->sql, $query->bindings, $previous);
+            }
+        });
+        foreach ([5, 6, 19] as $code) {
+            try {
+                app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->requestOne($entry->fresh(), $state->headVersion, $author);
+                $this->fail('Expected controlled database fault');
+            } catch (\Symfony\Component\HttpKernel\Exception\ConflictHttpException $failure) {
+                $this->assertContains($code, [5, 6]);
+                $this->assertStringContainsString('Reload and explicitly retry', $failure->getMessage());
+            } catch (\Illuminate\Database\QueryException) {
+                $this->assertSame(19, $code, 'Only unrelated database faults retain their original failure');
+            }
+            $this->assertSame(0, $entry->getConnection()->transactionLevel());
+            $this->assertSame($count, \Splicewire\Beam\Ux\Models\BeamUxRelease::count());
+            $this->assertEquals($state, $publication->state($entry->fresh()));
+        }
+    }
+
     /** Disposable repositories only: caller supplies a registered scratch root. */
     private function recordingRepository(): array
     {

@@ -50,3 +50,13 @@ Authentication and entry admission happen before returning any local path/hash/s
 Previews are limited to 20,000 bytes per side and explicitly marked truncated; validation still uses
 the complete bounded representation. Successful draft import must use normal independent review and
 fixed-version Release Publish before readers, mirror and the local Git recording advance.
+
+## SQLite contention
+
+Publication and recorder completion reserve the SQLite writer before their pin reads, in addition
+to reconciliation. Ordinary row locks and global entry order remain on other drivers. An existing
+outer workflow transaction may already have read before that reservation; this does not universally
+eliminate SQLite busy conflicts. The authenticated direct Publish operation returns retryable409
+only for SQLite busy/locked statements after its own complete rollback, before its transaction body
+completed. It says nothing was published and asks for reload/explicit retry. Unrelated database
+faults and commit/after-commit failures are not relabeled; no transaction or Git callback is replayed.
