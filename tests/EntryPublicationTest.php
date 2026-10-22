@@ -54,7 +54,7 @@ class EntryPublicationTest extends TestCase
         [$releases, $author] = $this->releaseFixture(reviewedAndMapped: false);
         \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
         $entry = BeamUxEntry::create(['slug' => 'file-theme', 'type' => 'theme', 'format' => 'css', 'realm' => 'site', 'namespace' => 'theme']);
-        $body = ['canvas' => ['accent' => '#112233', 'fontBody' => 'system-ui'], 'shell' => ['surface' => '#ffffff'], 'site' => ['accent' => '#334455']];
+        $body = ['canvas' => ['accent' => '#112233', 'fontBody' => 'system-ui'], 'shell' => ['surface' => '#ffffff', 'radius' => '14px', 'shadow' => '0 40px 90px -40px rgba(0,0,0,.7)'], 'site' => ['accent' => '#334455']];
         $publication = app(EntryPublication::class);
         $publication->write($entry, $body);
         $publication->publishAuthoredBody($entry);
@@ -76,6 +76,8 @@ class EntryPublicationTest extends TestCase
     {
         [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
         $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $body['canvas']['accent'] = '#102030';
+        $body['shell']['surface'] = '#405060';
         $body['site']['accent'] = '#abcdef';
         $bytes = $entry->codec()->decode($body);
         file_put_contents($target['absolute'], $bytes);
@@ -422,6 +424,25 @@ class EntryPublicationTest extends TestCase
         $this->assertFileConflict('file-moved', fn () => $base->restore($member, $author, $input));
         $this->assertSame($actual, file_get_contents($target['absolute']));
         $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_file_import_refuses_declared_noncolor_shell_changes_without_effects(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $before = $publication->state($entry);
+        foreach (['radius', 'shadow'] as $key) {
+            $changed = $body;
+            $changed['shell'][$key] = '#abcdef';
+            $bytes = $entry->codec()->decode($changed);
+            file_put_contents($target['absolute'], $bytes);
+            $inspection = $service->inspect($member, $author);
+            $this->assertSame('unsupported', $inspection->state, $key.' is a generic string, not a declared color');
+            $this->assertFalse($inspection->canTake);
+            $this->assertFileConflict('unsupported', fn () => $service->take($member, $author, $this->fileInput($inspection)));
+            $this->assertEquals($before, $publication->state($entry->fresh()));
+            $this->assertSame($bytes, file_get_contents($target['absolute']));
+        }
     }
 
     /** Disposable repositories only: caller supplies a registered scratch root. */

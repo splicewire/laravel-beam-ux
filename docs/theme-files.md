@@ -18,8 +18,10 @@ publish permission. A direct publisher without edit permission cannot inspect lo
 
 Import supports the exact complete canonical Theme/CSS representation emitted by CssBodyCodec.
 It requires UTF-8, at most 4 MiB, byte-exact encode/decode roundtrip, identical full leaf-key set and
-namespace preservation, and full canvas/shell/site schema validation. Only existing supported hex
-color leaves change. Font, responsive and extension leaves must remain unchanged. Canonical empty
+namespace preservation, and full canvas/shell/site schema validation. Only existing direct
+canvas/shell/site properties declared with `format: color` may change to supported hex colors.
+Generic strings such as shell radius/shadow are not color properties. Font, responsive and
+extension leaves must remain unchanged. Canonical empty
 is explicitly outside key-preserving import; malformed/no-root/duplicate/foreign CSS is invalid.
 Other codecs, clearing tokens, batch reconciliation and arbitrary CSS parsing remain unsupported.
 

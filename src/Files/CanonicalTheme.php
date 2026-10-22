@@ -35,20 +35,22 @@ class CanonicalTheme
             if ($keys !== $newKeys) {
                 throw new FileConflict('invalid', 'Import must preserve every published token and namespace.', 422);
             }
+            $schema = ['type' => 'object', 'properties' => [
+                'canvas' => ThemeSchemas::canvas(), 'shell' => ThemeSchemas::shell(), 'site' => ThemeSchemas::site(),
+            ]];
             foreach ($after as $key => $value) {
                 if ($value === $before[$key]) {
                     continue;
                 }
-                if (str_starts_with($key, 'responsive.') || ! preg_match('/^(canvas|shell|site)\./', $key) || str_contains(strtolower($key), 'font')) {
+                [$namespace, $property] = array_pad(explode('.', $key, 2), 2, '');
+                $declared = $schema['properties'][$namespace]['properties'][$property] ?? [];
+                if (($declared['type'] ?? null) !== 'string' || ($declared['format'] ?? null) !== 'color') {
                     throw new FileConflict('unsupported', 'Only existing Theme color leaves can change; other leaves must stay unchanged.', 422);
                 }
                 if (! is_string($value) || ! preg_match('/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/D', $value)) {
                     throw new FileConflict('invalid', 'Changed Theme colors must use a supported hexadecimal color.', 422);
                 }
             }
-            $schema = ['type' => 'object', 'properties' => [
-                'canvas' => ThemeSchemas::canvas(), 'shell' => ThemeSchemas::shell(), 'site' => ThemeSchemas::site(),
-            ]];
             // Retained extension namespaces are compared above and never stripped. The three owning
             // declared Theme namespaces validate in full, including the shell hidden by the editor.
             if (! app(AcceptanceGate::class)->accepts($body, $schema)) {
