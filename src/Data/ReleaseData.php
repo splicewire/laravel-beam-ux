@@ -46,8 +46,8 @@ final class ReleaseData extends BeamData
         return new self($model->id, $model->title, $model->realm, $model->status, $model->reviewed_by,
             $members->map(fn ($member) => new ReleaseMemberData($member->entry_id, $member->version_id,
                 $member->observed_pin, $member->redirect_target,
-                ! $entries->has($member->entry_id) || $entries[$member->entry_id]->published_version !== $member->observed_pin
-                    || $entries[$member->entry_id]->workflow_marking !== $member->observed_marking))->all(),
+                $model->status !== 'published' && (! $entries->has($member->entry_id) || $entries[$member->entry_id]->published_version !== $member->observed_pin
+                    || $entries[$member->entry_id]->workflow_marking !== $member->observed_marking)))->all(),
             $projection === null ? null : WorkflowProjectionData::from($projection),
             app()->bound(\Splicewire\Beam\Calendars\Actions\ActionService::class),
             (bool) config('beam.ux.releases.review_required', false),

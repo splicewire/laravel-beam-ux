@@ -980,6 +980,7 @@ class EntryPublicationTest extends TestCase
         $this->assertSame($seen->headVersion, $published->publishedVersion);
         $this->assertSame($later->headVersion, $published->headVersion);
         $this->assertTrue($published->draftPending);
+        $this->assertFalse($published->release->members[0]->stale, 'A Release is not stale after its own successful pin move.');
         $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
         $this->assertSame(self::BODY_ONE, $entry->fresh()->particle->payload);
     }
