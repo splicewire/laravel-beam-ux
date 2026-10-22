@@ -40,14 +40,6 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class EntryPublicationTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        parent::setUp();
-        // Publication-only fake disks can sit below a checkout. Git is unavailable unless
-        // the dedicated fixture below has initialized its own disposable repository.
-        config(['beam.ux.recording.git' => PHP_BINARY.'-publication-test-no-git']);
-    }
-
     /** Disposable repositories only: caller supplies a registered scratch root. */
     private function recordingRepository(): array
     {
@@ -529,6 +521,8 @@ class EntryPublicationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // Fake disks may sit inside a checkout; dedicated recordingRepository explicitly opts in.
+        config(['beam.ux.recording.git' => PHP_BINARY.'-publication-test-no-git']);
         $this->createTables();
 
         Storage::fake('artifacts');
