@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Description;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 
@@ -10,7 +11,12 @@ use Splicewire\Beam\Data\BeamData;
 final class EntryMakeEditableInputData extends BeamData
 {
     /** @param array<string, mixed> $body The page's current default JsonDoc. */
-    public function __construct(public string $slug, public array $body) {}
+    public function __construct(
+        #[Description('The kit page\'s slug to create the editable entry for. Refused if the page already has one.')]
+        public string $slug,
+        #[Description('The page\'s current default JsonDoc, which becomes the new entry\'s first body.')]
+        public array $body,
+    ) {}
 
     public static function rules(): array
     {

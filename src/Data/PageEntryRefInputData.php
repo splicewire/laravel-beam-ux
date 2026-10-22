@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Description;
 use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
@@ -9,7 +10,10 @@ use Splicewire\Beam\Data\BeamData;
 #[TypeScript, Title('Resolve page entry')]
 final class PageEntryRefInputData extends BeamData
 {
-    public function __construct(public string $slug) {}
+    public function __construct(
+        #[Description('The kit page\'s slug to locate an entry for. Resolving never creates the entry; make-editable does.')]
+        public string $slug,
+    ) {}
 
     public static function rules(): array
     {
