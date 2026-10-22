@@ -76,6 +76,13 @@ class LocalGit
             if ($part === '' || $part === '.' || $part === '..' || strtolower($part) === '.git') {
                 throw new RecordingFailure('path', 'A Release mirror path is not a contained regular file.');
             }
+            if (is_dir($cursor)) {
+                $names = scandir($cursor);
+                if ($names === false) {
+                    throw new RecordingFailure('path', 'The mirror path spelling cannot be verified.');
+                }
+                $this->assertCasePaths([$part], $names);
+            }
             $cursor .= '/'.$part;
             if (is_dir($cursor) && file_exists($cursor.'/.git')) {
                 throw new RecordingFailure('path', 'Nested Git worktrees cannot be recorded as member files.');
@@ -87,6 +94,8 @@ class LocalGit
         if (file_exists($cursor) && ! is_file($cursor)) {
             throw new RecordingFailure('path', 'Only regular mirror files can be recorded.');
         }
+        $this->assertCasePaths([$path], $this->treePaths($this->head()));
+        $this->assertCasePaths([$path], explode("\0", $this->run($this->root, ['ls-files', '-z'], [], null, false)));
         // A parent tracked as a gitlink would otherwise accept a file inside another repository.
         $tracked = $this->run($this->root, ['ls-files', '--stage']);
         foreach (explode("\n", $tracked) as $row) {
@@ -115,6 +124,11 @@ class LocalGit
     /** Prepare index from a fixed parent and exact bytes, never from a developer's staging area. */
     public function tree(string $work, string $base, array $manifest): string
     {
+        $paths = array_column($manifest, 'path');
+        foreach ($paths as $path) {
+            $this->path($path);
+        }
+        $this->assertCasePaths($paths, $this->treePaths($base));
         $env = $this->environment($work, $base);
         $this->run($this->root, ['read-tree', $base], $env);
         foreach ($manifest as $file) {
@@ -140,6 +154,7 @@ class LocalGit
     /** Verify the whole tree as well as the exact parent, member delta and durable identity. */
     public function verify(string $sha, string $base, string $tree, array $manifest, string $identity): void
     {
+        $this->assertCasePaths(array_column($manifest, 'path'), $this->treePaths($base));
         $matching = $this->run($this->root, ['log', '--all', '--format=%H', '--fixed-strings', '--grep=Beam-UX-Recording: '.$identity]);
         foreach (array_filter(explode("\n", $matching)) as $match) {
             if ($match !== $sha) {
@@ -206,6 +221,38 @@ class LocalGit
         }
 
         return ['GIT_DIR' => $work, 'GIT_COMMON_DIR' => $this->common, 'GIT_WORK_TREE' => $this->root, 'GIT_INDEX_FILE' => $work.'/index'];
+    }
+
+    /** Git names are NUL-delimited; filesystem/index state need not retain the parent spelling. */
+    private function treePaths(string $ref): array
+    {
+        return explode("\0", $this->run($this->root, ['ls-tree', '-r', '-z', '--name-only', $ref], [], null, false));
+    }
+
+    /** Every component must retain its existing spelling, including new files below tracked dirs. */
+    private function assertCasePaths(array $paths, array $existing): void
+    {
+        $spellings = [];
+        foreach ($existing as $path) {
+            $prefix = '';
+            foreach (explode('/', $path) as $part) {
+                $prefix = $prefix === '' ? $part : $prefix.'/'.$part;
+                $spellings[strtolower($prefix)][$prefix] = true;
+            }
+        }
+        foreach ($paths as $path) {
+            $prefix = '';
+            foreach (explode('/', $path) as $part) {
+                $prefix = $prefix === '' ? $part : $prefix.'/'.$part;
+                $folded = strtolower($prefix);
+                foreach (array_keys($spellings[$folded] ?? []) as $spelling) {
+                    if ((string) $spelling !== $prefix) {
+                        throw new RecordingFailure('path', 'A Release mirror path has a case-colliding file or ancestor.');
+                    }
+                }
+                $spellings[$folded][$prefix] = true;
+            }
+        }
     }
 
     private function optional(array $args): string

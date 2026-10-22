@@ -202,4 +202,84 @@ class LocalGitRecordingTest extends TestCase
             $this->assertSame($base, $this->git(['rev-parse', 'HEAD']));
         }
     }
+
+    public function test_case_aliases_against_parent_tree_index_and_ancestors_refuse_but_exact_paths_work(): void
+    {
+        mkdir($this->repo.'/Theme');
+        mkdir($this->repo.'/0');
+        file_put_contents($this->repo.'/0/1.css', "numeric ancestor\n");
+        file_put_contents($this->repo.'/Theme/Existing.css', "parent\n");
+        $this->git(['add', '--', 'Theme/Existing.css', '0/1.css']);
+        $this->git(['commit', '-m', 'case-sensitive parent names']);
+        // Remove the working directory so the negative control requires Git-tree inspection,
+        // including when a filesystem would otherwise alias a different case spelling.
+        unlink($this->repo.'/Theme/Existing.css');
+        rmdir($this->repo.'/Theme');
+        $git = new LocalGit($this->repo);
+        $base = $git->head();
+        $index = hash_file('sha256', $this->repo.'/.git/index');
+        foreach (['Member.css', 'theme/new.css', 'Theme/existing.css'] as $path) {
+            foreach (['path', 'tree'] as $door) {
+                try {
+                    if ($door === 'path') {
+                        $git->path($path);
+                    } else {
+                        $git->tree($this->work.'-'.$door, $base, $this->manifest($path));
+                    }
+                    $this->fail('A case alias was accepted: '.$path.' through '.$door);
+                } catch (RecordingFailure $failure) {
+                    $this->assertSame('path', $failure->reason);
+                    $this->assertSame($base, $git->head());
+                    $this->assertSame($index, hash_file('sha256', $this->repo.'/.git/index'));
+                }
+            }
+        }
+        $manifest = [...$this->manifest('New/a.css'), ...$this->manifest('new/b.css')];
+        try {
+            $git->tree($this->work.'-manifest', $base, $manifest);
+            $this->fail('Case aliases within new manifest ancestors were accepted');
+        } catch (RecordingFailure $failure) {
+            $this->assertSame('path', $failure->reason);
+        }
+        // A staged-only name and an untracked ancestor are separate alias sources.
+        file_put_contents($this->repo.'/Staged.css', 'staged');
+        $this->git(['add', '--', 'Staged.css']);
+        mkdir($this->repo.'/Untracked');
+        foreach (['staged.css', 'untracked/new.css'] as $path) {
+            try {
+                $git->path($path);
+                $this->fail('Index/worktree case alias accepted');
+            } catch (RecordingFailure $failure) {
+                $this->assertSame('path', $failure->reason);
+            }
+        }
+        $manifest = [...$this->manifest('member.css'), ...$this->manifest('Theme/Existing.css'), ...$this->manifest('Theme/New.css'), ...$this->manifest('0/1.css')];
+        $tree = $git->tree($this->work.'-exact', $base, $manifest);
+        $sha = $git->commit($this->work.'-exact', $base, "Exact spelling\n\nBeam-UX-Recording: exact-case");
+        $git->verify($sha, $base, $tree, $manifest, 'exact-case');
+        $this->assertSame($base, $git->head());
+        $this->assertSame('new', $this->git(['show', $sha.':Theme/New.css']));
+    }
+
+    public function test_saved_case_colliding_candidate_is_refused_during_recovery_verification(): void
+    {
+        $git = new LocalGit($this->repo);
+        $base = $git->head();
+        $index = hash_file('sha256', $this->repo.'/.git/index');
+        // Construct a stored bad candidate directly, bypassing the newly guarded preparation.
+        $old = $this->git(['rev-parse', $base.':member.css']);
+        $tree = new Process(['git', 'mktree'], $this->repo, null,
+            '100644 blob '.$old."\tmember.css\n100644 blob ".$old."\tMember.css\n");
+        $tree->mustRun();
+        $treeId = trim($tree->getOutput());
+        $sha = $this->git(['commit-tree', $treeId, '-p', $base, '-m', "Old bad candidate\n\nBeam-UX-Recording: bad-case"]);
+        try {
+            $git->verify($sha, $base, $treeId, $this->manifest('Member.css', "old\n"), 'bad-case');
+            $this->fail('A stored case-colliding candidate was accepted for recovery');
+        } catch (RecordingFailure $failure) {
+            $this->assertSame('path', $failure->reason);
+            $this->assertSame($base, $git->head());
+            $this->assertSame($index, hash_file('sha256', $this->repo.'/.git/index'));
+        }
+    }
 }
