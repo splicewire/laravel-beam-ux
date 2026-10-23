@@ -36,7 +36,8 @@ class ThemeReconciliation
             $data->publishedVersion = $state->publishedVersion;
             $data->fingerprint = $target['fingerprint'];
             $data->path = $target['path'];
-            $data->format = $entry->format?->value;
+            $format = $entry->getAttribute('format');
+            $data->format = $format instanceof UxFormat ? $format->value : null;
             $file = $this->files->read($target);
             $this->sameTarget($entry, $target);
             $data->fileExists = $file['exists'];
@@ -177,7 +178,7 @@ class ThemeReconciliation
 
     private function isMdx(BeamUxEntry $entry): bool
     {
-        return $entry->getAttribute('type') === UxType::Page && $entry->format === UxFormat::Mdx
+        return $entry->getAttribute('type') === UxType::Page && $entry->getAttribute('format') === UxFormat::Mdx
             && $entry->codec()::class === MdxBodyCodec::class && $entry->bodyKind() === BodyKind::Source;
     }
 
