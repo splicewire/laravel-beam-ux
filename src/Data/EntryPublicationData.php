@@ -20,10 +20,11 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
  * artifact — the body a guest reads. `draftPending` is the two disagreeing, computed here rather than
  * stored, so no writer can leave it lying.
  *
- * `compileError` mirrors {@see BeamUxEntryBodyData}'s field verbatim, and for the same reason: a publish
- * whose body does not compile still LANDS (the version is recorded and the pin moves), and the author
- * gets the compiler's own message rather than a refused write. A draft never compiles at all, so the
- * field is null on that path by construction, not by omission.
+ * `compileError` is transient compilation feedback on the returned state. Draft recording compiles
+ * at the new version address and an expected CompilationFailed retains that draft while the published
+ * pin stays unchanged. This is not durable diagnostic history: a later plain state read defaults null
+ * and does not establish that compilation has recovered. Release publication compiles its selected
+ * fixed versions before moving their pins.
  */
 #[TypeScript]
 #[Description("An entry's publication state: the working HEAD, the published version, whether a draft is pending, and the recorded version history.")]
@@ -48,10 +49,10 @@ class EntryPublicationData extends BeamData
         #[DataCollectionOf(EntryVersionData::class)]
         #[Description("The entry's recorded version history, newest-first.")]
         public array $versions = [],
-        #[Description('Why the published body could not be compiled to its artifact, or null when it did (and null on every draft path, which never compiles).')]
+        #[Description('Transient compilation feedback on this response, or null; a later null is not stored diagnostic history or evidence of recovery.')]
         public ?string $compileError = null,
         /** @var list<string> */
-        #[Description("Profile legality the restored version breaks (an unknown block, illegal containment, a schema fail), by node id and path. A restore records these and does not refuse (ADR-0228 d9); empty on every other path.")]
+        #[Description('Profile legality the restored version breaks (an unknown block, illegal containment, a schema fail), by node id and path. A restore records these and does not refuse (ADR-0228 d9); empty on every other path.')]
         public array $diagnostics = [],
         #[Description('The Release created by a publish request; its workflow may still require review.')]
         public ?ReleaseData $release = null,

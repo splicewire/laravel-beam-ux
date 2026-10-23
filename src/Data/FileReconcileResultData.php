@@ -14,5 +14,6 @@ final class FileReconcileResultData extends BeamData
         public string $entryId,
         public ?string $headVersion,
         public ?string $publishedVersion,
+        public ?FileDraftDiagnosticData $diagnostic = null,
     ) {}
 }

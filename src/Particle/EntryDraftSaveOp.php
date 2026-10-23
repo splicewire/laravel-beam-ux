@@ -17,9 +17,11 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
  * The draft half of the pair {@see EntryBodySaveOp} was until now the whole of: that op writes AND
  * publishes in one act, which is the right shape for "save and it is live" and the wrong one for an
  * author who wants to work before anyone reads it. This op writes the same body through the same
- * particle pipeline and records it as a version, and then stops — no disk mirror, no compile, no move
- * of the publication pin. A guest keeps reading the published body, because the artifact they are
- * served is addressed by that pin and nothing has touched it.
+ * particle pipeline and records it as a version. It compiles at that new version's address, retaining
+ * the draft on an expected compilation failure with transient response feedback. An already-pinned
+ * entry keeps its published pin and mirror; a guest's artifact remains addressed by that pin.
+ * First-write initialization can establish a baseline publication, so this is not a generic import
+ * shortcut for an unauthored entry.
  *
  * The reason this is not a flag on the existing op: `save-body` is what three editor surfaces and one
  * browser journey already call, and its contract is "this is live now". Widening it with a `draft: true`

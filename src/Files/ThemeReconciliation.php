@@ -4,10 +4,15 @@ namespace Splicewire\Beam\Ux\Files;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Rushing\Versioning\Contracts\VersionStore;
+use Splicewire\Beam\Ux\Body\BodyKind;
 use Splicewire\Beam\Ux\Codec\CssBodyCodec;
+use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
+use Splicewire\Beam\Ux\Data\FileDraftDiagnosticData;
 use Splicewire\Beam\Ux\Data\FileInspectionData;
 use Splicewire\Beam\Ux\Data\FileReconcileInputData;
 use Splicewire\Beam\Ux\Data\FileReconcileResultData;
+use Splicewire\Beam\Ux\Format\UxFormat;
+use Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
@@ -16,10 +21,10 @@ use Splicewire\Beam\Ux\Recording\ReleaseRecording;
 use Splicewire\Beam\Ux\Release\ReleaseService;
 use Splicewire\Beam\Ux\Type\UxType;
 
-/** Current-file reconciliation is separate from the addressed Release's immutable recording. */
+/** Fixed Theme/CSS and Page/MDX dispatch over the same guarded current-file orchestration. */
 class ThemeReconciliation
 {
-    public function __construct(private LocalThemeFile $files, private CanonicalTheme $themes) {}
+    public function __construct(private LocalThemeFile $files, private CanonicalTheme $themes, private CanonicalMdx $mdx = new CanonicalMdx) {}
 
     public function inspect(BeamUxReleaseMember $member, Authenticatable $actor): FileInspectionData
     {
@@ -31,6 +36,7 @@ class ThemeReconciliation
             $data->publishedVersion = $state->publishedVersion;
             $data->fingerprint = $target['fingerprint'];
             $data->path = $target['path'];
+            $data->format = $entry->format?->value;
             $file = $this->files->read($target);
             $this->sameTarget($entry, $target);
             $data->fileExists = $file['exists'];
@@ -40,13 +46,15 @@ class ThemeReconciliation
             $data->localSource = $file['bytes'] !== null && mb_check_encoding($file['bytes'], 'UTF-8') ? mb_strcut($file['bytes'], 0, 20000, 'UTF-8') : null;
             if (! $file['exists']) {
                 $data->state = 'missing';
-                $data->message = 'The local file is missing. Restore creates only the current published bytes.';
-                $data->canRestore = $this->mayRestore($entry, $actor);
+                $data->message = $this->isMdx($entry)
+                    ? 'The local MDX file is missing. MDX Restore is not supported by this body-only take.'
+                    : 'The local file is missing. Restore creates only the current published bytes.';
+                $data->canRestore = ! $this->isMdx($entry) && $this->mayRestore($entry, $actor);
             } elseif ($file['bytes'] === $published) {
                 $data->state = 'unchanged';
                 $data->message = 'The local file matches the current published version.';
             } else {
-                $this->themes->decode($file['bytes'], $this->pinnedBody($entry));
+                $this->decodeFile($entry, $file['bytes'], $this->pinnedBody($entry));
                 $data->state = 'differs';
                 $data->message = 'The local file differs from the current published version. Take it as a draft deliberately.';
                 $data->canTake = true;
@@ -72,13 +80,21 @@ class ThemeReconciliation
             if (! $file['exists']) {
                 throw new FileConflict('file-moved', 'The local file is missing. Nothing was imported.');
             }
-            $body = $this->themes->decode($file['bytes'], $this->pinnedBody($locked));
+            $body = $this->decodeFile($locked, $file['bytes'], $this->pinnedBody($locked));
             $this->sameTarget($locked, $target);
             $again = $this->files->read($target);
             if ($again !== $file) {
                 throw new FileConflict('file-moved', 'The local file changed during validation. Nothing was imported. Reload comparison.');
             }
-            $draft = app(EntryPublication::class)->draftFromBase($locked, $body, $input->expectedHeadVersion, 'Taken from local Theme file', $actor instanceof \Illuminate\Database\Eloquent\Model ? $actor : null);
+            $draft = app(EntryPublication::class)->draftFromBase($locked, $body, $input->expectedHeadVersion,
+                $this->isMdx($locked) ? 'Taken from canonical local MDX file' : 'Taken from local Theme file',
+                $actor instanceof \Illuminate\Database\Eloquent\Model ? $actor : null);
+            if ($draft->compileError !== null) {
+                $diagnostic = FileDraftDiagnosticData::compileFailed();
+
+                return new FileReconcileResultData('drafted-with-compile-error', $diagnostic->message,
+                    $locked->getAttribute('id'), $draft->headVersion, $draft->publishedVersion, $diagnostic);
+            }
 
             return new FileReconcileResultData('drafted', 'Draft saved. The published version and local file are unchanged.', $locked->getAttribute('id'), $draft->headVersion, $draft->publishedVersion);
         });
@@ -87,6 +103,9 @@ class ThemeReconciliation
     public function restore(BeamUxReleaseMember $member, Authenticatable $actor, FileReconcileInputData $input): FileReconcileResultData
     {
         $entry = $this->entry($member, $actor, true);
+        if ($this->isMdx($entry)) {
+            throw new FileConflict('unsupported', 'MDX Restore is not supported by this body-only take.', 422);
+        }
 
         return $entry->getConnection()->transaction(function () use ($entry, $member, $actor, $input) {
             $this->serializeEntry($entry);
@@ -136,19 +155,38 @@ class ThemeReconciliation
     /** @return array{\Splicewire\Beam\Ux\Models\BeamUxEntry, \Splicewire\Beam\Ux\Data\EntryPublicationData, array{absolute: string, path: string, fingerprint: string}, string} */
     private function context(BeamUxEntry $entry): array
     {
-        if ($entry->getAttribute('type') !== UxType::Theme || $entry->codec()::class !== CssBodyCodec::class) {
-            throw new FileConflict('unsupported', 'Only the published canonical Theme/CSS representation is supported here.', 422);
+        if (! $this->isMdx($entry) && ($entry->getAttribute('type') !== UxType::Theme || $entry->codec()::class !== CssBodyCodec::class)) {
+            throw new FileConflict('unsupported', 'Only canonical Theme/CSS or body-only Page/MDX with its native codec is supported here.', 422);
         }
         $state = app(EntryPublication::class)->state($entry);
         if ($state->headVersion === null || $state->publishedVersion === null) {
             throw new FileConflict('unsupported', 'A valid existing working head and published pin are required.', 422);
         }
-        $published = $entry->codec()->decode($this->pinnedBody($entry));
+        $body = $this->pinnedBody($entry);
+        $published = $this->isMdx($entry) ? $this->mdx->published($body) : $entry->codec()->decode($body);
+        if ($this->isMdx($entry)) {
+            // The existing code/profile guard remains authoritative; losslessness is not admission.
+            app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
+        }
         if (strlen($published) > LocalThemeFile::LIMIT || ! mb_check_encoding($published, 'UTF-8')) {
-            throw new FileConflict('unsupported', 'The published Theme representation is not bounded UTF-8.', 422);
+            throw new FileConflict('unsupported', 'The published representation is not bounded UTF-8.', 422);
         }
 
         return [$entry, $state, $this->files->target($entry), $published];
+    }
+
+    private function isMdx(BeamUxEntry $entry): bool
+    {
+        return $entry->getAttribute('type') === UxType::Page && $entry->format === UxFormat::Mdx
+            && $entry->codec()::class === MdxBodyCodec::class && $entry->bodyKind() === BodyKind::Source;
+    }
+
+    /** @param array<string, mixed> $published
+     * @return array<string, mixed>
+     */
+    private function decodeFile(BeamUxEntry $entry, string $bytes, array $published): array
+    {
+        return $this->isMdx($entry) ? $this->mdx->decode($bytes, $published) : $this->themes->decode($bytes, $published);
     }
 
     /** @return array<string, mixed> */
