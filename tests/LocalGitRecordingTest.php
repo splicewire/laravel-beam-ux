@@ -47,6 +47,69 @@ class LocalGitRecordingTest extends TestCase
         return [['path' => $path, 'bytes' => base64_encode($bytes), 'sha256' => hash('sha256', $bytes), 'mode' => '100644']];
     }
 
+    public static function commitFailureClasses(): array
+    {
+        return [
+            'identity-unknown' => ['Author identity unknown', 'identity-unknown'],
+            'signing' => ['error: gpg failed to sign the data', 'signing'],
+            'hook-rejected' => ['fatal: pre-commit hook declined', 'hook-rejected'],
+            'ref-lock' => ["fatal: cannot lock ref 'refs/heads/main'", 'ref-lock'],
+            'not-a-repo' => ['fatal: not a git repository', 'not-a-repo'],
+            'permission' => ['fatal: could not open index.lock: Permission denied', 'permission'],
+            'other' => ['opaque diagnostic sentinel that must not escape', 'other'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('commitFailureClasses')]
+    public function test_commit_failure_exposes_only_a_sanitized_class_and_exit_status(string $stderr, string $class): void
+    {
+        $git = new LocalGit($this->repo);
+        $base = $git->head();
+        $tree = $git->tree($this->work, $base, $this->manifest());
+        $wrapper = $this->repo.'/failing-git';
+        $script = "#!/bin/sh\nif [ \"\$2\" = commit ]; then printf '%s\\n' ".escapeshellarg($stderr)." >&2; exit 128; fi\nexec /usr/bin/git \"\$@\"\n";
+        file_put_contents($wrapper, $script);
+        chmod($wrapper, 0755);
+        config(['beam.ux.recording.git' => $wrapper]);
+
+        $previousHome = getenv('HOME');
+        $emptyHome = $this->repo.'/empty-home';
+        if ($class === 'identity-unknown') {
+            mkdir($emptyHome, 0700);
+            putenv('HOME='.$emptyHome);
+            $_SERVER['HOME'] = $emptyHome;
+            $_ENV['HOME'] = $emptyHome;
+            foreach (['EMAIL', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_CONFIG_GLOBAL'] as $key) {
+                putenv($key);
+                unset($_SERVER[$key], $_ENV[$key]);
+            }
+        }
+
+        try {
+            $git->commit($this->work, $base, 'diagnostic fixture');
+            $this->fail('A failing Git commit was accepted.');
+        } catch (RecordingFailure $failure) {
+            $this->assertSame('git-failed', $failure->reason);
+            $this->assertSame($class, $failure->diagnosticClass);
+            $this->assertSame(128, $failure->exitStatus);
+            $this->assertStringNotContainsString($stderr, $failure->getMessage());
+        } finally {
+            config(['beam.ux.recording.git' => 'git']);
+            if ($class === 'identity-unknown') {
+                if ($previousHome === false) {
+                    putenv('HOME');
+                    unset($_SERVER['HOME'], $_ENV['HOME']);
+                } else {
+                    putenv('HOME='.$previousHome);
+                    $_SERVER['HOME'] = $previousHome;
+                    $_ENV['HOME'] = $previousHome;
+                }
+            }
+        }
+
+        $this->assertNotSame('', $tree);
+    }
+
     public function test_native_hook_private_head_exact_tree_and_external_advance_cas_refusal(): void
     {
         $git = new LocalGit($this->repo);
@@ -148,7 +211,9 @@ class LocalGitRecordingTest extends TestCase
         try {
             $git->commit($this->work, $base, "Signed release\n\nBeam-UX-Recording: signing");
             $this->fail('Signing failure was bypassed');
-        } catch (RecordingFailure) {
+        } catch (RecordingFailure $error) {
+            $this->assertSame('signing', $error->diagnosticClass);
+            $this->assertNotNull($error->exitStatus);
             $this->assertSame($base, $git->head());
             $this->assertSame($index, hash_file('sha256', $this->repo.'/.git/index'));
         }

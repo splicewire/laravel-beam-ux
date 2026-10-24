@@ -87,6 +87,7 @@ class ReleaseRecording
         $git = null;
         $lock = null;
         $reason = 'git-failed';
+        $diagnostic = null;
         // Match publication's global entry-ID lock order before SQLite reservation or row reads.
         usort($prepared, fn (array $left, array $right): int => strcmp((string) $left[0]->getKey(), (string) $right[0]->getKey()));
         try {
@@ -105,6 +106,7 @@ class ReleaseRecording
             } catch (RecordingFailure|\Illuminate\Auth\Access\AuthorizationException $error) {
                 $git = null;
                 $reason = $error instanceof RecordingFailure ? $error->reason : 'unavailable';
+                $diagnostic = $error instanceof RecordingFailure ? $error->diagnostic() : null;
                 // Mirror publication remains supported without Git.
             }
             // Keep entry rows locked while completing mirrors; a concurrent publication cannot move
@@ -145,12 +147,13 @@ class ReleaseRecording
                 }
             });
             if ($git === null) {
-                $this->failure($release, $reason);
+                $this->failure($release, $reason, $diagnostic);
             } else {
                 $this->recordLocked($release, $actor, $git);
             }
         } catch (\Throwable $error) {
-            $this->failure($release, $error instanceof RecordingFailure ? $error->reason : 'completion');
+            $this->failure($release, $error instanceof RecordingFailure ? $error->reason : 'completion',
+                $error instanceof RecordingFailure ? $error->diagnostic() : null);
         } finally {
             if (is_resource($lock)) {
                 flock($lock, LOCK_UN);
@@ -179,7 +182,8 @@ class ReleaseRecording
         try {
             $this->recordLocked($release, $actor, $git);
         } catch (\Throwable $error) {
-            $this->failure($release, $error instanceof RecordingFailure ? $error->reason : 'git-failed');
+            $this->failure($release, $error instanceof RecordingFailure ? $error->reason : 'git-failed',
+                $error instanceof RecordingFailure ? $error->diagnostic() : null);
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);
@@ -314,13 +318,14 @@ class ReleaseRecording
         $row->forceFill(['state' => 'recorded', 'sha' => $sha, 'error' => null])->save();
     }
 
-    private function failure(BeamUxRelease $release, string $reason): void
+    private function failure(BeamUxRelease $release, string $reason, ?string $diagnostic = null): void
     {
         try {
             $row = $this->receipt($release);
             if ($row !== null) {
                 $row->forceFill(['state' => $row->state === 'unavailable' ? 'unavailable'
-                    : ($row->candidate !== null || $reason === 'recovery-required' ? 'recovery-required' : 'failed'), 'error' => $reason])->save();
+                    : ($row->candidate !== null || $reason === 'recovery-required' ? 'recovery-required' : 'failed'),
+                    'error' => $diagnostic === null ? $reason : $reason.':'.$diagnostic])->save();
             }
         } catch (\Throwable) {
             // Durable pending identity/candidate remains available when the receipt store recovers.

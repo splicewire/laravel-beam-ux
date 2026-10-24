@@ -276,13 +276,29 @@ class LocalGit
 
     private function run(string $cwd, array $args, array $env = [], ?string $input = null, bool $trim = true): string
     {
+        $process = null;
         try {
             $process = $this->process($cwd, $args, $env, $input);
             $process->mustRun();
         } catch (\Throwable $error) {
-            throw new RecordingFailure('git-failed', 'Local Git recording failed. Check Git, repository state, identity, signing and hooks, then retry.');
+            $diagnostic = $this->diagnosticClass($process?->getErrorOutput() ?? '');
+            $status = $process?->getExitCode();
+            throw new RecordingFailure('git-failed', 'Local Git recording failed ('.$diagnostic.($status === null ? '' : ', exit '.$status).').', $diagnostic, $status);
         }
 
         return $trim ? trim($process->getOutput()) : $process->getOutput();
+    }
+
+    private function diagnosticClass(string $stderr): string
+    {
+        return match (true) {
+            preg_match('/author identity unknown|committer identity unknown|unable to auto-detect email address/i', $stderr) === 1 => 'identity-unknown',
+            preg_match('/gpg failed to sign|failed to sign the data|signing failed|no secret key/i', $stderr) === 1 => 'signing',
+            preg_match('/hook declined|hook failed|failed to run .*hook|hook .*refused/i', $stderr) === 1 => 'hook-rejected',
+            preg_match('/cannot lock ref|unable to create .*\.lock|could not lock .*\.lock/i', $stderr) === 1 => 'ref-lock',
+            preg_match('/not a git repository|must be run in a work tree/i', $stderr) === 1 => 'not-a-repo',
+            preg_match('/permission denied|operation not permitted|access is denied/i', $stderr) === 1 => 'permission',
+            default => 'other',
+        };
     }
 }

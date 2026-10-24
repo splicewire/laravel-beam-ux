@@ -785,6 +785,7 @@ class EntryPublicationTest extends TestCase
         $recorder = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class);
         $failed = $recorder->receipt($release);
         $this->assertSame('failed', $failed->state);
+        $this->assertSame('git-failed:hook-rejected:1', $failed->error);
         $this->assertSame($base, $git(['rev-parse', 'HEAD']));
         file_put_contents($repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 0\n");
         $recorder->retry($release, $author);
