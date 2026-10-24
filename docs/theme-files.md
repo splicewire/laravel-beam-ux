@@ -23,7 +23,7 @@ canvas/shell/site properties declared with `format: color` may change to support
 Generic strings such as shell radius/shadow are not color properties. Font, responsive and
 extension leaves must remain unchanged. Canonical empty
 is explicitly outside key-preserving import; malformed/no-root/duplicate/foreign CSS is invalid.
-Other codecs, clearing tokens, batch reconciliation and arbitrary CSS parsing remain unsupported.
+Canonical Page/MDX body-only import uses the separate fixed dispatch described below. Other codecs, clearing tokens, batch reconciliation and arbitrary CSS parsing remain unsupported.
 
 The confirmed input captures working head, current pin, file existence/SHA256 and server-derived
 codec/disk/placement fingerprint. No body/path/actor can be submitted. Under the entry transaction,
@@ -63,3 +63,11 @@ eliminate SQLite busy conflicts. The authenticated direct Publish operation retu
 only for SQLite busy/locked statements after its own complete rollback, before its transaction body
 completed. It says nothing was published and asks for reload/explicit retry. Unrelated database
 faults and commit/after-commit failures are not relabeled; no transaction or Git callback is replayed.
+
+## Canonical MDX missing-file recovery and reviewed publication
+
+The same missing-only Restore supports an already-published Page/Mdx/Source with its native codec. Its complete current pinned body must pass CanonicalMdx: exactly the supported title/navOrder header and nonblank LF/UTF-8 body, bounded lossless native encoding. The addressed historical Release member stays fixed; Restore writes the entry’s **current published pin**, never that historical member or the pending working draft. Author/edit/publish and current all-member Release authority remain required.
+
+Inspect the missing file, confirm the captured head/pin/absence/placement, then Restore. Cancellation writes nothing. A file that appears, an existing different file, or changed state refuses without overwrite; reload and consent again. Incomplete creation can leave a partial file for explicit inspection or moving. Restore changes only the filesystem projection and required parent directories, not versions, pin, receipt, Git HEAD or the caller index.
+
+A subsequent body-only edit still needs an explicit Take as draft. Select the returned saved version in the ordinary Release panel, request review, have a different authorized author approve, and publish that fixed version. A later working draft is not substituted. A moved pin requires explicit rebase and renewed review. Publication intentionally writes the selected member’s mirror and records its frozen local bytes; unlike Files reconciliation, ordinary Publish has no last-minute submitted external-file hash check. Unrelated caller index/working files remain outside the recording. No automatic publish, push, overwrite Restore or source canvas editor is added.

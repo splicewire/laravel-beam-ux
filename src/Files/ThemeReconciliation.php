@@ -47,10 +47,8 @@ class ThemeReconciliation
             $data->localSource = $file['bytes'] !== null && mb_check_encoding($file['bytes'], 'UTF-8') ? mb_strcut($file['bytes'], 0, 20000, 'UTF-8') : null;
             if (! $file['exists']) {
                 $data->state = 'missing';
-                $data->message = $this->isMdx($entry)
-                    ? 'The local MDX file is missing. MDX Restore is not supported by this body-only take.'
-                    : 'The local file is missing. Restore creates only the current published bytes.';
-                $data->canRestore = ! $this->isMdx($entry) && $this->mayRestore($entry, $actor);
+                $data->message = 'The local file is missing. Restore creates only the current published bytes.';
+                $data->canRestore = $this->mayRestore($entry, $actor);
             } elseif ($file['bytes'] === $published) {
                 $data->state = 'unchanged';
                 $data->message = 'The local file matches the current published version.';
@@ -104,10 +102,6 @@ class ThemeReconciliation
     public function restore(BeamUxReleaseMember $member, Authenticatable $actor, FileReconcileInputData $input): FileReconcileResultData
     {
         $entry = $this->entry($member, $actor, true);
-        if ($this->isMdx($entry)) {
-            throw new FileConflict('unsupported', 'MDX Restore is not supported by this body-only take.', 422);
-        }
-
         return $entry->getConnection()->transaction(function () use ($entry, $member, $actor, $input) {
             $this->serializeEntry($entry);
             $locked = $entry->newQuery()->whereKey($entry->id)->lockForUpdate()->firstOrFail();

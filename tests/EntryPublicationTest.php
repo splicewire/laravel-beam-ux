@@ -303,6 +303,83 @@ class EntryPublicationTest extends TestCase
         }
     }
 
+    private function mdxFileFixture(): array
+    {
+        $directory = $this->ownedFileFixtureRoot().'/mdx';
+        mkdir($directory, 0700);
+        config(['filesystems.disks.mdx-file' => ['driver' => 'local', 'root' => $directory], 'beam.ux.storage.mirror_disk' => 'mdx-file']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+        [$releases, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        $entry = BeamUxEntry::create(['slug' => 'file-mdx', 'type' => 'page', 'format' => 'mdx', 'realm' => 'site', 'namespace' => 'help']);
+        $body = ['frontmatter' => ['title' => 'Help', 'navOrder' => '2'], 'content' => "\n# Published MDX\n"];
+        $publication = app(EntryPublication::class);
+        $publication->write($entry, $body);
+        $publication->publishAuthoredBody($entry);
+        $release = $releases->requestOne($entry->fresh(), $publication->state($entry->fresh())->headVersion, $author);
+        $member = $release->members()->sole();
+        $target = app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class)->target($entry->fresh());
+
+        return [$entry->fresh(), $member, $author, $body, $target, $publication];
+    }
+
+    public function test_missing_mdx_restore_uses_current_pin_not_historical_member_or_pending_head(): void
+    {
+        [$entry, $historicalMember, $author, $body, $target, $publication] = $this->mdxFileFixture();
+        $oldPin = $historicalMember->version_id;
+        $body['content'] = "\n# Current published MDX\n";
+        $current = $publication->draftFromBase($entry, $body, $publication->state($entry)->headVersion);
+        $publication->publishVersion($entry->fresh(), $current->headVersion);
+        $pending = $body;
+        $pending['content'] = "\n# Pending, never Restore this\n";
+        $publication->draftFromBase($entry->fresh(), $pending, $current->headVersion);
+        unlink($target['absolute']);
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $inspection = $service->inspect($historicalMember, $author);
+        $this->assertTrue($inspection->canRestore);
+        $this->assertSame('mdx', $inspection->format);
+        $this->assertSame($current->headVersion, $inspection->publishedVersion);
+        $before = $publication->state($entry->fresh());
+        $result = $service->restore($historicalMember, $author, $this->fileInput($inspection));
+        $this->assertSame('restored', $result->status);
+        $this->assertSame("---\ntitle: Help\nnavOrder: 2\n---\n\n# Current published MDX\n", file_get_contents($target['absolute']));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+        $this->assertSame($oldPin, $historicalMember->fresh()->version_id);
+    }
+
+    public function test_missing_mdx_restore_preserves_an_appearing_file_and_short_write(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->mdxFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        unlink($target['absolute']);
+        $input = $this->fileInput($service->inspect($member, $author));
+        $before = $publication->state($entry->fresh());
+        file_put_contents($target['absolute'], 'My external edit');
+        $this->assertFileConflict('file-moved', fn () => $service->restore($member, $author, $input));
+        $this->assertSame('My external edit', file_get_contents($target['absolute']));
+        unlink($target['absolute']);
+        $short = new class extends \Splicewire\Beam\Ux\Files\LocalThemeFile
+        {
+            private int $writes = 0;
+
+            protected function write($stream, string $bytes): int|false
+            {
+                return $this->writes++ === 0 ? fwrite($stream, substr($bytes, 0, 5)) : 0;
+            }
+        };
+        $failing = new \Splicewire\Beam\Ux\Files\ThemeReconciliation($short, app(\Splicewire\Beam\Ux\Files\CanonicalTheme::class), app(\Splicewire\Beam\Ux\Files\CanonicalMdx::class));
+        try {
+            $failing->restore($member, $author, $this->fileInput($failing->inspect($member, $author)));
+            $this->fail('An incomplete Restore must not report success');
+        } catch (\Splicewire\Beam\Ux\Files\FileConflict $failure) {
+            $this->assertSame(503, $failure->status);
+            $this->assertSame('incomplete', $failure->reason);
+        }
+        $this->assertSame("---\nt", file_get_contents($target['absolute']));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
     public function test_missing_file_restore_is_exclusive_and_preserves_draft_history(): void
     {
         [$entry, $member, $author, $body, $target, $publication] = $this->themeFileFixture();
