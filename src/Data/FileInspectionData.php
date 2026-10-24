@@ -24,5 +24,6 @@ final class FileInspectionData extends BeamData
         public bool $canTake = false,
         public bool $canRestore = false,
         public bool $sourceTruncated = false,
+        public ?string $format = null,
     ) {}
 }
