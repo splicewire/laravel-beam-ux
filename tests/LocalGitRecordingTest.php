@@ -110,6 +110,21 @@ class LocalGitRecordingTest extends TestCase
         $this->assertNotSame('', $tree);
     }
 
+    public function test_process_start_failure_returns_a_bounded_failure_without_leaking_the_working_directory(): void
+    {
+        $missingWorkingDirectory = $this->repo.'/does-not-exist';
+
+        try {
+            new LocalGit($missingWorkingDirectory);
+            $this->fail('A missing working directory was accepted.');
+        } catch (RecordingFailure $failure) {
+            $this->assertSame('git-failed', $failure->reason);
+            $this->assertSame('other', $failure->diagnosticClass);
+            $this->assertNull($failure->exitStatus);
+            $this->assertStringNotContainsString($missingWorkingDirectory, $failure->getMessage());
+        }
+    }
+
     public function test_native_hook_private_head_exact_tree_and_external_advance_cas_refusal(): void
     {
         $git = new LocalGit($this->repo);

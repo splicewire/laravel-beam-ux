@@ -281,8 +281,9 @@ class LocalGit
             $process = $this->process($cwd, $args, $env, $input);
             $process->mustRun();
         } catch (\Throwable $error) {
-            $diagnostic = $this->diagnosticClass($process?->getErrorOutput() ?? '');
-            $status = $process?->getExitCode();
+            $started = $process?->isStarted() ?? false;
+            $diagnostic = $this->diagnosticClass($started ? $process->getErrorOutput() : '');
+            $status = $started ? $process->getExitCode() : null;
             throw new RecordingFailure('git-failed', 'Local Git recording failed ('.$diagnostic.($status === null ? '' : ', exit '.$status).').', $diagnostic, $status);
         }
 
