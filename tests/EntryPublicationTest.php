@@ -1809,8 +1809,10 @@ class EntryPublicationTest extends TestCase
         ));
         $this->assertSame('Old', $entry->fresh()->title);
 
+        $versionsBeforePublish = \DB::table(Beam::table('versions'))->count();
         $published = $publication->publishVersion($entry->fresh(), $draft->headVersion);
 
+        $this->assertSame($versionsBeforePublish, \DB::table(Beam::table('versions'))->count());
         $this->assertSame($draft->headVersion, $published->publishedVersion);
         $this->assertSame('Reviewed title', $entry->fresh()->title);
         $this->assertSame(40, $entry->fresh()->nav_order);
