@@ -1796,7 +1796,7 @@ class EntryPublicationTest extends TestCase
 
     public function test_named_settings_publish_under_a_bodyless_canonical_root_does_not_publish_the_root(): void
     {
-        $root = BeamUxEntry::rootFor('site');
+        $root = BeamUxEntry::rootFor('site')->fresh();
         $before = $root->getAttributes();
         $publication = app(EntryPublication::class);
         $parent = $this->publishedPage(self::BODY_ONE);
@@ -1824,7 +1824,7 @@ class EntryPublicationTest extends TestCase
 
     public function test_url_move_under_canonical_root_still_checks_collisions_and_cycles(): void
     {
-        $root = BeamUxEntry::rootFor('site');
+        $root = BeamUxEntry::rootFor('site')->fresh();
         $before = $root->getAttributes();
         $entry = $this->publishedPage(self::BODY_ONE);
         $entry->forceFill(['parent_id' => $root->id, 'segment' => 'old'])->save();

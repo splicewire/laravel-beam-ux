@@ -78,18 +78,18 @@ final class EntryUrlChanges
     /** ADR-0209 amendment E: the existing realm root is infrastructure, not an authored version. */
     private function isCanonicalStructuralRoot(BeamUxEntry $root, BeamUxEntry $entry): bool
     {
-        $realm = $root->realm;
-        if ($root->namespace !== 'realms' || $root->slug !== $realm
-            || $root->type !== \Splicewire\Beam\Ux\Type\UxType::Page
-            || $root->parent_id !== null || ($root->segment !== null && $root->segment !== '')
-            || $root->particle_id !== null || $root->getAttribute('deleted_at') !== null
-            || ! in_array($realm, (array) ($root->realms ?? [$realm]), true)
-            || ! in_array($realm, (array) ($entry->realms ?? [$entry->realm]), true)) {
+        $realm = $root->getAttribute('realm');
+        if ($root->getAttribute('namespace') !== 'realms' || $root->getAttribute('slug') !== $realm
+            || $root->getAttribute('type') !== \Splicewire\Beam\Ux\Type\UxType::Page
+            || $root->getAttribute('parent_id') !== null || ($root->getAttribute('segment') !== null && $root->getAttribute('segment') !== '')
+            || $root->getAttribute('particle_id') !== null || $root->getAttribute('deleted_at') !== null
+            || ! in_array($realm, (array) ($root->getAttribute('realms') ?? [$realm]), true)
+            || ! in_array($realm, (array) ($entry->getAttribute('realms') ?? [$entry->getAttribute('realm')]), true)) {
             return false;
         }
         // rootFor stamps this when the optional workflow column exists; do not admit a hidden root.
         if (array_key_exists('workflow_marking', $root->getAttributes())
-            && $root->workflow_marking !== BeamUxEntry::MARKING_PUBLISHED) {
+            && $root->getAttribute('workflow_marking') !== BeamUxEntry::MARKING_PUBLISHED) {
             return false;
         }
 
