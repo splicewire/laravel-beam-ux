@@ -1794,6 +1794,127 @@ class EntryPublicationTest extends TestCase
         $input->toModelAttributes();
     }
 
+    public function test_named_settings_publish_under_a_bodyless_canonical_root_does_not_publish_the_root(): void
+    {
+        $root = BeamUxEntry::rootFor('site');
+        $before = $root->getAttributes();
+        $publication = app(EntryPublication::class);
+        $parent = $this->publishedPage(self::BODY_ONE);
+        $parent->forceFill(['parent_id' => $root->id, 'segment' => 'docs'])->save();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $entry->forceFill(['parent_id' => $parent->id, 'segment' => 'guide', 'title' => 'Old', 'nav_order' => 40])->save();
+        $pin = $entry->published_version;
+        $draft = $publication->draftFromBase($entry, self::BODY_ONE, $pin, pageSettings: new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(
+            title: 'Reviewed title', parentId: $parent->id, segment: 'guide', navOrder: 40,
+        ));
+        $this->assertSame('Old', $entry->fresh()->title);
+
+        $published = $publication->publishVersion($entry->fresh(), $draft->headVersion);
+
+        $this->assertSame($draft->headVersion, $published->publishedVersion);
+        $this->assertSame('Reviewed title', $entry->fresh()->title);
+        $this->assertSame(40, $entry->fresh()->nav_order);
+        $this->assertSame(self::BODY_ONE, $entry->fresh()->particle->payload);
+        $this->assertSame('/docs/guide', $entry->fresh()->url());
+        $this->assertSame($before, $root->fresh()->getAttributes());
+        $this->assertNull($root->fresh()->particle_id);
+        $this->assertNull($root->fresh()->published_version);
+        $this->assertCount(2, $published->versions);
+    }
+
+    public function test_url_move_under_canonical_root_still_checks_collisions_and_cycles(): void
+    {
+        $root = BeamUxEntry::rootFor('site');
+        $before = $root->getAttributes();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $entry->forceFill(['parent_id' => $root->id, 'segment' => 'old'])->save();
+        $other = $this->publishedPage(self::BODY_ONE);
+        $other->forceFill(['parent_id' => $root->id, 'segment' => '/taken'])->save();
+        $check = app(\Splicewire\Beam\Ux\Publish\EntryUrlChanges::class);
+        $check->assertAllowed($entry, [$entry->id => ['parentId' => $root->id, 'segment' => 'new']]);
+        foreach ([
+            [$entry->id => ['parentId' => $root->id, 'segment' => 'taken']],
+            [$root->id => ['parentId' => $entry->id, 'segment' => null]],
+        ] as $changes) {
+            try {
+                $check->assertAllowed($entry, $changes);
+                $this->fail('An invalid final graph was admitted.');
+            } catch (ValidationException $exception) {
+                $this->assertArrayHasKey('pageSettings.parentId', $exception->errors());
+            }
+        }
+        $this->assertSame($before, $root->fresh()->getAttributes());
+        $this->assertSame('old', $entry->fresh()->segment);
+    }
+
+    public static function nonCanonicalRootParents(): array
+    {
+        return array_map(fn ($case) => [$case], ['ordinary', 'impostor', 'wrong-realm', 'wrong-type', 'hidden', 'unmarked', 'addressable', 'body', 'deleted', 'missing', 'broken-root']);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('nonCanonicalRootParents')]
+    public function test_no_pin_parent_admission_is_limited_to_the_canonical_structural_root(string $case): void
+    {
+        $root = BeamUxEntry::rootFor('site');
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $parentId = $root->id;
+        match ($case) {
+            'ordinary' => $root->forceFill(['namespace' => 'content'])->save(),
+            'impostor' => $root->forceFill(['slug' => 'not-the-realm'])->save(),
+            'wrong-realm' => $root->forceFill(['realm' => 'operator', 'realms' => ['operator'], 'slug' => 'operator'])->save(),
+            'wrong-type' => $root->forceFill(['type' => 'component'])->save(),
+            'hidden' => $root->forceFill(['workflow_marking' => 'draft'])->save(),
+            'unmarked' => $root->forceFill(['workflow_marking' => null])->save(),
+            'addressable' => $root->forceFill(['segment' => 'root-content'])->save(),
+            'body' => $root->forceFill(['particle_id' => $entry->particle_id])->save(),
+            'deleted' => $root->delete(),
+            'missing' => $parentId = (string) \Illuminate\Support\Str::uuid(),
+            'broken-root' => $root->forceFill(['parent_id' => (string) \Illuminate\Support\Str::uuid()])->save(),
+        };
+        $before = $entry->fresh()->getAttributes();
+        try {
+            app(\Splicewire\Beam\Ux\Publish\EntryUrlChanges::class)->assertAllowed($entry, [
+                $entry->id => ['parentId' => $parentId, 'segment' => 'guide'],
+            ]);
+            $this->fail('An invalid no-pin parent was admitted: '.$case);
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('pageSettings.parentId', $exception->errors());
+        }
+        $this->assertSame($before, $entry->fresh()->getAttributes());
+    }
+
+    public function test_canonical_root_exception_respects_the_existing_publish_gate(): void
+    {
+        $root = BeamUxEntry::rootFor('site');
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $this->app->instance(\Splicewire\Beam\Ux\Sitemap\EntryPublishGate::class, new class implements \Splicewire\Beam\Ux\Sitemap\EntryPublishGate
+        {
+            public function isPublished(BeamUxEntry $entry): bool
+            {
+                return false;
+            }
+        });
+        $this->expectException(ValidationException::class);
+        app(\Splicewire\Beam\Ux\Publish\EntryUrlChanges::class)->assertAllowed($entry, [
+            $entry->id => ['parentId' => $root->id, 'segment' => 'guide'],
+        ]);
+    }
+
+    public function test_canonical_root_is_found_only_on_the_entry_connection(): void
+    {
+        config(['database.connections.root_elsewhere' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']]);
+        $this->createTables('root_elsewhere');
+        $foreign = BeamUxEntry::on('root_elsewhere')->create([
+            'namespace' => 'realms', 'slug' => 'site', 'realm' => 'site', 'realms' => ['site'],
+            'type' => 'page', 'workflow_marking' => BeamUxEntry::MARKING_PUBLISHED,
+        ]);
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $this->expectException(ValidationException::class);
+        app(\Splicewire\Beam\Ux\Publish\EntryUrlChanges::class)->assertAllowed($entry, [
+            $entry->id => ['parentId' => $foreign->id, 'segment' => 'guide'],
+        ]);
+    }
+
     public function test_batch_url_check_accepts_a_swap_but_refuses_a_collision(): void
     {
         $one = $this->publishedPage(self::BODY_ONE);

@@ -50,7 +50,8 @@ final class EntryUrlChanges
                     break;
                 }
                 $parent = $entries->get($node->parent_id);
-                if ($parent === null || ($parent->published_version === null && ! array_key_exists($parent->id, $changes))) {
+                if ($parent === null || ($parent->published_version === null && ! array_key_exists($parent->id, $changes)
+                    && ! $this->isCanonicalStructuralRoot($parent, $entry))) {
                     if (isset($affected[$entry->id])) {
                         $this->refuse('A page cannot publish under a missing or never-published parent.');
                     }
@@ -72,6 +73,27 @@ final class EntryUrlChanges
                 $urls[$url] = $entry->id;
             }
         }
+    }
+
+    /** ADR-0209 amendment E: the existing realm root is infrastructure, not an authored version. */
+    private function isCanonicalStructuralRoot(BeamUxEntry $root, BeamUxEntry $entry): bool
+    {
+        $realm = $root->realm;
+        if ($root->namespace !== 'realms' || $root->slug !== $realm
+            || $root->type !== \Splicewire\Beam\Ux\Type\UxType::Page
+            || $root->parent_id !== null || ($root->segment !== null && $root->segment !== '')
+            || $root->particle_id !== null || $root->getAttribute('deleted_at') !== null
+            || ! in_array($realm, (array) ($root->realms ?? [$realm]), true)
+            || ! in_array($realm, (array) ($entry->realms ?? [$entry->realm]), true)) {
+            return false;
+        }
+        // rootFor stamps this when the optional workflow column exists; do not admit a hidden root.
+        if (array_key_exists('workflow_marking', $root->getAttributes())
+            && $root->workflow_marking !== BeamUxEntry::MARKING_PUBLISHED) {
+            return false;
+        }
+
+        return app(\Splicewire\Beam\Ux\Sitemap\EntryPublishGate::class)->isPublished($root);
     }
 
     private function refuse(string $message): never
