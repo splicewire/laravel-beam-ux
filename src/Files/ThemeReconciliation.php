@@ -102,6 +102,7 @@ class ThemeReconciliation
     public function restore(BeamUxReleaseMember $member, Authenticatable $actor, FileReconcileInputData $input): FileReconcileResultData
     {
         $entry = $this->entry($member, $actor, true);
+
         return $entry->getConnection()->transaction(function () use ($entry, $member, $actor, $input) {
             $this->serializeEntry($entry);
             $locked = $entry->newQuery()->whereKey($entry->id)->lockForUpdate()->firstOrFail();
