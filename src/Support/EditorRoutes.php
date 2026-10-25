@@ -26,17 +26,20 @@ final class EditorRoutes
         $releaseMount = Particle::mount($releasesUri, 'beam-ux-release')
             ->names($realmPrefix.'beam-ux-release')
             ->only(['index', 'show']);
-        $releaseFilesMount = Particle::mount('beam-ux-release-files', 'beam-ux-release-files')
-            ->names($realmPrefix.'beam-ux-release-files')
-            ->only(['index', 'show']);
+        $releaseFilesMount = null;
+        if (($mountOptions['includeReleaseFiles'] ?? true) !== false) {
+            $releaseFilesMount = Particle::mount('beam-ux-release-files', 'beam-ux-release-files')
+                ->names($realmPrefix.'beam-ux-release-files')
+                ->only(['index', 'show']);
+        }
 
         if (is_string($mountOptions['realm'] ?? null)) {
             $releaseMount->inRealm($mountOptions['realm']);
-            $releaseFilesMount->inRealm($mountOptions['realm']);
+            $releaseFilesMount?->inRealm($mountOptions['realm']);
         }
 
         $releaseMount->ops(['command', 'readiness', 'changes'], $mountOptions);
-        $releaseFilesMount->ops(['commit-now', 'inspect-file', 'take-file-draft', 'take-all-drafts', 'restore-missing-file', 'remirror-file'], $mountOptions);
+        $releaseFilesMount?->ops(['commit-now', 'inspect-file', 'take-file-draft', 'take-all-drafts', 'restore-missing-file', 'remirror-file'], $mountOptions);
 
         // ADR-0236 d14: the Redirects seat's resource; the service checks the rights publishing takes.
         $redirectMount = Particle::mount('beam-ux-redirects', 'beam-ux-redirect');

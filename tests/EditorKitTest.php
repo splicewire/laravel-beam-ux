@@ -68,6 +68,24 @@ class EditorKitTest extends TestCase
         $this->assertSame('tenant', $tenantRelease->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM]);
     }
 
+    public function test_a_realm_mount_can_leave_the_release_files_recording_unmounted(): void
+    {
+        EditorRoutes::mount('tenant/beam-ux-entries', 'tenant/beam-ux-releases', [
+            'realm' => 'tenant',
+            'includeReleaseFiles' => false,
+        ]);
+
+        $names = collect(app('router')->getRoutes()->getRoutes())
+            ->map(fn ($route) => $route->getName())
+            ->filter()
+            ->all();
+
+        $this->assertContains('tenant.beam-ux-entry.body', $names);
+        $this->assertContains('tenant.beam-ux-release.command', $names);
+        $this->assertNotContains('tenant.beam-ux-release-files.index', $names);
+        $this->assertNotContains('tenant.beam-ux-release-files.commit-now', $names);
+    }
+
     public function test_creation_requires_author_and_creates_the_default_body_once(): void
     {
         $body = [['kind' => 'block', 'name' => 'h1', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Default page']]]];
