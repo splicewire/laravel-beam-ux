@@ -81,6 +81,23 @@ class PublicEntryRendererTest extends TestCase
         $this->assertSame('/docs/api', $response->json('props.entry.url'));
     }
 
+    public function test_the_entry_props_carry_its_declared_body_kind_which_chooses_the_editor(): void
+    {
+        // beam JS ADR-0006 d1: the client opens the canvas for a blocks entry. An MDX page is source on a host that
+        // keeps MDX as source (the default) and blocks on one that holds it as blocks (ADR-0233 d1).
+        $root = BeamUxEntry::rootFor();
+        $this->page('guide', ['segment' => 'guide', 'parent_id' => $root->getKey()]);
+        $this->page('home-tsx', ['segment' => 'home-tsx', 'parent_id' => $root->getKey(), 'format' => UxFormat::Tsx]);
+
+        $this->assertSame('mdx', $this->get('/guide')->json('props.entry.format'));
+        $this->assertSame('source', $this->get('/guide')->json('props.entry.bodyKind'));
+        $this->assertSame('blocks', $this->get('/home-tsx')->json('props.entry.bodyKind'));
+
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        $this->assertSame('blocks', $this->get('/guide')->json('props.entry.bodyKind'));
+    }
+
     public function test_a_root_absolute_segment_resolves_even_though_a_top_down_walk_could_never_reach_it(): void
     {
         // The docs subtree sits under the realm root but declares an absolute segment, so its URL

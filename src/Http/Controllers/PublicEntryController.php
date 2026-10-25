@@ -134,6 +134,9 @@ class PublicEntryController
                 'title' => $entry->title,
                 'type' => $entry->type?->value,
                 'format' => $entry->format?->value,
+                // ADR-0228 d1 / beam JS ADR-0006 d1: the declared Body Kind chooses the editor surface. An MDX page
+                // is `blocks` on a host that holds MDX as blocks (ADR-0233 d1) and `source` on one that does not.
+                'bodyKind' => $entry->bodyKind()->value,
                 'url' => $this->urls->resolveChain($chain),
                 'layout' => $chrome['layout'],
                 'template' => $chrome['template'],
