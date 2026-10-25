@@ -19,6 +19,18 @@ class JsonProp extends BeamData
      */
     public const NAME_PATTERN = '/\A[A-Za-z_$][A-Za-z0-9_$-]*(?::[A-Za-z_$][A-Za-z0-9_$-]*)?\z/';
 
+    /** @return array<string, mixed> */
+    public static function rules(): array
+    {
+        // Laravel Data infers an intersection for this scalar union. Preserve its actual
+        // wire shape here; kind-specific safety remains in the constructor below.
+        return ['value' => ['present', 'nullable', function (string $attribute, mixed $value, \Closure $fail): void {
+            if (! is_scalar($value)) {
+                $fail('The '.$attribute.' field must be a string, number, boolean or null.');
+            }
+        }]];
+    }
+
     /**
      * A literal prop never carries code (EP-07a, launch 2026-10-17): the printer emitted the name and a
      * `number` value raw, so either could put an expression into the module with no `expression` prop. Both
