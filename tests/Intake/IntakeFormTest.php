@@ -107,6 +107,29 @@ class IntakeFormTest extends TestCase
         $guard->assertPublishable($entry, $body, $body);
     }
 
+    public function test_a_host_route_gets_the_page_props_the_packaged_renderer_gives(): void
+    {
+        // A host that renders an entry page from its own route (a starter's `/`) must hand its forms the same props as
+        // the packaged renderer, or each one reads `This form is not available.` (starter receipt, 2026-10-25).
+        $this->openDoor();
+        config(['beam.core.intake.honeypot.field' => 'nickname']);
+        $published = [...$this->form('contact'), ...$this->form('private', '01a1f000-0000-7000-8000-000000000002')];
+        $this->app->instance(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class, new class($published) extends \Splicewire\Beam\Ux\Bindings\PublishedBindingDocument
+        {
+            public function __construct(private array $body) {}
+
+            public function read(BeamUxEntry $entry): array
+            {
+                return $entry->slug === 'home' ? $this->body : [];
+            }
+        });
+
+        $this->assertSame(['intakeForms' => ['contact' => self::CONTACT], 'intakeHoneypotField' => 'nickname'],
+            app(IntakeForms::class)->pagePropsFor(new BeamUxEntry(['slug' => 'home', 'type' => 'page', 'format' => 'tsx'])));
+        $this->assertSame([], app(IntakeForms::class)->pagePropsFor(new BeamUxEntry(['slug' => 'about', 'type' => 'page', 'format' => 'tsx'])),
+            'a page without a form carries nothing');
+    }
+
     public function test_the_editor_envelope_carries_the_schema_each_form_renders(): void
     {
         $this->openDoor();
