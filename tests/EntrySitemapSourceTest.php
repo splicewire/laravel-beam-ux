@@ -75,6 +75,30 @@ class EntrySitemapSourceTest extends TestCase
         unset($draft);
     }
 
+    public function test_a_page_under_a_hidden_page_is_not_listed(): void
+    {
+        // ADR-0236 d8, launch 00's DF-22 (EP-30 slice 0): the sitemap walks the publish gate up the chain, as the
+        // renderer now does, so it never lists a URL that answers 404.
+        $hidden = BeamUxEntry::create(['slug' => 'guides', 'type' => UxType::Page, 'segment' => '/guides']);
+        $child = BeamUxEntry::create(['slug' => 'start', 'type' => UxType::Page, 'segment' => 'start', 'parent_id' => $hidden->id]);
+        $other = BeamUxEntry::create(['slug' => 'about', 'type' => UxType::Page, 'segment' => '/about']);
+        $this->app->bind(EntryPublishGate::class, fn () => new class($hidden->id) implements EntryPublishGate
+        {
+            public function __construct(private string $hiddenId) {}
+
+            public function isPublished(BeamUxEntry $entry): bool
+            {
+                return $entry->id !== $this->hiddenId;
+            }
+        });
+
+        $urls = $this->urlsFrom($this->app->make(EntrySitemapSource::class));
+
+        $this->assertContains('https://example.test/about', $urls);
+        $this->assertNotContains('https://example.test/guides/start', $urls, 'published itself, but under a hidden page');
+        unset($child, $other);
+    }
+
     public function test_the_entitlement_gate_never_leaks_gated_content(): void
     {
         $public = BeamUxEntry::create(['slug' => 'free', 'type' => UxType::Page, 'segment' => '/free']);

@@ -71,6 +71,13 @@ class EntrySitemapSource implements LiveSitemapSource
                 continue;
             }
 
+            // A hidden page hides the pages under it (ADR-0236 d8), so a page under one is not a URL that answers.
+            foreach ($chain as $node) {
+                if (! $this->published->isPublished($node)) {
+                    continue 2;
+                }
+            }
+
             if (\Splicewire\Beam\Ux\Bindings\RecordPages::parameter($entry->segment) !== null) {
                 $request = \Illuminate\Http\Request::create('/');
                 $request->setUserResolver(fn () => null);
