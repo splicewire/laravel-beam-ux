@@ -36,7 +36,8 @@ final class RecordUrlChanges
         if ($stem === null || ! is_array($before) || ! Schema::connection($record->getConnectionName())->hasTable('beam_ux_redirects')) {
             return;
         }
-        foreach ($this->recordPages($stem) as $realm => [$page, $collection]) {
+        // The Record's own connection, a tenant's included: its site's Record Pages and Redirects live beside it.
+        foreach ($this->recordPages($stem, $record->getConnectionName()) as $realm => [$page, $collection]) {
             $field = (string) $page->getAttribute('record_page')['field'];
             $was = RecordPages::slug($before[$field] ?? null);
             if ($was === null || $was === RecordPages::slug($event->payload[$field] ?? null)) {
@@ -61,10 +62,10 @@ final class RecordUrlChanges
      *
      * @return array<string, array{0: BeamUxEntry, 1: string}>
      */
-    private function recordPages(string $stem): array
+    private function recordPages(string $stem, ?string $connection): array
     {
         $found = [];
-        foreach (BeamUxEntry::query()->whereNotNull('record_page')->where('type', UxType::Page->value)->get() as $page) {
+        foreach (BeamUxEntry::on($connection)->whereNotNull('record_page')->where('type', UxType::Page->value)->get() as $page) {
             $collection = (string) ($page->getAttribute('record_page')['collection'] ?? '');
             $source = $this->profiles->sources($page)[$collection] ?? null;
             $ancestry = $this->paths->ancestry($page);

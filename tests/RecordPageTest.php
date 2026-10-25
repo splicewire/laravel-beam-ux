@@ -383,6 +383,62 @@ class RecordPageTest extends TestCase
         $this->get('/posts/hello-world')->assertStatus(301)->assertRedirect('/posts/hi');
     }
 
+    public function test_a_records_url_change_on_a_tenant_connection_leaves_its_redirect_there(): void
+    {
+        // Review of 414383c7: entries and their Redirects can live on a tenant connection, so the Record Page is found,
+        // and the Redirect written, on the written Record's own connection, never the default one.
+        config(['database.connections.tenant' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']]);
+        $default = \Illuminate\Support\Facades\DB::getDefaultConnection();
+        \Illuminate\Support\Facades\DB::setDefaultConnection('tenant');
+        try {
+            $this->createTables();
+            Schema::create('beam_particles', function (Blueprint $table) {
+                $table->string('id')->primary();
+                $table->string('schema_ref');
+                $table->string('schema_id');
+                $table->string('source_tier')->default('local');
+                $table->string('migration_status')->default('current');
+                $table->json('payload');
+                $table->json('meta')->nullable();
+                $table->string('head_version')->nullable();
+                $table->timestamps();
+            });
+            (require __DIR__.'/../database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
+            Schema::create('activity_log', function (Blueprint $table) {
+                $table->id();
+                $table->string('log_name')->nullable()->index();
+                $table->text('description');
+                $table->nullableUuidMorphs('subject', 'subject');
+                $table->string('event')->nullable();
+                $table->nullableUuidMorphs('causer', 'causer');
+                $table->json('attribute_changes')->nullable();
+                $table->json('properties')->nullable();
+                $table->timestamps();
+            });
+        } finally {
+            \Illuminate\Support\Facades\DB::setDefaultConnection($default);
+        }
+        $root = tap((new BeamUxEntry)->setConnection('tenant')->forceFill(['id' => (string) \Illuminate\Support\Str::uuid(), 'namespace' => 'realms',
+            'slug' => 'site', 'type' => UxType::Page, 'realm' => 'site', 'realms' => ['site']]))->save();
+        $posts = tap((new BeamUxEntry)->setConnection('tenant')->forceFill(['id' => (string) \Illuminate\Support\Str::uuid(), 'slug' => 'posts',
+            'type' => UxType::Page, 'segment' => 'posts', 'parent_id' => $root->id, 'realm' => 'site', 'realms' => ['site']]))->save();
+        tap((new BeamUxEntry)->setConnection('tenant')->forceFill(['id' => (string) \Illuminate\Support\Str::uuid(), 'slug' => 'post',
+            'type' => UxType::Page, 'segment' => '{slug}', 'parent_id' => $posts->id, 'realm' => 'site', 'realms' => ['site'],
+            'record_page' => ['collection' => 'posts', 'field' => 'slug']]))->save();
+        \Illuminate\Support\Facades\DB::connection('tenant')->table('beam_particles')->insert(['id' => 'tenant-post', 'schema_ref' => 'https://example.test/posts/1',
+            'schema_id' => 'https://example.test/posts/1', 'payload' => json_encode(['slug' => 'old', 'title' => 'Tenant post', 'visible' => true])]);
+
+        $record = \Splicewire\Beam\Models\BeamParticle::on('tenant')->findOrFail('tenant-post');
+        $record->payload = [...$record->payload, 'slug' => 'new'];
+        $record->save();
+        event(new \Splicewire\Beam\Events\BeamParticlePersisted($record, $record->payload, $record->schema_ref));
+
+        $row = \Illuminate\Support\Facades\DB::connection('tenant')->table('beam_ux_redirects')->sole();
+        $this->assertSame(['/posts/old', 'record', 'posts', 'tenant-post'], [$row->path, $row->target_kind, $row->target_collection, $row->target_record_id]);
+        $this->assertFalse(Schema::hasTable('beam_ux_redirects') && \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->exists(),
+            'nothing on the default connection');
+    }
+
     private function recordRedirect(string $path, string $id): void
     {
         if (! Schema::hasTable('beam_ux_redirects')) {
