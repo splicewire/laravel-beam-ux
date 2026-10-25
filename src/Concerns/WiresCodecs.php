@@ -7,6 +7,7 @@ use Rushing\Popcorn\Registries\RegistryIndex;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Codec\CssBodyCodec;
+use Splicewire\Beam\Ux\Codec\MdxBlocksBodyCodec;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -35,7 +36,8 @@ trait WiresCodecs
         $this->app->singleton(CodecRegistry::class, function () {
             return (new CodecRegistry)
                 ->register(new TsxBodyCodec)
-                ->register(new MdxBodyCodec)
+                // ADR-0233 d1, per host: MDX holds blocks once the host says so, and stays source otherwise.
+                ->register(config('beam.ux.mdx.holds_blocks') ? new MdxBlocksBodyCodec : new MdxBodyCodec)
                 ->register(new CssBodyCodec);
         });
     }

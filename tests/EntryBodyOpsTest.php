@@ -13,6 +13,9 @@ use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Particle\ParticleOperationRegistry;
 use Splicewire\Beam\Realm\Contracts\TenancyContext;
+use Splicewire\Beam\Ux\Body\BodyKind;
+use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
+use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
 use Splicewire\Beam\Ux\Compile\NodeEntryBodyCompiler;
@@ -933,6 +936,178 @@ class EntryBodyOpsTest extends TestCase
             $this->assertArrayHasKey('form', $e->errors());
             $this->assertStringContainsString('blocks', $e->errors()['form'][0]);
         }
+    }
+
+    public function test_mdx_holds_blocks_only_on_a_host_that_says_so(): void
+    {
+        // ADR-0233 d1, per host: an unconverted host's MDX stays source and its body-only loop is unchanged.
+        $entry = BeamUxEntry::create(['slug' => 'docs', 'type' => 'page', 'format' => 'mdx']);
+        $this->assertSame(BodyKind::Source, $entry->bodyKind());
+        $this->assertSame(MdxBodyCodec::class, $entry->codec()::class);
+
+        $this->holdMdxAsBlocks();
+        $doc = [['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Blocks.']]]];
+        $lens = $this->fakeMdxLens([], "Blocks.\n");
+        $entry = $entry->fresh();
+        $this->assertSame(BodyKind::Blocks, $entry->bodyKind());
+        $this->assertInstanceOf(AcceptsJsonDoc::class, $entry->codec());
+        $this->assertSame("Blocks.\n", $entry->codec()->decode($doc), 'a JsonDoc prints through the MDX printer');
+        $this->assertSame([$doc], $lens->prints);
+        $raw = "---\ntitle: Docs\n---\n\nStill source.\n";
+        $this->assertSame(MdxBody::decode(MdxBody::encode($raw)), $entry->codec()->decode(MdxBody::encode($raw)), 'an unconverted body still decodes as source');
+    }
+
+    public function test_mdx_source_mode_prints_and_reads_through_the_mdx_lens_against_the_profile_keeping_ids(): void
+    {
+        $this->holdMdxAsBlocks();
+        $entry = BeamUxEntry::create(['slug' => 'mdx-source', 'type' => 'page', 'format' => 'mdx']);
+        $body = [['kind' => 'block', 'id' => '019a0000-0000-7000-8000-000000000002', 'name' => 'p', 'isComponent' => false,
+            'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Local MDX text']]]];
+        $parsed = $body;
+        unset($parsed[0]['id']);
+        $lens = $this->fakeMdxLens($parsed, "Local MDX text\n");
+        $this->app->instance(TsxLens::class, new class implements TsxLens
+        {
+            public function lower(string $source): array
+            {
+                throw new \LogicException('an MDX page never reads through the TSX Lens');
+            }
+        });
+
+        $printed = \Splicewire\Beam\Ux\Particle\EntrySourcePrintOp::handle($entry, new Request(['body' => $body]), null);
+        $read = \Splicewire\Beam\Ux\Particle\EntrySourceReadOp::handle($entry, new Request(['source' => $printed->source, 'body' => $body]), null);
+
+        $this->assertSame("Local MDX text\n", $printed->source);
+        $this->assertSame($body[0]['id'], $read->body[0]['id'], 'ids are rematched against the Local Session');
+        $this->assertSame(app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve($entry), $lens->reads[0][1]['profile']);
+        $this->assertContains('Callout', array_column($lens->reads[0][1]['profile']['nodes'], 'name'), 'the kit is in an MDX page\'s profile');
+    }
+
+    public function test_a_blocks_mdx_source_refuses_frontmatter_and_meta_rather_than_dropping_them(): void
+    {
+        $this->holdMdxAsBlocks();
+        $entry = BeamUxEntry::create(['slug' => 'mdx-frontmatter', 'type' => 'page', 'format' => 'mdx']);
+        $this->fakeMdxLens([]);
+        try {
+            \Splicewire\Beam\Ux\Particle\EntrySourceReadOp::handle($entry, new Request(['source' => "---\ntitle: Docs\n---\n\nBody.\n", 'body' => []]), null);
+            $this->fail('frontmatter is page settings, never a blocks body');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('page settings', $e->errors()['source'][0]);
+        }
+
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, new class implements \Splicewire\Beam\Mdx\Lens\MdxLens
+        {
+            public function read(string $body, array $context = []): array
+            {
+                return ['doc' => [], 'meta' => "export const meta = {title: 'Docs'}"];
+            }
+
+            public function print(array $doc): string
+            {
+                return '';
+            }
+        });
+        try {
+            \Splicewire\Beam\Ux\Particle\EntrySourceReadOp::handle($entry, new Request(['source' => "export const meta = {title: 'Docs'}\n\nBody.\n", 'body' => []]), null);
+            $this->fail('schemastud meta converts at adoption (d9)');
+        } catch (ValidationException $e) {
+            $this->assertStringContainsString('d9', $e->errors()['source'][0]);
+        }
+    }
+
+    public function test_save_source_on_a_blocks_mdx_entry_lowers_through_the_mdx_lens_and_compiles_the_printed_mdx(): void
+    {
+        $this->holdMdxAsBlocks();
+        $this->fakeMdxLens([['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Lowered']], 'dynamic' => false]], "## Lowered\n");
+        $compiler = new class implements EntryBodyCompiler
+        {
+            /** @var list<string> */
+            public array $sources = [];
+
+            public function compile(BeamUxEntry $entry, string $source): string
+            {
+                $this->sources[] = $source;
+
+                return 'export default () => null;';
+            }
+
+            public function handles(BeamUxEntry $entry): bool
+            {
+                return true;
+            }
+        };
+        $this->app->instance(EntryBodyCompiler::class, $compiler);
+        $this->app->forgetInstance(CompileEntryBody::class);
+        $entry = BeamUxEntry::create(['slug' => 'docs', 'type' => 'page', 'format' => 'mdx', 'namespace' => null]);
+
+        $payload = EntrySourceSaveOp::handle(
+            $entry,
+            Request::create('/beam-ux-entries/'.$entry->id.'/save-source', 'POST', ['source' => "## Lowered\n"]),
+            actor: null,
+        );
+
+        $stored = EntrySourceSaveOp::respond($payload, $entry->fresh())->body;
+        $this->assertSame('h2', $stored[0]['name']);
+        $this->assertArrayHasKey('id', $stored[0]);
+        $this->assertContains("## Lowered\n", $compiler->sources, 'an MDX page compiles from the MDX printer, never the TSX module printer');
+    }
+
+    public function test_the_real_mdx_lens_lowers_a_blocks_mdx_source_write_when_a_lens_host_is_set(): void
+    {
+        // The Node run, end to end: BEAM_MDX_LENS_HOST names a host whose node_modules hold @splicewire/beam-mdx built.
+        $host = getenv('BEAM_MDX_LENS_HOST');
+        if (! is_string($host) || ! is_file($host.'/node_modules/@splicewire/beam-mdx/package.json')) {
+            $this->markTestSkipped('Set BEAM_MDX_LENS_HOST to run the real MDX Lens.');
+        }
+        $this->holdMdxAsBlocks();
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, new \Splicewire\Beam\Mdx\Lens\NodeMdxLens(workingDirectory: $host));
+        $entry = BeamUxEntry::create(['slug' => 'real-mdx', 'type' => 'page', 'format' => 'mdx']);
+        $source = "## Plans\n\n<Callout type=\"tip\">\n\nPick **one**.\n\n</Callout>\n";
+
+        $read = \Splicewire\Beam\Ux\Particle\EntrySourceReadOp::handle($entry, new Request(['source' => $source, 'body' => []]), null);
+        $printed = \Splicewire\Beam\Ux\Particle\EntrySourcePrintOp::handle($entry, new Request(['body' => $read->body]), null);
+
+        $this->assertSame(['h2', 'Callout'], array_column($read->body, 'name'));
+        $this->assertArrayHasKey('id', $read->body[0]);
+        $this->assertSame($source, $printed->source);
+    }
+
+    private function holdMdxAsBlocks(): void
+    {
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+    }
+
+    /** A recording MDX Lens; the Node run is proven in laravel-beam-mdx and by the real-lens test above. */
+    private function fakeMdxLens(array $doc, string $printed = ''): object
+    {
+        $lens = new class($doc, $printed) implements \Splicewire\Beam\Mdx\Lens\MdxLens
+        {
+            /** @var list<array{0: string, 1: array<string, mixed>}> */
+            public array $reads = [];
+
+            /** @var list<array<int, array<string, mixed>>> */
+            public array $prints = [];
+
+            public function __construct(private array $doc, private string $printed) {}
+
+            public function read(string $body, array $context = []): array
+            {
+                $this->reads[] = [$body, $context];
+
+                return ['doc' => $this->doc, 'meta' => null];
+            }
+
+            public function print(array $doc): string
+            {
+                $this->prints[] = $doc;
+
+                return $this->printed;
+            }
+        };
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, $lens);
+
+        return $lens;
     }
 
     private function saveRequest(BeamUxEntry $entry, array $body): Request

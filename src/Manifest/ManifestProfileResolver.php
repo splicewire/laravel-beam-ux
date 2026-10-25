@@ -4,6 +4,8 @@ namespace Splicewire\Beam\Ux\Manifest;
 
 use Schemastud\Blockdoc\Contracts\ManifestNodeSource;
 use Schemastud\Blockdoc\Schema\ManifestBuilder;
+use Splicewire\Beam\Mdx\Kit\MdxKitNodeSource;
+use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
@@ -25,6 +27,17 @@ final class ManifestProfileResolver
     {
         $base = HtmlManifestProfile::manifest();
         $nodes = array_merge($base['nodes'], (new PackagedEditorNodeSource)->manifest($profile)['nodes']);
+
+        // ADR-0233 d7 — an MDX page's kit tags are the beam-mdx kit's Code Components, declared by
+        // splicewire/laravel-beam-mdx, so its body is checked against them like any other block.
+        if ($entry->format === UxFormat::Mdx && in_array($profile, ($kit = new MdxKitNodeSource)->profiles(), true)) {
+            $have = array_column($nodes, 'name');
+            foreach ($kit->manifest($profile)['nodes'] as $node) {
+                if (! in_array($node['name'], $have, true)) {
+                    $nodes[] = $node;
+                }
+            }
+        }
 
         // Compose the host's placeable `#[NodeType]` components onto the HTML base through the bound
         // ManifestNodeSource, when the host declares one (the flagship realm-bind is 07a's later host

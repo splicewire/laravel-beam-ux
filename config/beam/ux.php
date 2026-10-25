@@ -268,6 +268,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | MDX pages hold blocks (ADR-0233 d1, per host)
+    |--------------------------------------------------------------------------
+    |
+    | `holds_blocks` — when true, this host's MDX entries hold a JsonDoc, as a
+    |                  `tsx` page does. Source writes and registration from disk
+    |                  read MDX through the MDX Lens (`splicewire/laravel-beam-mdx`,
+    |                  Node), and the mirror prints it through the canonical printer.
+    |                  When false (the default), MDX stays source-kind and the
+    |                  body-only MDX loop is unchanged. A host turns it on only
+    |                  once its MDX is converted (ADR-0233 d9), and only once its
+    |                  frontmatter is held as page settings, since a blocks body
+    |                  carries no frontmatter (d3).
+    |
+    */
+    'mdx' => [
+        'holds_blocks' => (bool) env('BEAM_UX_MDX_HOLDS_BLOCKS', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Access (ADR-0212 — the two conjunctive rights)
     |--------------------------------------------------------------------------
     |

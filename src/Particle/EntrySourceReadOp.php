@@ -23,6 +23,6 @@ class EntrySourceReadOp
         SourceMode::assertAvailable($model);
         $input = EntrySourceReadInputData::validateAndCreate($request->all());
 
-        return new BeamUxEntryBodyInputData(app(SourceToBlocks::class)->convert($input->source, $input->body, app(ManifestProfileResolver::class)->resolve($model)));
+        return new BeamUxEntryBodyInputData(app(SourceToBlocks::class)->convert($input->source, $input->body, app(ManifestProfileResolver::class)->resolve($model), $model->getAttribute('format')));
     }
 }

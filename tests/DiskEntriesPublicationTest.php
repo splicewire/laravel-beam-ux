@@ -119,6 +119,46 @@ class DiskEntriesPublicationTest extends TestCase
         @unlink($this->root.'/page/home.tsx');
     }
 
+    public function test_a_registered_mdx_page_is_lowered_through_the_mdx_lens_on_a_host_that_holds_mdx_as_blocks(): void
+    {
+        // ADR-0233 d2, per host: registration from disk reads the file's BODY through the MDX Lens (its frontmatter
+        // is read into the entry's own fields, never the lens), and the rematch mints fresh ids.
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        $lens = new class implements \Splicewire\Beam\Mdx\Lens\MdxLens
+        {
+            /** @var list<string> */
+            public array $bodies = [];
+
+            public function read(string $body, array $context = []): array
+            {
+                $this->bodies[] = $body;
+
+                return ['doc' => [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'From MDX']], 'dynamic' => false]], 'meta' => null];
+            }
+
+            public function print(array $doc): string
+            {
+                return "## From MDX\n";
+            }
+        };
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, $lens);
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\n---\n\n## From MDX\n");
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $entry = BeamUxEntry::query()->where('slug', 'guide')->whereNull('namespace')->firstOrFail();
+        $body = app(StorageDriverResolver::class)->resolve($entry)->read($entry->particle_id)->body;
+
+        $this->assertSame('h2', $body[0]['name']);
+        $this->assertArrayHasKey('id', $body[0]);
+        $this->assertCount(1, $lens->bodies);
+        $this->assertStringNotContainsString('title: Guide', $lens->bodies[0], 'the lens reads the body, never the frontmatter');
+        $this->assertSame('Guide', $entry->title);
+
+        @unlink($this->root.'/page/guide.mdx');
+    }
+
     /** A fake lens (the Node run is proven end-to-end elsewhere) and a mirror disk rooted at the scanned tree. */
     private function mirrorOverScannedTree(): \Illuminate\Contracts\Filesystem\Filesystem
     {

@@ -74,6 +74,26 @@ class ManifestProfileResolverTest extends TestCase
         }
     }
 
+    public function test_an_mdx_entry_resolves_the_beam_mdx_kit_as_code_components_and_a_tsx_entry_does_not(): void
+    {
+        // ADR-0233 d7 — the kit is declared on the server (splicewire/laravel-beam-mdx), so an MDX page's kit
+        // tags are checked against the profile like any other block.
+        $mdx = $this->entry('central');
+        $mdx->format = 'mdx';
+        $tsx = $this->entry('central');
+        $tsx->format = 'tsx';
+
+        $mdxNames = array_column($this->resolver('central_db')->resolve($mdx)['nodes'], 'name');
+        $tsxNames = array_column($this->resolver('central_db')->resolve($tsx)['nodes'], 'name');
+
+        foreach (['Callout', 'Steps', 'Step', 'CardGrid', 'Card', 'Ref', 'Artifact'] as $kit) {
+            $this->assertContains($kit, $mdxNames);
+            $this->assertNotContains($kit, $tsxNames);
+        }
+        $this->assertNotContains('Content', $mdxNames, 'a fragment is an Authored Component placed by its own tag (d8)');
+        $this->assertSame(count($mdxNames), count(array_unique($mdxNames)), 'the kit never redeclares a base name');
+    }
+
     public function test_a_tenant_entry_resolves_a_code_refusing_profile(): void
     {
         $profile = $this->resolver('central_db')->resolve($this->entry('tenant_acme'));

@@ -10,6 +10,7 @@ use InvalidArgumentException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
+use Splicewire\Beam\Mdx\MdxBody;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Access\EntryAccessGate;
 use Splicewire\Beam\Ux\Access\Right;
@@ -19,6 +20,7 @@ use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
+use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
 use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
@@ -421,13 +423,22 @@ class RegisterEntriesFromDisk
         // fresh id. Every other kind encodes its text through the codec unchanged. `$lower = false` is the
         // batch's fallback when the Lens cannot read a file (see the caller).
         $body = ($lower && $entry->bodyKind() === BodyKind::Blocks)
-            ? app(SourceToBlocks::class)->convert($source, [], app(ManifestProfileResolver::class)->resolve($entry))
+            ? app(SourceToBlocks::class)->convert(self::lowerable($entry, $source), [], app(ManifestProfileResolver::class)->resolve($entry), $entry->format)
             : $entry->codec()->encode($source, $entry->body_style);
         $item = $this->drivers->resolveOnEntryConnection($entry)->write('', $body, $entry->namespace);
         if ($entry->particle_id === null && $item->key !== '') {
             $entry->particle_id = $item->key;
             $entry->save();
         }
+    }
+
+    /**
+     * ADR-0233 d3 — what the lens reads from a disk file: an MDX file's body without its frontmatter, which
+     * registration reads into the entry's own fields; any other file whole.
+     */
+    private static function lowerable(BeamUxEntry $entry, string $source): string
+    {
+        return $entry->format === UxFormat::Mdx ? MdxBody::encode($source)[MdxBody::CONTENT_KEY] : $source;
     }
 
     /**

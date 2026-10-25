@@ -121,7 +121,7 @@ class EntrySourceSaveOp
         return match ($entry->bodyKind()) {
             // mdx: `{frontmatter,content}`; css: the theme token object (a Source css entry round-trips text).
             BodyKind::Source => $entry->codec()->encode($source),
-            // tsx: lowered to a JsonDoc through the Node TSX Lens (d9).
+            // tsx (and mdx where the host holds MDX as blocks): lowered to a JsonDoc through its Lens (d9).
             BodyKind::Blocks => self::lowerToBlocks($entry, $source),
             // a theme (Form) has no source editor.
             default => throw ValidationException::withMessages([
@@ -145,7 +145,7 @@ class EntrySourceSaveOp
         // The lowered body is held to the realm's profile at the publication choke (EntryPublication::write);
         // here we only lower + reattach ids against the Working Head.
         $guard = app(CanvasBodyGuard::class);
-        $body = app(SourceToBlocks::class)->convert($source, $guard->workingHead($entry), app(ManifestProfileResolver::class)->resolve($entry));
+        $body = app(SourceToBlocks::class)->convert($source, $guard->workingHead($entry), app(ManifestProfileResolver::class)->resolve($entry), $entry->format);
 
         return $body;
     }

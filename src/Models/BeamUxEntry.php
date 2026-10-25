@@ -538,7 +538,8 @@ class BeamUxEntry extends Model implements WorkflowManaged
      * ADR-0228 d1 — the declared {@see BodyKind} of this entry's body. A theme is a **form**; a component
      * is **source** (central; ADR-0231 later adds an Authored-Component blocks path, not EP-05); any other
      * type is **blocks** when its codec carries a JsonDoc ({@see AcceptsJsonDoc} — a `tsx` page) and
-     * **source** otherwise (an `mdx` page, until editor-parity ticket 15 decides).
+     * **source** otherwise (an `mdx` page on a host that has not turned on `beam.ux.mdx.holds_blocks`; on one
+     * that has, {@see \Splicewire\Beam\Ux\Codec\MdxBlocksBodyCodec} accepts a JsonDoc, ADR-0233 d1).
      *
      * This is the entry's DECLARATION, read off its `type` and `format` — never sniffed from the stored
      * body. That is what d1 retires: `array_is_list` / `JsonDocShape::is` stop being the discriminator,
