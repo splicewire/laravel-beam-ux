@@ -121,12 +121,17 @@ final class RedirectService
 
     private function targetPage(BeamUxRedirect $redirect, string $target, string $realm, Authenticatable $actor): void
     {
-        $page = null;
+        // Either way the page is one this Redirect's site reaches: its URL resolves to it in the Redirect's realm.
+        // An id from another realm, or one whose URL another page answers here, names no page of this site.
+        $path = RedirectPaths::normalize($target);
         if (preg_match('/\A[0-9a-f-]{36}\z/i', $target) === 1) {
-            $page = BeamUxEntry::on($redirect->getConnectionName())->whereKey($target)->where('type', UxType::Page->value)->first();
-        } elseif (($path = RedirectPaths::normalize($target)) !== null) {
-            $chain = app(EntryPathResolver::class)->resolve($path, $realm);
-            $page = $chain === null ? null : $chain[array_key_last($chain)];
+            $chosen = BeamUxEntry::on($redirect->getConnectionName())->whereKey($target)->where('type', UxType::Page->value)->first();
+            $path = $chosen === null ? null : RedirectPaths::normalize($chosen->url());
+        }
+        $chain = $path === null ? null : app(EntryPathResolver::class)->resolve($path, $realm);
+        $page = $chain === null ? null : $chain[array_key_last($chain)];
+        if (isset($chosen) && $page !== null && (string) $page->getKey() !== (string) $chosen->getKey()) {
+            $page = null;
         }
         if ($page === null) {
             $this->refuse('target', 'No page has that URL. Name the page by its current URL.');

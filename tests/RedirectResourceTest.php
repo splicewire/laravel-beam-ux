@@ -74,6 +74,21 @@ class RedirectResourceTest extends AuthoredComponentNativeTestCase
         $this->assertSame(['/a'], BeamUxRedirect::query()->pluck('path')->all());
     }
 
+    public function test_a_page_named_by_id_must_be_one_the_redirects_site_reaches(): void
+    {
+        // Review of 86dd1a5b: an id from another realm passed, storing a URL this site doesn't serve (or serves as a
+        // different page). An id is held only when the page's current URL resolves to it in the Redirect's realm.
+        $docs = BeamUxEntry::create(['slug' => 'handbook', 'type' => 'page', 'format' => 'tsx', 'realm' => 'docs', 'realms' => ['docs'],
+            'parent_id' => BeamUxEntry::rootFor('docs')->id, 'segment' => 'pricing']);
+        $this->actingAs($this->user('author'));
+
+        $this->postJson('/beam-ux-redirects', ['path' => '/handbook', 'match' => 'exact', 'targetKind' => 'page', 'target' => $docs->id])
+            ->assertUnprocessable()->assertJsonValidationErrors('target');
+        $saved = $this->postJson('/beam-ux-redirects', ['path' => '/prices', 'match' => 'exact', 'targetKind' => 'page', 'target' => $this->pricing->id])
+            ->assertCreated();
+        $this->assertSame($this->pricing->id, BeamUxRedirect::query()->findOrFail($saved->json('data.id'))->target_entry_id);
+    }
+
     public function test_managing_redirects_takes_ux_author_and_the_mapped_publish_ability_on_a_target_page(): void
     {
         $this->actingAs($this->user('reader'));
