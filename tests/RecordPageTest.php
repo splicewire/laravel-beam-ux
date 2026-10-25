@@ -301,6 +301,25 @@ class RecordPageTest extends TestCase
         app(RecordPages::class)->assertSettings($page, new EntryPageSettingsData(title: 'Page', segment: '{slug}', recordPage: new RecordPageData('posts', 'slug')));
     }
 
+    public function test_a_redirect_reaches_a_record_through_its_record_page_as_the_reader_reads_it(): void
+    {
+        // ADR-0236 d1, d10 (EP-30 slice 2; ruling 8): a Record target is {collection, id}, reached at its URL through
+        // the Collection's Record Page, and only for a reader who may read the Record. The answer depends on the reader.
+        $this->page();
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
+        foreach (['/old-post' => 'hello', '/old-hidden' => 'hidden'] as $path => $id) {
+            \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->insert(['id' => (string) \Illuminate\Support\Str::uuid(), 'realm' => 'site',
+                'path' => $path, 'match' => 'exact', 'target_kind' => 'record', 'target_collection' => 'posts', 'target_record_id' => $id,
+                'permanent' => true, 'origin' => 'author', 'created_at' => now(), 'updated_at' => now()]);
+        }
+
+        $answer = $this->get('/old-post');
+
+        $answer->assertStatus(301)->assertRedirect('/posts/hello');
+        $this->assertSame('no-store, private', $answer->headers->get('Cache-Control'));
+        $this->get('/old-hidden')->assertNotFound();
+    }
+
     public function test_the_preview_bar_offers_the_records_its_viewer_may_read_to_open_a_record_page_on(): void
     {
         // ADR-0232 d10 (EP-18): a Record Page opens on a Record the viewer picks, from those the preview's viewer may read.
