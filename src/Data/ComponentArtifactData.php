@@ -13,7 +13,8 @@ class ComponentArtifactData extends BeamData
         public string $name,
         public ?string $url,
         public ?string $version,
-        #[\Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType('Record<string, RepeatRecordsData>')]
+        // A typed reference, not a literal: a host's generator emits only the types it reaches along references.
+        #[\Spatie\TypeScriptTransformer\Attributes\TypeScriptType('array<string, RepeatRecordsData>')]
         public array $bindings = [],
     ) {}
 }
