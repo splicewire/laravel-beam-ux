@@ -125,6 +125,21 @@ class ReleaseRedirectsPublishTest extends AuthoredComponentNativeTestCase
         $this->get('/legacy/child')->assertStatus(301)->assertRedirect('/fresh');
     }
 
+    public function test_a_takedown_target_is_a_page(): void
+    {
+        // Review of eca09bc0: a target named by id was any entry, so a published component was accepted and planned as a
+        // page target no guest could reach. A Take-down redirects to a page (d4).
+        $legacy = $this->livePage('legacy');
+        $this->bindLifecycle([$legacy]);
+        $component = BeamUxEntry::create(['slug' => 'card-'.Str::random(4), 'title' => 'Card', 'type' => 'component', 'format' => 'tsx', 'realm' => 'site']);
+        DB::table('beam_ux_entries')->where('id', $component->id)->update(['published_version' => 'v1']);
+        $service = app(ReleaseService::class);
+        $release = $service->create($legacy, 'Component target', $this->author);
+
+        $this->expectException(ValidationException::class);
+        $service->putMember($release, $legacy->id, null, $this->author, $component->id);
+    }
+
     public function test_an_exact_redirect_already_at_a_url_a_move_takes_away_now_leads_to_the_page(): void
     {
         $about = $this->livePage('about');

@@ -17,6 +17,7 @@ use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Preview\ReleasePreviewLinks;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
+use Splicewire\Beam\Ux\Type\UxType;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Control\TransitionResult;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
@@ -402,13 +403,14 @@ final class ReleaseService
         if ($redirectTarget !== null) {
             $target = $entry->newQuery()->where(fn ($query) => $query->whereNotNull('published_version')->orWhereIn('id', $publishing))->get()
                 ->first(function (BeamUxEntry $candidate) use ($entry, $redirectTarget, $workflow, $publishing) {
-                    return $candidate->id !== $entry->id && $candidate->realm === $entry->realm
+                    // A Take-down redirects to a page (ADR-0236 d4), never a component, layout or theme.
+                    return $candidate->id !== $entry->id && $candidate->realm === $entry->realm && $candidate->type === UxType::Page
                         && (! $workflow->manages($candidate) || $candidate->workflow_marking === BeamUxEntry::MARKING_PUBLISHED
                             || in_array((string) $candidate->id, $publishing, true))
                         && ($candidate->id === $redirectTarget || $candidate->url() === $redirectTarget);
                 });
             if ($target === null) {
-                $this->refuse('The Take-down redirect must resolve to a published entry in this realm, or one this Release publishes.');
+                $this->refuse('The Take-down redirect must resolve to a published page in this realm, or one this Release publishes.');
             }
         }
         // Admission only: the Release publishes the Redirects (ADR-0236 d4), once assertMemberPublishable() finds the

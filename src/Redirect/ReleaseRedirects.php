@@ -248,14 +248,14 @@ final class ReleaseRedirects
         return null;
     }
 
-    /** A Take-down's target, named by id or by its URL now, as the entry it is. */
+    /** A Take-down's target, named by id or by its URL now, as the page it is: a Take-down redirects to a page (d4). */
     private function target(Collection $now, ?string $named): ?string
     {
         if ($named === null || $named === '') {
             return null;
         }
         if ($now->has($named)) {
-            return $named;
+            return $now[$named]->type === UxType::Page ? $named : null;
         }
         $match = $now->first(fn (BeamUxEntry $entry) => $entry->type === UxType::Page && $entry->segment !== null
             && ($chain = $this->chain($now, (string) $entry->getKey())) !== null && $this->urls->resolveChain($chain) === $named);
