@@ -301,6 +301,16 @@ class RecordPageTest extends TestCase
         app(RecordPages::class)->assertSettings($page, new EntryPageSettingsData(title: 'Page', segment: '{slug}', recordPage: new RecordPageData('posts', 'slug')));
     }
 
+    public function test_the_preview_bar_offers_the_records_its_viewer_may_read_to_open_a_record_page_on(): void
+    {
+        // ADR-0232 d10 (EP-18): a Record Page opens on a Record the viewer picks, from those the preview's viewer may read.
+        $page = $this->page();
+
+        $choices = app(\Splicewire\Beam\Ux\Preview\PreviewBar::class)->recordChoices($page, '/posts/{slug}', \Illuminate\Http\Request::create('/'), 'site');
+
+        $this->assertSame([['label' => 'Record hello', 'path' => '/posts/hello']], $choices, 'labelled by its title field; the hidden one is not offered');
+    }
+
     public function test_preview_resolves_the_frozen_parameter_settings_without_changing_the_published_page(): void
     {
         $page = $this->page();

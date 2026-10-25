@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Support;
 use Illuminate\Support\Facades\Route;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Splicewire\Beam\Ux\Theme\ThemeResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
@@ -54,20 +55,30 @@ class PageEntryRef
      *
      * @return array{id: string, slug: string, format: string|null, artifact: array{url: string, version: string|null}|null}|null
      */
-    public static function for(string $slug): ?array
+    public static function for(string $slug, ?PreviewContext $preview = null): ?array
     {
         $entry = self::row($slug);
 
         if ($entry === null) {
             return null;
         }
+        // Inside a Preview (the route runs ResolvePreviewContext), the body is the Preview's version (ADR-0232 d15).
+        $preview ??= self::currentPreview();
+        $id = (string) $entry->getKey();
 
         return [
-            'id' => (string) $entry->getKey(),
+            'id' => $id,
             'slug' => $slug,
             'format' => self::formatValue($entry),
-            'artifact' => self::artifactFor($entry),
+            'artifact' => self::artifactFor($entry, $preview?->admitsDraft($id) ? $preview->versionFor($id) : null),
         ];
+    }
+
+    private static function currentPreview(): ?PreviewContext
+    {
+        $preview = app()->bound('request') ? request()->attributes->get('beam.ux.preview') : null;
+
+        return $preview instanceof PreviewContext ? $preview : null;
     }
 
     /** The page row a host-coded route means, by the tiebreak above, or null. A page's head reads it too (ADR-0234 d2). */
@@ -154,7 +165,7 @@ class PageEntryRef
      *
      * @return array{url: string, version: string|null}|null
      */
-    private static function artifactFor(BeamUxEntry $entry): ?array
+    private static function artifactFor(BeamUxEntry $entry, ?string $previewVersion = null): ?array
     {
         $name = (string) config('beam.ux.route_name', 'beam.ux.').'site.artifact';
 
@@ -164,11 +175,11 @@ class PageEntryRef
 
         $artifacts = app(EntryArtifactStore::class);
 
-        if (! $artifacts->has($entry)) {
+        if (! ($previewVersion === null ? $artifacts->has($entry) : $artifacts->hasVersion($entry, $previewVersion))) {
             return null;
         }
 
-        $version = $artifacts->version($entry);
+        $version = $previewVersion === null ? $artifacts->version($entry) : $artifacts->versionKey($previewVersion);
 
         return [
             // The version is pinned INTO the url, not handed over beside it: the browser caches by URL

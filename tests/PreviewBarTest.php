@@ -97,6 +97,35 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
         $this->assertSame('noindex, nofollow, noarchive', $response->headers->get('X-Robots-Tag'));
     }
 
+    public function test_a_host_page_reads_its_entry_and_the_bar_through_the_preview(): void
+    {
+        // A host's own page (a starter's home) addresses its entry through PageEntryRef and asks PreviewBar for the bar.
+        $pub = app(EntryPublication::class);
+        // A host route means a page in the configured namespace (PageEntryRef's tiebreak).
+        $home = $this->livePage('home-page');
+        $home->forceFill(['namespace' => config('beam.ux.namespace', 'starter')])->save();
+        $draft = $pub->recordDraft($home, [$this->node('section')])->headVersion;
+        $release = $this->release([$home->id => $draft]);
+        $live = \Splicewire\Beam\Ux\Support\PageEntryRef::for('home-page');
+        $grant = tap(new \Splicewire\Beam\Ux\Models\BeamUxPreviewGrant)->forceFill(['release_id' => $release->id])->setRelation('release', $release);
+        $context = new \Splicewire\Beam\Ux\Preview\PreviewContext($grant);
+
+        $previewed = \Splicewire\Beam\Ux\Support\PageEntryRef::for('home-page', $context);
+
+        $artifacts = app(\Splicewire\Beam\Ux\Compile\EntryArtifactStore::class);
+        $this->assertSame($artifacts->versionKey($draft), $previewed['artifact']['version'], 'the Release\'s version of the body');
+        $this->assertSame($artifacts->version($home->fresh()), $live['artifact']['version'], 'outside a Preview, unchanged');
+
+        $request = \Illuminate\Http\Request::create('/');
+        $this->assertNull(app(\Splicewire\Beam\Ux\Preview\PreviewBar::class)->for($request), 'no Preview, no bar');
+        $request->attributes->set('beam.ux.preview', $context);
+        $bar = app(\Splicewire\Beam\Ux\Preview\PreviewBar::class)->for($request, $home->fresh());
+        $this->assertSame(['Spring', 'preview', '/_beam/preview/switch?to=live&path=%2F'], [$bar['label'], $bar['mode'], $bar['switchUrl']],
+            'outside the mount, the configured route names');
+        $this->assertSame([$home->id], array_column($bar['changes']['pages'], 'entryId'));
+        $this->assertSame([], $bar['recordChoices']);
+    }
+
     public function test_the_switch_needs_a_preview_and_returns_only_to_this_site(): void
     {
         $credential = $this->openLink($this->release([$this->livePage('about')->id => null]));
