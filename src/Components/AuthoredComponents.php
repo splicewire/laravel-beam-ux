@@ -5,7 +5,6 @@ namespace Splicewire\Beam\Ux\Components;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Rushing\Versioning\Contracts\VersionStore;
-use Splicewire\Beam\Ux\Codec\JsonDocPrinter;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\JsonDoc\NodeChildren;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -546,7 +545,28 @@ class AuthoredComponents
 
     public function names(array $body): array
     {
-        return JsonDocShape::is($body) ? JsonDocPrinter::componentNames($body) : [];
+        if (! JsonDocShape::is($body)) {
+            return [];
+        }
+        // Read-only dependency discovery is not admission/hydration. Legacy bound render trees may
+        // omit printer-only fields; the save boundary still requires the declared JsonNode shape.
+        $names = [];
+        $walk = function (array $nodes) use (&$walk, &$names): void {
+            foreach ($nodes as $node) {
+                if (($node['kind'] ?? null) !== 'block') {
+                    continue;
+                }
+                $name = $node['name'] ?? null;
+                if (($node['isComponent'] ?? false) && is_string($name) && $name !== '' && $name !== 'Slot') {
+                    $names[$name] = true;
+                }
+                $walk(NodeChildren::of($node));
+                $walk($node['repeat']['empty'] ?? []);
+            }
+        };
+        $walk($body);
+
+        return array_keys($names);
     }
 
     public function canRead(BeamUxEntry $entry, ?\Illuminate\Contracts\Auth\Authenticatable $actor): bool

@@ -57,7 +57,7 @@ class EntryDuplicator
             'type' => $source->type,
             'format' => $source->format,
             'body_style' => $source->body_style,
-            'component_kind' => $source->component_kind,
+            ...($source->getConnection()->getSchemaBuilder()->hasColumn($source->getTable(), 'component_kind') ? ['component_kind' => $source->component_kind] : []),
             'namespace' => $source->namespace,
             'placement_ref' => $source->placement_ref,
             'driver_ref' => $source->driver_ref,

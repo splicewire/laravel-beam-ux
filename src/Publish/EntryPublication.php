@@ -611,6 +611,11 @@ class EntryPublication
      */
     public function write(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): array
     {
+        $connection = $entry->getConnectionName();
+        if ($connection !== null && ! array_key_exists($connection, config('database.connections', []))) {
+            // Preserve the residency/code refusal before opening an uninitialized tenant connection.
+            app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
+        }
         $written = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reservationTransaction($entry->getConnection(), function () use ($entry, $body, $pageSettings) {
             $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
 
