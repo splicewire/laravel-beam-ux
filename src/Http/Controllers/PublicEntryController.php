@@ -12,6 +12,7 @@ use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Head\PageHeadComposer;
 use Splicewire\Beam\Ux\Http\EntryPageProps;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
+use Splicewire\Beam\Ux\Http\HostedSiteRequest;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Preview\PreviewContext;
@@ -150,7 +151,7 @@ class PublicEntryController
         $theme = app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve(
             $realm,
             $preview,
-            includeCentral: ! $request->attributes->get('beam.ux.hosted-site', false),
+            includeCentral: ! $request->attributes->get(HostedSiteRequest::ATTRIBUTE, false),
         );
         $url = $record['url'] ?? $this->urls->resolveChain($chain);
         $restricted = $this->gate->isRestricted($chain);
