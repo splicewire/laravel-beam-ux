@@ -264,6 +264,24 @@ class RecordPageTest extends TestCase
         $this->assertNull($page->fresh()->record_page);
     }
 
+    public function test_sitemap_snapshot_keeps_literal_parameter_and_legacy_realm_routing_parity(): void
+    {
+        $page = $this->page();
+        BeamUxEntry::create(['slug' => 'literal', 'type' => UxType::Page, 'segment' => 'hello', 'parent_id' => $page->parent_id]);
+        foreach ([false, true] as $legacy) {
+            if ($legacy) {
+                Schema::table('beam_ux_entries', fn (Blueprint $table) => $table->dropColumn('realms'));
+                app(\Illuminate\Http\Request::class)->attributes->remove('_beamUxRealmsColumn');
+            }
+            $resolver = app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class);
+            $snapshot = $resolver->snapshot(BeamUxEntry::all());
+            foreach (['/posts', '/posts/hello', '/posts/other', '/missing'] as $path) {
+                $ids = fn ($chain) => $chain === null ? null : array_map(fn ($entry) => $entry->id, $chain);
+                $this->assertSame($ids($resolver->resolve($path)), $ids($snapshot->resolve($path)), $path);
+            }
+        }
+    }
+
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {

@@ -78,7 +78,9 @@ class EntryPathResolver
             if ($entry->namespace === 'realms' && $entry->slug === $realm) {
                 $lookup['root'] ??= $entry;
             }
-            if ($entry->type !== UxType::Page || ! $entry->isReachableIn($realm)) {
+            $reachable = array_key_exists('realms', $entry->getAttributes())
+                ? $entry->isReachableIn($realm) : $entry->realm === $realm;
+            if ($entry->type !== UxType::Page || ! $reachable) {
                 continue;
             }
             $segment = $entry->segment;
