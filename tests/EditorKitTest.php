@@ -40,6 +40,34 @@ class EditorKitTest extends TestCase
         $this->assertContains('beam-ux-entries/{id}/preview', $routes);
     }
 
+    public function test_editor_routes_can_be_mounted_for_a_second_realm_with_distinct_route_names(): void
+    {
+        EditorRoutes::mount('tenant/beam-ux-entries', 'tenant/beam-ux-releases', [
+            'realm' => 'tenant',
+            'abilityOverrides' => ['ux.author' => 'site.edit'],
+        ]);
+
+        $routes = app('router')->getRoutes();
+        $allRoutes = collect($routes->getRoutes());
+        $central = $allRoutes->first(fn ($route) => $route->getName() === 'beam-ux-entry.body');
+        $tenant = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-entry.body');
+        $tenantRelease = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.command');
+        $names = $allRoutes->map(fn ($route) => $route->getName())->filter()->values()->all();
+
+        $this->assertNotNull($central, 'Registered route names: '.implode(', ', $names));
+        $this->assertNotNull($tenant, 'Registered route names: '.implode(', ', $names));
+        $this->assertNotNull($tenantRelease, 'Registered route names: '.implode(', ', $names));
+        $this->assertSame('beam-ux-entries/{id}/body', $central->uri());
+        $this->assertSame('tenant/beam-ux-entries/{id}/body', $tenant->uri());
+        $this->assertSame('tenant', $tenant->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM]);
+        $this->assertSame(
+            ['ux.author' => 'site.edit'],
+            $tenant->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::ABILITY_OVERRIDES],
+        );
+        $this->assertArrayNotHasKey(\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM, $central->defaults);
+        $this->assertSame('tenant', $tenantRelease->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM]);
+    }
+
     public function test_creation_requires_author_and_creates_the_default_body_once(): void
     {
         $body = [['kind' => 'block', 'name' => 'h1', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Default page']]]];

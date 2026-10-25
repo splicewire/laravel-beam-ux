@@ -9,16 +9,39 @@ use Splicewire\Beam\Ux\Particle\ResolvePageEntryRefOp;
 /** Called by the host inside its auth/verified group; every operation also declares ux.author. */
 final class EditorRoutes
 {
-    public static function mount(string $uri = 'beam-ux-entries', string $releasesUri = 'beam-ux-releases'): void
-    {
+    public static function mount(
+        string $uri = 'beam-ux-entries',
+        string $releasesUri = 'beam-ux-releases',
+        array $mountOptions = [],
+    ): void {
+        $realmPrefix = is_string($mountOptions['realm'] ?? null) ? $mountOptions['realm'].'.' : '';
+        $entryOptions = array_replace($mountOptions, ['names' => $realmPrefix.'beam-ux-entry']);
+
         // NoSubject must precede any {id} route; no hidden package route registration.
-        Particle::ops($uri, 'beam-ux-entry', [ResolvePageEntryRefOp::class, EntryMakeEditableOp::class]);
+        Particle::ops($uri, 'beam-ux-entry', [ResolvePageEntryRefOp::class, EntryMakeEditableOp::class], $entryOptions);
         foreach (['body', 'save-body', 'save-draft', 'publish', 'versions', 'restore', 'clear-body', 'print-source', 'read-source', 'canvas-bindings', 'component-capabilities', 'create-component', 'duplicate-component', 'create-release', 'preview'] as $op) {
-            Particle::ops($uri, 'beam-ux-entry', $op);
+            Particle::ops($uri, 'beam-ux-entry', $op, $entryOptions);
         }
-        Particle::mount($releasesUri, 'beam-ux-release')->only(['index', 'show'])->ops(['command', 'readiness', 'changes']);
+
+        $releaseMount = Particle::mount($releasesUri, 'beam-ux-release')
+            ->names($realmPrefix.'beam-ux-release')
+            ->only(['index', 'show']);
+        $releaseFilesMount = Particle::mount('beam-ux-release-files', 'beam-ux-release-files')
+            ->names($realmPrefix.'beam-ux-release-files')
+            ->only(['index', 'show']);
+
+        if (is_string($mountOptions['realm'] ?? null)) {
+            $releaseMount->inRealm($mountOptions['realm']);
+            $releaseFilesMount->inRealm($mountOptions['realm']);
+        }
+
+        $releaseMount->ops(['command', 'readiness', 'changes'], $mountOptions);
+        $releaseFilesMount->ops(['commit-now', 'inspect-file', 'take-file-draft', 'take-all-drafts', 'restore-missing-file', 'remirror-file'], $mountOptions);
+
         // ADR-0236 d14: the Redirects seat's resource; the service checks the rights publishing takes.
-        Particle::mount('beam-ux-redirects', 'beam-ux-redirect');
-        Particle::mount('beam-ux-release-files', 'beam-ux-release-files')->only(['index', 'show'])->ops(['commit-now', 'inspect-file', 'take-file-draft', 'take-all-drafts', 'restore-missing-file', 'remirror-file']);
+        $redirectMount = Particle::mount('beam-ux-redirects', 'beam-ux-redirect');
+        if (is_string($mountOptions['realm'] ?? null)) {
+            $redirectMount->names($realmPrefix.'beam-ux-redirect')->inRealm($mountOptions['realm']);
+        }
     }
 }
