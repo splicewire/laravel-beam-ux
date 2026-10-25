@@ -104,6 +104,9 @@ abstract class TestCase extends Orchestra
             // `describe()` lands on a throwaway and the suite stays green over an empty index. The
             // tripwire in `RegistryConformanceTest` is what keeps this line honest.
             PopcornServiceProvider::class,
+            // ADR-0234 d9: the page's @graph projects a Record through the schema.org registry a host registers its
+            // projectors on; without the provider the registry is unshared and a registration never reaches the renderer.
+            \Schemastud\DataSchemaOrg\ServiceProvider::class,
         ];
     }
 

@@ -116,6 +116,41 @@ class RecordPageTest extends TestCase
         $this->assertContains('<meta data-inertia="og:image" property="og:image" content="https://site.test/images/hello.png">', $head);
     }
 
+    public function test_a_record_pages_graph_carries_its_record_only_where_a_projector_is_registered(): void
+    {
+        // ADR-0234 d9 and the EP-28 ruling: the Record's node comes from the projector registered for its Data class, as
+        // the page's main entity. A Record no projector maps adds nothing, which is every starter today (d12).
+        config(['app.url' => 'https://site.test', 'beam.brand.name' => 'Acme']);
+        $this->page();
+        $graph = function (): array {
+            $head = $this->getJson('/posts/hello')->assertOk()->json('props.head');
+            $script = array_values(preg_grep('#^<script data-inertia="structured-data"#', $head))[0];
+
+            return array_column(json_decode((string) preg_replace('#^<script[^>]*>|</script>$#', '', $script), true)['@graph'], null, '@type');
+        };
+
+        $this->assertArrayNotHasKey('mainEntity', $graph()['WebPage']);
+        $this->assertSame(['WebPage', 'BreadcrumbList'], array_keys($graph()));
+
+        app(\Schemastud\DataSchemaOrg\SchemaOrgRegistry::class)->register(new class implements \Schemastud\DataSchemaOrg\Contracts\SchemaOrgProjector
+        {
+            public function subject(): string
+            {
+                return \Splicewire\Beam\Collections\PublicRecordData::class;
+            }
+
+            public function project(\Spatie\LaravelData\Data $data, \Schemastud\DataSchemaOrg\ProjectionContext $context): \Spatie\SchemaOrg\Type
+            {
+                return (new \Spatie\SchemaOrg\BlogPosting)->headline($data->fields['title'])->setProperty('@id', $context->id);
+            }
+        });
+        $nodes = $graph();
+
+        $this->assertSame(['@id' => 'https://site.test/posts/hello#record'], $nodes['WebPage']['mainEntity']);
+        $this->assertSame(['@type' => 'BlogPosting', 'headline' => 'Record hello', '@id' => 'https://site.test/posts/hello#record'], $nodes['BlogPosting']);
+        $this->assertSame('https://site.test/posts/hello', end($nodes['BreadcrumbList']['itemListElement'])['item'], 'the trail ends at the Record');
+    }
+
     public function test_missing_and_unreadable_records_have_the_same_public_answer_and_literal_wins(): void
     {
         $page = $this->page();

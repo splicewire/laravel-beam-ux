@@ -194,7 +194,7 @@ class PublicEntryController
             'nav' => $withNav ? $this->nav->project($realm, $actor, $preview)->toArray() : null,
             // ADR-0234 d1: the Page Head, rendered once here. Inertia's server head takes these elements as they are, and
             // the root template prints the same ones on a first load.
-            'head' => $this->head->compose($entry, $url, $restricted, $request)->elements(),
+            'head' => $this->head->compose($entry, $url, $restricted, $request, $chain, $record)->elements(),
             ...($preview === null ? [] : ['preview' => [
                 'label' => $preview->grant->release?->title ?? 'saved version',
                 'exitUrl' => route((string) ($defaults['beamUxPreviewExitRoute'] ?? '')),

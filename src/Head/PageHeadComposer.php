@@ -22,13 +22,17 @@ final class PageHeadComposer
         private SitemapBaseUrlResolver $baseUrl,
         private PublicEntryGate $gate,
         private EntryPathResolver $paths,
+        private PageGraph $graph,
     ) {}
 
     /**
      * The head of a page served at `$path` (a Record Page's is its Record's). A restricted chain gets its title and
-     * `noindex` only (d3), so nothing else about a page a guest can't read is composed.
+     * `noindex` only (d3), so nothing else about a page a guest can't read is composed, its Structured Data included.
+     *
+     * @param  list<BeamUxEntry>  $chain  root first, ending at the page: its breadcrumbs
+     * @param  array<string, mixed>|null  $record  a Record Page's Record
      */
-    public function compose(BeamUxEntry $entry, string $path, bool $restricted, ?Request $request = null): PageHead
+    public function compose(BeamUxEntry $entry, string $path, bool $restricted, ?Request $request = null, array $chain = [], ?array $record = null): PageHead
     {
         $brand = Brand::for($request);
         $pageTitle = (string) $entry->title;
@@ -39,19 +43,22 @@ final class PageHeadComposer
         }
 
         $base = rtrim($this->baseUrl->baseUrl(), '/');
+        $canonical = $base.'/'.ltrim($path, '/');
+        $image = self::absolute(self::filled($entry->seo_social_image), $base);
 
         return new PageHead(
             title: $title,
             pageTitle: $pageTitle === '' ? $brand->name : $pageTitle,
             siteName: $brand->name,
             description: self::filled($entry->seo_description),
-            canonical: $base.'/'.ltrim($path, '/'),
-            image: self::absolute(self::filled($entry->seo_social_image), $base),
+            canonical: $canonical,
+            image: $image,
             type: match ($entry->seo_page_type) {
                 'Article' => 'article',
                 'ProfilePage' => 'profile',
                 default => 'website',
             },
+            structuredData: $this->graph->for($entry, $chain === [] ? [$entry] : $chain, $base, $canonical, $image, $brand, $record),
         );
     }
 
@@ -66,7 +73,7 @@ final class PageHeadComposer
         // A broken ancestry denies, as it does for the renderer, so it reads as restricted.
         $chain = $this->paths->ancestry($entry);
 
-        return $this->compose($entry, $request->path(), $chain === null || $this->gate->isRestricted($chain), $request);
+        return $this->compose($entry, $request->path(), $chain === null || $this->gate->isRestricted($chain), $request, $chain ?? []);
     }
 
     /**
@@ -90,8 +97,8 @@ final class PageHeadComposer
         return is_string($value) && trim($value) !== '' ? $value : null;
     }
 
-    /** A media-library image is usually a path; a link preview needs the whole URL. */
-    private static function absolute(?string $url, string $base): ?string
+    /** A media-library image is usually a path; a link preview, and a graph's reader, needs the whole URL. */
+    public static function absolute(?string $url, string $base): ?string
     {
         return $url === null || preg_match('#^(https?:)?//#i', $url) === 1 ? $url : $base.'/'.ltrim($url, '/');
     }

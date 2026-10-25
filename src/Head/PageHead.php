@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Head;
 
 use Illuminate\Http\Request;
+use Schemastud\DataSchemaOrg\Support\LdJson;
 use Splicewire\Beam\Brand\Brand;
 
 /**
@@ -29,6 +30,8 @@ final class PageHead
         public readonly ?string $image = null,
         /** The Open Graph type its Page Type reads as. */
         public readonly string $type = 'website',
+        /** The page's one `@graph` (d9, {@see PageGraph}). */
+        public readonly ?array $structuredData = null,
     ) {}
 
     /**
@@ -78,6 +81,9 @@ final class PageHead
             $this->image === null ? null : self::property('og:image', $this->image),
             // A card reads og:title, og:description and og:image itself; only its size is Twitter's own.
             self::element('meta', 'twitter:card', ['name' => 'twitter:card', 'content' => $this->image === null ? 'summary' : 'summary_large_image']),
+            // LdJson escapes `<` and `>` (JSON_HEX_TAG), so nothing an author typed can close the script.
+            $this->structuredData === null ? null
+                : '<script data-inertia="structured-data" type="application/ld+json">'.LdJson::encode($this->structuredData).'</script>',
         ]));
     }
 

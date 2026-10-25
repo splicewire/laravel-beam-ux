@@ -58,6 +58,8 @@ class PageHeadTest extends TestCase
             'title' => 'About us', 'seo_description' => 'Who we are.', 'seo_social_image' => '/media/about.png', 'seo_page_type' => 'Article',
         ]);
 
+        $head = $this->get('/about')->json('props.head');
+
         $this->assertSame([
             '<title data-inertia="title">About us - Acme</title>',
             '<meta data-inertia="description" name="description" content="Who we are.">',
@@ -69,7 +71,94 @@ class PageHeadTest extends TestCase
             '<meta data-inertia="og:url" property="og:url" content="https://site.test/about">',
             '<meta data-inertia="og:image" property="og:image" content="https://site.test/media/about.png">',
             '<meta data-inertia="twitter:card" name="twitter:card" content="summary_large_image">',
-        ], $this->get('/about')->json('props.head'));
+        ], array_slice($head, 0, 10));
+        $this->assertStringStartsWith('<script data-inertia="structured-data" type="application/ld+json">', $head[10], 'the @graph closes the head');
+        $this->assertCount(11, $head);
+    }
+
+    public function test_a_page_carries_one_graph_with_its_node_and_its_breadcrumbs(): void
+    {
+        // d9/d10: the page's node typed by its Page Type, from its title, SEO Fields, canonical URL and publish dates; a
+        // BreadcrumbList from the chain; an Article's author and publisher are the site's publisher.
+        $docs = $this->page('docs', ['title' => 'Docs']);
+        $this->page('api', [
+            'parent_id' => $docs->getKey(), 'title' => 'API Reference', 'seo_description' => 'Every endpoint.',
+            'seo_social_image' => '/media/api.png', 'seo_page_type' => 'Article', 'seo_published_date' => '2026-10-01',
+            'first_published_at' => '2026-10-02 09:00:00', 'last_published_at' => '2026-10-20 12:30:00',
+        ]);
+
+        $graph = $this->graph($this->get('/docs/api')->json('props.head'));
+
+        $this->assertSame('https://schema.org', $graph['@context']);
+        $this->assertEquals([
+            '@type' => 'Article',
+            '@id' => 'https://site.test/docs/api#webpage',
+            'url' => 'https://site.test/docs/api',
+            'name' => 'API Reference',
+            'description' => 'Every endpoint.',
+            'image' => 'https://site.test/media/api.png',
+            'datePublished' => '2026-10-01',
+            'dateModified' => '2026-10-20T12:30:00+00:00',
+            'isPartOf' => ['@id' => 'https://site.test/#website'],
+            'breadcrumb' => ['@id' => 'https://site.test/docs/api#breadcrumb'],
+            'author' => ['@id' => 'https://site.test/#organization'],
+            'publisher' => ['@id' => 'https://site.test/#organization'],
+        ], $this->node($graph, 'Article'));
+        $this->assertSame([
+            ['@type' => 'ListItem', 'position' => 1, 'name' => 'Acme', 'item' => 'https://site.test/'],
+            ['@type' => 'ListItem', 'position' => 2, 'name' => 'Docs', 'item' => 'https://site.test/docs'],
+            ['@type' => 'ListItem', 'position' => 3, 'name' => 'API Reference', 'item' => 'https://site.test/docs/api'],
+        ], $this->node($graph, 'BreadcrumbList')['itemListElement']);
+        $this->assertSame('https://site.test/docs/api#breadcrumb', $this->node($graph, 'BreadcrumbList')['@id']);
+        $this->assertSame('Acme', $this->node($graph, 'Organization')['name'], 'a node the page names is in the graph');
+    }
+
+    public function test_an_unpublished_date_falls_back_to_the_first_publish_and_a_plain_page_is_a_web_page(): void
+    {
+        // d6: an empty published date is the date of the page's first Publish.
+        $this->page('about', ['title' => 'About', 'first_published_at' => '2026-10-02 09:00:00']);
+
+        $node = $this->node($this->graph($this->get('/about')->json('props.head')), 'WebPage');
+
+        $this->assertSame('2026-10-02T09:00:00+00:00', $node['datePublished']);
+        $this->assertArrayNotHasKey('author', $node);
+        $this->assertArrayNotHasKey('description', $node);
+    }
+
+    public function test_the_home_page_carries_the_website_and_its_publisher(): void
+    {
+        // d9: the WebSite and its publisher, an Organization from the brand or a Person where the host declares one.
+        config(['beam.ux.namespace' => 'starter', 'beam.brand.logo' => '/brand/logo.svg']);
+        $this->page('home', ['namespace' => 'starter', 'segment' => null, 'title' => 'Home']);
+
+        $graph = $this->graph(PageHead::forPage('home', Request::create('https://whatever.test/')));
+
+        $this->assertEquals([
+            '@type' => 'WebSite', '@id' => 'https://site.test/#website', 'url' => 'https://site.test/', 'name' => 'Acme',
+            'publisher' => ['@id' => 'https://site.test/#organization'],
+        ], $this->node($graph, 'WebSite'));
+        $this->assertEquals([
+            '@type' => 'Organization', '@id' => 'https://site.test/#organization', 'name' => 'Acme', 'url' => 'https://site.test/',
+            'logo' => 'https://site.test/brand/logo.svg',
+        ], $this->node($graph, 'Organization'));
+        $this->assertNull($this->node($graph, 'BreadcrumbList'), 'the root has no trail');
+
+        config(['beam.ux.head.publisher' => 'Person']);
+        $person = $this->graph(PageHead::forPage('home', Request::create('https://whatever.test/')));
+        $this->assertSame('https://site.test/#person', $this->node($person, 'WebSite')['publisher']['@id']);
+        $this->assertSame('Acme', $this->node($person, 'Person')['name']);
+    }
+
+    public function test_a_profile_page_names_the_publisher_as_its_main_entity(): void
+    {
+        // d10: a ProfilePage's main entity is the Record on a Record Page, and otherwise the site's publisher.
+        $this->page('me', ['title' => 'Me', 'seo_page_type' => 'ProfilePage']);
+        $this->page('all', ['title' => 'All', 'seo_page_type' => 'CollectionPage']);
+
+        $profile = $this->graph($this->get('/me')->json('props.head'));
+        $this->assertSame(['@id' => 'https://site.test/#organization'], $this->node($profile, 'ProfilePage')['mainEntity']);
+        $this->assertNotNull($this->node($profile, 'Organization'));
+        $this->assertNotNull($this->node($this->graph($this->get('/all')->json('props.head')), 'CollectionPage'));
     }
 
     public function test_a_page_with_no_seo_fields_still_names_itself_and_its_canonical_url(): void
@@ -157,6 +246,32 @@ class PageHeadTest extends TestCase
     }
 
     /**
+     * The page's one `@graph`, from the one Structured Data element its head carries.
+     *
+     * @param  list<string>  $head
+     * @return array<string, mixed>
+     */
+    private function graph(array $head): array
+    {
+        $scripts = array_values(preg_grep('#^<script data-inertia="structured-data" type="application/ld\+json">#', $head));
+        $this->assertCount(1, $scripts, 'one @graph per page');
+
+        return json_decode((string) preg_replace('#^<script[^>]*>|</script>$#', '', $scripts[0]), true, flags: JSON_THROW_ON_ERROR);
+    }
+
+    /** @param  array<string, mixed>  $graph */
+    private function node(array $graph, string $type): ?array
+    {
+        foreach ($graph['@graph'] as $node) {
+            if ($node['@type'] === $type) {
+                return $node;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Force-filled because Publish writes the SEO Fields onto the row itself; they are not mass-assignable.
      *
      * @param  array<string, mixed>  $attributes
@@ -214,6 +329,8 @@ class PageHeadTest extends TestCase
             $table->text('seo_social_image')->nullable();
             $table->text('seo_page_type')->nullable();
             $table->text('seo_published_date')->nullable();
+            $table->timestamp('first_published_at')->nullable();
+            $table->timestamp('last_published_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
             $table->unique(['namespace', 'slug']);

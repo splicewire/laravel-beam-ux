@@ -232,6 +232,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Page Head (ADR-0234)
+    |--------------------------------------------------------------------------
+    |
+    | `publisher` — what a page's Structured Data names as the site's publisher:
+    |               an `Organization` built from the brand (the default), or a
+    |               `Person` for a personal site. The home page carries it with
+    |               the WebSite, and an Article names it as author and publisher.
+    |
+    */
+    'head' => [
+        'publisher' => env('BEAM_UX_PUBLISHER', 'Organization'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Compile on save (ADR-0209 §7)
     |--------------------------------------------------------------------------
     |

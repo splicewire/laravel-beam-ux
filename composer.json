@@ -29,6 +29,7 @@
         "rushing/laravel-versioning": "*",
         "rushing/php-popcorn": "dev-main",
         "schemastud/laravel-blockdoc": "*",
+        "schemastud/laravel-data-schema-org": "*",
         "schemastud/laravel-data-schemas": "*",
         "schemastud/laravel-frame": "*",
         "splicewire/laravel-beam": "*",
@@ -163,6 +164,14 @@
         {
             "type": "git",
             "url": "https://github.com/schemastud/laravel-frame.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/laravel-data-schema-org.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/schemastud/laravel-json-reference.git"
         },
         {
             "type": "git",
