@@ -47,7 +47,7 @@ final class ProfileCollections
                 continue;
             }
             $schema = $this->fieldSchema($source);
-            $out[] = ['name' => $source->name, 'schema' => $schema, 'hasRecordPage' => false];
+            $out[] = ['name' => $source->name, 'schema' => $schema, 'hasRecordPage' => app(RecordPages::class)->pageFor($entry, $source) !== null];
         }
 
         return $out;

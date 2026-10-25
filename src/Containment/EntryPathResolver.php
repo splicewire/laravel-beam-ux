@@ -153,7 +153,7 @@ class EntryPathResolver
         $chain = [];
         $node = $anchor;
 
-        foreach ($pieces as $piece) {
+        foreach ($pieces as $index => $piece) {
             $next = $this->child($node, $piece, $realm);
 
             if ($next !== null) {
@@ -166,7 +166,19 @@ class EntryPathResolver
             $through = $this->passThroughChild($node, $piece, $realm);
 
             if ($through === null) {
-                return null;
+                // Literal children (including pass-through) always win over a parameter.
+                if ($index !== array_key_last($pieces)) {
+                    return null;
+                }
+                $parameters = $this->routable($realm)->where('parent_id', $node->getKey())->get()
+                    ->filter(fn ($entry) => \Splicewire\Beam\Ux\Bindings\RecordPages::parameter($entry->segment) !== null);
+                if ($parameters->count() !== 1) {
+                    return null;
+                }
+                $parameter = $parameters->first();
+                $parameter->setAttribute('_record_page_value', rawurldecode($piece));
+
+                return [...$chain, $parameter];
             }
 
             $chain = [...$chain, ...$through];

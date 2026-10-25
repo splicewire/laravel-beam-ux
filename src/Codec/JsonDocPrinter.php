@@ -75,7 +75,7 @@ class JsonDocPrinter
         $styles = [];
         $parts = [];
         foreach ($nodes as $node) {
-            $parts[] = self::printNode($node, 3, true, $styles);
+            $parts[] = self::printNode($node, 3, true, $styles, 'record');
         }
         $body = implode("\n", $parts);
         $styleSetup = $styles === [] ? '' : '  const blockStyles = __beamBlockStyles('.json_encode($styles, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).", styleRegistry);\n";
@@ -93,11 +93,11 @@ class JsonDocPrinter
             : '  const { '.implode(', ', $islands)."} = components;\n";
         $signature = $styles !== [] ? 'Page({ components = {}, styleRegistry } = {})' : ($islands === [] ? 'Page()' : 'Page({ components = {} })');
         if (self::hasBindings($nodes)) {
-            $signature = 'Page({ components = {}, styleRegistry, bindings = {}, bindingRuntime } = {})';
+            $signature = 'Page({ components = {}, styleRegistry, bindings = {}, record, bindingRuntime } = {})';
         }
 
         if (self::hasComponentReferences($nodes)) {
-            $signature = 'Page({ components = {}, styleRegistry, bindings = {}, bindingRuntime, ...componentProps } = {})';
+            $signature = 'Page({ components = {}, styleRegistry, bindings = {}, record, bindingRuntime, ...componentProps } = {})';
         }
 
         return "export default function {$signature} {\n{$destructure}{$styleSetup}  return (\n    <>\n{$styleTag}{$body}\n    </>\n  );\n}\n";

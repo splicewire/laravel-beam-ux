@@ -67,6 +67,20 @@ class EntrySitemapSource implements LiveSitemapSource
                 continue;
             }
 
+            if (\Splicewire\Beam\Ux\Bindings\RecordPages::parameter($entry->segment) !== null) {
+                $request = \Illuminate\Http\Request::create('/');
+                $request->setUserResolver(fn () => null);
+                $pages = app(\Splicewire\Beam\Ux\Bindings\RecordPages::class);
+                foreach ($pages->records($entry, $request, BeamUxEntry::REALM_SITE) as $row) {
+                    $url = $pages->url($entry, $row);
+                    $resolved = $url === null ? null : app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)->resolve($url);
+                    if ($resolved !== null && end($resolved)->getKey() === $entry->getKey()) {
+                        yield Url::create($base.$url);
+                    }
+                }
+
+                continue;
+            }
             yield Url::create($base.$entry->url());
         }
     }

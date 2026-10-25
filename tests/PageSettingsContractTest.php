@@ -19,7 +19,7 @@ class PageSettingsContractTest extends TestCase
         $this->assertArrayHasKey('EntryPageSettingsInputData', $request['$defs']);
         $this->assertSame([
             'title', 'parentId', 'segment', 'navOrder', 'navGroup', 'layout', 'template',
-            'description', 'socialImage', 'pageType', 'publishedDate', 'fileLanguage', 'childFields', 'fields', 'unclaimed',
+            'description', 'socialImage', 'pageType', 'publishedDate', 'fileLanguage', 'childFields', 'fields', 'unclaimed', 'recordPage',
         ], $response['$defs']['EntryPageSettingsData']['required']);
         $this->assertSame(['title'], $request['$defs']['EntryPageSettingsInputData']['required']);
     }

@@ -42,6 +42,8 @@ final class EntryPageSettingsData extends BeamData
         public array $fields = [],
         /** @var array<string, string> */
         public array $unclaimed = [],
+        #[\Spatie\TypeScriptTransformer\Attributes\Optional]
+        public ?RecordPageData $recordPage = null,
     ) {}
 
     public static function rules(): array
@@ -64,6 +66,9 @@ final class EntryPageSettingsData extends BeamData
                     $fail('The host registers no Page Fields by this name (beam.ux.page_fields).');
                 }
             }],
+            'recordPage' => ['nullable', 'array:collection,field,titleField,descriptionField,socialImageField'],
+            'recordPage.collection' => ['required_with:recordPage', 'string'],
+            'recordPage.field' => ['required_with:recordPage', 'string'],
             'fields' => ['array'],
             'unclaimed' => ['array', static function (string $attribute, mixed $value, \Closure $fail): void {
                 foreach (is_array($value) ? array_keys($value) : [] as $key) {
@@ -106,6 +111,7 @@ final class EntryPageSettingsData extends BeamData
             publishedDate: $entry->seo_published_date,
             fileLanguage: \Splicewire\Beam\Ux\Format\FileLanguage::of($entry),
             childFields: $entry->getAttribute('child_fields'),
+            recordPage: $entry->getAttribute('record_page') === null ? null : RecordPageData::from($entry->getAttribute('record_page')),
         );
     }
 }

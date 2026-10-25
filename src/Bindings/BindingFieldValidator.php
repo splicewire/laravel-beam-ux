@@ -10,7 +10,7 @@ final class BindingFieldValidator
     public function assert(array $body, array $profile, ?callable $relation = null): void
     {
         $offers = array_column($profile['x-collections'] ?? [], null, 'name');
-        $this->walk($body, $offers, null, $relation, array_column($profile['nodes'] ?? [], null, 'name'));
+        $this->walk($body, $offers, $profile['x-record'] ?? null, $relation, array_column($profile['nodes'] ?? [], null, 'name'));
     }
 
     private function walk(array $nodes, array $offers, ?array $scope, ?callable $relation, array $entries): void
@@ -19,7 +19,7 @@ final class BindingFieldValidator
             $current = $scope;
             if (isset($node['repeat'])) {
                 $repeat = $node['repeat'];
-                if (isset($repeat['collection']) && $scope === null) {
+                if (isset($repeat['collection']) && ($scope === null || ($scope['recordPageRoot'] ?? false))) {
                     $current = $offers[$repeat['collection']] ?? null;
                 } elseif (isset($repeat['relation']) && ! isset($repeat['collection']) && $scope !== null && $relation !== null) {
                     $current = $relation($scope, $repeat['relation']);

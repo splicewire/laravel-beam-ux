@@ -16,12 +16,12 @@ use Splicewire\Beam\Storage\ConnectionAwareStorageDriver;
 use Splicewire\Beam\Storage\DeletableStorageDriver;
 use Splicewire\Beam\Ux\Access\EntryAccessGate;
 use Splicewire\Beam\Ux\Access\Right;
+use Splicewire\Beam\Ux\Body\BodyKind;
+use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
 use Splicewire\Beam\Ux\Codec\BodyCodec;
 use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
-use Splicewire\Beam\Ux\Body\BodyKind;
-use Splicewire\Beam\Ux\Codec\AcceptsJsonDoc;
 use Splicewire\Beam\Ux\Format\BodyStyle;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
@@ -192,6 +192,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
         'realms',
         'parent_id',
         'segment',
+        'record_page',
         // Sibling nav order (host-provided; nullable — projector orders by it when the column is present).
         'nav_order',
         // Chrome aspect (ADR-0213): the two inherited composition axes. NULL = no declaration =
@@ -242,6 +243,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
             // The ordered realm fallback stack (ticket 03) — a list<string>, same shape as
             // RealmRegistry::$stack.
             'realms' => 'array',
+            'record_page' => 'array',
             // The two access rights (ADR-0212) — any-of `list<string>` token lists. Cast to array so a
             // NULL column stays null (no declaration) and an empty JSON array stays `[]` (an explicit
             // deny); the two are NOT interchangeable and `tokensFor()` preserves the difference.
@@ -297,7 +299,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
             // this. Guarded on the column so a host that has not run the DOCS-06 migration is
             // unaffected (the package's hasColumn-tolerance convention).
             if ($entry->origin === null
-                && \Illuminate\Support\Facades\Schema::hasColumn($entry->getTable(), 'origin')) {
+                && Schema::hasColumn($entry->getTable(), 'origin')) {
                 $entry->origin = \Splicewire\Beam\Ux\Provenance\Provenance::CMS;
             }
         });

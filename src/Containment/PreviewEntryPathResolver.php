@@ -21,6 +21,7 @@ final class PreviewEntryPathResolver
             $expected = '/';
         }
 
+        $parameterMatches = [];
         foreach ($entries as $entry) {
             $chain = [];
             $node = $entry;
@@ -49,9 +50,17 @@ final class PreviewEntryPathResolver
             if ($this->urls->resolveChain($chain) === $expected) {
                 return $chain;
             }
+            $field = \Splicewire\Beam\Ux\Bindings\RecordPages::parameter($entry->segment);
+            if ($field !== null) {
+                $pattern = str_replace(preg_quote('{'.$field.'}', '#'), '([^/]+)', preg_quote($this->urls->resolveChain($chain), '#'));
+                if (preg_match('#^'.$pattern.'$#D', $expected, $match) === 1) {
+                    $entry->setAttribute('_record_page_value', rawurldecode($match[1]));
+                    $parameterMatches[] = $chain;
+                }
+            }
         }
 
-        return null;
+        return count($parameterMatches) === 1 ? $parameterMatches[0] : null;
     }
 
     public function pathForEntry(string $entryId, string $realm, PreviewContext $preview): ?string
