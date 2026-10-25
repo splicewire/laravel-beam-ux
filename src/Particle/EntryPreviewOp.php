@@ -10,6 +10,8 @@ use Illuminate\Validation\ValidationException;
 use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
+use Splicewire\Beam\Ux\Compile\CompileEntryBody;
+use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Data\EntryPreviewInputData;
 use Splicewire\Beam\Ux\Data\PreviewLinkData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -31,8 +33,19 @@ final class EntryPreviewOp
         $input = EntryPreviewInputData::validateAndCreate($request->all());
         app(ReleaseService::class)->authorizeFileEdit($model, $actor);
 
-        if ($model->particle === null || app(VersionStore::class)->version($model->particle, $input->versionId) === null) {
+        $version = $model->particle === null
+            ? null
+            : app(VersionStore::class)->version($model->particle, $input->versionId);
+        if ($version === null) {
             throw ValidationException::withMessages(['versionId' => 'Choose a saved version of this entry.']);
+        }
+        $payload = $version->snapshot['payload'] ?? null;
+        if (! is_array($payload)) {
+            throw ValidationException::withMessages(['versionId' => 'Choose a saved version with a valid body snapshot.']);
+        }
+        $artifacts = app(EntryArtifactStore::class);
+        if (! $artifacts->hasVersion($model, (string) $version->id)) {
+            app(CompileEntryBody::class)->forVersion($model, (string) $version->id, $payload);
         }
 
         $routeName = (string) config('beam.ux.route_name', 'beam.ux.').'site.preview.start';

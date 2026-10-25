@@ -2362,6 +2362,42 @@ class EntryPublicationTest extends TestCase
         }
     }
 
+    public function test_preview_compiles_a_pruned_saved_version_before_minting_its_grant(): void
+    {
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_preview_grants_table.php.stub')->up();
+        Route::beamUxSite('site/entry');
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $oldVersion = (string) $entry->published_version;
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        Illuminate\Support\Facades\Gate::define('update', fn ($user = null, $subject = null) =>
+            $user?->getAuthIdentifier() === 'author' && $subject instanceof BeamUxEntry && $subject->is($entry));
+
+        $this->assertTrue($this->artifacts()->hasVersion($entry, $oldVersion));
+        $this->publishDraftAs($entry, $author);
+        $entry = $entry->fresh();
+        $this->assertNotSame($oldVersion, (string) $entry->published_version);
+        $this->assertFalse($this->artifacts()->hasVersion($entry, $oldVersion), 'Publishing prunes the older version artifact.');
+
+        PublicationFakeCompiler::$fails = true;
+        try {
+            EntryPreviewOp::handle($entry, Request::create('/', 'POST', ['versionId' => $oldVersion]), $author);
+            $this->fail('a failed historical compile must not mint a preview grant');
+        } catch (CompilationFailed) {
+            $this->assertSame(0, DB::table('beam_ux_preview_grants')->count());
+        } finally {
+            PublicationFakeCompiler::$fails = false;
+        }
+
+        $link = EntryPreviewOp::handle($entry, Request::create('/', 'POST', ['versionId' => $oldVersion]), $author);
+
+        $this->assertTrue($this->artifacts()->hasVersion($entry, $oldVersion));
+        $this->assertSame($oldVersion, app(\Splicewire\Beam\Ux\Preview\PreviewGrantService::class)
+            ->resolve(basename((string) parse_url($link->url, PHP_URL_PATH)))?->version_id);
+        $this->assertSame((string) $entry->published_version, (string) $entry->fresh()->published_version,
+            'Preview compilation does not move the public publication pin.');
+    }
+
     public function test_a_release_resolves_its_author_from_the_default_guards_provider(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
