@@ -41,6 +41,7 @@ final class PreviewStartController
         return redirect($path)
             ->withCookie($cookie)
             ->withCookie(cookie()->forget(ResolvePreviewContext::VIEWER_COOKIE))
+            ->withCookie(cookie()->forget(ResolvePreviewContext::MODE_COOKIE))
             ->header('Cache-Control', 'no-store, private')
             ->header('X-Robots-Tag', 'noindex, nofollow, noarchive')
             ->header('Referrer-Policy', 'no-referrer');

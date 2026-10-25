@@ -13,6 +13,7 @@ use Splicewire\Beam\Ux\Http\Controllers\EntryArtifactController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewExitController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewLinkController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewStartController;
+use Splicewire\Beam\Ux\Http\Controllers\PreviewSwitchController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewViewAsMeController;
 use Splicewire\Beam\Ux\Http\Controllers\PublicEntryController;
 use Splicewire\Beam\Ux\Http\EntryPageProps;
@@ -126,6 +127,7 @@ trait WiresPublicSurface
             $artifactName = "{$routeName}site.artifact";
             $previewExitName = "{$routeName}site.preview.exit";
             $previewViewerName = "{$routeName}site.preview.view-as-me";
+            $previewSwitchName = "{$routeName}site.preview.switch";
 
             $defaults = [
                 'beamUxRealm' => $realm,
@@ -134,6 +136,7 @@ trait WiresPublicSurface
                 'beamUxArtifactRoute' => $artifactName,
                 'beamUxPreviewExitRoute' => "{$routeName}site.preview.exit",
                 'beamUxPreviewViewerRoute' => $previewViewerName,
+                'beamUxPreviewSwitchRoute' => $previewSwitchName,
             ];
 
             $apply = function ($route) use ($defaults) {
@@ -154,6 +157,11 @@ trait WiresPublicSurface
                 ->middleware([ResolvePreviewContext::class, 'auth'])
                 ->name($previewViewerName));
 
+            // The bar's Live site / Preview switch on the same URL (ADR-0232 d13), ahead of the token route.
+            $apply($this->get('_beam/preview/switch', PreviewSwitchController::class)
+                ->middleware(ResolvePreviewContext::class)
+                ->name($previewSwitchName));
+
             // A Release's Preview Link (ADR-0232 d8): two segments, so the one-segment token route below never takes it.
             $apply($this->get('_beam/preview/release/{release}', PreviewLinkController::class)
                 ->name("{$routeName}site.preview.link"));
@@ -166,7 +174,9 @@ trait WiresPublicSurface
                 ->name($artifactName));
 
             if ($claimRoot) {
+                // The root renders inside a Preview like every other page.
                 $apply($this->get('/', PublicEntryController::class)
+                    ->middleware(ResolvePreviewContext::class)
                     ->name("{$routeName}site.root"));
             }
 

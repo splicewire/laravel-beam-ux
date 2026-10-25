@@ -16,6 +16,12 @@ final class ResolvePreviewContext
 
     public const VIEWER_COOKIE = 'beam_ux_preview_viewer';
 
+    /** `live` while the bar shows the live site at the same URL (ADR-0232 d13); the Preview waits, still verified. */
+    public const MODE_COOKIE = 'beam_ux_preview_mode';
+
+    /** The request attribute that holds a verified Preview while the live site is shown. */
+    public const LIVE = 'beam.ux.preview.live';
+
     public function __construct(private PreviewGrantResolver $grants, private ?ReleasePreviewLinks $links = null) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -30,13 +36,14 @@ final class ResolvePreviewContext
                 $viewer = $request->cookie(self::VIEWER_COOKIE) === 'me'
                     ? PreviewContext::centralViewer($request)
                     : null;
-                $request->attributes->set('beam.ux.preview', new PreviewContext($grant, $viewer));
+                $request->attributes->set($request->cookie(self::MODE_COOKIE) === 'live' ? self::LIVE : 'beam.ux.preview',
+                    new PreviewContext($grant, $viewer));
             }
         }
 
         $response = $next($request);
 
-        if ($request->attributes->get('beam.ux.preview') instanceof PreviewContext) {
+        if ($request->attributes->get('beam.ux.preview') instanceof PreviewContext || $request->attributes->get(self::LIVE) instanceof PreviewContext) {
             $response->headers->set('Cache-Control', 'no-store, private');
             $response->headers->set('X-Robots-Tag', 'noindex, nofollow, noarchive');
             $response->headers->set('Referrer-Policy', 'no-referrer');

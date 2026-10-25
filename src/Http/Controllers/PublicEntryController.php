@@ -105,8 +105,50 @@ class PublicEntryController
         return '^(?!(?:'.$alternation.')(?:\/|$)).*$';
     }
 
+    /** A verified Preview held behind the bar while the live site shows (ADR-0232 d13). */
+    private function livePreview(Request $request): ?PreviewContext
+    {
+        $live = $request->attributes->get(\Splicewire\Beam\Ux\Http\Middleware\ResolvePreviewContext::LIVE);
+
+        return $live instanceof PreviewContext ? $live : null;
+    }
+
+    /**
+     * The Preview bar (ADR-0232 d10, d11, d13): what it previews, the way out, the switch to the same URL on the live
+     * site (none for a page the Release adds), and for a Release its changed pages and what would stop Publish.
+     * `previewUrl` plus `&path=` opens a path in the Preview from the live site.
+     *
+     * @param  array<string, mixed>  $defaults
+     * @return array<string, mixed>
+     */
+    private function previewBar(Request $request, array $defaults, PreviewContext $preview, bool $live, BeamUxEntry $entry): array
+    {
+        $release = $preview->grant->release;
+        $here = $request->getRequestUri();
+        $switch = (string) ($defaults['beamUxPreviewSwitchRoute'] ?? '');
+        $added = ! $live && $entry->published_version === null;
+
+        return [
+            'label' => $release?->title ?? 'saved version',
+            'mode' => $live ? 'live' : 'preview',
+            'exitUrl' => route((string) ($defaults['beamUxPreviewExitRoute'] ?? '')),
+            'viewAsMeUrl' => $live || PreviewContext::centralViewer($request) === null ? null : route(
+                (string) ($defaults['beamUxPreviewViewerRoute'] ?? ''),
+                ['path' => $here],
+                false,
+            ),
+            'switchUrl' => $added ? null : route($switch, ['to' => $live ? 'preview' : 'live', 'path' => $here], false),
+            'previewUrl' => route($switch, ['to' => 'preview'], false),
+            'changes' => $release === null ? null : app(\Splicewire\Beam\Ux\Release\ReleaseChanges::class)->of($release)->toArray(),
+            'readiness' => $release === null ? null : app(\Splicewire\Beam\Ux\Release\ReleaseReadiness::class)->report($release)->toArray(),
+        ];
+    }
+
     public function __invoke(Request $request, string $path = ''): Response
     {
+        // Read by name. The root route has no `{path}`, and a route's defaults reach the controller positionally, so
+        // there the argument is the first default (the realm): `/` resolved as `/site` and never rendered.
+        $path = (string) ($request->route()?->parameter('path') ?? '');
         $defaults = $request->route()?->defaults ?? [];
 
         $realm = (string) ($defaults['beamUxRealm'] ?? BeamUxEntry::REALM_SITE);
@@ -201,15 +243,7 @@ class PublicEntryController
             // ADR-0234 d1: the Page Head, rendered once here. Inertia's server head takes these elements as they are, and
             // the root template prints the same ones on a first load.
             'head' => $this->head->compose($entry, $url, $restricted, $request, $chain, $record)->elements(),
-            ...($preview === null ? [] : ['preview' => [
-                'label' => $preview->grant->release?->title ?? 'saved version',
-                'exitUrl' => route((string) ($defaults['beamUxPreviewExitRoute'] ?? '')),
-                'viewAsMeUrl' => PreviewContext::centralViewer($request) === null ? null : route(
-                    (string) ($defaults['beamUxPreviewViewerRoute'] ?? ''),
-                    ['path' => $request->getRequestUri()],
-                    false,
-                ),
-            ]]),
+            ...(($bar = $preview ?? $this->livePreview($request)) === null ? [] : ['preview' => $this->previewBar($request, $defaults, $bar, $preview === null, $entry)]),
             // Props the package owning this page's layout contributes (DOCS-12): none unless one is registered.
             ...$this->pageProps->for($chrome['layout'], $entry, $chain, $actor),
         ], );

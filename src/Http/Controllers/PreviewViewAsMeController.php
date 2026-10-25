@@ -15,14 +15,8 @@ final class PreviewViewAsMeController
         abort_unless($request->attributes->get('beam.ux.preview') instanceof PreviewContext, Response::HTTP_NOT_FOUND);
         abort_if(PreviewContext::centralViewer($request) === null, Response::HTTP_NOT_FOUND);
 
-        $path = $request->query('path', '/');
-        abort_unless(is_string($path)
-            && strlen($path) <= 4096
-            && str_starts_with($path, '/')
-            && ! str_starts_with($path, '//')
-            && ! str_contains($path, '\\')
-            && parse_url($path, PHP_URL_HOST) === null
-            && ! preg_match('/[\x00-\x20]/', $path), Response::HTTP_BAD_REQUEST);
+        $path = PreviewContext::returnPath($request->query('path', '/'));
+        abort_if($path === null, Response::HTTP_BAD_REQUEST);
 
         $preview = $request->attributes->get('beam.ux.preview');
         $minutes = max(1, min(480, now()->diffInMinutes($preview->grant->expires_at)));

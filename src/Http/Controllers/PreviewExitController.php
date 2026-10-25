@@ -11,6 +11,7 @@ final class PreviewExitController
     {
         return redirect('/')
             ->withCookie(cookie()->forget(ResolvePreviewContext::COOKIE))
-            ->withCookie(cookie()->forget(ResolvePreviewContext::VIEWER_COOKIE));
+            ->withCookie(cookie()->forget(ResolvePreviewContext::VIEWER_COOKIE))
+            ->withCookie(cookie()->forget(ResolvePreviewContext::MODE_COOKIE));
     }
 }

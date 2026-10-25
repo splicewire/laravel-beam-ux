@@ -43,6 +43,7 @@ final class PreviewLinkController
         return redirect($path)
             ->withCookie(cookie(ResolvePreviewContext::COOKIE, $credential, $minutes, '/', null, $request->isSecure(), true, false, 'lax'))
             ->withCookie(cookie()->forget(ResolvePreviewContext::VIEWER_COOKIE))
+            ->withCookie(cookie()->forget(ResolvePreviewContext::MODE_COOKIE))
             ->header('Cache-Control', 'no-store, private')
             ->header('X-Robots-Tag', 'noindex, nofollow, noarchive')
             ->header('Referrer-Policy', 'no-referrer');

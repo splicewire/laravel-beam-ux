@@ -27,6 +27,18 @@ final readonly class PreviewContext
         return $tenancy->isActive() ? null : $viewer;
     }
 
+    /** A path on this site to return to after a Preview route, or null for anything else (another host, a scheme). */
+    public static function returnPath(mixed $path): ?string
+    {
+        return is_string($path)
+            && strlen($path) <= 4096
+            && str_starts_with($path, '/')
+            && ! str_starts_with($path, '//')
+            && ! str_contains($path, '\\')
+            && parse_url($path, PHP_URL_HOST) === null
+            && ! preg_match('/[\x00-\x20]/', $path) ? $path : null;
+    }
+
     /** A grant is meaningful only in the same ambient storage scope as the row it names. */
     public function sharesStorageWith(BeamUxEntry $entry): bool
     {
