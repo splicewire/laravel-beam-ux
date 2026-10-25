@@ -94,9 +94,12 @@ class ThemeResolver
      *                              through to the site's own resolved default. `null` (or a realm with
      *                              no theme row of its own) is a pure no-op — identical to calling this
      *                              with no argument at all.
+     * @param  bool  $includeCentral  Whether central theme entries participate. Hosted tenant sites
+     *                               pass false so a tenant's public theme never inherits operator-owned
+     *                               central styling; app hosts retain the historical cascade.
      * @return array{canvas: array<string, mixed>, shell: array<string, mixed>, site: array<string, mixed>}
      */
-    public function resolve(?string $realm = null, ?PreviewContext $preview = null): array
+    public function resolve(?string $realm = null, ?PreviewContext $preview = null, bool $includeCentral = true): array
     {
         $this->lastFailure = null;
 
@@ -108,15 +111,19 @@ class ThemeResolver
         try {
             $theme = $this->defaults();
 
-            [$entry, $connection] = ['central:'.self::SLUG, self::CENTRAL_CONNECTION];
-            $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry(self::SLUG), self::CENTRAL_CONNECTION, $preview));
+            if ($includeCentral) {
+                [$entry, $connection] = ['central:'.self::SLUG, self::CENTRAL_CONNECTION];
+                $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry(self::SLUG), self::CENTRAL_CONNECTION, $preview));
+            }
 
             [$entry, $connection] = ['tenant:'.self::SLUG, null];
             $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry(self::SLUG), null, $preview));
 
             if ($realm !== null && $realm !== self::SLUG) {
-                [$entry, $connection] = ['central:'.$realm, self::CENTRAL_CONNECTION];
-                $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry($realm), self::CENTRAL_CONNECTION, $preview));
+                if ($includeCentral) {
+                    [$entry, $connection] = ['central:'.$realm, self::CENTRAL_CONNECTION];
+                    $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry($realm), self::CENTRAL_CONNECTION, $preview));
+                }
 
                 [$entry, $connection] = ['tenant:'.$realm, null];
                 $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry($realm), null, $preview));

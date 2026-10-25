@@ -147,7 +147,11 @@ class PublicEntryController
         $chrome = $this->chrome->resolve($chain);
 
         $bindings = app(\Splicewire\Beam\Ux\Bindings\BindingResolver::class)->resolve($entry, $request, $realm);
-        $theme = app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve($realm, $preview);
+        $theme = app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve(
+            $realm,
+            $preview,
+            includeCentral: ! $request->attributes->get('beam.ux.hosted-site', false),
+        );
         $url = $record['url'] ?? $this->urls->resolveChain($chain);
         $restricted = $this->gate->isRestricted($chain);
         $componentDocument = $preview === null

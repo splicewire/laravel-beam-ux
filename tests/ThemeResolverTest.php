@@ -203,6 +203,19 @@ class ThemeResolverTest extends TestCase
         $this->assertSame('#35d07a', $theme['canvas']['editAccent']);
     }
 
+    public function test_a_hosted_tenant_theme_skips_the_central_tier(): void
+    {
+        $this->writeThemeEntry('central', ['site' => ['background' => '#111111', 'accent' => '#222222']]);
+        $this->writeThemeEntry('testing', ['site' => ['background' => '#333333']]);
+
+        $theme = $this->resolver()->resolve(includeCentral: false);
+
+        $this->assertSame('#333333', $theme['site']['background']);
+        $this->assertSame('#4F7CFF', $theme['site']['accent'], 'central-only styling must not cross into a Hosted tenant site');
+
+        $this->assertSame('#222222', $this->resolver()->resolve()['site']['accent'], 'central requests retain the central tier');
+    }
+
     public function test_it_never_throws_even_when_the_central_connection_is_configured_but_unmigrated(): void
     {
         // 'central' connection exists in config (getEnvironmentSetUp) but its tables were never created —
