@@ -5,6 +5,8 @@ namespace Splicewire\Beam\Ux\Intake;
 use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Intake\PublicIntakeWriteGate;
 use Splicewire\Beam\Schema\Contracts\SchemaTargetResolver;
+use Splicewire\Beam\Ux\Bindings\PublishedBindingDocument;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
  * EP-07d — the page forms that write to the submissions ledger through laravel-beam's public intake door
@@ -69,6 +71,24 @@ final class IntakeForms
         if ($refused !== []) {
             throw ValidationException::withMessages(['body' => $refused]);
         }
+    }
+
+    /**
+     * The props a rendered page carries for its forms: each published form's schema, by capture key, and the honeypot
+     * field the door watches. Empty when the page holds no form the door accepts. The packaged renderer spreads it into
+     * the page, and so does a host route that renders an entry page itself (a starter's `/`).
+     *
+     * @return array{intakeForms?: array<string, array<string, mixed>>, intakeHoneypotField?: string}
+     */
+    public function pagePropsFor(BeamUxEntry $entry): array
+    {
+        $schemas = $this->schemasFor(app(PublishedBindingDocument::class)->read($entry));
+
+        return $schemas === [] ? [] : [
+            'intakeForms' => $schemas,
+            // The door's honeypot field, so the form sends the one its middleware watches (and the doctor names).
+            'intakeHoneypotField' => (string) config('beam.core.intake.honeypot.field', 'website'),
+        ];
     }
 
     /**

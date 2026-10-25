@@ -65,6 +65,24 @@ class BeamUxManifestRegistryAuditTest extends TestCase
         $this->assertStringContainsString('not declared in the profile: [Ghost]', $drift->detail);
     }
 
+    public function test_where_mdx_pages_hold_blocks_the_mdx_kit_is_part_of_the_compared_vocabulary(): void
+    {
+        // ADR-0233 d7: an MDX page that holds blocks is checked against the beam-mdx kit too, so the one JS registry a
+        // host registers must carry the kit, and the comparison must count it (starter receipt 2026-10-25).
+        config(['beam.ux.manifest.js_registry' => $this->snapshot, 'beam.ux.mdx.holds_blocks' => true]);
+        $site = $this->components('site');
+        $kit = array_column((new \Splicewire\Beam\Mdx\Kit\MdxKitNodeSource)->manifest('content')['nodes'], 'name');
+        $this->assertContains('Callout', $kit);
+
+        file_put_contents($this->snapshot, json_encode([...$site, ...$kit]));
+        $this->assertSame(DoctorStatus::Pass, (new BeamUxManifestRegistryAudit)->run()[0]->status, 'the kit a host registers is declared');
+
+        file_put_contents($this->snapshot, json_encode($site));
+        $missing = (new BeamUxManifestRegistryAudit)->run()[0];
+        $this->assertSame(DoctorStatus::Fail, $missing->status);
+        $this->assertStringContainsString('Callout', $missing->detail, 'a kit the canvas cannot draw is drift');
+    }
+
     public function test_a_per_realm_snapshot_is_compared_realm_by_realm(): void
     {
         config(['beam.ux.manifest.js_registry' => $this->snapshot, 'beam.ux.manifest.realms' => ['operator' => OperatorNodeSource::class]]);
