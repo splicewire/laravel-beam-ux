@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Storage;
 
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Splicewire\Beam\Ux\Files\MdxPageFile;
+use Splicewire\Beam\Ux\Manifest\EntryResidency;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\FilePlacement;
 
@@ -51,7 +52,8 @@ class PlacedDiskMirror
      */
     public function mirror(BeamUxEntry $entry, string $path, array $body): bool
     {
-        if ($this->disk === null || $path === '') {
+        // ADR-0233 d6: a Hosted site's page has no file, so a tenant-resident entry is never mirrored.
+        if ($this->disk === null || $path === '' || ! app(EntryResidency::class)->isCentralResident($entry)) {
             return false;
         }
 

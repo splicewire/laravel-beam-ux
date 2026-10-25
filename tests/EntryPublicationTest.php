@@ -726,6 +726,41 @@ class EntryPublicationTest extends TestCase
         $this->assertSame([], $envelope()->fileLanguages);
     }
 
+    public function test_a_new_hosted_page_has_no_file_language_keeps_the_tsx_codec_and_is_never_mirrored(): void
+    {
+        // review-r1 (EP-26 F), ADR-0233 d6: a Hosted site's page has no File Language and no file. Its format stays the
+        // tsx codec it had before File Languages existed (the column is NOT NULL); nothing offers it a language or
+        // mirrors it, whether the field is omitted or named.
+        $directory = $this->ownedFileFixtureRoot().'/hosted';
+        mkdir($directory, 0700);
+        config(['filesystems.disks.hosted' => ['driver' => 'local', 'root' => $directory], 'beam.ux.storage.mirror_disk' => 'hosted', 'beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+        $this->bindSplitTenancy();
+        $input = ['type' => 'page', 'title' => 'Tenant page', 'slug' => 'tenant-page', 'realm' => 'site'];
+
+        $attributes = \Splicewire\Beam\Ux\Data\BeamUxEntryInputData::from($input)->toModelAttributes();
+
+        $this->assertSame('tsx', $attributes['format'], 'omitted: the pre-F codec, not a File Language');
+        foreach (['tsx', 'mdx'] as $named) {
+            try {
+                \Splicewire\Beam\Ux\Data\BeamUxEntryInputData::from([...$input, 'fileLanguage' => $named])->toModelAttributes();
+                $this->fail("A Hosted page was given the File Language {$named}");
+            } catch (ValidationException $failure) {
+                $this->assertArrayHasKey('fileLanguage', $failure->errors());
+            }
+        }
+        $entry = BeamUxEntry::create([...$attributes, 'namespace' => 'tenant']);
+        $this->assertNull(\Splicewire\Beam\Ux\Format\FileLanguage::of($entry));
+        $this->assertNull(\Splicewire\Beam\Ux\Data\EntryPageSettingsData::fromEntry($entry)->fileLanguage);
+        $this->assertSame([], app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->of($entry, self::BODY_ONE)->fileLanguages);
+        $publication = app(EntryPublication::class);
+        $publication->write($entry, self::BODY_ONE);
+        $publication->publishAuthoredBody($entry->fresh());
+        $this->assertNotNull($entry->fresh()->published_version);
+        $this->assertSame([], array_values(array_diff(scandir($directory), ['.', '..'])), 'nothing is mirrored for a Hosted page');
+    }
+
     /** @return array{0: BeamUxEntry, 1: string, 2: EntryPublication} a published tsx page and its mirror path */
     private function publishedTsxPage(string $slug): array
     {

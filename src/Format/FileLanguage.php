@@ -37,6 +37,16 @@ final class FileLanguage
         return UxFormat::Tsx->value;
     }
 
+    /** The page's File Language, or null for a Hosted site's page, which has none (d6) whatever codec its `format` names. */
+    public static function of(BeamUxEntry $entry): ?string
+    {
+        if (self::choices($entry) === []) {
+            return null;
+        }
+
+        return $entry->format instanceof UxFormat ? $entry->format->value : $entry->getAttribute('format');
+    }
+
     /** May this page take `$language`? Its current language always may (a host turning the gate off strands none). */
     public static function allows(BeamUxEntry $entry, string $language): bool
     {

@@ -104,7 +104,7 @@ final class EntryPageSettingsData extends BeamData
             template: $entry->template, description: $entry->seo_description,
             socialImage: $entry->seo_social_image, pageType: $entry->seo_page_type ?? 'WebPage',
             publishedDate: $entry->seo_published_date,
-            fileLanguage: $entry->format instanceof \Splicewire\Beam\Ux\Format\UxFormat ? $entry->format->value : $entry->getAttribute('format'),
+            fileLanguage: \Splicewire\Beam\Ux\Format\FileLanguage::of($entry),
             childFields: $entry->getAttribute('child_fields'),
         );
     }

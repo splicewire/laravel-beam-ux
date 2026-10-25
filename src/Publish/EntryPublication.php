@@ -250,9 +250,10 @@ class EntryPublication
                 $entry->save();
                 $states[$id] = $this->state($entry);
                 $this->audit($entry, 'published', $actor, $states[$id]);
-                // ADR-0233 d5: a File Language change moves the mirror file; the old path rides with the member.
+                // ADR-0233 d5: a File Language change moves the mirror file; the old path rides with the member as
+                // its named `moved` slot ({@see mirroredFile()}), beside the [entry, version, body] the recording reads.
                 $moved = $this->moved($before[$id] ?? null, $entry);
-                $prepared[$id][3] = $moved;
+                $prepared[$id]['moved'] = $moved;
                 // A later member may still refuse: no disk mirror escapes a rolled-back Release.
                 $snapshot = clone $entry;
                 if ($completion === null) {

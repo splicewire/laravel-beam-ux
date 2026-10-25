@@ -197,18 +197,30 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         ];
     }
 
-    /** A new page's File Language: the one chosen, or its parent's, then the host's (ADR-0233 d5). */
+    /**
+     * A new page's `format`: the File Language chosen, or its parent's, then the host's (ADR-0233 d5).
+     *
+     * A Hosted site's page has no File Language (d6), and naming one is refused. Its `format` is still `tsx`, the
+     * value it had before File Languages existed: the column is NOT NULL (default `tsx`) and names the body codec, and
+     * a Hosted page's blocks are stored through the tsx codec. For a Hosted page it is that codec, never a file:
+     * page settings offer it no language, and the mirror writes no file for it ({@see \Splicewire\Beam\Ux\Storage\PlacedDiskMirror}).
+     */
     private function createdFileLanguage(): string
     {
         $probe = new BeamUxEntry(['type' => 'page']);
         $choices = \Splicewire\Beam\Ux\Format\FileLanguage::choices($probe);
+        if ($choices === []) {
+            if ($this->fileLanguage !== null) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['fileLanguage' => 'A Hosted site\'s pages have no File Language (ADR-0233 d6).']);
+            }
+
+            return \Splicewire\Beam\Ux\Format\UxFormat::Tsx->value;
+        }
         if ($this->fileLanguage === null) {
             return \Splicewire\Beam\Ux\Format\FileLanguage::defaultFor($probe, $this->parentId);
         }
         if (! in_array($this->fileLanguage, $choices, true)) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['fileLanguage' => $choices === []
-                ? 'A Hosted site\'s pages have no File Language (ADR-0233 d6).'
-                : "This host does not write pages in {$this->fileLanguage}."]);
+            throw \Illuminate\Validation\ValidationException::withMessages(['fileLanguage' => "This host does not write pages in {$this->fileLanguage}."]);
         }
 
         return $this->fileLanguage;

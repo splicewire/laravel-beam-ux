@@ -63,7 +63,7 @@ class ReleaseRecording
                     'bytes' => base64_encode($bytes), 'sha256' => hash('sha256', $bytes)];
                 // ADR-0233 d5: a File Language change moved this member's file. The old path is a frozen deletion in
                 // the same commit, of exactly the bytes published there, so an edited old file refuses like a Take-down.
-                if (($moved = $member[3] ?? null) !== null) {
+                if (($moved = $member['moved'] ?? null) !== null) {
                     $old = $disk->path($moved['path']);
                     $this->contained($disk->path(''), $moved['path']);
                     $size += strlen($moved['bytes']);
@@ -262,7 +262,7 @@ class ReleaseRecording
         $receipt = null;
         $deleted = false;
         foreach ($allMembers as $member) {
-            $moved = $member[3] ?? null;
+            $moved = $member['moved'] ?? null;
             if ($moved === null || ! isset($preparedIds[(string) $member[0]->getKey()])) {
                 continue;
             }
