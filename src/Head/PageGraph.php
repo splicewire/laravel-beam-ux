@@ -100,8 +100,10 @@ final class PageGraph
     }
 
     /**
-     * The chain as a trail of the URLs it passes through, the deepest page naming each; the realm root is the site,
-     * named by the brand. The last step is the page at its own URL, which on a Record Page is its Record's. Null at the
+     * The chain as a trail of the URLs it passes through, the deepest page naming each. The site's home, named by the
+     * brand, heads every trail, so a parentless page still has one (the starter's /about, found by the EP-28 receipt);
+     * a root-absolute segment restarts the trail there, as it restarts the URL. The realm root is the site itself, so it
+     * names nothing. The last step is the page at its own URL, which on a Record Page is its Record's. Null at the
      * root, which has no trail.
      *
      * @param  list<BeamUxEntry>  $chain
@@ -109,19 +111,26 @@ final class PageGraph
      */
     private function trail(array $chain, string $base, string $canonical, BrandData $brand): ?array
     {
-        $steps = [];
+        $home = ['name' => $brand->name, 'item' => $base.'/'];
+        $steps = [$home];
         $page = array_pop($chain);
         foreach ($chain as $i => $node) {
+            if (str_starts_with((string) $node->segment, '/')) {
+                $steps = [$home];
+            }
             $url = $base.$this->urls->resolveChain(array_slice($chain, 0, $i + 1));
-            $name = $i === 0 ? $brand->name : ((string) $node->title ?: $brand->name);
-            if ($steps !== [] && end($steps)['item'] === $url) {
-                $steps[array_key_last($steps)]['name'] = $name;
+            $name = $node->namespace === 'realms' ? null : (((string) $node->title) ?: null);
+            if (end($steps)['item'] === $url) {
+                $steps[array_key_last($steps)]['name'] = $name ?? end($steps)['name'];
             } else {
-                $steps[] = ['name' => $name, 'item' => $url];
+                $steps[] = ['name' => $name ?? $brand->name, 'item' => $url];
             }
         }
+        if (str_starts_with((string) $page?->segment, '/')) {
+            $steps = [$home];
+        }
         $last = ['name' => (string) $page?->title ?: $brand->name, 'item' => $canonical];
-        if ($steps !== [] && end($steps)['item'] === $canonical) {
+        if (end($steps)['item'] === $canonical) {
             $steps[array_key_last($steps)] = $last;
         } else {
             $steps[] = $last;

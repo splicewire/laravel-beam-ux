@@ -113,6 +113,27 @@ class PageHeadTest extends TestCase
         $this->assertSame('Acme', $this->node($graph, 'Organization')['name'], 'a node the page names is in the graph');
     }
 
+    public function test_every_page_below_the_root_starts_its_trail_at_the_sites_home(): void
+    {
+        // EP-28 receipt 2026-10-25: the starter's /about is a parentless page with a root-absolute segment, so the chain
+        // the renderer walks holds only the page, and it had no trail. The site's home heads every trail, and a
+        // root-absolute segment restarts the trail there, as it restarts the URL.
+        $this->page('solo', ['parent_id' => null, 'segment' => '/solo', 'title' => 'Solo']);
+        $shell = $this->page('internal', ['title' => 'Internal']);
+        $docs = $this->page('docs', ['parent_id' => $shell->getKey(), 'segment' => '/beam/docs', 'title' => 'Docs']);
+        $this->page('api', ['parent_id' => $docs->getKey(), 'title' => 'API']);
+        $trail = fn (string $path) => array_map(
+            fn (array $item) => [$item['name'], $item['item']],
+            $this->node($this->graph($this->get($path)->json('props.head')), 'BreadcrumbList')['itemListElement'],
+        );
+
+        $this->assertSame([['Acme', 'https://site.test/'], ['Solo', 'https://site.test/solo']], $trail('/solo'));
+        $this->assertSame([['Acme', 'https://site.test/'], ['Docs', 'https://site.test/beam/docs']], $trail('/beam/docs'));
+        $this->assertSame([
+            ['Acme', 'https://site.test/'], ['Docs', 'https://site.test/beam/docs'], ['API', 'https://site.test/beam/docs/api'],
+        ], $trail('/beam/docs/api'));
+    }
+
     public function test_an_unpublished_date_falls_back_to_the_first_publish_and_a_plain_page_is_a_web_page(): void
     {
         // d6: an empty published date is the date of the page's first Publish.
