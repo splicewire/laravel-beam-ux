@@ -8,6 +8,9 @@ final class ReleaseLifecycle
 {
     public const DEFINITION = 'beam-ux.release';
 
+    /** The places a Release is still open: it can change, preview and publish. `published` is final. */
+    public const OPEN = ['draft', 'in_review', 'approved', 'scheduled'];
+
     public static function blueprint(): WorkflowBlueprint
     {
         return WorkflowBlueprint::fromArray([

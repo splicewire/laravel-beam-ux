@@ -199,6 +199,36 @@ class EntryPublication
      * @param  array<string, ?string>|null  $expectedPins  Complete observed-pin map, when publishing a Release.
      * @return array<string, EntryPublicationData>
      */
+    /**
+     * What one fixed version must meet before a Release publishes it: its body and the components it uses (read with
+     * the Release's other fixed versions), and its page settings. Returns the URL change those settings propose, which
+     * {@see EntryUrlChanges} judges with the rest of the Release. Publication and a Release's readiness report (ADR-0232
+     * d11) both run it, so the report cannot disagree with Publish.
+     *
+     * @param  array<string, ?string>  $refs  the Release's fixed versions, by entry id
+     * @return array{parentId: ?string, segment: ?string}|null
+     */
+    public function assertVersionPublishable(BeamUxEntry $entry, Version $version, array $refs): ?array
+    {
+        $publishedBody = $this->publishedBody($entry);
+        app(CanvasBodyGuard::class)->assertPublishable(app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->validationEntry($entry, $version->snapshot['meta']['pageSettings'] ?? null, false), $version->snapshot['payload'], JsonDocShape::is($publishedBody) ? $publishedBody : [], $refs);
+        $settings = $version->snapshot['meta']['pageSettings'] ?? null;
+        if ($settings === null) {
+            return null;
+        }
+        $data = \Splicewire\Beam\Ux\Data\EntryPageSettingsData::validateAndCreate($settings);
+
+        return ['parentId' => $data->parentId, 'segment' => $data->segment];
+    }
+
+    private function publishedBody(BeamUxEntry $entry): mixed
+    {
+        $particle = $this->particle($entry);
+        $pin = $this->publishedVersionId($entry);
+
+        return $pin === null || $particle === null ? null : ($this->versions->version($particle, $pin)?->snapshot['payload'] ?? null);
+    }
+
     public function publishVersions(BeamUxEntry $context, array $refs, ?Model $actor = null, ?array $expectedPins = null, ?callable $completion = null): array
     {
         $this->requireVersionStore();
@@ -227,14 +257,11 @@ class EntryPublication
                     throw ValidationException::withMessages(['ref' => 'The named version does not belong to this entry or has no valid body snapshot.']);
                 }
                 $body = $version->snapshot['payload'];
-                $pin = $this->publishedVersionId($entry);
-                $publishedBody = $pin === null ? null : ($this->versions->version($particle, $pin)?->snapshot['payload'] ?? null);
-                app(CanvasBodyGuard::class)->assertPublishable(app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->validationEntry($entry, $version->snapshot['meta']['pageSettings'] ?? null, false), $body, JsonDocShape::is($publishedBody) ? $publishedBody : [], $refs);
+                $change = $this->assertVersionPublishable($entry, $version, $refs);
+                $publishedBody = $this->publishedBody($entry);
                 $before[$id] = $this->mirroredFile($entry, is_array($publishedBody) ? $publishedBody : null);
-                $settings = $version->snapshot['meta']['pageSettings'] ?? null;
-                if ($settings !== null) {
-                    $data = \Splicewire\Beam\Ux\Data\EntryPageSettingsData::validateAndCreate($settings);
-                    $changes[$id] = ['parentId' => $data->parentId, 'segment' => $data->segment];
+                if ($change !== null) {
+                    $changes[$id] = $change;
                 }
                 $prepared[$id] = [$entry, $version, $body];
             }

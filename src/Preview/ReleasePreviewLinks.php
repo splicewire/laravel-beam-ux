@@ -7,6 +7,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Route;
 use Splicewire\Beam\Ux\Models\BeamUxPreviewGrant;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
+use Splicewire\Beam\Ux\Release\ReleaseLifecycle;
 
 /**
  * A Release's **Preview Links** (ADR-0232 d8). A link names one Release and when it expires, signed with a key derived
@@ -21,7 +22,7 @@ use Splicewire\Beam\Ux\Models\BeamUxRelease;
 final class ReleasePreviewLinks
 {
     /** The Release states a Preview may show (as {@see PreviewGrantService::resolve()}); a published one has ended. */
-    public const OPEN = ['draft', 'in_review', 'approved', 'scheduled'];
+    public const OPEN = ReleaseLifecycle::OPEN;
 
     private const PREFIX = 'link:';
 

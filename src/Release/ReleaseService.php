@@ -14,6 +14,7 @@ use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
+use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Preview\ReleasePreviewLinks;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
@@ -108,7 +109,7 @@ final class ReleaseService
             $this->assertMember($entry, $ref, $redirectTarget);
             $this->transition($locked, 'revise', $actor);
             $member = $locked->members()->where('entry_id', $entryId)->first()
-                ?? (new \Splicewire\Beam\Ux\Models\BeamUxReleaseMember)->setConnection($locked->getConnectionName());
+                ?? (new BeamUxReleaseMember)->setConnection($locked->getConnectionName());
             $member->forceFill([
                 'release_id' => $locked->id, 'entry_id' => $entryId, 'version_id' => $ref,
                 'observed_pin' => $entry->published_version, 'observed_marking' => $entry->workflow_marking,
@@ -252,18 +253,10 @@ final class ReleaseService
                 ? $this->authorizeDirect($entry, $actor)
                 : $this->authorizeEntry($entry, $actor, in_array($transition, ['approve', 'schedule', 'publish'], true));
             if ($transition === 'publish') {
-                if ($entry->published_version !== $member->observed_pin || $entry->workflow_marking !== $member->observed_marking) {
+                if ($this->memberMoved($entry, $member)) {
                     $this->refuse('A publication pin or marking moved. Rebase or drop that member.');
                 }
-                $this->assertMember($entry, $member->version_id, $member->redirect_target);
-                if ($member->redirect_target !== null) {
-                    foreach ($removed as $removedId) {
-                        $target = $this->entry($release, $removedId);
-                        if ($member->redirect_target === $target->id || $member->redirect_target === $target->url()) {
-                            $this->refuse('A redirect target cannot be taken down in the same Release.');
-                        }
-                    }
-                }
+                $this->assertMemberPublishable($release, $entry, $member, $removed);
             }
         }
         if ($transition === 'revise') {
@@ -286,7 +279,7 @@ final class ReleaseService
             if (str_starts_with($context->causationId ?? '', 'ux-release:') && $context->causationId !== $release->schedule_token) {
                 throw new AuthorizationException('The scheduled Release membership changed; schedule the reviewed revision again.');
             }
-            if (config('beam.ux.releases.review_required', false) && (! in_array($release->status, ['approved', 'scheduled'], true) || $release->reviewed_by === null)) {
+            if ($this->awaitsReview($release)) {
                 $this->refuse('This Release requires approval before publication.');
             }
             // ADR-0232 d8: Publish ends the Preview Links; the secret goes with them (saved with the transition).
@@ -331,6 +324,39 @@ final class ReleaseService
         }
     }
 
+    /** Whether review is on and this Release has not been approved; Publish refuses it (ADR-0226). */
+    public function awaitsReview(BeamUxRelease $release): bool
+    {
+        return config('beam.ux.releases.review_required', false)
+            && (! in_array($release->status, ['approved', 'scheduled'], true) || $release->reviewed_by === null);
+    }
+
+    /** A stale member: its entry's publication pin or marking moved after it joined (ADR-0226 d6). */
+    public function memberMoved(BeamUxEntry $entry, BeamUxReleaseMember $member): bool
+    {
+        return $entry->published_version !== $member->observed_pin || $entry->workflow_marking !== $member->observed_marking;
+    }
+
+    /**
+     * The member checks Publish makes once the member is current: its fixed version still reads and compiles, or its
+     * Take-down is admissible and does not redirect to a page the same Release takes down. Publish and the readiness
+     * report (ADR-0232 d11) both run it.
+     *
+     * @param  list<string>  $removed  the entries the Release takes down
+     */
+    public function assertMemberPublishable(BeamUxRelease $release, BeamUxEntry $entry, BeamUxReleaseMember $member, array $removed): void
+    {
+        $this->assertMember($entry, $member->version_id, $member->redirect_target);
+        if ($member->redirect_target !== null) {
+            foreach ($removed as $removedId) {
+                $target = $this->entry($release, $removedId);
+                if ($member->redirect_target === $target->id || $member->redirect_target === $target->url()) {
+                    $this->refuse('A redirect target cannot be taken down in the same Release.');
+                }
+            }
+        }
+    }
+
     private function assertMember(BeamUxEntry $entry, ?string $ref, ?string $redirectTarget): void
     {
         if ($ref !== null) {
@@ -362,7 +388,8 @@ final class ReleaseService
         // Admission only. EP-31 owns redirect emission.
     }
 
-    private function entry(BeamUxRelease $release, string $id): BeamUxEntry
+    /** A member's entry, which must share the Release's realm and connection. */
+    public function entry(BeamUxRelease $release, string $id): BeamUxEntry
     {
         $entry = BeamUxEntry::on($release->getConnectionName())->findOrFail($id);
         if ($entry->realm !== $release->realm) {

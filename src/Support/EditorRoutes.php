@@ -17,7 +17,7 @@ final class EditorRoutes
         foreach (['body', 'save-body', 'save-draft', 'publish', 'versions', 'restore', 'clear-body', 'print-source', 'read-source', 'create-release', 'preview'] as $op) {
             Particle::ops($uri, 'beam-ux-entry', $op);
         }
-        Particle::mount($releasesUri, 'beam-ux-release')->only(['index', 'show'])->ops(['command']);
+        Particle::mount($releasesUri, 'beam-ux-release')->only(['index', 'show'])->ops(['command', 'readiness']);
         Particle::mount('beam-ux-release-files', 'beam-ux-release-files')->only(['index', 'show'])->ops(['commit-now', 'inspect-file', 'take-file-draft', 'take-all-drafts', 'restore-missing-file', 'remirror-file']);
     }
 }

@@ -11,11 +11,30 @@ final class EntryUrlChanges
     /** @param array<string, array{parentId: ?string, segment: ?string}> $changes */
     public function assertAllowed(BeamUxEntry $context, array $changes): void
     {
+        $problem = $this->problems($context, $changes)[0] ?? null;
+        if ($problem !== null) {
+            $this->refuse($problem['message']);
+        }
+    }
+
+    /**
+     * Every reason the final graph is refused, the first being the one assertAllowed() throws. A Release's readiness
+     * report (ADR-0232 d11) lists them all, reading without locks.
+     *
+     * @param  array<string, array{parentId: ?string, segment: ?string}>  $changes
+     * @return list<array{entryId: string, message: string}>
+     */
+    public function problems(BeamUxEntry $context, array $changes, bool $lock = true): array
+    {
         // Same connection as publication, including tenant-resident entries. Locks survive the caller's transaction.
-        $entries = $context->newQuery()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+        $query = $context->newQuery()->orderBy('id');
+        $entries = ($lock ? $query->lockForUpdate() : $query)->get()->keyBy('id');
+        $problems = [];
         foreach ($changes as $id => $change) {
             if (! $entries->has($id)) {
-                $this->refuse('A changed entry does not exist.');
+                $problems[] = ['entryId' => (string) $id, 'message' => 'A changed entry does not exist.'];
+
+                continue;
             }
             $entries[$id]->parent_id = $change['parentId'];
             $entries[$id]->segment = $change['segment'];
@@ -40,7 +59,9 @@ final class EntryUrlChanges
             while ($node !== null) {
                 if (isset($seen[$node->id])) {
                     if (isset($affected[$entry->id])) {
-                        $this->refuse('The proposed page parents contain a cycle.');
+                        $problems[] = ['entryId' => (string) $entry->id, 'message' => 'The proposed page parents contain a cycle.'];
+
+                        continue 2;
                     }
                     break;
                 }
@@ -53,7 +74,9 @@ final class EntryUrlChanges
                 if ($parent === null || ($parent->published_version === null && ! array_key_exists($parent->id, $changes)
                     && ! $this->isCanonicalStructuralRoot($parent, $entry))) {
                     if (isset($affected[$entry->id])) {
-                        $this->refuse('A page cannot publish under a missing or never-published parent.');
+                        $problems[] = ['entryId' => (string) $entry->id, 'message' => 'A page cannot publish under a missing or never-published parent.'];
+
+                        continue 2;
                     }
                     break;
                 }
@@ -68,11 +91,16 @@ final class EntryUrlChanges
             foreach ($realms as $realm) {
                 $url = $realm.':'.$path;
                 if (isset($urls[$url]) && (isset($affected[$entry->id]) || isset($affected[$urls[$url]]))) {
-                    $this->refuse('The proposed pages would share a URL.');
+                    // Named after the page that moved, which is the one to fix.
+                    $problems[] = ['entryId' => (string) (isset($affected[$entry->id]) ? $entry->id : $urls[$url]), 'message' => 'The proposed pages would share a URL.'];
+
+                    continue;
                 }
                 $urls[$url] = $entry->id;
             }
         }
+
+        return $problems;
     }
 
     /** ADR-0209 amendment E: the existing realm root is infrastructure, not an authored version. */

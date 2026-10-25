@@ -2121,6 +2121,90 @@ class EntryPublicationTest extends TestCase
         $this->assertNull($published->getAttribute('preview_link_secret'));
     }
 
+    public function test_release_readiness_lists_every_publish_blocker_with_its_fix_while_publish_still_refuses(): void
+    {
+        // ADR-0232 d11 (EP-18): the Preview lists every reason Publish would refuse, each with the action that fixes it,
+        // where Publish stops at the first. The report runs Publish's own checks, so the two cannot disagree.
+        $one = $this->publishedPage(self::BODY_ONE);
+        $two = $this->publishedPage(self::BODY_ONE);
+        $taken = $this->publishedPage(self::BODY_ONE);
+        $one->forceFill(['segment' => 'one'])->save();
+        $two->forceFill(['segment' => 'two'])->save();
+        $taken->forceFill(['segment' => 'taken'])->save();
+        [$service, $author] = $this->releaseFixture();
+        $pub = app(EntryPublication::class);
+        $release = $service->create($one, 'Blocked three ways', $author);
+        // `two` would move onto the URL a published page already holds.
+        $moved = $pub->recordDraft($two, self::BODY_TWO, pageSettings: new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(title: 'Two', segment: 'taken'));
+        $service->putMember($release, $two->id, $moved->headVersion, $author);
+        // `one`'s pin moves after it joined.
+        $service->putMember($release, $one->id, $pub->recordDraft($one, self::BODY_TWO)->headVersion, $author);
+        $pub->publishVersion($one->fresh(), $pub->recordDraft($one->fresh(), self::BODY_ONE)->headVersion);
+
+        $report = app(\Splicewire\Beam\Ux\Release\ReleaseReadiness::class)->report($release->fresh());
+
+        $this->assertFalse($report->ready);
+        $blockers = collect($report->blockers)->keyBy('code');
+        $this->assertSame(['review', 'stale', 'url'], $blockers->keys()->sort()->values()->all());
+        $this->assertSame(['submit'], $blockers['review']->fixes, 'review is on, and the Release was never submitted');
+        $this->assertSame([$one->id, ['rebase', 'drop']], [$blockers['stale']->entryId, $blockers['stale']->fixes]);
+        $this->assertSame([$two->id, ['open', 'drop']], [$blockers['url']->entryId, $blockers['url']->fixes]);
+        $this->assertSame('The proposed pages would share a URL.', $blockers['url']->message);
+        try {
+            $service->transition($release, 'publish', $author);
+            $this->fail('a blocked Release published');
+        } catch (ValidationException) {
+            $this->assertSame('draft', $release->fresh()->status);
+        }
+    }
+
+    public function test_release_readiness_is_ready_when_publish_would_succeed_and_notes_a_member_in_another_open_release(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $draft = app(EntryPublication::class)->recordDraft($entry, self::BODY_TWO);
+        $release = $service->create($entry, 'Ready', $author);
+        $service->putMember($release, $entry->id, $draft->headVersion, $author);
+        $other = $service->create($entry, 'Also changing it', $author);
+        $service->putMember($other, $entry->id, $draft->headVersion, $author);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $readiness = app(\Splicewire\Beam\Ux\Release\ReleaseReadiness::class);
+
+        $report = $readiness->report($release->fresh());
+
+        $this->assertTrue($report->ready);
+        $this->assertSame([], $report->blockers);
+        $this->assertCount(1, $report->notes, 'a note never blocks');
+        $note = $report->notes[0];
+        $this->assertSame(['other-release', $entry->id, $other->id, 'Also changing it', 'draft'],
+            [$note->code, $note->entryId, $note->releaseId, $note->releaseTitle, $note->releaseStatus]);
+
+        $service->transition($release, 'publish', $reviewer);
+        $this->assertSame('published', $release->fresh()->status);
+        $this->assertTrue($readiness->report($release->fresh())->ready, 'a published Release has nothing left to block');
+    }
+
+    public function test_release_readiness_lists_a_take_down_whose_redirect_target_the_same_release_takes_down(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $target = $this->publishedPage(self::BODY_TWO);
+        [$service, $author] = $this->releaseFixture();
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => 'published'])->save();
+        $target->forceFill(['segment' => 'target', 'workflow_marking' => 'published'])->save();
+        $release = $service->create($entry, 'Take both down', $author);
+        $service->putMember($release, $entry->id, null, $author, $target->id);
+        $service->putMember($release, $target->id, null, $author);
+
+        $blockers = collect(app(\Splicewire\Beam\Ux\Release\ReleaseReadiness::class)->report($release->fresh())->blockers)
+            ->where('code', 'takedown')->values();
+
+        $this->assertCount(1, $blockers);
+        $this->assertSame([$entry->id, 'A redirect target cannot be taken down in the same Release.', ['drop']],
+            [$blockers[0]->entryId, $blockers[0]->message, $blockers[0]->fixes]);
+    }
+
     public function test_release_resource_and_commands_mount_through_the_existing_particle_surface(): void
     {
         $discovery = app(\Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery::class);

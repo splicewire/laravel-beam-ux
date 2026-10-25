@@ -76,6 +76,24 @@ class ReleaseReadTest extends TestCase
         $this->assertStringNotContainsString((string) $this->release->fresh()->getAttribute('preview_link_secret'), (string) $link, 'the secret never leaves the server');
     }
 
+    public function test_an_author_reads_what_would_stop_a_release_publishing_and_a_reader_cannot(): void
+    {
+        // ADR-0232 d11 (EP-18): the Release panel and the Preview bar read the same report.
+        app(AttributedParticleDiscovery::class)->registerClass(\Splicewire\Beam\Ux\Particle\ReleaseReadinessOp::class);
+        Particle::ops('beam-ux-releases', 'beam-ux-release', 'readiness');
+        // An operation's subject-free ability is asked as its entitlement, which a host registers for `ux.author`.
+        Gate::define('entitlement:ux.author', fn ($user = null) => $user?->getAuthIdentifier() === 'author');
+
+        $this->actingAs($this->user('author'));
+        $this->getJson("/beam-ux-releases/{$this->release->id}/readiness")->assertOk()
+            ->assertJsonPath('data.ready', false)
+            ->assertJsonPath('data.blockers.0.code', 'empty')
+            ->assertJsonPath('data.notes', []);
+
+        $this->actingAs($this->user('reader'));
+        $this->getJson("/beam-ux-releases/{$this->release->id}/readiness")->assertForbidden();
+    }
+
     public function test_someone_who_cannot_author_can_neither_list_nor_open_a_release(): void
     {
         $this->actingAs($this->user('reader'));
