@@ -341,6 +341,48 @@ class RecordPageTest extends TestCase
         $this->get('/old-post')->assertNotFound();
     }
 
+    public function test_a_records_url_change_leaves_a_redirect_from_its_old_url_to_the_record(): void
+    {
+        // ADR-0236 d3 (EP-31 slice 2; ruling 2): when the field a Record Page binds by changes on a Record, the write
+        // signal leaves an exact Redirect from the old URL to the Record by identity, so the old URL keeps reaching it.
+        $this->page();
+        if (! Schema::hasTable('beam_ux_redirects')) {
+            (require __DIR__.'/../database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
+        }
+        // Every Redirect write records an activity row (ADR-0236 Consequences).
+        Schema::create('activity_log', function (Blueprint $table) {
+            $table->id();
+            $table->string('log_name')->nullable()->index();
+            $table->text('description');
+            $table->nullableUuidMorphs('subject', 'subject');
+            $table->string('event')->nullable();
+            $table->nullableUuidMorphs('causer', 'causer');
+            $table->json('attribute_changes')->nullable();
+            $table->json('properties')->nullable();
+            $table->timestamps();
+        });
+        $write = function (array $changes): void {
+            $record = \Splicewire\Beam\Models\BeamParticle::query()->findOrFail('hello');
+            $record->payload = [...$record->payload, ...$changes];
+            $record->save();
+            // The signal ParticleWriter dispatches after every pipeline write.
+            event(new \Splicewire\Beam\Events\BeamParticlePersisted($record, $record->payload, $record->schema_ref));
+        };
+
+        $write(['title' => 'Renamed']);
+        $this->assertSame(0, \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->count(), 'its URL did not change');
+
+        $write(['slug' => 'hello-world']);
+        $row = \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->sole();
+        $this->assertSame(['/posts/hello', 'exact', 'record', 'posts', 'hello', 'record'],
+            [$row->path, $row->match, $row->target_kind, $row->target_collection, $row->target_record_id, $row->origin]);
+        $this->get('/posts/hello')->assertStatus(301)->assertRedirect('/posts/hello-world');
+
+        $write(['slug' => 'hi']);
+        $this->get('/posts/hello')->assertStatus(301)->assertRedirect('/posts/hi');
+        $this->get('/posts/hello-world')->assertStatus(301)->assertRedirect('/posts/hi');
+    }
+
     private function recordRedirect(string $path, string $id): void
     {
         if (! Schema::hasTable('beam_ux_redirects')) {

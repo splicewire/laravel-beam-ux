@@ -174,6 +174,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         Relation::morphMap(['beam_ux_entry' => BeamUxEntry::class]);
         // A Redirect is the subject of its own activity rows (ADR-0236 Consequences), stored for good: by alias.
         Relation::morphMap(['beam_ux_redirect' => Models\BeamUxRedirect::class]);
+        // ADR-0236 d3: a Record's URL change leaves a Redirect, caught on the signal every pipeline write emits.
+        $this->app->make(\Illuminate\Contracts\Events\Dispatcher::class)
+            ->listen(\Splicewire\Beam\Events\BeamParticlePersisted::class, [Redirect\RecordUrlChanges::class, 'handle']);
 
         // UX-08c: the read ability the Developer-zone diagnostics declare (who may update entries; Root passes).
         DiagnosticsAbility::define();
