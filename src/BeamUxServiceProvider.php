@@ -277,6 +277,13 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 BeamUxRouteShadowAudit::class,
             );
 
+            // ADR-0236's Consequences: a Redirect that stops answering does so silently, the guest getting the uniform
+            // 404. This names one that dangles, loops, sits where a page answers, or that a host route serves first.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                Doctor\BeamUxRedirectAudit::class,
+            );
+
             // beam-docs-satellite 69: a composed URL is not evidence of reachability. `UrlResolver`
             // reported corrected URLs for fifteen www docs guides while `EntryPathResolver` could not
             // see six of the rows — `realms` was NULL, written past `BeamUxEntry::booted()`, and
