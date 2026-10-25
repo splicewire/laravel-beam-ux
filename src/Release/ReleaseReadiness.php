@@ -92,10 +92,20 @@ final class ReleaseReadiness
                     $changes[$id] = $change;
                 }
             } catch (ValidationException $refused) {
-                $missing = $this->usedComponents($entry, $body, $refs)->first(fn (BeamUxEntry $component) => $component->published_version === null);
-                $blockers[] = $missing === null
-                    ? new Item('content', $id, self::message($refused), ['open', 'drop'])
-                    : new Item('component', $id, self::message($refused), ['add', 'open'], componentId: (string) $missing->getKey());
+                // Publish names the first never-published component it meets; each one is a reason, with its own fix.
+                $missing = [];
+                foreach ($this->usedComponents($entry, $body, $refs) as $component) {
+                    if ($component->published_version === null) {
+                        $name = (string) ($component->getAttribute('component_name') ?? $component->slug);
+                        $missing[] = new Item('component', $id, "Publish the component {$name} first, or include it in the same Release.",
+                            ['add', 'open'], componentId: (string) $component->getKey());
+                    }
+                }
+                $message = self::message($refused);
+                if (! in_array($message, array_map(fn (Item $item) => $item->message, $missing), true)) {
+                    $blockers[] = new Item('content', $id, $message, ['open', 'drop']);
+                }
+                $blockers = [...$blockers, ...$missing];
             }
             foreach ($this->usedComponents($entry, $body, $refs) as $component) {
                 if ($component->published_version !== null && $this->publication->state($component)->draftPending) {
@@ -152,12 +162,31 @@ final class ReleaseReadiness
         $notes = [];
         foreach ($memberships as $membership) {
             if (($other = $open->get($membership->release_id)) !== null) {
+                [$dueAt, $timezone] = $this->schedule($other);
                 $notes[] = new Item('other-release', (string) $membership->entry_id, "Also in the Release \"{$other->title}\" ({$other->status}).",
-                    [], releaseId: (string) $other->getKey(), releaseTitle: (string) $other->title, releaseStatus: (string) $other->status);
+                    [], releaseId: (string) $other->getKey(), releaseTitle: (string) $other->title, releaseStatus: (string) $other->status,
+                    releaseDueAt: $dueAt, releaseTimezone: $timezone);
             }
         }
 
         return $notes;
+    }
+
+    /**
+     * When a scheduled Release will publish: its calendar action, found by the origin the Release holds. Null without
+     * a schedule, or on a host without calendars.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function schedule(BeamUxRelease $release): array
+    {
+        $token = $release->schedule_token;
+        if ($release->status !== 'scheduled' || $token === null || ! class_exists(\Splicewire\Beam\Calendars\Models\CalendarAction::class)) {
+            return [null, null];
+        }
+        $action = \Splicewire\Beam\Calendars\Models\CalendarAction::on($release->getConnectionName())->where('origin', $token)->first();
+
+        return $action === null ? [null, null] : [$action->due_at?->toIso8601String(), (string) $action->timezone];
     }
 
     private static function message(ValidationException $refused): string

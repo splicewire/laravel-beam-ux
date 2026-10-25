@@ -24,5 +24,8 @@ final class ReleaseReadinessItemData extends BeamData
         public ?string $releaseId = null,
         public ?string $releaseTitle = null,
         public ?string $releaseStatus = null,
+        /** When that other Release is scheduled to publish (ISO 8601), and in which timezone; null when it isn't. */
+        public ?string $releaseDueAt = null,
+        public ?string $releaseTimezone = null,
     ) {}
 }

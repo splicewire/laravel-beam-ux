@@ -192,14 +192,6 @@ class EntryPublication
     }
 
     /**
-     * Publish fixed member versions on one entry connection. Authorization belongs to the caller.
-     * The Release participant calls this inside its workflow transaction; single publish shares it.
-     *
-     * @param  array<string, string>  $refs  Entry id => fixed version id.
-     * @param  array<string, ?string>|null  $expectedPins  Complete observed-pin map, when publishing a Release.
-     * @return array<string, EntryPublicationData>
-     */
-    /**
      * What one fixed version must meet before a Release publishes it: its body and the components it uses (read with
      * the Release's other fixed versions), and its page settings. Returns the URL change those settings propose, which
      * {@see EntryUrlChanges} judges with the rest of the Release. Publication and a Release's readiness report (ADR-0232
@@ -229,6 +221,14 @@ class EntryPublication
         return $pin === null || $particle === null ? null : ($this->versions->version($particle, $pin)?->snapshot['payload'] ?? null);
     }
 
+    /**
+     * Publish fixed member versions on one entry connection. Authorization belongs to the caller.
+     * The Release participant calls this inside its workflow transaction; single publish shares it.
+     *
+     * @param  array<string, string>  $refs  Entry id => fixed version id.
+     * @param  array<string, ?string>|null  $expectedPins  Complete observed-pin map, when publishing a Release.
+     * @return array<string, EntryPublicationData>
+     */
     public function publishVersions(BeamUxEntry $context, array $refs, ?Model $actor = null, ?array $expectedPins = null, ?callable $completion = null): array
     {
         $this->requireVersionStore();

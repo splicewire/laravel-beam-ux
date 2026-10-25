@@ -2179,10 +2179,32 @@ class EntryPublicationTest extends TestCase
         $note = $report->notes[0];
         $this->assertSame(['other-release', $entry->id, $other->id, 'Also changing it', 'draft'],
             [$note->code, $note->entryId, $note->releaseId, $note->releaseTitle, $note->releaseStatus]);
+        $this->assertNull($note->releaseDueAt, 'not scheduled');
 
         $service->transition($release, 'publish', $reviewer);
         $this->assertSame('published', $release->fresh()->status);
         $this->assertTrue($readiness->report($release->fresh())->ready, 'a published Release has nothing left to block');
+    }
+
+    public function test_release_readiness_notes_another_open_release_with_its_schedule(): void
+    {
+        // d11: a member also in another open Release is noted "with that Release's schedule", read from its calendar action.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $this->calendarFixture();
+        $draft = app(EntryPublication::class)->recordDraft($entry, self::BODY_TWO);
+        $release = $service->create($entry, 'This one', $author);
+        $service->putMember($release, $entry->id, $draft->headVersion, $author);
+        $later = $service->create($entry, 'New year', $author);
+        $service->putMember($later, $entry->id, $draft->headVersion, $author);
+        $service->transition($later, 'submit', $author);
+        $service->transition($later, 'approve', $reviewer);
+        $service->schedule($later, '2030-01-01T09:30:00Z', 'Europe/Paris', $reviewer);
+
+        $note = collect(app(\Splicewire\Beam\Ux\Release\ReleaseReadiness::class)->report($release->fresh())->notes)->firstWhere('code', 'other-release');
+
+        $this->assertSame([$later->id, 'scheduled', 'Europe/Paris'], [$note->releaseId, $note->releaseStatus, $note->releaseTimezone]);
+        $this->assertSame(\Carbon\CarbonImmutable::parse('2030-01-01T09:30:00Z')->getTimestamp(), \Carbon\CarbonImmutable::parse($note->releaseDueAt)->getTimestamp());
     }
 
     public function test_release_readiness_lists_a_take_down_whose_redirect_target_the_same_release_takes_down(): void

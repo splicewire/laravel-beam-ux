@@ -43,6 +43,27 @@ class ReleaseReadinessComponentTest extends AuthoredComponentNativeTestCase
         $this->assertSame('Publish the component Card first, or include it in the same Release.', $blocker->message);
     }
 
+    public function test_every_never_published_component_a_page_uses_is_its_own_blocker(): void
+    {
+        // d11 lists every reason, where Publish names only the first component it meets.
+        $pub = app(EntryPublication::class);
+        $card = $this->authoredComponent('card');
+        $pub->recordDraft($card, $this->body('Card'));
+        $badge = $this->authoredComponent('badge');
+        $pub->recordDraft($badge, $this->body('Badge'));
+        $page = BeamUxEntry::create(['slug' => 'uses-both', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $release = $this->releaseHolding($page, $pub->recordDraft($page, [$this->node('Card'), $this->node('Badge')])->headVersion);
+
+        $blockers = collect(app(ReleaseReadiness::class)->report($release)->blockers);
+
+        $this->assertSame(['component', 'component'], $blockers->pluck('code')->all(), 'one blocker per component, and no generic one beside them');
+        $this->assertEqualsCanonicalizing([$card->id, $badge->id], $blockers->pluck('componentId')->all());
+        $this->assertEqualsCanonicalizing([
+            'Publish the component Card first, or include it in the same Release.',
+            'Publish the component Badge first, or include it in the same Release.',
+        ], $blockers->pluck('message')->all());
+    }
+
     public function test_a_used_component_with_a_pending_draft_is_a_note_that_does_not_block(): void
     {
         $pub = app(EntryPublication::class);
