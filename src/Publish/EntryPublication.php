@@ -611,7 +611,14 @@ class EntryPublication
      */
     public function write(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): array
     {
-        return app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reservationTransaction($entry->getConnection(), fn () => $this->writeAfterLocks($entry, $body, $pageSettings));
+        $written = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reservationTransaction($entry->getConnection(), function () use ($entry, $body, $pageSettings) {
+            $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
+
+            return $this->writeAfterLocks($locked, $body, $pageSettings);
+        });
+        $entry->refresh();
+
+        return $written;
     }
 
     private function writeAfterLocks(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings): array
@@ -923,7 +930,7 @@ class EntryPublication
             new PolicyWriteGate(app(Gate::class)),
             app(SchemaTargetResolver::class),
             app(AcceptanceGate::class),
-            app(Dispatcher::class),
+            new AfterCommitParticleEvents(app(Dispatcher::class)),
         ));
     }
 }

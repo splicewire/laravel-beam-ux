@@ -555,4 +555,110 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
         $this->assertSame('FreedName', $two->fresh()->component_name);
         $this->assertNotNull($one->fresh()->deleted_at);
     }
+
+    public function test_restore_refuses_a_published_name_reused_since_soft_delete_atomically(): void
+    {
+        $pub = app(EntryPublication::class);
+        $one = $this->reviewComponent('restore-old-publisher');
+        $old = $pub->recordDraft($one, $this->body('RestoreCard'));
+        $pub->publishVersion($one->fresh(), $old->headVersion);
+        $pub->recordDraft($one->fresh(), $this->body('RestoreCardTwo'));
+        $one->fresh()->delete();
+        $two = $this->reviewComponent('restore-new-publisher');
+        $new = $pub->recordDraft($two, $this->body('RestoreCard'));
+        $pub->publishVersion($two->fresh(), $new->headVersion);
+        try {
+            $one->fresh()->restore();
+            $this->fail('Restore recreated a published name collision');
+        } catch (ValidationException $error) {
+            $this->assertStringContainsString('published', strtolower($error->getMessage()));
+        }
+        $this->assertNotNull($one->fresh()->deleted_at);
+        $this->assertNull($one->fresh()->component_name);
+        $this->assertNull($one->fresh()->published_component_name);
+        $this->assertSame('RestoreCard', $two->fresh()->published_component_name);
+    }
+
+    public function test_soft_delete_restore_rolls_back_reservations_and_row_on_failure(): void
+    {
+        $one = $this->reviewComponent('restore-rollback');
+        app(EntryPublication::class)->recordDraft($one, $this->body('RollbackRestore'));
+        $one->fresh()->delete();
+        BeamUxEntry::restored(function (BeamUxEntry $entry) use ($one) {
+            if ($entry->id === $one->id) {
+                throw new \RuntimeException('injected restoration failure');
+            }
+        });
+        try {
+            $one->fresh()->restore();
+            $this->fail('Injected restoration failure was hidden');
+        } catch (\RuntimeException $error) {
+            $this->assertSame('injected restoration failure', $error->getMessage());
+        }
+        $this->assertNotNull($one->fresh()->deleted_at);
+        $this->assertNull($one->fresh()->component_name);
+    }
+
+    public function test_state_mutating_write_retry_refetches_entry_and_emits_only_after_commit(): void
+    {
+        $entry = $this->reviewComponent('retry-fresh-model');
+        $calls = $events = 0;
+        $eventLevels = [];
+        app('events')->listen(\Splicewire\Beam\Events\BeamParticlePersisted::class, function ($event) use (&$events, &$eventLevels) {
+            $events++;
+            $eventLevels[] = $event->record->getConnection()->transactionLevel();
+        });
+        BeamUxEntry::saved(function (BeamUxEntry $saved) use ($entry, &$calls) {
+            if ($saved->id === $entry->id && $saved->particle_id !== null && ++$calls === 1) {
+                throw new \PDOException('deadlock detected', 40001);
+            }
+        });
+        $written = app(EntryPublication::class)->write($entry, $this->body('RetryFreshModel'));
+        $fresh = $entry->fresh();
+        $this->assertSame('RetryFreshModel', $fresh->component_name);
+        $this->assertSame($written['key'], $fresh->particle_id);
+        $this->assertSame(1, \Splicewire\Beam\Models\BeamParticle::count());
+        $this->assertSame(1, $events);
+        $this->assertSame([0], $eventLevels);
+        $this->assertSame(2, $calls);
+    }
+
+    public function test_lock_wait_timeout_gets_one_retry_then_clear_refusal(): void
+    {
+        $calls = 0;
+        try {
+            app(AuthoredComponents::class)->reservationTransaction((new BeamUxEntry)->getConnection(), function () use (&$calls) {
+                $calls++;
+                throw new \PDOException('Lock wait timeout exceeded; try restarting transaction', 1205);
+            });
+            $this->fail('Lock timeout escaped as success');
+        } catch (ValidationException $error) {
+            $this->assertStringContainsString('conflicted', $error->getMessage());
+        }
+        $this->assertSame(2, $calls);
+    }
+
+    public function test_name_migration_postgres_down_compiles_drop_index_not_constraint(): void
+    {
+        $connection = new \Illuminate\Database\PostgresConnection(fn () => throw new \RuntimeException('No database connection is allowed'), 'compile-only', '', ['driver' => 'pgsql']);
+        $connection->useDefaultSchemaGrammar();
+        $original = \Illuminate\Support\Facades\Schema::getFacadeRoot();
+        $schema = \Mockery::mock(\Illuminate\Database\Schema\Builder::class);
+        $schema->shouldReceive('hasTable')->with('beam_ux_entries')->once()->andReturnTrue();
+        $schema->shouldReceive('hasColumn')->with('beam_ux_entries', 'component_name')->once()->andReturnTrue();
+        $schema->shouldReceive('getConnection')->once()->andReturn($connection);
+        $sql = [];
+        $schema->shouldReceive('table')->once()->andReturnUsing(function ($table, $callback) use ($connection, &$sql) {
+            $blueprint = new \Illuminate\Database\Schema\Blueprint($connection, $table, $callback);
+            $sql = $blueprint->toSql();
+        });
+        \Illuminate\Support\Facades\Schema::swap($schema);
+        try {
+            (require dirname(__DIR__).'/database/migrations/shared/add_component_names_to_beam_ux_entries_table.php.stub')->down();
+        } finally {
+            \Illuminate\Support\Facades\Schema::swap($original);
+        }
+        $this->assertContains('drop index "beam_ux_component_name_unique"', $sql);
+        $this->assertStringNotContainsString('drop constraint', implode(' ', $sql));
+    }
 }

@@ -153,7 +153,9 @@ class BeamUxEntry extends Model implements WorkflowManaged
     use HasFacets;
     use HasUuids;
     use HasVisibility;
-    use SoftDeletes;
+    use SoftDeletes {
+        restore as private restoreSoftDeleted;
+    }
     use WorkflowManagedTrait;
 
     protected $table = 'beam_ux_entries';
@@ -275,6 +277,23 @@ class BeamUxEntry extends Model implements WorkflowManaged
         return array_values(array_map(strval(...), (array) $tokens));
     }
 
+    /** The name claim and the soft-delete transition commit or roll back together. */
+    public function restore()
+    {
+        if (! app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->authored($this)) {
+            return $this->restoreSoftDeleted();
+        }
+
+        return $this->getConnection()->transaction(function () {
+            $locked = $this->newQuery()->withTrashed()->lockForUpdate()->findOrFail($this->getKey());
+            $result = $locked->restoreSoftDeleted();
+            $this->setRawAttributes($locked->getAttributes(), true);
+            $this->setRelations($locked->getRelations());
+
+            return $result;
+        });
+    }
+
     /**
      * Default a new entry's `realms` fallback stack onto `[realm]` (ticket 03). Only fires when the
      * entry has a realm and no stack was set explicitly — so a host that authors a multi-realm entry
@@ -294,8 +313,10 @@ class BeamUxEntry extends Model implements WorkflowManaged
         static::restoring(function (BeamUxEntry $entry): void {
             $components = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class);
             if ($components->authored($entry)) {
+                $pin = $components->version($entry, $entry->published_version);
+                $components->assertRestoredPublishedName($entry, $pin);
                 $components->reserveName($entry, $components->working($entry));
-                $components->setPublishedName($entry, $components->version($entry, $entry->published_version));
+                $components->setPublishedName($entry, $pin);
             }
         });
         static::restored(fn () => app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget());

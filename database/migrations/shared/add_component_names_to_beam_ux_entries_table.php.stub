@@ -29,7 +29,11 @@ return new class extends Migration
     {
         if (Schema::hasTable('beam_ux_entries') && Schema::hasColumn('beam_ux_entries', 'component_name')) {
             Schema::table('beam_ux_entries', function (Blueprint $table): void {
-                $table->dropUnique('beam_ux_component_name_unique');
+                if (Schema::getConnection()->getDriverName() === 'pgsql') {
+                    $table->dropIndex('beam_ux_component_name_unique');
+                } else {
+                    $table->dropUnique('beam_ux_component_name_unique');
+                }
                 $table->dropColumn(['component_name', 'published_component_name']);
             });
         }

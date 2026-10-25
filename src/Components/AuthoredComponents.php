@@ -429,9 +429,10 @@ class AuthoredComponents
                 return $callback();
             }, 2);
         } catch (\Throwable $failure) {
-            if (in_array((string) $failure->getCode(), ['40001', '1213'], true)
+            if (in_array((string) $failure->getCode(), ['40001', '1213', '1205'], true)
                 || str_contains(strtolower($failure->getMessage()), 'deadlock')
-                || str_contains(strtolower($failure->getMessage()), 'serialization failure')) {
+                || str_contains(strtolower($failure->getMessage()), 'serialization failure')
+                || str_contains(strtolower($failure->getMessage()), 'lock wait timeout')) {
                 $this->refuse('The component reservation conflicted. Retry the save against the current head.');
             }
             throw $failure;
@@ -458,6 +459,19 @@ class AuthoredComponents
             $entry->forceFill(['component_name' => $name])->save();
         } catch (\Illuminate\Database\UniqueConstraintViolationException) {
             $this->refuse('Component names must be unique in their realm; this name is taken.');
+        }
+    }
+
+    /** Restoring an old Pin must not reclaim a name published by a surviving row. */
+    public function assertRestoredPublishedName(BeamUxEntry $entry, array $body): void
+    {
+        if ($body === [] || ! $entry->getConnection()->getSchemaBuilder()->hasColumn($entry->getTable(), 'published_component_name')) {
+            return;
+        }
+        $name = $this->definition($body)->name;
+        if ($entry->newQuery()->where('realm', $entry->realm)->whereKeyNot($entry->getKey())
+            ->whereNotNull('published_version')->whereRaw('LOWER(published_component_name) = ?', [strtolower($name)])->exists()) {
+            $this->refuse('Cannot restore: published component name '.$name.' conflicts with another published component. Rename the conflicting component first.');
         }
     }
 
