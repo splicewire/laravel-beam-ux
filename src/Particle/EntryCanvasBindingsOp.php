@@ -24,6 +24,9 @@ class EntryCanvasBindingsOp
         $service->authorize($model, $actor);
         $input = EntryCanvasBindingsInputData::validateAndCreate($request->all());
 
-        return $service->resolve($model, $request, $input->toArray()['body'], $input->recordValue);
+        // The guards consume the validated wire document. Named Slot map values are
+        // hydrated by JsonBlockNode, but are not a typed Data collection; toArray()
+        // leaves their nested nodes as objects instead of the required wire arrays.
+        return $service->resolve($model, $request, $request->input('body'), $input->recordValue);
     }
 }
