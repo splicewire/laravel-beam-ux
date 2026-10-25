@@ -229,11 +229,11 @@ class EntryPublication
      * @param  array<string, ?string>|null  $expectedPins  Complete observed-pin map, when publishing a Release.
      * @return array<string, EntryPublicationData>
      */
-    public function publishVersions(BeamUxEntry $context, array $refs, ?Model $actor = null, ?array $expectedPins = null, ?callable $completion = null): array
+    public function publishVersions(BeamUxEntry $context, array $refs, ?Model $actor = null, ?array $expectedPins = null, ?callable $completion = null, bool $leaveRedirects = true): array
     {
         $this->requireVersionStore();
 
-        return $context->getConnection()->transaction(function () use ($context, $refs, $actor, $expectedPins, $completion) {
+        return $context->getConnection()->transaction(function () use ($context, $refs, $actor, $expectedPins, $completion, $leaveRedirects) {
             // SQLite ignores FOR UPDATE; reserve its writer before reading pins. No model events or timestamps.
             if ($context->getConnection()->getDriverName() === 'sqlite') {
                 $context->newQuery()->whereKey($context->getKey())->toBase()->update(['id' => $context->getKey()]);
@@ -266,6 +266,9 @@ class EntryPublication
                 $prepared[$id] = [$entry, $version, $body];
             }
             app(EntryUrlChanges::class)->assertAllowed($context, $changes);
+            // ADR-0236 d2: the Redirects the moves leave, read before any URL changes. A Release plans its own, with
+            // its Take-downs (ReleaseService), and asks for none here.
+            $redirects = $leaveRedirects ? app(\Splicewire\Beam\Ux\Redirect\ReleaseRedirects::class)->plan($context, $refs) : null;
             // Compile every fixed snapshot before any member's marking, fields or pin changes.
             foreach ($prepared as [$entry, $version, $body]) {
                 $this->applyPageSettings($entry, $version, validateUrl: false);
@@ -308,6 +311,10 @@ class EntryPublication
             // ADR-0236 d7: a page always wins, so Publish removes a Redirect at a URL it now puts a page on.
             foreach ($prepared as [$entry]) {
                 app(\Splicewire\Beam\Ux\Redirect\RedirectService::class)->pruneAnswered($entry);
+            }
+            // EP-31 ruling 1: outside a Release (a save-body call, a seed, an import) they carry the `publish` origin.
+            if ($redirects !== null) {
+                app(\Splicewire\Beam\Ux\Redirect\RedirectService::class)->leave($redirects, 'publish', null, $actor, $context->getConnectionName());
             }
             if ($completion !== null) {
                 $completion($prepared);

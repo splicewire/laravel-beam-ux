@@ -50,27 +50,8 @@ final class ReleaseRedirects
      */
     public function plan(BeamUxEntry $context, array $refs, array $takedowns = []): array
     {
-        $now = $context->newQuery()->get()->keyBy(fn (BeamUxEntry $entry) => (string) $entry->getKey());
-        $after = $now->map(fn (BeamUxEntry $entry) => clone $entry);
-        foreach ($refs as $id => $ref) {
-            $change = $this->change($now->get((string) $id), (string) $ref);
-            if ($change !== null && $after->has((string) $id)) {
-                $after[(string) $id]->parent_id = $change['parentId'];
-                $after[(string) $id]->segment = $change['segment'];
-            }
-        }
-        $publishing = array_fill_keys(array_map('strval', array_keys($refs)), true);
-        $removed = [];
-        foreach ($takedowns as $id => $target) {
-            $removed[(string) $id] = $target;
-        }
-
+        [$now, $after, $publishing, $removed, $visibleAfter] = $this->graph($context, $refs, $takedowns);
         $before = $this->addresses($now, fn (BeamUxEntry $entry) => $entry->published_version !== null && $this->published($entry));
-        $visibleAfter = function (BeamUxEntry $entry) use ($publishing, $removed): bool {
-            $id = (string) $entry->getKey();
-
-            return ! array_key_exists($id, $removed) && (isset($publishing[$id]) || $this->published($entry));
-        };
         $afterUrls = $this->addresses($after, fn (BeamUxEntry $entry) => isset($publishing[(string) $entry->getKey()]) || $entry->published_version !== null, $visibleAfter);
 
         $answered = [];
@@ -114,6 +95,59 @@ final class ReleaseRedirects
                 && $after[$id]->type === UxType::Page && ! array_key_exists((string) $id, $removed)
                 && ! $this->chainVisible($after, $id, $visibleAfter))),
         ];
+    }
+
+    /**
+     * Whether a page is live once the publish runs (EP-31 ruling 4): published now or by it, not taken down by it, and
+     * not under a page hidden after it. A Take-down's target must be (d4).
+     *
+     * @param  array<string, string>  $refs
+     * @param  array<string, ?string>  $takedowns
+     */
+    public function liveAfter(BeamUxEntry $context, array $refs, array $takedowns, string $entryId): bool
+    {
+        [, $after, $publishing, , $visibleAfter] = $this->graph($context, $refs, $takedowns);
+        $entry = $after->get($entryId);
+
+        return $entry !== null && (isset($publishing[$entryId]) || $entry->published_version !== null)
+            && $this->chainVisible($after, $entryId, $visibleAfter);
+    }
+
+    /** A Take-down's target, named by its id or by its URL now, as the entry it is. */
+    public function targetOf(BeamUxEntry $context, ?string $named): ?string
+    {
+        return $this->target($context->newQuery()->get()->keyBy(fn (BeamUxEntry $entry) => (string) $entry->getKey()), $named);
+    }
+
+    /**
+     * The entries now, and after the publish's moves; the entries it publishes and takes down; and the gate a node of a
+     * chain passes after it (a publishing page counts as published, a taken-down one as hidden).
+     *
+     * @return array{0: Collection<string, BeamUxEntry>, 1: Collection<string, BeamUxEntry>, 2: array<string, true>, 3: array<string, ?string>, 4: \Closure(BeamUxEntry): bool}
+     */
+    private function graph(BeamUxEntry $context, array $refs, array $takedowns): array
+    {
+        $now = $context->newQuery()->get()->keyBy(fn (BeamUxEntry $entry) => (string) $entry->getKey());
+        $after = $now->map(fn (BeamUxEntry $entry) => clone $entry);
+        foreach ($refs as $id => $ref) {
+            $change = $this->change($now->get((string) $id), (string) $ref);
+            if ($change !== null && $after->has((string) $id)) {
+                $after[(string) $id]->parent_id = $change['parentId'];
+                $after[(string) $id]->segment = $change['segment'];
+            }
+        }
+        $publishing = array_fill_keys(array_map('strval', array_keys($refs)), true);
+        $removed = [];
+        foreach ($takedowns as $id => $target) {
+            $removed[(string) $id] = $target;
+        }
+        $visibleAfter = function (BeamUxEntry $entry) use ($publishing, $removed): bool {
+            $id = (string) $entry->getKey();
+
+            return ! array_key_exists($id, $removed) && (isset($publishing[$id]) || $this->published($entry));
+        };
+
+        return [$now, $after, $publishing, $removed, $visibleAfter];
     }
 
     /** The URL change a saved version's page settings propose, as Publish reads them. */

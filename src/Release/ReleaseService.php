@@ -106,7 +106,7 @@ final class ReleaseService
             $directFirst && $this->isDirect($locked)
                 ? $this->authorizeDirect($entry, $actor)
                 : $this->authorizeEntry($entry, $actor, false);
-            $this->assertMember($entry, $ref, $redirectTarget);
+            $this->assertMember($entry, $ref, $redirectTarget, $this->publishing($locked));
             $this->transition($locked, 'revise', $actor);
             $member = $locked->members()->where('entry_id', $entryId)->first()
                 ?? (new BeamUxReleaseMember)->setConnection($locked->getConnectionName());
@@ -306,9 +306,14 @@ final class ReleaseService
                     $takedowns[] = [$entry, $version, $version->snapshot['payload']];
                 }
             }
+            // ADR-0236 d2, d4: the Redirects the Release leaves, its moves' and its Take-downs', read before anything
+            // changes and written once its Take-downs are done.
+            $redirects = app(\Splicewire\Beam\Ux\Redirect\ReleaseRedirects::class)->plan($prototype, $refs,
+                $members->whereNull('version_id')->mapWithKeys(fn ($member) => [(string) $member->entry_id => $member->redirect_target])->all());
             if ($refs !== []) {
                 app(EntryPublication::class)->publishVersions($prototype, $refs, $actor instanceof Model ? $actor : null, $pins,
-                    fn (array $prepared) => app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->prepare($release, $prepared, $actor, $takedowns));
+                    fn (array $prepared) => app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->prepare($release, $prepared, $actor, $takedowns),
+                    leaveRedirects: false);
             } elseif ($takedowns !== []) {
                 app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->prepare($release, [], $actor, $takedowns);
             }
@@ -321,6 +326,8 @@ final class ReleaseService
                     }
                 }
             }
+            app(\Splicewire\Beam\Ux\Redirect\RedirectService::class)->leave($redirects, 'release', (string) $release->getKey(),
+                $actor instanceof Model ? $actor : null, $release->getConnectionName());
         }
     }
 
@@ -346,7 +353,7 @@ final class ReleaseService
      */
     public function assertMemberPublishable(BeamUxRelease $release, BeamUxEntry $entry, BeamUxReleaseMember $member, array $removed): void
     {
-        $this->assertMember($entry, $member->version_id, $member->redirect_target);
+        $this->assertMember($entry, $member->version_id, $member->redirect_target, $this->publishing($release));
         if ($member->redirect_target !== null) {
             foreach ($removed as $removedId) {
                 $target = $this->entry($release, $removedId);
@@ -354,10 +361,27 @@ final class ReleaseService
                     $this->refuse('A redirect target cannot be taken down in the same Release.');
                 }
             }
+            // ADR-0236 d4, EP-31 ruling 4: the target is live once the Release publishes, so not under a page it hides.
+            $members = $release->members()->get();
+            $planner = app(\Splicewire\Beam\Ux\Redirect\ReleaseRedirects::class);
+            $prototype = (new BeamUxEntry)->setConnection($release->getConnectionName());
+            $target = $planner->targetOf($prototype, $member->redirect_target);
+            $refs = $members->whereNotNull('version_id')->mapWithKeys(fn ($m) => [(string) $m->entry_id => (string) $m->version_id])->all();
+            $takedowns = $members->whereNull('version_id')->mapWithKeys(fn ($m) => [(string) $m->entry_id => $m->redirect_target])->all();
+            if ($target === null || ! $planner->liveAfter($prototype, $refs, $takedowns, $target)) {
+                $this->refuse('The Take-down redirect target must be live once this Release publishes: published, and not under a page it hides.');
+            }
         }
     }
 
-    private function assertMember(BeamUxEntry $entry, ?string $ref, ?string $redirectTarget): void
+    /** @return list<string> the entries the Release publishes a version of */
+    private function publishing(BeamUxRelease $release): array
+    {
+        return $release->members()->whereNotNull('version_id')->pluck('entry_id')->map(fn ($id) => (string) $id)->all();
+    }
+
+    /** @param  list<string>  $publishing  the entries the Release publishes, which count as published targets (EP-31 ruling 4) */
+    private function assertMember(BeamUxEntry $entry, ?string $ref, ?string $redirectTarget, array $publishing = []): void
     {
         if ($ref !== null) {
             if ($redirectTarget !== null) {
@@ -376,16 +400,19 @@ final class ReleaseService
             $this->refuse('Take-down requires an entry lifecycle that currently permits unpublish.');
         }
         if ($redirectTarget !== null) {
-            $target = $entry->newQuery()->whereNotNull('published_version')->get()->first(function (BeamUxEntry $candidate) use ($entry, $redirectTarget, $workflow) {
-                return $candidate->id !== $entry->id && $candidate->realm === $entry->realm
-                    && (! $workflow->manages($candidate) || $candidate->workflow_marking === BeamUxEntry::MARKING_PUBLISHED)
-                    && ($candidate->id === $redirectTarget || $candidate->url() === $redirectTarget);
-            });
+            $target = $entry->newQuery()->where(fn ($query) => $query->whereNotNull('published_version')->orWhereIn('id', $publishing))->get()
+                ->first(function (BeamUxEntry $candidate) use ($entry, $redirectTarget, $workflow, $publishing) {
+                    return $candidate->id !== $entry->id && $candidate->realm === $entry->realm
+                        && (! $workflow->manages($candidate) || $candidate->workflow_marking === BeamUxEntry::MARKING_PUBLISHED
+                            || in_array((string) $candidate->id, $publishing, true))
+                        && ($candidate->id === $redirectTarget || $candidate->url() === $redirectTarget);
+                });
             if ($target === null) {
-                $this->refuse('The Take-down redirect must resolve to a published entry in this realm.');
+                $this->refuse('The Take-down redirect must resolve to a published entry in this realm, or one this Release publishes.');
             }
         }
-        // Admission only. EP-31 owns redirect emission.
+        // Admission only: the Release publishes the Redirects (ADR-0236 d4), once assertMemberPublishable() finds the
+        // target live after it.
     }
 
     /** A member's entry, which must share the Release's realm and connection. */

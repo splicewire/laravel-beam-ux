@@ -81,6 +81,37 @@ final class RedirectService
     }
 
     /**
+     * Writes the Redirects a publish's plan names ({@see ReleaseRedirects}), each recording its causer: the publisher.
+     * A move's carry the given origin (`publish` outside a Release, `release` in one, with its id); a Take-down's
+     * carry `takedown`. One already at the same path and match now leads where the plan says (d2).
+     *
+     * @param  array{redirects: list<array<string, mixed>>}  $plan
+     * @return list<BeamUxRedirect>
+     */
+    public function leave(array $plan, string $origin, ?string $originRef, ?\Illuminate\Database\Eloquent\Model $actor, ?string $connection): array
+    {
+        if ($plan['redirects'] === [] || ! Schema::connection($connection)->hasTable('beam_ux_redirects')) {
+            return [];
+        }
+
+        return BeamUxRedirect::causedBy($actor, function () use ($plan, $origin, $originRef, $actor, $connection) {
+            $left = [];
+            foreach ($plan['redirects'] as $planned) {
+                $redirect = BeamUxRedirect::on($connection)->firstOrNew(['realm' => $planned['realm'], 'path' => $planned['path'], 'match' => $planned['match']]);
+                $who = $actor instanceof Authenticatable ? (string) $actor->getAuthIdentifier() : null;
+                $redirect->forceFill([
+                    'target_kind' => $planned['targetKind'], 'target_entry_id' => $planned['targetEntryId'], 'target_path' => $planned['targetPath'],
+                    'target_collection' => null, 'target_record_id' => null, 'target_url' => null, 'permanent' => true,
+                    'origin' => $planned['reason'] === 'takedown' ? 'takedown' : $origin, 'origin_ref' => $originRef, 'edited_by' => $who,
+                ] + ($redirect->exists ? [] : ['created_by' => $who]))->save();
+                $left[] = $redirect;
+            }
+
+            return $left;
+        });
+    }
+
+    /**
      * d7: a page always wins, so Publish removes a Redirect at exactly the URL it puts a page on, recording each one it
      * removed. A path-and-below Redirect there keeps answering the URLs under it.
      *
