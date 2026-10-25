@@ -45,6 +45,9 @@ final class PageGraph
         $type = in_array($entry->seo_page_type, self::PAGE_TYPES, true) ? $entry->seo_page_type : 'WebPage';
         $trail = $this->trail($chain, $base, $canonical, $brand);
         $main = $record === null ? null : $this->record($record, $base, $canonical.'#record');
+        // d10: a ProfilePage's main entity is its Record on a Record Page, else the site's publisher. A Record no projector
+        // maps adds nothing (d9), so its page names no main entity rather than the publisher in its place.
+        $profilesPublisher = $type === 'ProfilePage' && $record === null;
 
         $page = self::node($type, array_filter([
             '@id' => $canonical.'#webpage',
@@ -56,7 +59,7 @@ final class PageGraph
             'dateModified' => self::dateTime($entry->last_published_at),
             'isPartOf' => ['@id' => $base.'/#website'],
             'breadcrumb' => $trail === null ? null : ['@id' => $canonical.'#breadcrumb'],
-            'mainEntity' => $main === null ? ($type === 'ProfilePage' ? $publisherRef : null) : ['@id' => $canonical.'#record'],
+            'mainEntity' => $main !== null ? ['@id' => $canonical.'#record'] : ($profilesPublisher ? $publisherRef : null),
             ...($type === 'Article' ? ['author' => $publisherRef, 'publisher' => $publisherRef] : []),
         ], fn ($value) => $value !== null));
         $graph->add($page);
@@ -75,7 +78,7 @@ final class PageGraph
             ]));
         }
         // The publisher's node travels wherever the page names it, so a reader of the graph never meets a bare reference.
-        if ($home || $type === 'Article' || ($type === 'ProfilePage' && $main === null)) {
+        if ($home || $type === 'Article' || $profilesPublisher) {
             $graph->add($publisher);
         }
 

@@ -151,6 +151,21 @@ class RecordPageTest extends TestCase
         $this->assertSame('https://site.test/posts/hello', end($nodes['BreadcrumbList']['itemListElement'])['item'], 'the trail ends at the Record');
     }
 
+    public function test_a_profile_record_page_whose_record_is_not_projected_names_no_main_entity(): void
+    {
+        // ADR-0234 d10: a ProfilePage's main entity is the Record on a Record Page. With no projector the Record adds no
+        // node (d9, the EP-28 ruling), and the site's publisher, the fallback for a page with no Record, is not it.
+        config(['app.url' => 'https://site.test', 'beam.brand.name' => 'Acme']);
+        $this->page()->forceFill(['seo_page_type' => 'ProfilePage'])->save();
+
+        $head = $this->getJson('/posts/hello')->assertOk()->json('props.head');
+        $script = array_values(preg_grep('#^<script data-inertia="structured-data"#', $head))[0];
+        $nodes = array_column(json_decode((string) preg_replace('#^<script[^>]*>|</script>$#', '', $script), true)['@graph'], null, '@type');
+
+        $this->assertArrayNotHasKey('mainEntity', $nodes['ProfilePage']);
+        $this->assertSame(['ProfilePage', 'BreadcrumbList'], array_keys($nodes), 'no publisher node stands in for the Record');
+    }
+
     public function test_missing_and_unreadable_records_have_the_same_public_answer_and_literal_wins(): void
     {
         $page = $this->page();
@@ -420,6 +435,7 @@ class RecordPageTest extends TestCase
             $table->json('record_page')->nullable();
             $table->string('seo_description')->nullable();
             $table->string('seo_social_image')->nullable();
+            $table->string('seo_page_type')->nullable();
             $table->integer('nav_order')->nullable();
             $table->json('traverse')->nullable();
             $table->json('access')->nullable();
