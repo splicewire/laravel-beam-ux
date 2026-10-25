@@ -65,15 +65,17 @@ final class PreviewBar
      * ADR-0236 d12 (ADR-0232 d14): each URL the Preview's Release moves or takes down, and where it will go once it
      * publishes; a Take-down with no target leaves its URLs to the uniform 404 (`to` null).
      *
-     * @return list<array{from: string, to: ?string, reason: string}>
+     * `match` says whether it covers that path only (`exact`) or the path and everything under it (`prefix`).
+     *
+     * @return list<array{from: string, match: string, to: ?string, reason: string}>
      */
     private function redirects(PreviewContext $preview): array
     {
         $plan = app(\Splicewire\Beam\Ux\Redirect\ReleaseRedirects::class)->forPreview($preview);
 
         return [
-            ...array_map(fn (array $row) => ['from' => $row['path'], 'to' => $row['to'], 'reason' => $row['reason']], $plan['redirects']),
-            ...array_map(fn (array $row) => ['from' => $row['path'], 'to' => null, 'reason' => 'takedown'], $plan['gone']),
+            ...array_map(fn (array $row) => ['from' => $row['path'], 'match' => $row['match'], 'to' => $row['to'], 'reason' => $row['reason']], $plan['redirects']),
+            ...array_map(fn (array $row) => ['from' => $row['path'], 'match' => 'exact', 'to' => null, 'reason' => 'takedown'], $plan['gone']),
         ];
     }
 

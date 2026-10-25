@@ -255,10 +255,10 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
         $this->assertSame(0, \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->count(), 'a Preview writes nothing');
 
         $this->assertSame([
-            ['from' => '/about', 'to' => '/company', 'reason' => 'moved'],
-            ['from' => '/about/team', 'to' => '/company/team', 'reason' => 'moved'],
-            ['from' => '/gone', 'to' => null, 'reason' => 'takedown'],
-            ['from' => '/legacy', 'to' => '/pricing', 'reason' => 'takedown'],
+            ['from' => '/about', 'match' => 'exact', 'to' => '/company', 'reason' => 'moved'],
+            ['from' => '/about/team', 'match' => 'exact', 'to' => '/company/team', 'reason' => 'moved'],
+            ['from' => '/gone', 'match' => 'exact', 'to' => null, 'reason' => 'takedown'],
+            ['from' => '/legacy', 'match' => 'exact', 'to' => '/pricing', 'reason' => 'takedown'],
         ], collect($bar)->sortBy('from')->values()->all());
         $this->assertNotNull($team);
     }
@@ -277,7 +277,7 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
 
         $guest = $this->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)->get('/legacy');
         $guest->assertNotFound();
-        $this->assertSame([['from' => '/legacy', 'to' => '/members', 'reason' => 'takedown']],
+        $this->assertSame([['from' => '/legacy', 'match' => 'exact', 'to' => '/members', 'reason' => 'takedown']],
             $this->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)->get('/')->json('props.preview.redirects'));
 
         $asMe = $this->actingAs($this->user('reader'))->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)
