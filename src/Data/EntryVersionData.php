@@ -94,11 +94,19 @@ class EntryVersionData extends BeamData
             ->where('version_id', $version->id)->pluck('release_id');
         if ($version->getConnection()->getSchemaBuilder()->hasTable('beam_ux_release_recordings')) {
             $entryId = BeamUxEntry::on($version->getConnectionName())->where('particle_id', $version->versionable_id)->value('id');
-            $takedownIds = \Splicewire\Beam\Ux\Models\BeamUxReleaseRecording::on($version->getConnectionName())
-                ->get(['release_id', 'manifest'])->filter(function ($receipt) use ($version, $entryId) {
-                    return collect($receipt->manifest ?? [])->contains(fn (array $file) => ($file['action'] ?? null) === 'delete'
-                        && $file['entryId'] === (string) ($entryId ?? '') && $file['versionId'] === (string) $version->id);
-                })->pluck('release_id');
+            $recordings = \Splicewire\Beam\Ux\Models\BeamUxReleaseRecording::on($version->getConnectionName())
+                ->select('release_id');
+            $connection = $version->getConnection()->getDriverName();
+            $binding = ['delete', (string) ($entryId ?? ''), (string) $version->id];
+            if ($connection === 'sqlite') {
+                $recordings->whereRaw("exists (select 1 from json_each(beam_ux_release_recordings.manifest) as file where json_extract(file.value, '$.action') = ? and json_extract(file.value, '$.entryId') = ? and json_extract(file.value, '$.versionId') = ?)", $binding);
+            } elseif ($connection === 'pgsql') {
+                $recordings->whereRaw('manifest::jsonb @> ?::jsonb', [json_encode([['action' => $binding[0], 'entryId' => $binding[1], 'versionId' => $binding[2]]], JSON_THROW_ON_ERROR)]);
+            } else {
+                // MySQL's JSON_CONTAINS and compatible drivers support partial-object containment.
+                $recordings->whereJsonContains('manifest', ['action' => $binding[0], 'entryId' => $binding[1], 'versionId' => $binding[2]]);
+            }
+            $takedownIds = $recordings->pluck('release_id');
             $ids = $ids->merge($takedownIds)->unique()->values();
         }
         $result = [];

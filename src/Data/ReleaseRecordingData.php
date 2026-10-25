@@ -23,7 +23,7 @@ final class ReleaseRecordingData extends BeamData
     public static function project(BeamUxRelease $release, ?Authenticatable $actor = null): self
     {
         $service = app(ReleaseRecording::class);
-        $row = $service->receipt($release);
+        $row = $service->receiptSummary($release);
         $allowed = false;
         if ($actor !== null) {
             try {

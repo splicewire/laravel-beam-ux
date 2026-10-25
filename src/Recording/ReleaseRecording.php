@@ -25,6 +25,18 @@ class ReleaseRecording
         return BeamUxReleaseRecording::on($release->getConnectionName())->where('release_id', $release->id)->first();
     }
 
+    /** History needs status only; never hydrate frozen file bodies into a version-list projection. */
+    public function receiptSummary(BeamUxRelease $release): ?BeamUxReleaseRecording
+    {
+        if (! $release->getConnection()->getSchemaBuilder()->hasTable('beam_ux_release_recordings')) {
+            return null;
+        }
+
+        return BeamUxReleaseRecording::on($release->getConnectionName())
+            ->where('release_id', $release->id)
+            ->first(['id', 'release_id', 'state', 'sha', 'no_change', 'error']);
+    }
+
     /** Called inside publication; optional projection failure is contained in its own savepoint. */
     public function prepare(BeamUxRelease $release, array $prepared, Authenticatable $actor, array $takedowns = []): void
     {
@@ -147,12 +159,22 @@ class ReleaseRecording
                 }
                 $diskName = config('beam.ux.storage.mirror_disk');
                 $disk = is_string($diskName) && $diskName !== '' ? Storage::disk($diskName) : null;
-                if ($disk === null || config('filesystems.disks.'.$diskName.'.driver') !== 'local') {
-                    throw new RecordingFailure('mirror-disabled', 'No local mirror disk is enabled.');
+                if ($disk === null) {
+                    throw new RecordingFailure('mirror-disabled', 'No mirror disk is enabled.');
+                }
+                $local = config('filesystems.disks.'.$diskName.'.driver') === 'local';
+                if ($takedowns !== [] && ! $local) {
+                    throw new RecordingFailure('mirror-disabled', 'Take-down recording needs an enabled local mirror disk.');
                 }
                 foreach ($prepared as [$entry, $version, $body]) {
                     $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
-                    $this->mirrorContained($disk->path(''), $path);
+                    if ($local) {
+                        $this->mirrorContained($disk->path(''), $path);
+                    } else {
+                        // Remote mirrors remain valid publication targets; only local Git recording
+                        // and deletion receipts require filesystem paths.
+                        $this->relativeParts($path);
+                    }
                     if (! app(PlacedDiskMirror::class)->mirror($entry, $path, $body)) {
                         throw new RecordingFailure('mirror', 'A Release mirror could not be completed.');
                     }

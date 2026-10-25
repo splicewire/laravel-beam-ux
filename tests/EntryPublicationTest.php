@@ -120,6 +120,23 @@ class EntryPublicationTest extends TestCase
         $this->assertSame($index, hash_file('sha256', $repo.'/.git/index'));
     }
 
+    public function test_normal_release_still_mirrors_to_a_non_local_disk(): void
+    {
+        Storage::fake('remote-mirror');
+        config(['filesystems.disks.remote-mirror.driver' => 's3', 'beam.ux.storage.mirror_disk' => 'remote-mirror']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+
+        $result = $this->publishDraftAs($entry, $author);
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+
+        $this->assertSame('published', $result->release->status);
+        $this->assertSame($entry->codec()->decode(self::BODY_TWO), Storage::disk('remote-mirror')->get($path));
+    }
+
     public static function configuredMirrorRoots(): array
     {
         return [['configured-link'], ['platform-temp-alias']];
@@ -837,7 +854,18 @@ class EntryPublicationTest extends TestCase
         $this->assertSame($author, request()->user());
         $publishedVersion = app(\Rushing\Versioning\Contracts\VersionStore::class)
             ->version($takenDown->particle, $takenDown->published_version);
+        \Illuminate\Support\Facades\DB::connection()->flushQueryLog();
+        \Illuminate\Support\Facades\DB::connection()->enableQueryLog();
         $history = \Splicewire\Beam\Ux\Data\EntryVersionData::fromVersion($publishedVersion, false, false);
+        $queries = \Illuminate\Support\Facades\DB::connection()->getQueryLog();
+        \Illuminate\Support\Facades\DB::connection()->disableQueryLog();
+        $receiptQueries = array_values(array_filter($queries, fn (array $query) => str_contains($query['query'], 'beam_ux_release_recordings')));
+        $this->assertNotEmpty($receiptQueries);
+        $this->assertTrue(collect($receiptQueries)->contains(fn (array $query) => str_contains($query['query'], 'json_each')));
+        foreach ($receiptQueries as $query) {
+            $select = explode(' from ', strtolower($query['query']), 2)[0];
+            $this->assertStringNotContainsString('manifest', $select, 'History queries must not select frozen file bytes.');
+        }
         $this->assertContains($release->id, array_map(fn ($recording) => $recording->releaseId, $history->recordings));
     }
 
