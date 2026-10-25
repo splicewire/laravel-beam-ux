@@ -121,6 +121,8 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 'shared/add_origin_to_beam_ux_releases_table',
                 // A Release's Preview Links (ADR-0232 d8): on/off and the secret they are signed with.
                 'shared/add_preview_links_to_beam_ux_releases_table',
+                // A site's Redirects (ADR-0236 d1): a row of their own, beside the entries they lead to.
+                'shared/create_beam_ux_redirects_table',
                 'shared/create_beam_ux_release_recordings_table',
                 'shared/create_beam_ux_preview_grants_table',
                 // The BASELINE (ADR-0225 decision 2; launch ticket 00, 2026-10-16): pins every already-written
@@ -185,6 +187,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
         // A Release reads by the rule its resource declares, `ux.author`, whether listed or opened (EP-15 receipt).
         Gate::policy(Models\BeamUxRelease::class, Release\ReleasePolicy::class);
+        Gate::policy(Models\BeamUxRedirect::class, Redirect\RedirectPolicy::class);
 
         // The boot half of the same concerns — route macros, commands, the workflow and schema
         // handovers. `WiresSitemap` and `WiresPublicSurface` each contribute to BOTH chains, one

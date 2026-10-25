@@ -305,6 +305,10 @@ class EntryPublication
                     });
                 }
             }
+            // ADR-0236 d7: a page always wins, so Publish removes a Redirect at a URL it now puts a page on.
+            foreach ($prepared as [$entry]) {
+                app(\Splicewire\Beam\Ux\Redirect\RedirectService::class)->pruneAnswered($entry);
+            }
             if ($completion !== null) {
                 $completion($prepared);
             }

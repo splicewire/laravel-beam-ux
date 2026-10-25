@@ -17,6 +17,8 @@ final class EditorRoutes
             Particle::ops($uri, 'beam-ux-entry', $op);
         }
         Particle::mount($releasesUri, 'beam-ux-release')->only(['index', 'show'])->ops(['command', 'readiness', 'changes']);
+        // ADR-0236 d14: the Redirects seat's resource; the service checks the rights publishing takes.
+        Particle::mount('beam-ux-redirects', 'beam-ux-redirect');
         Particle::mount('beam-ux-release-files', 'beam-ux-release-files')->only(['index', 'show'])->ops(['commit-now', 'inspect-file', 'take-file-draft', 'take-all-drafts', 'restore-missing-file', 'remirror-file']);
     }
 }
