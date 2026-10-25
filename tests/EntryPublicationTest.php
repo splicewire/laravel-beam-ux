@@ -320,6 +320,46 @@ class EntryPublicationTest extends TestCase
         }
     }
 
+    /** A published MDX page that holds blocks (ADR-0233 d1), mirrored to an owned file root. */
+    private function blocksMdxFileFixture(): array
+    {
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        // A reversible lens over paragraphs; the Node lens is proven in laravel-beam-mdx.
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, new class implements \Splicewire\Beam\Mdx\Lens\MdxLens
+        {
+            public function read(string $body, array $context = []): array
+            {
+                return ['doc' => array_map(fn (string $text) => [
+                    'kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false,
+                    'props' => [], 'children' => [['kind' => 'text', 'value' => $text]],
+                ], preg_split('/\n{2,}/', trim($body))), 'meta' => null];
+            }
+
+            public function print(array $doc): string
+            {
+                return implode("\n\n", array_map(fn (array $block) => $block['children'][0]['value'], $doc))."\n";
+            }
+        });
+        $directory = $this->ownedFileFixtureRoot().'/mdx';
+        mkdir($directory, 0700);
+        config(['filesystems.disks.mdx-file' => ['driver' => 'local', 'root' => $directory], 'beam.ux.storage.mirror_disk' => 'mdx-file']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+        [$releases, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        $entry = BeamUxEntry::create(['slug' => 'file-mdx', 'type' => 'page', 'format' => 'mdx', 'realm' => 'site', 'namespace' => 'help', 'title' => 'Help', 'nav_order' => 2]);
+        $body = [['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Published MDX']]]];
+        $publication = app(EntryPublication::class);
+        $publication->write($entry, $body);
+        $publication->publishAuthoredBody($entry);
+        $release = $releases->requestOne($entry->fresh(), $publication->state($entry->fresh())->headVersion, $author);
+        $member = $release->members()->sole();
+        $target = app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class)->target($entry->fresh());
+
+        return [$entry->fresh(), $member, $author, $body, $target, $publication];
+    }
+
     private function mdxFileFixture(): array
     {
         $directory = $this->ownedFileFixtureRoot().'/mdx';
@@ -387,6 +427,76 @@ class EntryPublicationTest extends TestCase
         $this->assertSame('remirrored', $result->status);
         $this->assertSame("---\ntitle: Help\nnavOrder: 2\n---\n\n# New published MDX\n", file_get_contents($target['absolute']));
         $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_a_blocks_mdx_page_mirrors_its_page_settings_as_frontmatter_and_reconciles_unchanged(): void
+    {
+        // ADR-0233 d3: frontmatter isn't part of the body. The mirror prints the page settings as the header, then the
+        // body the MDX Lens prints, and the Files action reads that same file as the published bytes.
+        [$entry, $member, $author, , $target] = $this->blocksMdxFileFixture();
+
+        $this->assertSame("---\ntitle: Help\nnavOrder: 2\n---\n\nPublished MDX\n", file_get_contents($target['absolute']));
+        $inspection = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class)->inspect($member, $author);
+        $this->assertSame('unchanged', $inspection->state);
+        $this->assertSame('mdx', $inspection->format);
+    }
+
+    public function test_take_reads_a_blocks_mdx_page_header_as_page_settings_and_its_body_through_the_lens(): void
+    {
+        [$entry, $member, $author, , $target, $publication] = $this->blocksMdxFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $bytes = "---\ntitle: Help desk\nnavOrder: 2\ndescription: How to get help\n---\n\nEdited MDX\n\nA second paragraph\n";
+        file_put_contents($target['absolute'], $bytes);
+        $before = $publication->state($entry->fresh());
+        $inspection = $service->inspect($member, $author);
+        $this->assertSame('differs', $inspection->state);
+
+        $result = $service->take($member, $author, $this->fileInput($inspection));
+
+        $this->assertSame('drafted', $result->status);
+        $after = $publication->state($entry->fresh());
+        $this->assertSame($before->publishedVersion, $after->publishedVersion);
+        $this->assertSame($bytes, file_get_contents($target['absolute']), 'Take drafts; the file and the pin are unchanged');
+        $head = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($entry->fresh()->versionable(), $after->headVersion)->snapshot;
+        $this->assertSame(['Edited MDX', 'A second paragraph'], array_map(fn (array $block) => $block['children'][0]['value'], $head['payload']));
+        $this->assertSame('Help desk', $head['meta']['pageSettings']['title']);
+        $this->assertSame('How to get help', $head['meta']['pageSettings']['description']);
+        $this->assertSame(2, $head['meta']['pageSettings']['navOrder']);
+
+        // Publishing the taken draft mirrors its settings back as the canonical header, with the published date
+        // Publish stamps, so the file now reads as unchanged.
+        $publication->publishVersion($entry->fresh(), $after->headVersion);
+        $date = $entry->fresh()->seo_published_date;
+        $this->assertSame("---\ntitle: Help desk\nnavOrder: 2\ndescription: How to get help\npublishedDate: {$date}\n---\n\nEdited MDX\n\nA second paragraph\n", file_get_contents($target['absolute']));
+        $this->assertSame('unchanged', $service->inspect($member, $author)->state);
+    }
+
+    public function test_take_refuses_a_blocks_mdx_header_key_no_page_setting_declares(): void
+    {
+        [$entry, $member, $author, , $target, $publication] = $this->blocksMdxFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        file_put_contents($target['absolute'], "---\ntitle: Help\nnavOrder: 2\naudience: admins\n---\n\nEdited MDX\n");
+        $before = $publication->state($entry->fresh());
+
+        $inspection = $service->inspect($member, $author);
+
+        $this->assertSame('invalid', $inspection->state);
+        $this->assertStringContainsString('audience', $inspection->message);
+        $this->assertFalse($inspection->canTake);
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_a_page_setting_the_frontmatter_grammar_cannot_carry_is_refused_on_a_blocks_mdx_page(): void
+    {
+        [$entry, , , , , $publication] = $this->blocksMdxFileFixture();
+        $settings = \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'Help', 'navOrder' => 2, 'description' => "Two\nlines"]);
+
+        try {
+            $publication->recordDraft($entry->fresh(), self::BODY_ONE, null, $settings);
+            $this->fail('A two-line description was saved on an MDX page');
+        } catch (ValidationException $failure) {
+            $this->assertArrayHasKey('pageSettings.description', $failure->errors());
+        }
     }
 
     public function test_take_all_as_drafts_uses_one_exact_batch_and_refuses_if_any_file_moved(): void

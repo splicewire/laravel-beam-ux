@@ -271,6 +271,9 @@ class EntryPublication
         if ($pageSettings !== null && $entry->type !== \Splicewire\Beam\Ux\Type\UxType::Page) {
             throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);
         }
+        if ($pageSettings !== null && \Splicewire\Beam\Ux\Files\MdxPageFile::applies($entry)) {
+            \Splicewire\Beam\Ux\Files\MdxPageFile::assertPrintable($pageSettings);
+        }
         $this->requireVersionStore();
         // An author-requested draft still needs the current public body mirrored as its baseline.
         $this->baseline($entry, mirror: true);

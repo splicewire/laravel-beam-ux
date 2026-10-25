@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Storage;
 
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Splicewire\Beam\Ux\Files\MdxPageFile;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\FilePlacement;
 
@@ -54,7 +55,13 @@ class PlacedDiskMirror
             return false;
         }
 
-        $this->disk->put($path, $entry->codec()->decode($body));
+        $source = $entry->codec()->decode($body);
+        // ADR-0233 d3: an MDX page that holds blocks keeps its page settings out of its body, and its file prints them
+        // as the frontmatter header import reads back.
+        if (MdxPageFile::applies($entry) && array_is_list($body)) {
+            $source = MdxPageFile::print(MdxPageFile::settingsOf($entry), $source);
+        }
+        $this->disk->put($path, $source);
 
         return true;
     }

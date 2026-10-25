@@ -159,6 +159,53 @@ class DiskEntriesPublicationTest extends TestCase
         @unlink($this->root.'/page/guide.mdx');
     }
 
+    public function test_a_blocks_mdx_page_takes_its_seo_fields_from_frontmatter_and_refuses_an_invalid_one(): void
+    {
+        // ADR-0233 d3: on a host that holds MDX as blocks, frontmatter is the page's settings, SEO fields included.
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        $page = "---\ntitle: Handbook\ndescription: How the handbook works\npageType: Article\npublished_date: 2026-10-01\n---\n\n## From MDX\n";
+        $invalid = "---\ntitle: Notes\npage_type: Blog\n---\n\n## From MDX\n";
+        file_put_contents($this->root.'/page/legacy.mdx', $page);
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+        $this->assertNull(BeamUxEntry::query()->where('slug', 'legacy')->firstOrFail()->seo_description, 'a host that keeps MDX as source is unchanged');
+        @unlink($this->root.'/page/legacy.mdx');
+
+        $this->holdMdxAsBlocks();
+        file_put_contents($this->root.'/page/handbook.mdx', $page);
+        file_put_contents($this->root.'/page/notes.mdx', $invalid);
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $handbook = BeamUxEntry::query()->where('slug', 'handbook')->firstOrFail();
+        $this->assertSame('How the handbook works', $handbook->seo_description);
+        $this->assertSame('Article', $handbook->seo_page_type);
+        $this->assertSame('2026-10-01', $handbook->seo_published_date);
+        $notes = BeamUxEntry::query()->where('slug', 'notes')->firstOrFail();
+        $this->assertNull($notes->seo_page_type);
+        $this->assertStringContainsString('page_type', $result['failed']['page/notes.mdx'] ?? '');
+
+        @unlink($this->root.'/page/handbook.mdx');
+        @unlink($this->root.'/page/notes.mdx');
+    }
+
+    /** Hold MDX as blocks with a fake MDX Lens: the Node run is proven in laravel-beam-mdx. */
+    private function holdMdxAsBlocks(): void
+    {
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, new class implements \Splicewire\Beam\Mdx\Lens\MdxLens
+        {
+            public function read(string $body, array $context = []): array
+            {
+                return ['doc' => [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'From MDX']], 'dynamic' => false]], 'meta' => null];
+            }
+
+            public function print(array $doc): string
+            {
+                return "## From MDX\n";
+            }
+        });
+    }
+
     /** A fake lens (the Node run is proven end-to-end elsewhere) and a mirror disk rooted at the scanned tree. */
     private function mirrorOverScannedTree(): \Illuminate\Contracts\Filesystem\Filesystem
     {

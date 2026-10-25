@@ -5,6 +5,8 @@ namespace Splicewire\Beam\Ux\Disk;
 use FilesystemIterator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use RecursiveDirectoryIterator;
@@ -20,6 +22,7 @@ use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
+use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
@@ -329,6 +332,12 @@ class RegisterEntriesFromDisk
             // `format` default docblock records finding for themes, in a second place.
             // A tsx file the Lens cannot lower is recorded like a compile failure and falls back to raw
             // source so the batch still registers it (ADR-0228 d9).
+            // ADR-0233 d3 — an MDX page that holds blocks takes its SEO fields from the file's frontmatter too. They are
+            // not mass-assignable (page settings force-fill them at publish), so they land here, after the create.
+            if (($seo = $this->seoFor($source, $relative, $envelope)) !== []) {
+                $entry->forceFill($seo)->save();
+            }
+
             try {
                 $this->writeBody($entry, $source);
             } catch (ValidationException $e) {
@@ -526,6 +535,38 @@ class RegisterEntriesFromDisk
                 $this->assertKnownTokens($tokens, $right, $relative);
                 $out[$right->column()] = $tokens;
             }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The SEO columns an MDX page's frontmatter names, on a host whose MDX pages hold blocks (ADR-0233 d3), where the
+     * frontmatter is the page's settings. Each is checked against the page-settings rule for it and column-guarded like
+     * every other aspect field; a value the rule refuses is left out and recorded with this run's failures.
+     *
+     * @param  array{slug: string, type: ?string, namespace: ?string, format: string}  $envelope
+     * @return array<string, string>
+     */
+    protected function seoFor(string $source, string $relative, array $envelope): array
+    {
+        if ($envelope['type'] !== UxType::Page->value || $envelope['format'] !== UxFormat::Mdx->value || ! config('beam.ux.mdx.holds_blocks')) {
+            return [];
+        }
+        $fm = $this->frontmatter($source);
+        $rules = EntryPageSettingsData::rules();
+        $out = [];
+        foreach (['description' => 'seo_description', 'social_image' => 'seo_social_image', 'page_type' => 'seo_page_type', 'published_date' => 'seo_published_date'] as $field => $column) {
+            if (! isset($fm[$field]) || $fm[$field] === '' || ! Schema::hasColumn('beam_ux_entries', $column)) {
+                continue;
+            }
+            $setting = Str::camel($field);
+            if (Validator::make([$setting => $fm[$field]], [$setting => $rules[$setting]])->fails()) {
+                $this->failures[$relative] = "frontmatter `{$field}` is not a valid page setting; it was left out.";
+
+                continue;
+            }
+            $out[$column] = $fm[$field];
         }
 
         return $out;

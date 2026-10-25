@@ -3,10 +3,13 @@
 namespace Splicewire\Beam\Ux\Files;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Validation\ValidationException;
 use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Ux\Body\BodyKind;
 use Splicewire\Beam\Ux\Codec\CssBodyCodec;
+use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
+use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
 use Splicewire\Beam\Ux\Data\FileBatchReconcileInputData;
 use Splicewire\Beam\Ux\Data\FileBatchReconcileResultData;
 use Splicewire\Beam\Ux\Data\FileDraftDiagnosticData;
@@ -15,6 +18,8 @@ use Splicewire\Beam\Ux\Data\FileReconcileInputData;
 use Splicewire\Beam\Ux\Data\FileReconcileResultData;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard;
+use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
+use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
@@ -23,7 +28,10 @@ use Splicewire\Beam\Ux\Recording\ReleaseRecording;
 use Splicewire\Beam\Ux\Release\ReleaseService;
 use Splicewire\Beam\Ux\Type\UxType;
 
-/** Fixed Theme/CSS and Page/MDX dispatch over the same guarded current-file orchestration. */
+/**
+ * Fixed Theme/CSS and Page/MDX dispatch over the same guarded current-file orchestration. A Page/MDX that holds blocks
+ * (ADR-0233 d1) reconciles its {@see MdxPageFile}: page settings as frontmatter, then the body the MDX Lens prints.
+ */
 class ThemeReconciliation
 {
     public function __construct(private LocalThemeFile $files, private CanonicalTheme $themes, private CanonicalMdx $mdx = new CanonicalMdx) {}
@@ -86,15 +94,15 @@ class ThemeReconciliation
             if (! $file['exists']) {
                 throw new FileConflict('file-moved', 'The local file is missing. Nothing was imported.');
             }
-            $body = $this->decodeFile($locked, $file['bytes'], $this->pinnedBody($locked));
+            [$body, $settings] = $this->decodeFile($locked, $file['bytes'], $this->pinnedBody($locked));
             $this->sameTarget($locked, $target);
             $again = $this->files->read($target);
             if ($again !== $file) {
                 throw new FileConflict('file-moved', 'The local file changed during validation. Nothing was imported. Reload comparison.');
             }
             $draft = app(EntryPublication::class)->draftFromBase($locked, $body, $input->expectedHeadVersion,
-                $this->isMdx($locked) ? 'Taken from canonical local MDX file' : 'Taken from local Theme file',
-                $actor instanceof \Illuminate\Database\Eloquent\Model ? $actor : null);
+                $this->isMdx($locked) || MdxPageFile::applies($locked) ? 'Taken from canonical local MDX file' : 'Taken from local Theme file',
+                $actor instanceof \Illuminate\Database\Eloquent\Model ? $actor : null, $settings);
             if ($draft->compileError !== null) {
                 $diagnostic = FileDraftDiagnosticData::compileFailed();
 
@@ -197,19 +205,19 @@ class ThemeReconciliation
                 if (! $file['exists']) {
                     throw new FileConflict('file-moved', 'A local file is missing. Nothing was taken. Reload comparison.');
                 }
-                $body = $this->decodeFile($locked, $file['bytes'], $this->pinnedBody($locked));
-                $drafts[] = [$locked, $body, $token, $target, $file];
+                [$body, $settings] = $this->decodeFile($locked, $file['bytes'], $this->pinnedBody($locked));
+                $drafts[] = [$locked, $body, $settings, $token, $target, $file];
             }
             if ($this->takeAllSnapshot($anchor, $actor) !== $expected) {
                 throw new FileConflict('file-moved', 'The Files changed during batch validation. Nothing was taken. Reload comparison.');
             }
             $results = [];
-            foreach ($drafts as [$entry, $body, $token, $target, $file]) {
+            foreach ($drafts as [$entry, $body, $settings, $token, $target, $file]) {
                 if ($this->files->target($entry) !== $target || $this->files->read($target) !== $file) {
                     throw new FileConflict('file-moved', 'A local file changed during batch validation. Nothing was taken. Reload comparison.');
                 }
                 $draft = app(EntryPublication::class)->draftFromBase($entry, $body, $token->expectedHeadVersion,
-                    'Taken from local file as part of a confirmed batch', $actor instanceof \Illuminate\Database\Eloquent\Model ? $actor : null);
+                    'Taken from local file as part of a confirmed batch', $actor instanceof \Illuminate\Database\Eloquent\Model ? $actor : null, $settings);
                 $diagnostic = $draft->compileError === null ? null : FileDraftDiagnosticData::compileFailed();
                 $results[] = new FileReconcileResultData($diagnostic === null ? 'drafted' : 'drafted-with-compile-error',
                     $diagnostic?->message ?? 'Draft saved. The published version and local file are unchanged.',
@@ -285,7 +293,7 @@ class ThemeReconciliation
     /** @return array{\Splicewire\Beam\Ux\Models\BeamUxEntry, \Splicewire\Beam\Ux\Data\EntryPublicationData, array{absolute: string, path: string, fingerprint: string}, string} */
     private function context(BeamUxEntry $entry): array
     {
-        if (! $this->isMdx($entry) && ($entry->getAttribute('type') !== UxType::Theme || $entry->codec()::class !== CssBodyCodec::class)) {
+        if (! $this->isMdx($entry) && ! MdxPageFile::applies($entry) && ($entry->getAttribute('type') !== UxType::Theme || $entry->codec()::class !== CssBodyCodec::class)) {
             throw new FileConflict('unsupported', 'Only canonical Theme/CSS or body-only Page/MDX with its native codec is supported here.', 422);
         }
         $state = app(EntryPublication::class)->state($entry);
@@ -293,8 +301,8 @@ class ThemeReconciliation
             throw new FileConflict('unsupported', 'A valid existing working head and published pin are required.', 422);
         }
         $body = $this->pinnedBody($entry);
-        $published = $this->isMdx($entry) ? $this->mdx->published($body) : $entry->codec()->decode($body);
-        if ($this->isMdx($entry)) {
+        $published = $this->published($entry, $body);
+        if ($this->isMdx($entry) || MdxPageFile::applies($entry)) {
             // The existing code/profile guard remains authoritative; losslessness is not admission.
             app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
         }
@@ -311,12 +319,69 @@ class ThemeReconciliation
             && $entry->codec()::class === MdxBodyCodec::class && $entry->bodyKind() === BodyKind::Source;
     }
 
-    /** @param array<string, mixed> $published
-     * @return array<string, mixed>
+    /** The current published representation: the bytes the mirror writes for this pinned body.
+     * @param  array<string, mixed>  $body
+     */
+    private function published(BeamUxEntry $entry, array $body): string
+    {
+        if ($this->isMdx($entry)) {
+            return $this->mdx->published($body);
+        }
+        if (! MdxPageFile::applies($entry)) {
+            return $entry->codec()->decode($body);
+        }
+        if (! JsonDocShape::is($body)) {
+            throw new FileConflict('unsupported', 'This MDX page still holds its source. Its host converts it to blocks once (ADR-0233 d9) before the Files action reads it.', 422);
+        }
+
+        return MdxPageFile::print(MdxPageFile::settingsOf($entry), $entry->codec()->decode($body));
+    }
+
+    /** The body a file drafts, and for a blocks MDX page the page settings its header changed (else null).
+     * @param  array<string, mixed>  $published
+     * @return array{0: array<string, mixed>, 1: ?EntryPageSettingsData}
      */
     private function decodeFile(BeamUxEntry $entry, string $bytes, array $published): array
     {
-        return $this->isMdx($entry) ? $this->mdx->decode($bytes, $published) : $this->themes->decode($bytes, $published);
+        if (MdxPageFile::applies($entry)) {
+            return $this->decodeMdxPageFile($entry, $bytes, $published);
+        }
+
+        return [$this->isMdx($entry) ? $this->mdx->decode($bytes, $published) : $this->themes->decode($bytes, $published), null];
+    }
+
+    /**
+     * ADR-0233 d3: the header is the page's settings and the rest is its body. A header key no page setting declares
+     * refuses the file, since nothing would keep it; the body reads through the MDX Lens with ids reattached against
+     * the published blocks the file was printed from.
+     *
+     * @param  array<int, array<string, mixed>>  $published
+     * @return array{0: array<int, array<string, mixed>>, 1: ?EntryPageSettingsData}
+     */
+    private function decodeMdxPageFile(BeamUxEntry $entry, string $bytes, array $published): array
+    {
+        if (strlen($bytes) > CanonicalMdx::LIMIT || ! mb_check_encoding($bytes, 'UTF-8') || str_contains($bytes, "\r")) {
+            throw new FileConflict('invalid', 'MDX import requires bounded UTF-8 with LF line endings.', 422);
+        }
+        $file = MdxPageFile::read($bytes);
+        if ($file['unknown'] !== []) {
+            throw new FileConflict('invalid', 'The header names keys no page setting declares ('.implode(', ', array_keys($file['unknown'])).'). Nothing was imported.', 422);
+        }
+        $header = $file['fields'];
+        $served = MdxPageFile::fields(MdxPageFile::settingsOf($entry));
+        ksort($header);
+        ksort($served);
+        try {
+            $settings = $header === $served ? null : MdxPageFile::settingsFrom($file['fields'], $entry->parent_id);
+            if ($settings !== null) {
+                MdxPageFile::assertPrintable($settings);
+            }
+            $body = app(SourceToBlocks::class)->convert($file['body'], $published, app(ManifestProfileResolver::class)->resolve($entry), UxFormat::Mdx);
+        } catch (ValidationException $failure) {
+            throw new FileConflict('invalid', (string) (collect($failure->errors())->flatten()->first() ?? 'The MDX page file is not valid.'), 422);
+        }
+
+        return [$body, $settings];
     }
 
     /** @return array<string, mixed> */
