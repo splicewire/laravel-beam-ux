@@ -289,6 +289,12 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 Doctor\BeamUxRedirectAudit::class,
             );
 
+            // ADR-0236 d8: a hidden page hides the pages under it, so a structural page left unpublished is named here.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                Doctor\BeamUxHiddenParentAudit::class,
+            );
+
             // beam-docs-satellite 69: a composed URL is not evidence of reachability. `UrlResolver`
             // reported corrected URLs for fifteen www docs guides while `EntryPathResolver` could not
             // see six of the rows — `realms` was NULL, written past `BeamUxEntry::booted()`, and
