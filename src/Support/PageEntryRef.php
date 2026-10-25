@@ -56,11 +56,7 @@ class PageEntryRef
      */
     public static function for(string $slug): ?array
     {
-        $entry = BeamUxEntry::query()
-            ->where('slug', $slug)
-            ->where('type', UxType::Page)
-            ->where('namespace', config('beam.ux.namespace', 'starter'))
-            ->first();
+        $entry = self::row($slug);
 
         if ($entry === null) {
             return null;
@@ -72,6 +68,16 @@ class PageEntryRef
             'format' => self::formatValue($entry),
             'artifact' => self::artifactFor($entry),
         ];
+    }
+
+    /** The page row a host-coded route means, by the tiebreak above, or null. A page's head reads it too (ADR-0234 d2). */
+    public static function row(string $slug): ?BeamUxEntry
+    {
+        return BeamUxEntry::query()
+            ->where('slug', $slug)
+            ->where('type', UxType::Page)
+            ->where('namespace', config('beam.ux.namespace', 'starter'))
+            ->first();
     }
 
     /**

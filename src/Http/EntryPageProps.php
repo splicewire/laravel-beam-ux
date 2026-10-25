@@ -17,7 +17,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 final class EntryPageProps
 {
     /** The props {@see Controllers\PublicEntryController} owns. */
-    public const CORE = ['entry', 'artifact', 'chrome', 'nav', 'bindings'];
+    public const CORE = ['entry', 'artifact', 'chrome', 'nav', 'bindings', 'head'];
 
     /** @var array<string, list<Closure(BeamUxEntry, list<BeamUxEntry>, mixed): array<string, mixed>>> */
     private array $contributors = [];

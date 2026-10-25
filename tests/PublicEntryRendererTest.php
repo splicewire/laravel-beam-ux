@@ -386,7 +386,7 @@ class PublicEntryRendererTest extends TestCase
         $root = BeamUxEntry::rootFor();
         $this->page('docs', ['segment' => 'docs', 'parent_id' => $root->getKey(), 'layout' => 'DocsLayout']);
 
-        $this->assertSame(['entry', 'artifact', 'chrome', 'nav'], array_keys($this->get('/docs')->json('props')));
+        $this->assertSame(['entry', 'artifact', 'chrome', 'nav', 'head'], array_keys($this->get('/docs')->json('props')));
     }
 
     public function test_a_chrome_name_that_is_not_a_nestable_entry_carries_no_address(): void

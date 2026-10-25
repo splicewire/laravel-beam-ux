@@ -3,10 +3,12 @@
 namespace Splicewire\Beam\Ux\Concerns;
 
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
 use Rushing\Popcorn\Concerns\Chained;
 use Splicewire\Beam\Ux\Access\EntryAccessResolver;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
+use Splicewire\Beam\Ux\Head\PageHead;
 use Splicewire\Beam\Ux\Http\Controllers\EntryArtifactController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewExitController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewStartController;
@@ -168,5 +170,15 @@ trait WiresPublicSurface
                 ->where('path', PublicEntryController::pathConstraint($reservedPrefixes))
                 ->name("{$routeName}site.show"));
         });
+    }
+
+    /**
+     * `@beamPageHead`: the packaged head slot a root template places once, inside `<x-inertia::head>` (ADR-0234 d1). It
+     * prints the page's `head` prop wherever SSR doesn't run, else the brand's name as the title.
+     */
+    #[Chained('boot', order: 51)]
+    protected function bootPageHeadDirective(): void
+    {
+        Blade::directive('beamPageHead', fn () => '<?php echo \\'.PageHead::class.'::slot($page ?? null); ?>');
     }
 }

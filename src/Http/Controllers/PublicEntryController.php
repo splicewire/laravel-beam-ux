@@ -9,6 +9,7 @@ use Splicewire\Beam\Ux\Containment\ChromeEntryResolver;
 use Splicewire\Beam\Ux\Containment\ChromeResolver;
 use Splicewire\Beam\Ux\Containment\NavProjector;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
+use Splicewire\Beam\Ux\Head\PageHeadComposer;
 use Splicewire\Beam\Ux\Http\EntryPageProps;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
@@ -49,6 +50,7 @@ class PublicEntryController
         private EntryRenderer $renderer,
         private ChromeEntryResolver $chromeEntries,
         private EntryPageProps $pageProps,
+        private PageHeadComposer $head,
         private ChromeResolver $chrome = new ChromeResolver,
     ) {}
 
@@ -146,6 +148,8 @@ class PublicEntryController
 
         $bindings = app(\Splicewire\Beam\Ux\Bindings\BindingResolver::class)->resolve($entry, $request, $realm);
         $theme = app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve($realm, $preview);
+        $url = $record['url'] ?? $this->urls->resolveChain($chain);
+        $restricted = $this->gate->isRestricted($chain);
         $response = $this->renderer->render($page, [
             ...($bindings === [] ? [] : ['bindings' => array_map(fn ($binding) => $binding->toArray(), $bindings)]),
             // EP-07d: the schema each published form renders, for the public intake keys this host's door accepts only.
@@ -160,7 +164,7 @@ class PublicEntryController
                 // ADR-0228 d1 / beam JS ADR-0006 d1: the declared Body Kind chooses the editor surface. An MDX page
                 // is `blocks` on a host that holds MDX as blocks (ADR-0233 d1) and `source` on one that does not.
                 'bodyKind' => $entry->bodyKind()->value,
-                'url' => $record['url'] ?? $this->urls->resolveChain($chain),
+                'url' => $url,
                 ...($record === null ? [] : ['description' => $entry->seo_description, 'socialImage' => $entry->seo_social_image]),
                 'layout' => $chrome['layout'],
                 'template' => $chrome['template'],
@@ -188,6 +192,9 @@ class PublicEntryController
             // round trip. `withNav: false` at mount time is the escape hatch for a host that caches
             // and injects its own.
             'nav' => $withNav ? $this->nav->project($realm, $actor, $preview)->toArray() : null,
+            // ADR-0234 d1: the Page Head, rendered once here. Inertia's server head takes these elements as they are, and
+            // the root template prints the same ones on a first load.
+            'head' => $this->head->compose($entry, $url, $restricted, $request)->elements(),
             ...($preview === null ? [] : ['preview' => [
                 'label' => $preview->grant->release?->title ?? 'saved version',
                 'exitUrl' => route((string) ($defaults['beamUxPreviewExitRoute'] ?? '')),
@@ -201,7 +208,7 @@ class PublicEntryController
             ...$this->pageProps->for($chrome['layout'], $entry, $chain, $actor),
         ], );
 
-        if ($record !== null || $bindings !== [] || $this->gate->isRestricted($chain)) {
+        if ($record !== null || $bindings !== [] || $restricted) {
             // Post-gate output for a restricted body: never stored, so a revoked grant bites on the
             // next request rather than living on in a shared cache (ADR-0122, ADR-0209 §8).
             $response->headers->set('Cache-Control', 'no-store, private');

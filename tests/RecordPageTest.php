@@ -102,6 +102,20 @@ class RecordPageTest extends TestCase
         $this->assertStringNotContainsString('{slug}', json_encode($response->json('props.nav')));
     }
 
+    public function test_a_record_pages_head_reads_its_record_at_the_records_own_url(): void
+    {
+        // ADR-0234 d1/d4 (EP-28): a link preview of /posts/hello names that Record, not the parameter page.
+        config(['app.url' => 'https://site.test', 'beam.brand.name' => 'Acme']);
+        $this->page();
+
+        $head = $this->getJson('/posts/hello')->assertOk()->json('props.head');
+
+        $this->assertSame('<title data-inertia="title">Record hello - Acme</title>', $head[0]);
+        $this->assertContains('<meta data-inertia="description" name="description" content="SEO hello">', $head);
+        $this->assertContains('<link data-inertia="canonical" rel="canonical" href="https://site.test/posts/hello">', $head);
+        $this->assertContains('<meta data-inertia="og:image" property="og:image" content="https://site.test/images/hello.png">', $head);
+    }
+
     public function test_missing_and_unreadable_records_have_the_same_public_answer_and_literal_wins(): void
     {
         $page = $this->page();
