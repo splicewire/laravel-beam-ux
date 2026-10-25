@@ -125,9 +125,12 @@ class PublicEntryController
         $chrome = $this->chrome->resolve($chain);
 
         $bindings = app(\Splicewire\Beam\Ux\Bindings\BindingResolver::class)->resolve($entry, $request, $realm);
+        // EP-07d: the schema each published form renders, for the public intake keys this host's door accepts only.
+        $intakeForms = app(\Splicewire\Beam\Ux\Intake\IntakeForms::class)->schemasFor(app(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class)->read($entry));
 
         $response = $this->renderer->render($page, [
             ...($bindings === [] ? [] : ['bindings' => array_map(fn ($binding) => $binding->toArray(), $bindings)]),
+            ...($intakeForms === [] ? [] : ['intakeForms' => $intakeForms]),
             'entry' => [
                 'id' => (string) $entry->getKey(),
                 'slug' => (string) $entry->slug,

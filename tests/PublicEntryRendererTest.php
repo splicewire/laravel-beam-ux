@@ -98,6 +98,39 @@ class PublicEntryRendererTest extends TestCase
         $this->assertSame('blocks', $this->get('/guide')->json('props.entry.bodyKind'));
     }
 
+    public function test_a_published_form_carries_the_schema_it_renders_only_for_a_public_intake_key(): void
+    {
+        // EP-07d: the server resolves each form's fields, so the page needs no public schema read of its own.
+        $schema = ['type' => 'object', 'properties' => ['email' => ['type' => 'string']]];
+        $this->app->instance(\Splicewire\Beam\Schema\Contracts\SchemaTargetResolver::class, new class($schema) implements \Splicewire\Beam\Schema\Contracts\SchemaTargetResolver
+        {
+            public function __construct(private array $schema) {}
+
+            public function targetFor(string $recordType, ?int $version = null): array
+            {
+                return in_array($recordType, ['contact', 'private'], true) ? $this->schema : [];
+            }
+        });
+        config(['beam.core.intake.enabled' => true, 'beam.core.intake.public_schemas' => ['contact']]);
+        $form = fn (string $key, string $id) => ['kind' => 'block', 'name' => 'IntakeForm', 'isComponent' => true, 'dynamic' => false, 'id' => $id,
+            'props' => [['name' => 'captureKey', 'kind' => 'string', 'value' => $key]], 'children' => []];
+        $this->app->instance(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class, new class([$form('contact', 'f1'), $form('private', 'f2')]) extends \Splicewire\Beam\Ux\Bindings\PublishedBindingDocument
+        {
+            public function __construct(private array $body) {}
+
+            public function read(BeamUxEntry $entry): array
+            {
+                return $entry->slug === 'contact-us' ? $this->body : [];
+            }
+        });
+        $root = BeamUxEntry::rootFor();
+        $this->page('contact-us', ['segment' => 'contact-us', 'parent_id' => $root->getKey()]);
+        $this->page('about', ['segment' => 'about', 'parent_id' => $root->getKey()]);
+
+        $this->assertSame(['contact' => $schema], $this->get('/contact-us')->json('props.intakeForms'));
+        $this->assertArrayNotHasKey('intakeForms', $this->get('/about')->json('props'), 'a page without a form carries nothing');
+    }
+
     public function test_a_root_absolute_segment_resolves_even_though_a_top_down_walk_could_never_reach_it(): void
     {
         // The docs subtree sits under the realm root but declares an absolute segment, so its URL

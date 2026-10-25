@@ -81,6 +81,7 @@ class EntryBodyEnvelope
                     ? null : \Splicewire\Beam\Ux\Containment\PageFields::schema($class),
             ] : null,
             fileLanguages: $pageSettings !== null ? \Splicewire\Beam\Ux\Format\FileLanguage::choices($entry) : null,
+            intakeForms: JsonDocShape::is($body) ? app(\Splicewire\Beam\Ux\Intake\IntakeForms::class)->schemasFor($body) : [],
         );
     }
 

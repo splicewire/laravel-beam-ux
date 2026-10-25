@@ -72,6 +72,8 @@ final class CanvasBodyGuard
         $checkIds = $this->diff->changedIds($this->workingHead($entry), $body);
 
         $this->legality->assert($body, $profile, $checkIds);
+        // EP-07d: a changed form posts only to a public intake schema this host's door accepts.
+        app(\Splicewire\Beam\Ux\Intake\IntakeForms::class)->assertBody($body, $checkIds);
     }
 
     /**
