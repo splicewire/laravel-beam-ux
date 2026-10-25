@@ -58,7 +58,9 @@ final class PageHeadComposer
                 'ProfilePage' => 'profile',
                 default => 'website',
             },
-            structuredData: $this->graph->for($entry, $chain === [] ? [$entry] : $chain, $base, $canonical, $image, $brand, $record),
+            structuredData: $this->graph->installed()
+                ? $this->graph->for($entry, $chain === [] ? [$entry] : $chain, $base, $canonical, $image, $brand, $record)
+                : null,
         );
     }
 

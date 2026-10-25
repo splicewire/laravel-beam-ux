@@ -17,7 +17,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * `schemastud/laravel-data-schema-org`.
  *
  * The page's node is typed by its Page Type, with a BreadcrumbList from the chain on every page below the root, the
- * WebSite and its publisher on the home page, and a Record Page's Record as its main entity. The concrete schema.org
+ * WebSite and its publisher on the home page, and a Record Page's Record as its main entity. Only where the host installs
+ * that package ({@see installed()}): beam-ux suggests it rather than requiring it. The concrete schema.org
  * types live here, in the package that owns the page (flagship ADR-0050 decision 4). A Record's node comes only from a
  * projector a host registers for its Data class, {@see PublicRecordData}, which carries the Record's Collection; with
  * none registered a Record adds nothing (d12).
@@ -30,7 +31,22 @@ final class PageGraph
     /** d10: the Page Types the estate uses. A further one is a line here. */
     public const PAGE_TYPES = ['WebPage', 'Article', 'CollectionPage', 'ProfilePage'];
 
-    public function __construct(private UrlResolver $urls) {}
+    private bool $installed;
+
+    /**
+     * `laravel-data-schema-org` is a host's choice (beam-ux suggests it): a host without it carries no @graph and keeps
+     * the rest of its Page Head. `$installed` is detected once; a test may state it.
+     */
+    public function __construct(private UrlResolver $urls, ?bool $installed = null)
+    {
+        $this->installed = $installed ?? (class_exists(SchemaOrgGraph::class) && class_exists(\Spatie\SchemaOrg\WebPage::class));
+    }
+
+    /** Whether this host can project Structured Data at all. */
+    public function installed(): bool
+    {
+        return $this->installed;
+    }
 
     /**
      * @param  list<BeamUxEntry>  $chain  root first, ending at the page

@@ -29,7 +29,6 @@
         "rushing/laravel-versioning": "*",
         "rushing/php-popcorn": "dev-main",
         "schemastud/laravel-blockdoc": "*",
-        "schemastud/laravel-data-schema-org": "*",
         "schemastud/laravel-data-schemas": "*",
         "schemastud/laravel-frame": "*",
         "splicewire/laravel-beam": "*",
@@ -47,11 +46,13 @@
         "phpunit/phpunit": "^11.0|^12.0",
         "laravel/pint": "^1.0",
         "wikimedia/composer-merge-plugin": "^2.1",
-        "splicewire/laravel-beam-media": "*"
+        "splicewire/laravel-beam-media": "*",
+        "schemastud/laravel-data-schema-org": "*"
     },
     "suggest": {
         "splicewire/laravel-beam-calendars": "Schedules reviewed Releases through the existing calendar action service. Publish-now does not require calendars.",
-        "splicewire/laravel-beam-media": "Entry-scoped raster image upload and picker; hosts without media keep the authoring surface unchanged."
+        "splicewire/laravel-beam-media": "Entry-scoped raster image upload and picker; hosts without media keep the authoring surface unchanged.",
+        "schemastud/laravel-data-schema-org": "Projects each page's Structured Data (one @graph per page, ADR-0234 d9); hosts without it keep the rest of the Page Head."
     },
     "autoload": {
         "psr-4": {

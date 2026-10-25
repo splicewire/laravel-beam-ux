@@ -11,7 +11,9 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Splicewire\Beam\Sitemap\Resolvers\SitemapBaseUrlResolver;
+use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Format\UxFormat;
+use Splicewire\Beam\Ux\Head\PageGraph;
 use Splicewire\Beam\Ux\Head\PageHead;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -111,6 +113,32 @@ class PageHeadTest extends TestCase
         ], $this->node($graph, 'BreadcrumbList')['itemListElement']);
         $this->assertSame('https://site.test/docs/api#breadcrumb', $this->node($graph, 'BreadcrumbList')['@id']);
         $this->assertSame('Acme', $this->node($graph, 'Organization')['name'], 'a node the page names is in the graph');
+    }
+
+    public function test_without_the_schema_org_package_a_page_keeps_its_head_and_carries_no_graph(): void
+    {
+        // GO 32 (2026-10-25): five live hosts that symlink beam-ux don't install laravel-data-schema-org. The graph is
+        // the package's to project, so without it a page carries no @graph, and its title, description, canonical and
+        // social tags are unchanged.
+        $this->app->instance(PageGraph::class, new PageGraph(app(UrlResolver::class), installed: false));
+        $this->page('about', ['title' => 'About us', 'seo_description' => 'Who we are.']);
+
+        $head = $this->get('/about')->assertOk()->json('props.head');
+
+        $this->assertSame('<title data-inertia="title">About us - Acme</title>', $head[0]);
+        $this->assertContains('<meta data-inertia="description" name="description" content="Who we are.">', $head);
+        $this->assertContains('<link data-inertia="canonical" rel="canonical" href="https://site.test/about">', $head);
+        $this->assertSame([], preg_grep('/application\/ld\+json/', $head), 'no JSON-LD without the package');
+    }
+
+    public function test_beam_ux_suggests_the_schema_org_package_rather_than_requiring_it(): void
+    {
+        // A host that wants Structured Data requires laravel-data-schema-org itself, as the starters do.
+        $manifest = json_decode((string) file_get_contents(__DIR__.'/../composer.json'), true, flags: JSON_THROW_ON_ERROR);
+
+        $this->assertArrayNotHasKey('schemastud/laravel-data-schema-org', $manifest['require']);
+        $this->assertArrayHasKey('schemastud/laravel-data-schema-org', $manifest['require-dev']);
+        $this->assertArrayHasKey('schemastud/laravel-data-schema-org', $manifest['suggest']);
     }
 
     public function test_every_page_below_the_root_starts_its_trail_at_the_sites_home(): void
