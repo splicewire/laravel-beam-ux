@@ -77,10 +77,18 @@ class BeamUxManifestRegistryAudit implements DoctorAudit
      */
     private function components(string $realm): array
     {
-        $probe = new BeamUxEntry(['type' => 'page', 'realm' => $realm]);
-        $names = array_column(app(ManifestProfileResolver::class)->resolve($probe)['nodes'], 'name');
+        // One JS registry serves every page of the realm: where MDX pages hold blocks, their profile adds the beam-mdx
+        // kit (ADR-0233 d7), so the compared vocabulary is the union of the TSX and the MDX page profiles.
+        $probes = [new BeamUxEntry(['type' => 'page', 'realm' => $realm])];
+        if (config('beam.ux.mdx.holds_blocks')) {
+            $probes[] = new BeamUxEntry(['type' => 'page', 'realm' => $realm, 'format' => 'mdx']);
+        }
+        $names = [];
+        foreach ($probes as $probe) {
+            $names = [...$names, ...array_column(app(ManifestProfileResolver::class)->resolve($probe)['nodes'], 'name')];
+        }
 
-        return array_values(array_filter($names, fn (string $name) => $name !== '' && ctype_upper($name[0])));
+        return array_values(array_unique(array_filter($names, fn (string $name) => $name !== '' && ctype_upper($name[0]))));
     }
 
     private static function inconclusive(string $detail, string $realm = ''): Finding
