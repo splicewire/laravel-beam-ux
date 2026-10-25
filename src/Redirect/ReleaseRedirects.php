@@ -17,7 +17,10 @@ use Splicewire\Beam\Ux\Type\UxType;
  * readiness report and its Preview all read one plan.
  *
  * A move leaves a Redirect at every URL a guest could open before it (a published page whose chain the publish gate
- * passes: decision 8) that no page answers after it, to the page that was there, by identity. That covers the moved
+ * passes: decision 8) that no page answers after it, to the page that was there, by identity. Read rights don't
+ * enter here: a page only some readers may read keeps its old URL for them, because a Redirect answers only a reader
+ * who may read its target (decision 10), and a page answers its URL whoever may read it, as EP-30's save check and
+ * prune count it. That covers the moved
  * pages and every page under them whose URL changed, composed with all of the publish's moves at once, as
  * {@see \Splicewire\Beam\Ux\Publish\EntryUrlChanges} composes them. A swap, a new page at an old URL, a root-absolute
  * segment and a hidden page leave none. A Record Page that moves leaves a path-and-below Redirect from its old static
