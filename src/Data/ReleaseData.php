@@ -40,6 +40,8 @@ final class ReleaseData extends BeamData
         public bool $previewLinksEnabled = false,
         /** A Preview Link minted for this read (7 days), for whoever may manage the links; never the secret. */
         public ?string $previewLink = null,
+        /** ADR-0232 d15: where a signed-in author opens this Release's Preview; null when it has nothing saved to render. */
+        public ?string $previewHref = null,
     ) {}
 
     public static function scope(Builder $query): Builder
@@ -68,7 +70,20 @@ final class ReleaseData extends BeamData
             (bool) $model->getAttribute('preview_links_enabled'),
             $model->getAttribute('preview_links_enabled') && app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->mayManageLinks($model, request()->user())
                 ? app(\Splicewire\Beam\Ux\Preview\ReleasePreviewLinks::class)->url($model) : null,
+            self::previewHref($model, $members),
         );
+    }
+
+    /** @param \Illuminate\Support\Collection<int, \Splicewire\Beam\Ux\Models\BeamUxReleaseMember> $members */
+    private static function previewHref(BeamUxRelease $model, \Illuminate\Support\Collection $members): ?string
+    {
+        $name = config('beam.ux.route_name', 'beam.ux.').'site.preview.open';
+        if (! in_array($model->status, \Splicewire\Beam\Ux\Release\ReleaseLifecycle::OPEN, true)
+            || $members->whereNotNull('version_id')->isEmpty() || ! \Illuminate\Support\Facades\Route::has($name)) {
+            return null;
+        }
+
+        return route($name, ['release' => $model->getKey()], false);
     }
 
     private static function filesHref(?string $member): ?string

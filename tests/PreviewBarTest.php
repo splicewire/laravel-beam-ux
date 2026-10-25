@@ -165,6 +165,35 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
         $this->assertStringNotContainsString('Live title', $previewed);
     }
 
+    public function test_an_author_opens_a_releases_preview_on_its_first_changed_page(): void
+    {
+        // ADR-0232 d15 (EP-18 slice 4): the Release page's Preview. Signed in, no link needed; the same 8-hour Preview.
+        $pub = app(EntryPublication::class);
+        $about = $this->livePage('about');
+        $release = $this->release([$about->id => $pub->recordDraft($about, [$this->node('section')])->headVersion]);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => $user?->getAuthIdentifier() === 'author');
+
+        $this->getJson("/_beam/preview/open/{$release->id}")->assertUnauthorized();
+        $this->actingAs($this->user('reader'))->get("/_beam/preview/open/{$release->id}")->assertForbidden();
+        $opened = $this->actingAs($this->user('author'))->get("/_beam/preview/open/{$release->id}");
+
+        $opened->assertRedirect('/about');
+        $this->assertSame('no-store, private', $opened->headers->get('Cache-Control'));
+        $grant = app(\Splicewire\Beam\Ux\Preview\PreviewGrantResolver::class)
+            ->resolve((string) $opened->getCookie(ResolvePreviewContext::COOKIE, false)?->getValue());
+        $this->assertNotNull($grant);
+        $this->assertSame([$release->id, 'author'], [$grant->release_id, $grant->created_by]);
+        $this->assertEqualsWithDelta(now()->addHours(8)->getTimestamp(), $grant->expires_at->getTimestamp(), 60);
+    }
+
+    public function test_a_release_with_nothing_saved_to_render_has_no_preview_to_open(): void
+    {
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => $user?->getAuthIdentifier() === 'author');
+        $release = $this->release([$this->livePage('about')->id => null]);
+
+        $this->actingAs($this->user('author'))->get("/_beam/preview/open/{$release->id}")->assertNotFound();
+    }
+
     public function test_the_switch_needs_a_preview_and_returns_only_to_this_site(): void
     {
         $credential = $this->openLink($this->release([$this->livePage('about')->id => null]));
@@ -214,6 +243,15 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
         $pub->publishVersion($entry->fresh(), $pub->recordDraft($entry->fresh(), $body)->headVersion);
 
         return $entry->fresh();
+    }
+
+    private function user(string $id): \Illuminate\Foundation\Auth\User
+    {
+        $user = new \Illuminate\Foundation\Auth\User;
+        $user->setKeyType('string');
+        $user->forceFill(['id' => $id]);
+
+        return $user;
     }
 
     private function node(string $name): array

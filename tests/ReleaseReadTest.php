@@ -110,6 +110,21 @@ class ReleaseReadTest extends TestCase
         $this->getJson("/beam-ux-releases/{$this->release->id}/changes")->assertForbidden();
     }
 
+    public function test_a_release_with_a_saved_member_links_its_author_to_its_preview(): void
+    {
+        // ADR-0232 d15 (EP-18 slice 4): the Release panel's Preview is a plain link to the author route.
+        \Illuminate\Support\Facades\Route::beamUxSite('site/entry');
+        app('router')->getRoutes()->refreshNameLookups();
+        $this->actingAs($this->user('author'));
+        $this->getJson("/beam-ux-releases/{$this->release->id}")->assertOk()->assertJsonPath('data.previewHref', null);
+
+        \Illuminate\Support\Facades\DB::table('beam_ux_release_members')->insert(['id' => (string) \Illuminate\Support\Str::uuid(),
+            'release_id' => $this->release->id, 'entry_id' => (string) \Illuminate\Support\Str::uuid(), 'version_id' => (string) \Illuminate\Support\Str::uuid()]);
+
+        $this->getJson("/beam-ux-releases/{$this->release->id}")->assertOk()
+            ->assertJsonPath('data.previewHref', "/_beam/preview/open/{$this->release->id}");
+    }
+
     public function test_someone_who_cannot_author_can_neither_list_nor_open_a_release(): void
     {
         $this->actingAs($this->user('reader'));
