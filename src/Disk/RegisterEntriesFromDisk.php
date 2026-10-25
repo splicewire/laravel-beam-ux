@@ -23,7 +23,6 @@ use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Containment\PageFields;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
-use Splicewire\Beam\Ux\Data\EntryFrontmatterData;
 use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
 use Splicewire\Beam\Ux\Files\MdxPageFile;
 use Splicewire\Beam\Ux\Format\UxFormat;
@@ -458,12 +457,7 @@ class RegisterEntriesFromDisk
         if (! MdxPageFile::applies($entry)) {
             return;
         }
-        $claimed = [
-            ...EntryFrontmatterData::fieldNames(),
-            ...array_map(FrontmatterParser::canonicalize(...), MdxPageFile::KEYS),
-            ...array_map(fn (Right $right) => $right->value, Right::cases()),
-        ];
-        $unknown = array_diff_key($this->frontmatter($source), array_flip($claimed));
+        $unknown = array_diff_key($this->frontmatter($source), array_flip(EntryPageSettingsData::reservedFrontmatterKeys()));
         if ($unknown === []) {
             return;
         }

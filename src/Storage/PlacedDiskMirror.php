@@ -55,15 +55,24 @@ class PlacedDiskMirror
             return false;
         }
 
-        $source = $entry->codec()->decode($body);
-        // ADR-0233 d3: an MDX page that holds blocks keeps its page settings out of its body, and its file prints them
-        // as the frontmatter header import reads back.
-        if (MdxPageFile::applies($entry) && array_is_list($body)) {
-            $source = MdxPageFile::print(MdxPageFile::settingsOf($entry), $source);
-        }
-        $this->disk->put($path, $source);
+        $this->disk->put($path, $this->bytes($entry, $body));
 
         return true;
+    }
+
+    /**
+     * The bytes the mirror writes for an entry's body: its codec's source, and for an MDX page that holds blocks its
+     * page settings as the frontmatter header first (ADR-0233 d3), since such a page keeps them out of its body. The
+     * Release recording and the Files action read the same bytes, so a commit and a comparison match the file.
+     *
+     * @param  array<string, mixed>  $body
+     */
+    public function bytes(BeamUxEntry $entry, array $body): string
+    {
+        $source = $entry->codec()->decode($body);
+
+        return MdxPageFile::applies($entry) && array_is_list($body)
+            ? MdxPageFile::print(MdxPageFile::settingsOf($entry), $source) : $source;
     }
 
     /**

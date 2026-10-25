@@ -66,11 +66,34 @@ final class EntryPageSettingsData extends BeamData
                 foreach (is_array($value) ? array_keys($value) : [] as $key) {
                     if (! is_string($key) || preg_match('/^[a-z0-9]+(?:_[a-z0-9]+)*$/D', $key) !== 1) {
                         $fail('An unclaimed frontmatter key is a snake_case name.');
+                    } elseif (in_array($key, self::reservedFrontmatterKeys(), true)) {
+                        $fail("The unclaimed key [{$key}] is declared, so it cannot be kept as unclaimed.");
                     }
                 }
             }],
             'unclaimed.*' => ['string', 'max:2000'],
         ];
+    }
+
+    /**
+     * The frontmatter keys a page declares, in their canonical snake_case spelling: every page setting, and the keys
+     * registration from disk reads onto the row (ADR-0212's rights, the realm, the workflow marking). An unclaimed
+     * key may name none of them.
+     *
+     * @return list<string>
+     */
+    public static function reservedFrontmatterKeys(): array
+    {
+        $keys = [];
+        foreach ((new \ReflectionClass(self::class))->getConstructor()?->getParameters() ?? [] as $parameter) {
+            $keys[] = \Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser::canonicalize($parameter->getName());
+        }
+
+        return array_values(array_unique([
+            ...$keys,
+            ...EntryFrontmatterData::fieldNames(),
+            ...array_map(fn (\Splicewire\Beam\Ux\Access\Right $right) => $right->value, \Splicewire\Beam\Ux\Access\Right::cases()),
+        ]));
     }
 
     public static function fromEntry(BeamUxEntry $entry): self

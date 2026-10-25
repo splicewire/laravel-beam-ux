@@ -320,12 +320,11 @@ class EntryPublicationTest extends TestCase
         }
     }
 
-    /** A published MDX page that holds blocks (ADR-0233 d1), mirrored to an owned file root. */
-    private function blocksMdxFileFixture(): array
+    /** Hold MDX as blocks behind a reversible lens over paragraphs; the Node lens is proven in laravel-beam-mdx. */
+    private function holdMdxAsBlocksWithParagraphLens(): void
     {
         config(['beam.ux.mdx.holds_blocks' => true]);
         $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
-        // A reversible lens over paragraphs; the Node lens is proven in laravel-beam-mdx.
         $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, new class implements \Splicewire\Beam\Mdx\Lens\MdxLens
         {
             public function read(string $body, array $context = []): array
@@ -341,6 +340,12 @@ class EntryPublicationTest extends TestCase
                 return implode("\n\n", array_map(fn (array $block) => $block['children'][0]['value'], $doc))."\n";
             }
         });
+    }
+
+    /** A published MDX page that holds blocks (ADR-0233 d1), mirrored to an owned file root. */
+    private function blocksMdxFileFixture(): array
+    {
+        $this->holdMdxAsBlocksWithParagraphLens();
         $directory = $this->ownedFileFixtureRoot().'/mdx';
         mkdir($directory, 0700);
         config(['filesystems.disks.mdx-file' => ['driver' => 'local', 'root' => $directory], 'beam.ux.storage.mirror_disk' => 'mdx-file']);
@@ -539,6 +544,79 @@ class EntryPublicationTest extends TestCase
         $envelope = app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->of($entry->fresh()->forceFill(['parent_id' => $parent->id]), self::BODY_ONE);
         $this->assertSame(['recipe'], $envelope->pageFields['names']);
         $this->assertSame(['servings', 'cuisine', 'vegetarian'], array_keys($envelope->pageFields['schema']['properties']));
+    }
+
+    public function test_an_unclaimed_key_that_names_a_declared_key_is_refused_and_never_overrides_the_file(): void
+    {
+        // review-r1 (EP-26 E): unclaimed['title'] would have printed over the page's own title while the version held
+        // another, and a registration-only key (realm) would have been read back onto the row by the next import.
+        [$entry, , , , , $publication] = $this->blocksMdxFileFixture();
+        $parent = $this->recipesParent();
+        $draft = fn (array $unclaimed, ?string $parentId = null) => $publication->recordDraft($entry->fresh(), self::BODY_ONE, null,
+            \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'Help', 'parentId' => $parentId, 'unclaimed' => $unclaimed]));
+        foreach ([[['title' => 'Injected'], null, 'title'], [['realm' => 'operator'], null, 'realm'], [['servings' => '9'], $parent->id, 'servings']] as [$unclaimed, $parentId, $key]) {
+            try {
+                $draft($unclaimed, $parentId);
+                $this->fail("Kept a declared key as unclaimed: {$key}");
+            } catch (ValidationException $failure) {
+                $this->assertArrayHasKey("pageSettings.unclaimed.{$key}", $failure->errors());
+            }
+        }
+        $this->assertFalse(\Illuminate\Support\Facades\Validator::make(
+            ['unclaimed' => ['nav_order' => '1']], ['unclaimed' => \Splicewire\Beam\Ux\Data\EntryPageSettingsData::rules()['unclaimed']])->passes(),
+            'the page-settings input rule refuses it too');
+        $this->expectException(\InvalidArgumentException::class);
+        \Splicewire\Beam\Ux\Containment\PageFields::check(Fixtures\CollidingFields::class, []);
+    }
+
+    public function test_page_fields_answer_to_the_parent_the_draft_names_not_the_row(): void
+    {
+        // review-r1 (EP-26 E): a draft that moves a page to the root, or under another parent, is checked against where
+        // it is going, not the parent its row still names.
+        [$entry, , , , , $publication] = $this->blocksMdxFileFixture();
+        $recipes = $this->recipesParent();
+        $plain = $this->publishedPage(self::BODY_ONE);
+        $entry->forceFill(['parent_id' => $recipes->id])->save();
+        $draft = fn (?string $parentId) => $publication->recordDraft($entry->fresh(), self::BODY_ONE, null,
+            \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'Help', 'parentId' => $parentId, 'fields' => ['servings' => 4]]));
+        foreach (['to the root' => null, 'under a parent that declares none' => (string) $plain->id] as $move => $parentId) {
+            try {
+                $draft($parentId);
+                $this->fail("Checked a move {$move} against the old parent");
+            } catch (ValidationException $failure) {
+                $this->assertArrayHasKey('pageSettings.fields', $failure->errors());
+            }
+        }
+
+        $draft((string) $recipes->id);
+        $particle = $entry->fresh()->particle;
+        $particle->meta = [...$particle->meta, 'pageSettings' => [...$particle->meta['pageSettings'], 'parentId' => null, 'fields' => []]];
+        $particle->save();
+        $this->assertNull(app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->of($entry->fresh(), self::BODY_ONE)->pageFields['schema'],
+            'the envelope offers the fields of the parent the working copy names');
+    }
+
+    public function test_a_release_records_a_blocks_mdx_page_with_its_frontmatter_header(): void
+    {
+        // The mirror writes the header; the recorded blob must be those same bytes, not the bare body.
+        [$repo, $git] = $this->recordingRepository();
+        $this->holdMdxAsBlocksWithParagraphLens();
+        $entry = BeamUxEntry::create(['slug' => 'recorded-mdx', 'type' => 'page', 'format' => 'mdx', 'realm' => 'site', 'title' => 'Help', 'nav_order' => 2]);
+        $publication = app(EntryPublication::class);
+        $publication->write($entry, [['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'First']]]]);
+        $publication->publishAuthoredBody($entry->fresh());
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        $draft = $publication->recordDraft($entry->fresh(), [['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Second']]]]);
+
+        $state = EntryPublishOp::handle($entry->fresh(), Request::create('/', 'POST', ['ref' => $draft->headVersion]), $author);
+
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt(\Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id));
+        $this->assertSame('recorded', $receipt?->state, $receipt?->error ?? '');
+        $this->assertStringStartsWith("---\ntitle: Help\nnavOrder: 2\n", file_get_contents($repo.'/'.$path));
+        $this->assertSame(file_get_contents($repo.'/'.$path), $git(['show', 'HEAD:'.$path])."\n");
     }
 
     /** A published parent page whose children carry the host's `recipe` Page Fields (ADR-0233 d4). */

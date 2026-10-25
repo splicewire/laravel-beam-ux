@@ -32,6 +32,13 @@ class MdxPageFileTest extends TestCase
         $this->assertSame(['audience' => 'admins', 'schema_type' => 'HowTo'], MdxPageFile::read(MdxPageFile::print($settings, "Body\n"))['unknown']);
     }
 
+    public function test_an_unclaimed_key_never_prints_over_a_declared_one(): void
+    {
+        $settings = new EntryPageSettingsData(title: 'Help', fields: ['servings' => 2], unclaimed: ['title' => 'Injected', 'servings' => '9', 'audience' => 'admins']);
+
+        $this->assertSame("---\ntitle: Help\nservings: 2\naudience: admins\n---\n\nBody\n", MdxPageFile::print($settings, "Body\n"));
+    }
+
     public function test_page_fields_print_after_the_settings_and_before_the_unclaimed_keys(): void
     {
         $settings = new EntryPageSettingsData(title: 'Pie', fields: ['servings' => 4, 'vegetarian' => false], unclaimed: ['audience' => 'cooks']);

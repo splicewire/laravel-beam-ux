@@ -10,6 +10,7 @@ use ReflectionNamedType;
 use ReflectionParameter;
 use Schemastud\DataSchemas\Generators\Generator;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
+use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
@@ -38,15 +39,44 @@ final class PageFields
         return array_values(array_filter(array_keys(config('beam.ux.page_fields', [])), fn ($name) => self::classNamed((string) $name) !== null));
     }
 
-    /** The class a child page's fields follow: the one its parent's published `childFields` names, if any. */
-    public static function forChild(BeamUxEntry $child, ?string $parentId = null): ?string
+    /** The class a page's fields follow under its current parent (the row's `parent_id`). */
+    public static function forChild(BeamUxEntry $child): ?string
     {
-        $parentId ??= $child->parent_id;
+        return self::forParent($child, $child->parent_id);
+    }
+
+    /**
+     * The class a page's fields follow under the parent `$parentId`: the one that parent's published `childFields`
+     * names. A null parent is a root page, which no parent declares fields for. The caller names the parent
+     * explicitly, so a draft that moves the page (to the root, or to another parent) is checked against its new parent.
+     */
+    public static function forParent(BeamUxEntry $child, ?string $parentId): ?string
+    {
         if ($parentId === null || ! Schema::connection($child->getConnectionName())->hasColumn('beam_ux_entries', 'child_fields')) {
             return null;
         }
 
         return self::classNamed($child->newQuery()->whereKey($parentId)->value('child_fields'));
+    }
+
+    /**
+     * An unclaimed key may name nothing a page declares: no page setting, no key registration reads onto the row, and
+     * none of the Page Fields its parent declares. Otherwise the printed file would carry the key twice, or a value the
+     * version does not hold.
+     *
+     * @param  array<string, string>  $unclaimed
+     */
+    public static function assertUnclaimed(?string $class, array $unclaimed): void
+    {
+        $declared = EntryPageSettingsData::reservedFrontmatterKeys();
+        foreach ($class === null ? [] : array_keys(self::parameters($class)) as $name) {
+            $declared[] = FrontmatterParser::canonicalize($name);
+        }
+        foreach (array_keys($unclaimed) as $key) {
+            if (in_array(FrontmatterParser::canonicalize((string) $key), $declared, true)) {
+                throw ValidationException::withMessages(["pageSettings.unclaimed.{$key}" => 'This key is declared, so it cannot be kept as unclaimed. Set it as the page setting or Page Field it names.']);
+            }
+        }
     }
 
     /**
@@ -146,6 +176,9 @@ final class PageFields
             $type = $parameter->getType();
             if (! $type instanceof ReflectionNamedType || ! in_array($type->getName(), ['string', 'int', 'float', 'bool'], true)) {
                 throw new InvalidArgumentException("Page Fields class [{$class}] declares [{$parameter->getName()}] as a non-scalar; Page Fields are flat scalars (ADR-0233 d4).");
+            }
+            if (in_array(FrontmatterParser::canonicalize($parameter->getName()), EntryPageSettingsData::reservedFrontmatterKeys(), true)) {
+                throw new InvalidArgumentException("Page Fields class [{$class}] declares [{$parameter->getName()}], which a page setting already names; a Page Field needs its own key.");
             }
             $parameters[$parameter->getName()] = $parameter;
         }

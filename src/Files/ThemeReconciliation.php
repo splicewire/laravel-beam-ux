@@ -27,6 +27,7 @@ use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Recording\ReleaseRecording;
 use Splicewire\Beam\Ux\Release\ReleaseService;
+use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
@@ -335,7 +336,7 @@ class ThemeReconciliation
             throw new FileConflict('unsupported', 'This MDX page still holds its source. Its host converts it to blocks once (ADR-0233 d9) before the Files action reads it.', 422);
         }
 
-        return MdxPageFile::print(MdxPageFile::settingsOf($entry), $entry->codec()->decode($body));
+        return app(PlacedDiskMirror::class)->bytes($entry, $body);
     }
 
     /** The body a file drafts, and for a blocks MDX page the page settings its header changed (else null).

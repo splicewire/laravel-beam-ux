@@ -48,7 +48,7 @@ class ReleaseRecording
             $size = 0;
             foreach ($prepared as [$entry, $version, $body]) {
                 $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
-                $bytes = $entry->codec()->decode($body);
+                $bytes = app(PlacedDiskMirror::class)->bytes($entry, $body);
                 $absolute = $disk->path($path);
                 $this->contained($disk->path(''), $path);
                 $size += strlen($bytes);
@@ -63,7 +63,7 @@ class ReleaseRecording
             }
             foreach ($takedowns as [$entry, $version, $body]) {
                 $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
-                $bytes = $entry->codec()->decode($body);
+                $bytes = app(PlacedDiskMirror::class)->bytes($entry, $body);
                 $absolute = $disk->path($path);
                 $this->contained($disk->path(''), $path);
                 $size += strlen($bytes);
@@ -182,7 +182,7 @@ class ReleaseRecording
                         throw new RecordingFailure('mirror', 'A Release mirror could not be completed.');
                     }
                     $actual = $disk->get($path);
-                    if ($actual !== $entry->codec()->decode($body)) {
+                    if ($actual !== app(PlacedDiskMirror::class)->bytes($entry, $body)) {
                         throw new RecordingFailure('mirror', 'A Release mirror did not match its published snapshot.');
                     }
                 }

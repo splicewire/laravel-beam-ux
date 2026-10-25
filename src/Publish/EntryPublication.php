@@ -272,13 +272,15 @@ class EntryPublication
             throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);
         }
         if ($pageSettings !== null) {
-            // ADR-0233 d4: a page names only Page Fields the host registers, and its own are checked against the
-            // class its parent declares.
+            // ADR-0233 d4: a page names only Page Fields the host registers, its own are checked against the class
+            // the parent it names declares (a draft that moves the page answers to its new parent), and an unclaimed
+            // key may name nothing declared (d3).
             if ($pageSettings->childFields !== null && \Splicewire\Beam\Ux\Containment\PageFields::classNamed($pageSettings->childFields) === null) {
                 throw ValidationException::withMessages(['pageSettings.childFields' => 'The host registers no Page Fields by this name (beam.ux.page_fields).']);
             }
-            $pageSettings->fields = \Splicewire\Beam\Ux\Containment\PageFields::check(
-                \Splicewire\Beam\Ux\Containment\PageFields::forChild($entry, $pageSettings->parentId), $pageSettings->fields);
+            $class = \Splicewire\Beam\Ux\Containment\PageFields::forParent($entry, $pageSettings->parentId);
+            $pageSettings->fields = \Splicewire\Beam\Ux\Containment\PageFields::check($class, $pageSettings->fields);
+            \Splicewire\Beam\Ux\Containment\PageFields::assertUnclaimed($class, $pageSettings->unclaimed);
         }
         if ($pageSettings !== null && \Splicewire\Beam\Ux\Files\MdxPageFile::applies($entry)) {
             \Splicewire\Beam\Ux\Files\MdxPageFile::assertPrintable($pageSettings);

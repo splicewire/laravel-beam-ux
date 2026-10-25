@@ -58,10 +58,18 @@ final class MdxPageFile
     public static function print(EntryPageSettingsData $settings, string $body): string
     {
         $lines = '';
+        $printed = [];
+        foreach ([...self::fields($settings), ...PageFields::toFrontmatter($settings->fields)] as $key => $value) {
+            $printed[FrontmatterParser::canonicalize($key)] = true;
+            $lines .= $key.': '.$value."\n";
+        }
         $unclaimed = $settings->unclaimed;
         ksort($unclaimed);
-        foreach ([...self::fields($settings), ...PageFields::toFrontmatter($settings->fields), ...$unclaimed] as $key => $value) {
-            $lines .= $key.': '.$value."\n";
+        foreach ($unclaimed as $key => $value) {
+            // A save refuses an unclaimed key that names a declared one; one never overrides what the page declares.
+            if (! isset($printed[FrontmatterParser::canonicalize($key)])) {
+                $lines .= $key.': '.$value."\n";
+            }
         }
 
         return "---\n".$lines."---\n\n".$body;
@@ -133,6 +141,7 @@ final class MdxPageFile
             ...$fields, 'parentId' => $entry->parent_id, 'fields' => $pageFields, 'unclaimed' => $unclaimed,
         ]);
         $settings->fields = PageFields::check($class, $settings->fields);
+        PageFields::assertUnclaimed($class, $settings->unclaimed);
 
         return $settings;
     }
