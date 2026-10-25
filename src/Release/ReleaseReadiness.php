@@ -121,6 +121,14 @@ final class ReleaseReadiness
                 array_key_exists($problem['entryId'], $refs) ? ['open', 'drop'] : ['open']);
         }
         $notes = [...$notes, ...$this->inOtherReleases($release, $members->pluck('entry_id')->map(fn ($id) => (string) $id)->all())];
+        // ADR-0236 d7, d8: what Publish will do that an author might not expect.
+        $redirects = app(\Splicewire\Beam\Ux\Redirect\ReleaseRedirects::class)->forRelease($release);
+        foreach ($redirects['replaced'] as $replaced) {
+            $notes[] = new Item('redirect-replaced', $replaced['entryId'], "This page takes {$replaced['path']}, so Publish removes the Redirect there.");
+        }
+        foreach ($redirects['staysHidden'] as $hidden) {
+            $notes[] = new Item('stays-hidden', $hidden, 'This page stays hidden after Publish: a page above it is hidden.', ['open']);
+        }
 
         return new ReleaseReadinessData($blockers === [], $blockers, $notes);
     }

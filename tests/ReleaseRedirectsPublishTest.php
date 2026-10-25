@@ -140,6 +140,40 @@ class ReleaseRedirectsPublishTest extends AuthoredComponentNativeTestCase
         $service->putMember($release, $legacy->id, null, $this->author, $component->id);
     }
 
+    public function test_a_release_names_what_it_replaces_and_what_stays_hidden_and_lists_its_redirects(): void
+    {
+        // ADR-0236 d2, d7, d8 (EP-31 slice 3): the readiness report notes a Redirect a page will replace and a page that
+        // stays hidden; the Release lists the Redirects it will leave while open, and the ones it left once published,
+        // each with its id so the panel can remove it.
+        $plans = $this->livePage('plans');
+        $old = $this->livePage('old');
+        $section = $this->livePage('section');
+        $this->bindLifecycle([$plans, $old, $section]);
+        $section->forceFill(['workflow_marking' => \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DRAFT])->save();
+        $late = $this->draftPage('late', $section);
+        DB::table('beam_ux_redirects')->insert(['id' => (string) Str::uuid(), 'realm' => 'site', 'path' => '/pricing', 'match' => 'exact',
+            'target_kind' => 'path', 'target_path' => '/plans', 'permanent' => true, 'origin' => 'author', 'created_at' => now(), 'updated_at' => now()]);
+        $service = app(ReleaseService::class);
+        $release = $service->create($plans, 'Rename', $this->author);
+        $service->putMember($release, $plans->id, $this->move($plans, 'pricing'), $this->author);
+        $service->putMember($release, $old->id, $this->move($old, 'new'), $this->author);
+        $service->putMember($release, $late->id, $this->move($late, 'late'), $this->author);
+
+        $notes = collect(app(ReleaseReadiness::class)->report($release)->notes)->map(fn ($item) => [$item->code, $item->entryId])->all();
+        $this->assertContains(['redirect-replaced', $plans->id], $notes);
+        $this->assertContains(['stays-hidden', $late->id], $notes);
+        $open = \Splicewire\Beam\Ux\Data\ReleaseData::project($release->fresh())->redirects;
+        $this->assertSame([['id' => null, 'path' => '/old', 'match' => 'exact', 'to' => '/new', 'origin' => 'release'],
+            ['id' => null, 'path' => '/plans', 'match' => 'exact', 'to' => '/pricing', 'origin' => 'release']], collect($open)->sortBy('path')->values()->all());
+
+        $service->dropMember($release, $late->id, $this->author);
+        $service->transition($release, 'publish', $this->author);
+
+        $made = collect(\Splicewire\Beam\Ux\Data\ReleaseData::project($release->fresh())->redirects)->sortBy('path')->values();
+        $this->assertSame([['/old', '/new', 'release'], ['/plans', '/pricing', 'release']], $made->map(fn ($r) => [$r['path'], $r['to'], $r['origin']])->all());
+        $this->assertSame(BeamUxRedirect::query()->where('path', '/old')->value('id'), $made[0]['id']);
+    }
+
     public function test_an_exact_redirect_already_at_a_url_a_move_takes_away_now_leads_to_the_page(): void
     {
         $about = $this->livePage('about');

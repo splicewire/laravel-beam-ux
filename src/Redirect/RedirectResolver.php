@@ -61,6 +61,10 @@ final class RedirectResolver
             return $trace;
         }
         $map = RedirectMap::for($realm, $connection);
+        if ($preview !== null) {
+            // d12: in a Preview, Redirects answer as its Release would leave them; the Preview writes nothing.
+            $map = $map->withPlanned(app(ReleaseRedirects::class)->forPreview($preview)['redirects'], $realm);
+        }
         // By reference: the walk's steps and permanence so far are part of every ending.
         $end = function (string $end, ?string $to = null, bool $private = false, bool $external = false) use (&$trace): array {
             return ['end' => $end, 'to' => $to, 'private' => $trace['private'] || $private, 'external' => $external] + $trace;

@@ -10,6 +10,8 @@ use Splicewire\Beam\Ux\Bindings\RecordPages;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRedirect;
+use Splicewire\Beam\Ux\Models\BeamUxRelease;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 use Splicewire\Beam\Ux\Type\UxType;
 
@@ -40,10 +42,14 @@ final class ReleaseRedirects
     ) {}
 
     /**
+     * `to` is where each leads once the publish runs (the target page's URL after it), which a Preview serves and the
+     * bar names. `gone` lists the URLs a Take-down with no target hides: the uniform 404 (d4).
+     *
      * @param  array<string, string>  $refs  the versions the publish puts live, by entry id
      * @param  array<string, ?string>  $takedowns  the entries it takes down, each with its target (an id or a URL) or null
      * @return array{
-     *     redirects: list<array{realm: string, path: string, match: string, targetKind: string, targetEntryId: ?string, targetPath: ?string, reason: string, entryId: string}>,
+     *     redirects: list<array{realm: string, path: string, match: string, targetKind: string, targetEntryId: ?string, targetPath: ?string, to: ?string, reason: string, entryId: string}>,
+     *     gone: list<array{realm: string, path: string, entryId: string}>,
      *     replaced: list<array{realm: string, path: string, redirectId: string, entryId: string}>,
      *     staysHidden: list<string>
      * }
@@ -56,6 +62,7 @@ final class ReleaseRedirects
 
         $answered = [];
         $redirects = [];
+        $gone = [];
         foreach ($before as $key => $was) {
             [$realm, $id] = explode('|', $key, 2);
             $entry = $now[$id];
@@ -69,7 +76,7 @@ final class ReleaseRedirects
                 $from = $this->prefixOf($was);
                 $to = $is === null ? null : $this->prefixOf($is);
                 if ($from !== null && $to !== null && $from !== $to) {
-                    $redirects[] = $this->row($realm, $from, 'prefix', 'path', null, $to, 'moved', $id);
+                    $redirects[] = $this->row($realm, $from, 'prefix', 'path', null, $to, $to, 'moved', $id);
                 }
 
                 continue;
@@ -78,23 +85,52 @@ final class ReleaseRedirects
                 continue;
             }
             if ($is !== null) {
-                $redirects[] = $this->row($realm, $was, 'exact', 'page', $id, null, 'moved', $id);
+                $redirects[] = $this->row($realm, $was, 'exact', 'page', $id, null, $is, 'moved', $id);
 
                 continue;
             }
             $takenDown = $this->takenDownAbove($after, $id, $removed);
-            if ($takenDown !== null && ($target = $this->target($now, $removed[$takenDown])) !== null) {
-                $redirects[] = $this->row($realm, $was, 'exact', 'page', $target, null, 'takedown', $id);
+            if ($takenDown === null) {
+                continue;
             }
+            $target = $this->target($now, $removed[$takenDown]);
+            $target === null
+                ? $gone[] = ['realm' => $realm, 'path' => $was, 'entryId' => $id]
+                : $redirects[] = $this->row($realm, $was, 'exact', 'page', $target, null, $afterUrls[$realm.'|'.$target] ?? null, 'takedown', $id);
         }
 
         return [
             'redirects' => $redirects,
+            'gone' => $gone,
             'replaced' => $this->replaced($context, $after, $afterUrls, $publishing),
             'staysHidden' => array_values(array_filter(array_keys($publishing), fn (string $id) => $after->has($id)
                 && $after[$id]->type === UxType::Page && ! array_key_exists((string) $id, $removed)
                 && ! $this->chainVisible($after, $id, $visibleAfter))),
         ];
+    }
+
+    /** The plan of a Release: its members' versions, and its Take-downs with their targets. */
+    public function forRelease(BeamUxRelease $release): array
+    {
+        $members = $release->members()->get();
+
+        return $this->plan((new BeamUxEntry)->setConnection($release->getConnectionName()),
+            $members->whereNotNull('version_id')->mapWithKeys(fn ($m) => [(string) $m->entry_id => (string) $m->version_id])->all(),
+            $members->whereNull('version_id')->mapWithKeys(fn ($m) => [(string) $m->entry_id => $m->redirect_target])->all());
+    }
+
+    /** The plan a Preview shows: its Release's, or the one saved version a single-entry Preview holds. */
+    public function forPreview(PreviewContext $preview): array
+    {
+        $grant = $preview->grant;
+        if ($grant->release_id !== null && $grant->release !== null) {
+            return $this->forRelease($grant->release);
+        }
+        $prototype = (new BeamUxEntry)->setConnection($grant->getConnectionName());
+
+        return $grant->entry_id !== null && $grant->version_id !== null
+            ? $this->plan($prototype, [(string) $grant->entry_id => (string) $grant->version_id])
+            : ['redirects' => [], 'gone' => [], 'replaced' => [], 'staysHidden' => []];
     }
 
     /**
@@ -301,9 +337,9 @@ final class ReleaseRedirects
         return $this->gate === null || $this->gate->isPublished($entry);
     }
 
-    private function row(string $realm, string $path, string $match, string $kind, ?string $entryTarget, ?string $pathTarget, string $reason, string $entryId): array
+    private function row(string $realm, string $path, string $match, string $kind, ?string $entryTarget, ?string $pathTarget, ?string $to, string $reason, string $entryId): array
     {
         return ['realm' => $realm, 'path' => $path, 'match' => $match, 'targetKind' => $kind, 'targetEntryId' => $entryTarget,
-            'targetPath' => $pathTarget, 'reason' => $reason, 'entryId' => $entryId];
+            'targetPath' => $pathTarget, 'to' => $to, 'reason' => $reason, 'entryId' => $entryId];
     }
 }

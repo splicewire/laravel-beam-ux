@@ -27,6 +27,27 @@ final class RedirectMap
             ->push($candidate)->values());
     }
 
+    /**
+     * The same map as a Preview's Release would leave it (ADR-0236 d12): each planned Redirect, as a path to where it
+     * leads after the Release, replacing a stored one at the same path and match. One with nowhere to go is left out.
+     *
+     * @param  list<array{realm: string, path: string, match: string, to: ?string}>  $planned
+     */
+    public function withPlanned(array $planned, string $realm): self
+    {
+        $map = $this->redirects;
+        foreach ($planned as $row) {
+            if ($row['realm'] !== $realm || $row['to'] === null) {
+                continue;
+            }
+            $map = $map->reject(fn (BeamUxRedirect $r) => $r->path === $row['path'] && $r->match === $row['match'])
+                ->push((new BeamUxRedirect)->forceFill(['realm' => $realm, 'path' => $row['path'], 'match' => $row['match'],
+                    'target_kind' => 'path', 'target_path' => $row['to'], 'permanent' => false, 'origin' => 'release']));
+        }
+
+        return new self($map->values());
+    }
+
     public function match(string $path): ?BeamUxRedirect
     {
         $exact = $this->redirects->first(fn (BeamUxRedirect $r) => $r->match === 'exact' && $r->path === $path);
