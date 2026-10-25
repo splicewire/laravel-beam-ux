@@ -94,6 +94,22 @@ class ReleaseReadTest extends TestCase
         $this->getJson("/beam-ux-releases/{$this->release->id}/readiness")->assertForbidden();
     }
 
+    public function test_an_author_reads_the_pages_a_release_changes_and_a_reader_cannot(): void
+    {
+        // ADR-0232 d10 (EP-18): the Release panel lists its changed pages and their Reach, as the Preview bar does.
+        app(AttributedParticleDiscovery::class)->registerClass(\Splicewire\Beam\Ux\Particle\ReleaseChangesOp::class);
+        Particle::ops('beam-ux-releases', 'beam-ux-release', 'changes');
+        Gate::define('entitlement:ux.author', fn ($user = null) => $user?->getAuthIdentifier() === 'author');
+
+        $this->actingAs($this->user('author'));
+        $this->getJson("/beam-ux-releases/{$this->release->id}/changes")->assertOk()
+            ->assertJsonPath('data.pages', [])
+            ->assertJsonPath('data.reach', []);
+
+        $this->actingAs($this->user('reader'));
+        $this->getJson("/beam-ux-releases/{$this->release->id}/changes")->assertForbidden();
+    }
+
     public function test_someone_who_cannot_author_can_neither_list_nor_open_a_release(): void
     {
         $this->actingAs($this->user('reader'));
