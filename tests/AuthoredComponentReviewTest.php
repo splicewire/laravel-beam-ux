@@ -297,4 +297,84 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
         $this->expectException(ValidationException::class);
         $component->fresh()->delete();
     }
+
+    public function test_code_only_page_headers_are_unchanged_when_an_unused_authored_component_exists(): void
+    {
+        $this->app->instance(\Schemastud\Blockdoc\Contracts\ManifestNodeSource::class, new class implements \Schemastud\Blockdoc\Contracts\ManifestNodeSource
+        {
+            public function profiles(): array
+            {
+                return ['content'];
+            }
+
+            public function nodeClassesFor(string $profile): array
+            {
+                return [];
+            }
+
+            public function docAdmitsFor(string $profile): ?array
+            {
+                return null;
+            }
+
+            public function marksFor(string $profile): array
+            {
+                return [];
+            }
+
+            public function manifest(string $profile): array
+            {
+                return ['nodes' => [['name' => 'CodeWidget', 'category' => 'html', 'admitsChildCategories' => [], 'admitsText' => false, 'slots' => [], 'attrsSchema' => ['type' => 'object', 'additionalProperties' => false]]]];
+            }
+        });
+        $this->app->bind(\Splicewire\Beam\Ux\Http\EntryRenderer::class, fn () => new class implements \Splicewire\Beam\Ux\Http\EntryRenderer
+        {
+            public function render(string $page, array $props): \Symfony\Component\HttpFoundation\Response
+            {
+                return response()->json(['props' => $props]);
+            }
+        });
+        Route::beamUxSite('test', withNav: false);
+        $root = BeamUxEntry::rootFor();
+        $pub = app(EntryPublication::class);
+        $page = BeamUxEntry::create(['slug' => 'only-code', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site', 'parent_id' => $root->id, 'segment' => 'only-code']);
+        $version = $pub->recordDraft($page, [$this->node('CodeWidget')]);
+        $pub->publishVersion($page->fresh(), $version->headVersion);
+        $before = $this->get('/only-code')->assertOk();
+        $cache = $before->headers->get('Cache-Control');
+        $etag = $before->headers->get('ETag');
+        $unused = $this->reviewComponent('unused-in-realm');
+        $pub->recordDraft($unused, $this->body('UnusedInRealm'));
+        $after = $this->get('/only-code')->assertOk();
+        $this->assertSame($cache, $after->headers->get('Cache-Control'));
+        $this->assertSame($etag, $after->headers->get('ETag'));
+        $this->assertStringNotContainsString('no-store', $after->headers->get('Cache-Control'));
+        $this->assertSame([], $after->json('props.artifact.components') ?? []);
+        fwrite(STDOUT, '\nCODE_ONLY_HEADERS '.json_encode(['before' => $cache, 'after' => $after->headers->get('Cache-Control'), 'etagBefore' => $etag, 'etagAfter' => $after->headers->get('ETag')]).'\n');
+    }
+
+    public function test_native_empty_working_head_does_not_bypass_the_delete_guard(): void
+    {
+        $component = $this->reviewComponent('native-cleared');
+        $pub = app(EntryPublication::class);
+        $draft = $pub->recordDraft($component, $this->body('NativeCleared'));
+        $pub->publishVersion($component->fresh(), $draft->headVersion);
+        $page = BeamUxEntry::create(['slug' => 'native-clear-user', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $pub->recordDraft($page, [$this->node('NativeCleared')]);
+        // Isolate the deletion gate from the separately tested Clear response projection.
+        $pub->write($component->fresh(), []);
+        app(\Rushing\Versioning\Contracts\VersionStore::class)->snapshot($component->fresh()->particle, 'cleared native head');
+        $this->assertSame([], app(AuthoredComponents::class)->working($component->fresh()));
+        $denied = false;
+        $otherFailure = null;
+        try {
+            $component->fresh()->delete();
+        } catch (ValidationException) {
+            $denied = true;
+        } catch (\Throwable $error) {
+            $otherFailure = $error::class;
+        }
+        $this->assertTrue($denied, 'The in-use gate did not refuse before deletion; later failure: '.($otherFailure ?? 'none'));
+        $this->assertNull($component->fresh()->deleted_at);
+    }
 }

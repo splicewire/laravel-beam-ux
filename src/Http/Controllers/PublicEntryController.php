@@ -214,8 +214,14 @@ class PublicEntryController
             $response->headers->set('Cache-Control', 'no-store, private');
         }
 
+        $delivered = [
+            ...array_map(fn ($component) => $component->toArray(), $componentData),
+            ...($chromeArtifacts['layout']['components'] ?? []),
+            ...($chromeArtifacts['template']['components'] ?? []),
+        ];
+        $hasDeliveredComponent = array_filter($delivered, fn ($component) => ($component['url'] ?? null) !== null) !== [];
         if ($record === null && $bindings === [] && ! app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->privateCache
-            && ! $this->gate->isRestricted($chain) && ($componentData !== [] || ($chromeArtifacts['layout']['components'] ?? []) !== [] || ($chromeArtifacts['template']['components'] ?? []) !== [])) {
+            && ! $this->gate->isRestricted($chain) && $hasDeliveredComponent) {
             // Each request projects current dependency pins; a publish changes this validator without recompiling callers.
             $response->setEtag(hash('sha256', json_encode([$this->artifactVersion($entry, $preview), $componentData, $chromeArtifacts], JSON_THROW_ON_ERROR)));
             // Other host page props/nav may be actor-specific; validators do not grant shared-cache permission.
