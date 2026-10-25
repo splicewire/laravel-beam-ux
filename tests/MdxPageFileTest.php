@@ -23,6 +23,14 @@ class MdxPageFileTest extends TestCase
         );
     }
 
+    public function test_unclaimed_keys_print_sorted_after_the_declared_ones(): void
+    {
+        $settings = new EntryPageSettingsData(title: 'Guide', unclaimed: ['schema_type' => 'HowTo', 'audience' => 'admins']);
+
+        $this->assertSame("---\ntitle: Guide\naudience: admins\nschema_type: HowTo\n---\n\nBody\n", MdxPageFile::print($settings, "Body\n"));
+        $this->assertSame(['audience' => 'admins', 'schema_type' => 'HowTo'], MdxPageFile::read(MdxPageFile::print($settings, "Body\n"))['unknown']);
+    }
+
     public function test_reading_accepts_either_key_spelling_and_names_the_keys_nothing_declares(): void
     {
         $file = MdxPageFile::read("---\ntitle: Guide\nnav_order: 3\nsocial-image: /og.png\naudience: admins\n---\n\nBody\n");
@@ -49,6 +57,13 @@ class MdxPageFileTest extends TestCase
             } catch (ValidationException $failure) {
                 $this->assertArrayHasKey('pageSettings.title', $failure->errors());
             }
+        }
+
+        try {
+            MdxPageFile::assertPrintable(new EntryPageSettingsData(title: 'Guide', unclaimed: ['audience' => ' admins']));
+            $this->fail('Printed an unreadable unclaimed value');
+        } catch (ValidationException $failure) {
+            $this->assertArrayHasKey('pageSettings.unclaimed.audience', $failure->errors());
         }
 
         MdxPageFile::assertPrintable(new EntryPageSettingsData(title: 'Guide: the "real" one'));

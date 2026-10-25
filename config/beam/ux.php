@@ -277,9 +277,11 @@ return [
     |                  Node), and the mirror prints it through the canonical printer.
     |                  When false (the default), MDX stays source-kind and the
     |                  body-only MDX loop is unchanged. A host turns it on only
-    |                  once its MDX is converted (ADR-0233 d9), and only once its
-    |                  frontmatter is held as page settings, since a blocks body
-    |                  carries no frontmatter (d3).
+    |                  once its MDX is converted (ADR-0233 d9). Its frontmatter is
+    |                  then the page's settings, held in the version (d3), and the
+    |                  mirror prints them back as the file's header. `beam:doctor`
+    |                  FAILS (BeamUxMdxPagesAudit) while this is on and any stored
+    |                  MDX page still holds source.
     |
     */
     'mdx' => [

@@ -352,8 +352,8 @@ class ThemeReconciliation
 
     /**
      * ADR-0233 d3: the header is the page's settings and the rest is its body. A header key no page setting declares
-     * refuses the file, since nothing would keep it; the body reads through the MDX Lens with ids reattached against
-     * the published blocks the file was printed from.
+     * is kept with the settings as written; the body reads through the MDX Lens with ids reattached against the
+     * published blocks the file was printed from.
      *
      * @param  array<int, array<string, mixed>>  $published
      * @return array{0: array<int, array<string, mixed>>, 1: ?EntryPageSettingsData}
@@ -364,15 +364,13 @@ class ThemeReconciliation
             throw new FileConflict('invalid', 'MDX import requires bounded UTF-8 with LF line endings.', 422);
         }
         $file = MdxPageFile::read($bytes);
-        if ($file['unknown'] !== []) {
-            throw new FileConflict('invalid', 'The header names keys no page setting declares ('.implode(', ', array_keys($file['unknown'])).'). Nothing was imported.', 422);
-        }
-        $header = $file['fields'];
-        $served = MdxPageFile::fields(MdxPageFile::settingsOf($entry));
-        ksort($header);
-        ksort($served);
+        $served = MdxPageFile::settingsOf($entry);
+        $header = [$file['fields'], $file['unknown']];
+        $current = [MdxPageFile::fields($served), $served->unclaimed];
+        array_walk($header, fn (array &$keys) => ksort($keys));
+        array_walk($current, fn (array &$keys) => ksort($keys));
         try {
-            $settings = $header === $served ? null : MdxPageFile::settingsFrom($file['fields'], $entry->parent_id);
+            $settings = $header === $current ? null : MdxPageFile::settingsFrom($file['fields'], $entry->parent_id, $file['unknown']);
             if ($settings !== null) {
                 MdxPageFile::assertPrintable($settings);
             }

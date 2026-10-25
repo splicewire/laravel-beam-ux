@@ -22,7 +22,9 @@ use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
+use Splicewire\Beam\Ux\Data\EntryFrontmatterData;
 use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
+use Splicewire\Beam\Ux\Files\MdxPageFile;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
@@ -340,6 +342,7 @@ class RegisterEntriesFromDisk
 
             try {
                 $this->writeBody($entry, $source);
+                $this->keepUnclaimed($entry, $source, $relative);
             } catch (ValidationException $e) {
                 $this->failures[$relative] = $e->errors()['source'][0] ?? 'the TSX lens could not lower the source.';
                 $this->writeBody($entry, $source, lower: false);
@@ -439,6 +442,44 @@ class RegisterEntriesFromDisk
             $entry->particle_id = $item->key;
             $entry->save();
         }
+    }
+
+    /**
+     * ADR-0233 d3 — a blocks MDX page keeps the frontmatter keys nothing declares in its registered version's page
+     * settings, so the mirror prints them back. Registration's own keys (`realm`, the rights, `workflow_marking`) are
+     * claimed here and land on columns as before. A key set the page settings refuse (a page with no title, a value
+     * the flat grammar cannot carry) is recorded with this run's failures rather than kept half-way.
+     */
+    private function keepUnclaimed(BeamUxEntry $entry, string $source, string $relative): void
+    {
+        if (! MdxPageFile::applies($entry)) {
+            return;
+        }
+        $claimed = [
+            ...EntryFrontmatterData::fieldNames(),
+            ...array_map(FrontmatterParser::canonicalize(...), MdxPageFile::KEYS),
+            ...array_map(fn (Right $right) => $right->value, Right::cases()),
+        ];
+        $unclaimed = array_diff_key($this->frontmatter($source), array_flip($claimed));
+        if ($unclaimed === []) {
+            return;
+        }
+        $settings = EntryPageSettingsData::fromEntry($entry->refresh());
+        $settings->unclaimed = $unclaimed;
+        try {
+            EntryPageSettingsData::validateAndCreate($settings->toArray());
+            MdxPageFile::assertPrintable($settings);
+        } catch (ValidationException $e) {
+            $this->failures[$relative] = 'frontmatter keys '.implode(', ', array_keys($unclaimed)).' were not kept: '
+                .(collect($e->errors())->flatten()->first() ?? 'the page settings are not valid.');
+
+            return;
+        }
+        $particle = $entry->particle;
+        $meta = $particle->meta ?? [];
+        $meta['pageSettings'] = $settings->toArray();
+        $particle->meta = $meta;
+        $particle->save();
     }
 
     /**

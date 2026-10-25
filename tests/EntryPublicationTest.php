@@ -471,19 +471,54 @@ class EntryPublicationTest extends TestCase
         $this->assertSame('unchanged', $service->inspect($member, $author)->state);
     }
 
-    public function test_take_refuses_a_blocks_mdx_header_key_no_page_setting_declares(): void
+    public function test_take_keeps_a_blocks_mdx_header_key_no_page_setting_declares_and_the_mirror_prints_it_back(): void
     {
+        // ADR-0233 d3: a key nothing declares is kept in the version as written, so the file survives the round trip.
         [$entry, $member, $author, , $target, $publication] = $this->blocksMdxFileFixture();
         $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
-        file_put_contents($target['absolute'], "---\ntitle: Help\nnavOrder: 2\naudience: admins\n---\n\nEdited MDX\n");
-        $before = $publication->state($entry->fresh());
+        $bytes = "---\ntitle: Help\nnavOrder: 2\npublishedDate: 2026-10-01\naudience: admins\nschema_type: HowTo\n---\n\nEdited MDX\n";
+        file_put_contents($target['absolute'], $bytes);
 
-        $inspection = $service->inspect($member, $author);
+        $result = $service->take($member, $author, $this->fileInput($service->inspect($member, $author)));
 
-        $this->assertSame('invalid', $inspection->state);
-        $this->assertStringContainsString('audience', $inspection->message);
-        $this->assertFalse($inspection->canTake);
-        $this->assertEquals($before, $publication->state($entry->fresh()));
+        $this->assertSame('drafted', $result->status);
+        $head = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($entry->fresh()->versionable(), $result->headVersion)->snapshot;
+        $this->assertSame(['audience' => 'admins', 'schema_type' => 'HowTo'], $head['meta']['pageSettings']['unclaimed']);
+        $publication->publishVersion($entry->fresh(), $result->headVersion);
+        $this->assertSame($bytes, file_get_contents($target['absolute']), 'mirror then Take then publish is byte-stable');
+        $this->assertSame('unchanged', $service->inspect($member, $author)->state);
+    }
+
+    public function test_the_doctor_fails_while_mdx_holds_blocks_is_on_and_a_stored_mdx_page_still_holds_source(): void
+    {
+        $audit = new \Splicewire\Beam\Ux\Doctor\BeamUxMdxPagesAudit;
+        $legacy = BeamUxEntry::create(['slug' => 'legacy-mdx', 'type' => 'page', 'format' => 'mdx', 'realm' => 'site', 'title' => 'Legacy']);
+        app(EntryPublication::class)->write($legacy, ['frontmatter' => ['title' => 'Legacy'], 'content' => "\n# Legacy\n"]);
+        $this->assertSame('pass', $audit->run()[0]->status->value, 'a gate that is off passes');
+
+        $this->blocksMdxFileFixture();
+        $gate = $audit->run()[0];
+
+        $this->assertSame('fail', $gate->status->value);
+        $this->assertStringContainsString('1 of 2 MDX pages still hold source (legacy-mdx)', $gate->detail);
+        $legacy->forceFill(['format' => 'tsx'])->save();
+        $this->assertSame('pass', $audit->run()[0]->status->value);
+    }
+
+    public function test_the_doctor_reports_the_frontmatter_keys_published_pages_keep(): void
+    {
+        [$entry, $member, $author, , $target, $publication] = $this->blocksMdxFileFixture();
+        $audit = new \Splicewire\Beam\Ux\Doctor\BeamUxMdxPagesAudit;
+        $this->assertSame('pass', $audit->run()[1]->status->value);
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        file_put_contents($target['absolute'], "---\ntitle: Help\nnavOrder: 2\naudience: admins\n---\n\nPublished MDX\n");
+        $result = $service->take($member, $author, $this->fileInput($service->inspect($member, $author)));
+        $publication->publishVersion($entry->fresh(), $result->headVersion);
+
+        $unclaimed = $audit->run()[1];
+
+        $this->assertSame('warn', $unclaimed->status->value);
+        $this->assertStringContainsString('file-mdx (audience)', $unclaimed->detail);
     }
 
     public function test_a_page_setting_the_frontmatter_grammar_cannot_carry_is_refused_on_a_blocks_mdx_page(): void

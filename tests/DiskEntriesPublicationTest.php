@@ -187,6 +187,26 @@ class DiskEntriesPublicationTest extends TestCase
         @unlink($this->root.'/page/notes.mdx');
     }
 
+    public function test_a_blocks_mdx_page_keeps_the_frontmatter_keys_nothing_declares_in_its_registered_version(): void
+    {
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        $this->holdMdxAsBlocks();
+        file_put_contents($this->root.'/page/recipe.mdx', "---\ntitle: Recipe\nnavOrder: 4\nschemaType: HowTo\naudience: cooks\n---\n\n## From MDX\n");
+        file_put_contents($this->root.'/page/untitled.mdx', "---\naudience: cooks\n---\n\n## From MDX\n");
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $recipe = BeamUxEntry::query()->where('slug', 'recipe')->firstOrFail();
+        $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($recipe->versionable(), $recipe->published_version)->snapshot;
+        $this->assertSame(['schema_type' => 'HowTo', 'audience' => 'cooks'], $version['meta']['pageSettings']['unclaimed']);
+        $this->assertSame('Recipe', $version['meta']['pageSettings']['title']);
+        $this->assertSame(4, $version['meta']['pageSettings']['navOrder']);
+        $this->assertStringContainsString('were not kept', $result['failed']['page/untitled.mdx'] ?? '', 'a page with no title cannot hold settings');
+
+        @unlink($this->root.'/page/recipe.mdx');
+        @unlink($this->root.'/page/untitled.mdx');
+    }
+
     /** Hold MDX as blocks with a fake MDX Lens: the Node run is proven in laravel-beam-mdx. */
     private function holdMdxAsBlocks(): void
     {

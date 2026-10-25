@@ -6,7 +6,7 @@ echo "// Generated from EntryPageSettingsData by scripts/export-page-settings.ph
 foreach ($class->getConstructor()->getParameters() as $parameter) {
     $type = $parameter->getType();
     $ts = match ($type->getName()) {
-        'string' => 'string', 'int' => 'number', default => throw new RuntimeException('Unsupported page field type')
+        'string' => 'string', 'int' => 'number', 'array' => 'Record<string, string>', default => throw new RuntimeException('Unsupported page field type')
     };
     echo '  '.$parameter->getName().': '.$ts.($type->allowsNull() ? ' | null' : '').";\n";
 }

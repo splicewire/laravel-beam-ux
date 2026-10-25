@@ -11,4 +11,5 @@ export interface EntryPageSettings {
   socialImage: string | null;
   pageType: string;
   publishedDate: string | null;
+  unclaimed: Record<string, string>;
 }

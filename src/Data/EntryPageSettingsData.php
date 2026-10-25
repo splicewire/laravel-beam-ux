@@ -8,7 +8,12 @@ use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
-/** ADR-0232 d1/d2 and ADR-0234 d6: the guest-visible fields in the particle's versioned meta. */
+/**
+ * ADR-0232 d1/d2 and ADR-0234 d6: the guest-visible fields in the particle's versioned meta.
+ *
+ * `unclaimed` (ADR-0233 d3) holds the frontmatter keys nothing declares, kept as written under their canonical
+ * snake_case names, so a file's keys survive import and the mirror. It has no column; the version holds it.
+ */
 #[TypeScript]
 #[Title('Page settings')]
 final class EntryPageSettingsData extends BeamData
@@ -27,6 +32,8 @@ final class EntryPageSettingsData extends BeamData
         public ?string $socialImage = null,
         public string $pageType = 'WebPage',
         public ?string $publishedDate = null,
+        /** @var array<string, string> */
+        public array $unclaimed = [],
     ) {}
 
     public static function rules(): array
@@ -43,6 +50,14 @@ final class EntryPageSettingsData extends BeamData
             'socialImage' => ['nullable', 'string', 'max:2048'],
             'pageType' => ['in:WebPage,Article,CollectionPage,ProfilePage'],
             'publishedDate' => ['nullable', 'date_format:Y-m-d'],
+            'unclaimed' => ['array', static function (string $attribute, mixed $value, \Closure $fail): void {
+                foreach (is_array($value) ? array_keys($value) : [] as $key) {
+                    if (! is_string($key) || preg_match('/^[a-z0-9]+(?:_[a-z0-9]+)*$/D', $key) !== 1) {
+                        $fail('An unclaimed frontmatter key is a snake_case name.');
+                    }
+                }
+            }],
+            'unclaimed.*' => ['string', 'max:2000'],
         ];
     }
 

@@ -40,6 +40,7 @@ use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxMdxPagesAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxReachabilityAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxRouteShadowAudit;
@@ -191,6 +192,13 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxChromeAudit::class,
+            );
+
+            // ADR-0233: FAILS while beam.ux.mdx.holds_blocks is on and any stored MDX page still holds source (the
+            // gate is only for a converted host, d9), and reports the frontmatter keys published pages keep (d3).
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxMdxPagesAudit::class,
             );
 
             // theme-entries-and-authoring ticket 07: `ThemeResolver::resolve()` never throws, so a query
