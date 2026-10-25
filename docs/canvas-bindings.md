@@ -1,0 +1,13 @@
+# Authoring data bindings
+
+The canvas binding inspector uses the entry's Manifest Profile `x-collections`. Fields come from each offered Collection's owning schema. Repeat query controls use declared `x-filter.name` and `x-sort.name` metadata; they do not invent query names. Field Bindings and `when` rules update the existing Local Session document and its undo history. Saving remains the ordinary draft operation.
+
+Live data uses the optional `UxBuilderClient.canvasBindings(entryId, body, recordValue)` port. The default Beam Inertia adapter sends a same-origin, CSRF-protected POST to the addressed entry's `canvas-bindings` read operation. Hosts mounting `EditorRoutes::mount()` inside their authenticated editor group receive that operation. An injected client without the port displays “unavailable”; it never falls back to a public resource URL.
+
+The server checks authentication, `ux.author`, and the addressed entry's update ability before reading its body, profile, or Records. It validates the unsaved document using the normal binding guard, then reads through the existing resource guards as that author. It takes the Record Page declaration from the saved Working Head, never from unsaved client settings. Save a changed declaration and reopen the editor to refresh its field vocabulary.
+
+A Record Page initially selects the first readable Record in a bounded raw window. The picker offers at most 25 Records from that window, skips invalid URL values, and reports when more may exist. It does not scan further to fill a sparse window. Picking another Record changes preview state only: no draft save, publication, head/pin change, compilation, mirror write, or dirty event. Late responses from a retired entry/document/selection are discarded. A failed or refused read clears preview data and shows an error.
+
+`x-collections.publicRead` is declaration metadata, not a grant. A false value warns that the Collection has no Public Read; null/unknown warns that its reader guards need checking. Author-visible data does not imply guest access. A public read continues to use the visitor's own guards and projection.
+
+The inspector edits Collection Repeats, scalar text/property bindings, and `when` rules. Existing nested relation Repeats remain readable, but this inspector does not offer relation editing. Bound values render read-only in the canvas; selecting their block in the outline keeps its binding controls available. Literal-property/style edits preserve field-binding declarations.

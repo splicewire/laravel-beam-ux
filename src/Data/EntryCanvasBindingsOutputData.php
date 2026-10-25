@@ -16,6 +16,7 @@ final class EntryCanvasBindingsOutputData extends BeamData
         public array $bindings,
         #[LiteralTypeScriptType('Record<string, unknown> | null')]
         public ?array $record,
+        #[LiteralTypeScriptType('CanvasRecordChoiceData[]')]
         #[DataCollectionOf(CanvasRecordChoiceData::class)]
         public array $choices,
         public bool $hasMore,
