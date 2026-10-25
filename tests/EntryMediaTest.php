@@ -131,6 +131,22 @@ class EntryMediaTest extends TestCase
 
     public function test_soft_delete_keeps_images_for_restore_and_force_delete_removes_files(): void
     {
+        $this->lifecycleTables();
+        $entry = $this->entry();
+        $image = app(EntryMedia::class)->upload($entry, UploadedFile::fake()->image('photo.png'), $this->actor());
+        $path = Media::findOrFail($image->id)->getPathRelativeToRoot();
+        $entry->delete();
+        Storage::disk('public')->assertExists($path);
+        $this->assertNotNull(Media::find($image->id));
+        $entry->restore();
+        $this->assertCount(1, app(EntryMedia::class)->library($entry, $this->actor())->items);
+        $entry->forceDelete();
+        $this->assertNull(Media::find($image->id));
+        Storage::disk('public')->assertMissing($path);
+    }
+
+    private function lifecycleTables(): void
+    {
         Schema::create('activity_log', function (Blueprint $table) {
             $table->id();
             $table->string('log_name')->nullable();
@@ -151,15 +167,25 @@ class EntryMediaTest extends TestCase
             $table->uuid('taggable_id');
             $table->string('taggable_type');
         });
+    }
+
+    public function test_force_delete_waits_for_commit_and_rollback_preserves_the_files(): void
+    {
+        $this->lifecycleTables();
         $entry = $this->entry();
         $image = app(EntryMedia::class)->upload($entry, UploadedFile::fake()->image('photo.png'), $this->actor());
         $path = Media::findOrFail($image->id)->getPathRelativeToRoot();
-        $entry->delete();
-        Storage::disk('public')->assertExists($path);
-        $this->assertNotNull(Media::find($image->id));
-        $entry->restore();
-        $this->assertCount(1, app(EntryMedia::class)->library($entry, $this->actor())->items);
+        DB::beginTransaction();
         $entry->forceDelete();
+        Storage::disk('public')->assertExists($path);
+        DB::rollBack();
+        $entry = BeamUxEntry::findOrFail($entry->id);
+        $this->assertNotNull(Media::find($image->id));
+        Storage::disk('public')->assertExists($path);
+        DB::beginTransaction();
+        $entry->forceDelete();
+        Storage::disk('public')->assertExists($path);
+        DB::commit();
         $this->assertNull(Media::find($image->id));
         Storage::disk('public')->assertMissing($path);
     }
@@ -168,11 +194,13 @@ class EntryMediaTest extends TestCase
     {
         $entry = $this->entry();
         for ($i = 0; $i < 51; $i++) {
-            Media::create(['model_type' => \Splicewire\Beam\Ux\Media\EntryMediaOwner::MORPH, 'model_id' => $entry->id,
+            Media::create(['uuid' => '00000000-0000-4000-8000-'.sprintf('%012d', $i), 'created_at' => now()->addSeconds($i), 'model_type' => \Splicewire\Beam\Ux\Media\EntryMediaOwner::MORPH, 'model_id' => $entry->id,
                 'collection_name' => 'entry-images', 'name' => 'Photo '.$i, 'file_name' => $i.'.png', 'mime_type' => 'image/png',
                 'disk' => 'public', 'size' => 1, 'manipulations' => [], 'custom_properties' => [], 'generated_conversions' => [], 'responsive_images' => []]);
         }
-        $this->assertCount(50, app(EntryMedia::class)->library($entry, $this->actor())->items);
+        $items = app(EntryMedia::class)->library($entry, $this->actor())->items;
+        $this->assertCount(50, $items);
+        $this->assertSame(array_map(fn ($i) => 'Photo '.$i, range(50, 1)), array_map(fn ($item) => $item->name, $items));
     }
 
     public function test_both_ux_author_and_the_addressed_parent_update_policy_are_required(): void

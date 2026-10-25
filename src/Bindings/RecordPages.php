@@ -18,24 +18,14 @@ final class RecordPages
 {
     public function __construct(private ProfileCollections $profiles) {}
 
-    /** Request-local declaration metadata only; never caches Record reads or authorization decisions. */
-    private function memo(): \stdClass
+    private function memo(): RecordPageScope
     {
-        $request = app(Request::class);
-        $memo = $request->attributes->get('_beamUxRecordPages');
-        if (! $memo instanceof \stdClass) {
-            $memo = (object) ['columns' => [], 'pages' => [], 'matches' => [], 'offers' => []];
-            $request->attributes->set('_beamUxRecordPages', $memo);
-        }
-
-        return $memo;
+        return app(RecordPageScope::class);
     }
 
-    public static function forgetRequest(): void
+    public static function forgetScope(): void
     {
-        if (app()->bound('request')) {
-            app(Request::class)->attributes->remove('_beamUxRecordPages');
-        }
+        app(RecordPageScope::class)->forgetPages();
     }
 
     private function storageKey(BeamUxEntry $entry): string
@@ -102,14 +92,7 @@ final class RecordPages
         if ($anchor === null) {
             $this->refuse('Record Pages require a registered database schema anchor.');
         }
-        if ($settings->parentId !== null) {
-            $entry->newQuery()->whereKey($settings->parentId)->lockForUpdate()->first();
-        }
-        $others = $entry->newQuery()->whereKeyNot($entry->getKey())->where(function ($query) use ($settings) {
-            $query->whereNotNull('record_page')
-                ->orWhereHas('particle', fn ($particle) => $particle->whereNotNull('meta->pageSettings->recordPage'))
-                ->orWhere(fn ($siblings) => $siblings->where('parent_id', $settings->parentId)->where('segment', 'like', '{%'));
-        })->with('particle')->orderBy('id')->lockForUpdate()->get();
+        $others = $this->candidates($entry, $settings)->with('particle')->orderBy('id')->get();
         foreach ($others as $other) {
             if (! array_intersect((array) ($entry->realms ?? [$entry->realm]), (array) ($other->realms ?? [$other->realm]))) {
                 continue;
@@ -133,6 +116,45 @@ final class RecordPages
                 }
             }
         }
+    }
+
+    /** Lock a selected PRIMARY KEY set in the SAME global order used by publish/publishVersions. */
+    public function lockForSettings(BeamUxEntry $entry, EntryPageSettingsData $settings): void
+    {
+        if ($settings->recordPage === null) {
+            return;
+        }
+        // Read the OR/JSON predicates without a lock: an InnoDB range lock here would cover the table.
+        $ids = $this->lockIds($entry, $settings);
+        $entry->newQuery()->whereKey($ids)->orderBy('id')->lockForUpdate()->get();
+        if ($ids !== $this->lockIds($entry, $settings)) {
+            throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('Record Page declarations changed while acquiring locks. Retry against the current state.');
+        }
+        // assertSettings() takes the schema anchor AFTER these entry locks, as publication does.
+        // It re-reads declarations after serialization; no predicate/range lock is used there.
+    }
+
+    /** @return list<string> */
+    private function lockIds(BeamUxEntry $entry, EntryPageSettingsData $settings): array
+    {
+        $ids = $this->candidates($entry, $settings)->pluck('id')->all();
+        $ids[] = $entry->getKey();
+        if ($settings->parentId !== null) {
+            $ids[] = $settings->parentId;
+        }
+        $ids = array_values(array_unique($ids));
+        sort($ids, SORT_STRING);
+
+        return $ids;
+    }
+
+    private function candidates(BeamUxEntry $entry, EntryPageSettingsData $settings): \Illuminate\Database\Eloquent\Builder
+    {
+        return $entry->newQuery()->whereKeyNot($entry->getKey())->where(function ($query) use ($settings) {
+            $query->whereNotNull('record_page')
+                ->orWhereHas('particle', fn ($particle) => $particle->whereNotNull('meta->pageSettings->recordPage'))
+                ->orWhere(fn ($siblings) => $siblings->where('parent_id', $settings->parentId)->where('segment', 'like', '{%'));
+        });
     }
 
     /** Validation gets the proposed/saved version's declaration without persisting draft routing. */

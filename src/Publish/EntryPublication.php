@@ -135,6 +135,9 @@ class EntryPublication
         $this->requireVersionStore();
 
         return $entry->getConnection()->transaction(function () use ($entry, $body, $baseVersion, $label, $actor, $pageSettings) {
+            if ($pageSettings?->recordPage !== null) {
+                app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->lockForSettings($entry, $pageSettings);
+            }
             $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
             if ($pageSettings !== null) {
                 app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->assertSettings($locked, $pageSettings);
@@ -170,7 +173,7 @@ class EntryPublication
                 });
             }
 
-            $state = $this->recordDraft($locked, $body, $label, $pageSettings);
+            $state = $this->recordDraftAfterLocks($locked, $body, $label, $pageSettings);
             $this->audit($locked, 'drafted', $actor, $state);
 
             return $state;
@@ -279,10 +282,19 @@ class EntryPublication
 
     public function recordDraft(BeamUxEntry $entry, array $body, ?string $label = null, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): EntryPublicationData
     {
-        // Keep the Collection/parent reservation locks through the draft write even for direct callers.
-        if ($pageSettings?->recordPage !== null && $entry->getConnection()->transactionLevel() === 0) {
-            return $entry->getConnection()->transaction(fn () => $this->recordDraft($entry, $body, $label, $pageSettings));
+        if ($pageSettings?->recordPage !== null) {
+            return $entry->getConnection()->transaction(function () use ($entry, $body, $label, $pageSettings) {
+                app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->lockForSettings($entry, $pageSettings);
+
+                return $this->recordDraftAfterLocks($entry, $body, $label, $pageSettings);
+            });
         }
+
+        return $this->recordDraftAfterLocks($entry, $body, $label, $pageSettings);
+    }
+
+    private function recordDraftAfterLocks(BeamUxEntry $entry, array $body, ?string $label, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings): EntryPublicationData
+    {
         $this->assertStorable($entry, $body);
         if ($pageSettings !== null && $entry->type !== \Splicewire\Beam\Ux\Type\UxType::Page) {
             throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);

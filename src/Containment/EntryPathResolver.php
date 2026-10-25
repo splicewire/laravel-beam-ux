@@ -369,12 +369,12 @@ class EntryPathResolver
 
     private function hasRealmsColumn(): bool
     {
-        $attributes = app(\Illuminate\Http\Request::class)->attributes;
-        if (! $attributes->has('_beamUxRealmsColumn')) {
-            $attributes->set('_beamUxRealmsColumn', Schema::hasColumn('beam_ux_entries', 'realms'));
-        }
+        $scope = app(\Splicewire\Beam\Ux\Bindings\RecordPageScope::class);
+        $connection = \Illuminate\Support\Facades\DB::connection();
+        $key = json_encode([$connection->getName(), $connection->getDatabaseName(),
+            app(\Splicewire\Beam\Realm\Contracts\TenancyContext::class)->currentTenantId()]);
 
-        return $attributes->get('_beamUxRealmsColumn');
+        return $scope->realmsColumns[$key] ??= Schema::hasColumn('beam_ux_entries', 'realms');
     }
 
     /**

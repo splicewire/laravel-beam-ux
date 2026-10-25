@@ -271,7 +271,7 @@ class RecordPageTest extends TestCase
         foreach ([false, true] as $legacy) {
             if ($legacy) {
                 Schema::table('beam_ux_entries', fn (Blueprint $table) => $table->dropColumn('realms'));
-                app(\Illuminate\Http\Request::class)->attributes->remove('_beamUxRealmsColumn');
+                app(\Splicewire\Beam\Ux\Bindings\RecordPageScope::class)->realmsColumns = [];
             }
             $resolver = app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class);
             $snapshot = $resolver->snapshot(BeamUxEntry::all());
@@ -280,6 +280,71 @@ class RecordPageTest extends TestCase
                 $this->assertSame($ids($resolver->resolve($path)), $ids($snapshot->resolve($path)), $path);
             }
         }
+    }
+
+    public function test_a_new_container_scope_reloads_published_record_page_metadata(): void
+    {
+        $page = $this->page();
+        $service = app(RecordPages::class);
+        $this->assertTrue($service->hasPublished($page));
+        \Illuminate\Support\Facades\DB::table('beam_ux_entries')->where('id', $page->id)->update(['record_page' => null]);
+        $this->assertTrue($service->hasPublished($page), 'Metadata is reusable only within this scope.');
+        $this->app->forgetScopedInstances();
+        $this->assertFalse($service->hasPublished($page));
+    }
+
+    public function test_draft_locks_the_ordered_primary_key_set_before_the_own_row(): void
+    {
+        Schema::create('beam_versions', fn (Blueprint $table) => $table->uuid('id')->primary());
+        $page = $this->page();
+        $entry = BeamUxEntry::create(['slug' => 'other', 'type' => UxType::Page, 'parent_id' => $page->parent_id, 'segment' => 'other']);
+        $observed = null;
+        \Illuminate\Support\Facades\DB::listen(function ($query) use (&$observed) {
+            if ($observed === null && str_starts_with($query->sql, 'select * from "beam_ux_entries"')) {
+                $observed = $query;
+                throw new \RuntimeException('stop-before-draft-state');
+            }
+        });
+        try {
+            app(\Splicewire\Beam\Ux\Publish\EntryPublication::class)->draftFromBase($entry, [], null, pageSettings: new EntryPageSettingsData(title: 'Other', parentId: $entry->parent_id, segment: '{slug}', recordPage: new RecordPageData('posts', 'slug')));
+            $this->fail('The query probe was not reached.');
+        } catch (\RuntimeException $error) {
+            $this->assertSame('stop-before-draft-state', $error->getMessage());
+        }
+        $this->assertNotNull($observed);
+        $this->assertStringContainsString(' in (', $observed->sql);
+        $this->assertStringContainsString('order by "id" asc', $observed->sql);
+        $ids = [$page->id, $entry->id, $entry->parent_id];
+        sort($ids);
+        $this->assertSame($ids, $observed->bindings);
+    }
+
+    public function test_a_changed_candidate_set_refuses_instead_of_extending_held_locks(): void
+    {
+        $page = $this->page();
+        $entry = BeamUxEntry::create(['slug' => 'other', 'type' => UxType::Page, 'parent_id' => $page->parent_id, 'segment' => 'other']);
+        $changed = false;
+        \Illuminate\Support\Facades\DB::listen(function ($query) use (&$changed) {
+            if (! $changed && str_starts_with($query->sql, 'select * from "beam_ux_entries"') && str_contains($query->sql, ' in (')) {
+                $changed = true;
+                BeamUxEntry::create(['slug' => 'new-candidate', 'type' => UxType::Page, 'segment' => 'new-candidate', 'record_page' => ['collection' => 'posts', 'field' => 'slug']]);
+            }
+        });
+        $this->expectException(\Symfony\Component\HttpKernel\Exception\ConflictHttpException::class);
+        $this->expectExceptionMessage('declarations changed');
+        $entry->getConnection()->transaction(fn () => app(RecordPages::class)->lockForSettings($entry, new EntryPageSettingsData(title: 'Other', parentId: $entry->parent_id, segment: '{slug}', recordPage: new RecordPageData('posts', 'slug'))));
+    }
+
+    public function test_sitemap_selects_routing_columns_and_page_rows_only(): void
+    {
+        $this->page();
+        \Illuminate\Support\Facades\DB::enableQueryLog();
+        iterator_to_array(app(\Splicewire\Beam\Ux\Sitemap\EntrySitemapSource::class)->urls());
+        $queries = array_filter(\Illuminate\Support\Facades\DB::getQueryLog(), fn ($q) => str_contains($q['query'], 'from "beam_ux_entries"'));
+        $first = array_values($queries)[0];
+        $this->assertStringNotContainsString('select *', $first['query']);
+        $this->assertContains('page', $first['bindings']);
+        $this->assertStringNotContainsString('"particle_id"', $first['query']);
     }
 
     private function createTables(): void

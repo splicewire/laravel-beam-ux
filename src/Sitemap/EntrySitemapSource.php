@@ -45,7 +45,11 @@ class EntrySitemapSource implements LiveSitemapSource
 
         // Route gate (coarse): only Page-typed entries are routable. The
         // per-entry URL resolution + marking + entitlement gates run below.
-        $all = BeamUxEntry::query()->get();
+        $routing = ['id', 'slug', 'namespace', 'type', 'realm', 'realms', 'parent_id', 'segment',
+            'access', 'traverse', 'requirements', 'record_page', 'workflow_marking', 'workflow_version',
+            'schema_ref', 'format', 'residency_mode'];
+        $columns = array_values(array_intersect($routing, \Illuminate\Support\Facades\Schema::getColumnListing('beam_ux_entries')));
+        $all = BeamUxEntry::query()->select($columns)->where('type', UxType::Page->value)->get();
         $resolver = app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)->snapshot($all);
         $entries = $all->filter(fn ($entry) => $entry->type === UxType::Page);
 

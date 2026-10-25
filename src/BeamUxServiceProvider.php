@@ -131,6 +131,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
     public function packageRegistered(): void
     {
+        $this->app->scoped(Bindings\RecordPageScope::class);
         $this->app->bind(PreviewGrantResolver::class, PreviewGrantService::class);
         // DOCS-06b: the templates the provenance backfill may match an unstamped row against; packages register theirs.
         $this->app->singleton(Provenance\ProvenanceTemplates::class);
@@ -185,6 +186,10 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // registers the doctor/operator check on ITS OWN migrations DOWN into beam-core's aggregation
         // manifest, guarded on the manifest being bound (a host predating it still boots beam-ux fine).
         if ($this->app->bound(BeamDoctorManifest::class)) {
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                Doctor\RecordPageIsolationAudit::class,
+            );
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxMigrationsAudit::class,

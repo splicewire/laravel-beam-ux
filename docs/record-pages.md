@@ -4,6 +4,8 @@ A Record Page is an ordinary page with a parameter segment and a versioned Colle
 
 Run the published beam-ux migration `add_record_page_to_beam_ux_entries_table` in the same central or tenant connection as the entries. Like unique Collection writes, saving a Record Page requires a registered database schema anchor for that Collection on the entry connection, so concurrent declarations can serialize against one row. Existing pages stay unchanged. The published column holds the served declaration; draft settings stay in the entry's existing version history.
 
+Concurrent declaration uniqueness requires PostgreSQL's default READ COMMITTED isolation, or MySQL/MariaDB configured with READ COMMITTED. The save locks the selected entry/parent/candidate primary keys in global ID order, then the schema anchor, and refuses a changed candidate set with HTTP 409. MySQL REPEATABLE READ may hide a newly committed declaration from that snapshot recheck. The advisory Doctor check reads `SELECT @@transaction_isolation` on the entry connection and warns about that race; it does not block saves or change the host's isolation. Other isolation levels and live cross-process MySQL contention are not verified here. Two different Collections racing to create the first top-level `{field}` page also remain a separate low-risk limitation.
+
 Send these settings through the normal entry save-draft operation, with the current base version and canvas body:
 
 ```json

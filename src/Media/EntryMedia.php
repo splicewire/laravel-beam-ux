@@ -49,7 +49,7 @@ final class EntryMedia
         $this->authorize($entry, $actor);
         $relation = EntryMediaOwner::forEntry($entry)->media();
         $items = $relation->where('collection_name', 'entry-images')->whereIn('mime_type', self::MIMES)
-            ->orderBy($relation->getRelated()->getKeyName())->limit(50)->get()
+            ->orderByDesc('created_at')->orderByDesc($relation->getRelated()->getKeyName())->limit(50)->get()
             ->map(fn ($media) => EntryImageData::fromMedia($media))->values()->all();
 
         return new EntryImageLibraryData($items);
