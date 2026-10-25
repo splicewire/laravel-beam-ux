@@ -146,6 +146,14 @@ class PublicEntryController
 
         $bindings = app(\Splicewire\Beam\Ux\Bindings\BindingResolver::class)->resolve($entry, $request, $realm);
         $theme = app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve($realm, $preview);
+        $componentDocument = $preview === null
+            ? app(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class)->read($entry)
+            : app(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class)->readPreview($entry, $preview);
+        $componentData = app(\Splicewire\Beam\Ux\Components\ComponentDelivery::class)->published($entry, $componentDocument, $request, $realm);
+        $chromeArtifacts = [
+            'layout' => $this->chromeArtifact($request, $chrome['layout'], $entry, $preview, $theme),
+            'template' => $this->chromeArtifact($request, $chrome['template'], $entry, $preview, $theme),
+        ];
         $response = $this->renderer->render($page, [
             ...($bindings === [] ? [] : ['bindings' => array_map(fn ($binding) => $binding->toArray(), $bindings)]),
             // EP-07d: the schema each published form renders, for the public intake keys this host's door accepts only.
@@ -171,6 +179,7 @@ class PublicEntryController
             'artifact' => [
                 'url' => $this->artifactUrl($request, $entry, $preview?->versionFor((string) $entry->getKey())),
                 'version' => $this->artifactVersion($entry, $preview),
+                'components' => array_map(fn ($component) => $component->toArray(), $componentData),
                 'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme($theme),
                 'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss($theme),
             ],
@@ -179,10 +188,7 @@ class PublicEntryController
             // nests them" — and it can only import what it can address. Null per axis when the name is
             // not a nestable entry (`ChromeEntryResolver`); the client prefers a registered component
             // of the same name on its own, so this never overrides a host registration.
-            'chrome' => [
-                'layout' => $this->chromeArtifact($request, $chrome['layout'], $entry, $preview, $theme),
-                'template' => $this->chromeArtifact($request, $chrome['template'], $entry, $preview, $theme),
-            ],
+            'chrome' => $chromeArtifacts,
             // The already-gated nav for the whole realm, so a shell renders `<SiteNav rootPath>` — the
             // site nav and the docs sidebar out of ONE payload (ADR-0210 §5) — without a second
             // round trip. `withNav: false` at mount time is the escape hatch for a host that caches
@@ -201,7 +207,8 @@ class PublicEntryController
             ...$this->pageProps->for($chrome['layout'], $entry, $chain, $actor),
         ], );
 
-        if ($record !== null || $bindings !== [] || $this->gate->isRestricted($chain)) {
+        if ($record !== null || $bindings !== [] || $componentData !== [] || ($chromeArtifacts['layout']['components'] ?? []) !== []
+            || ($chromeArtifacts['template']['components'] ?? []) !== [] || $this->gate->isRestricted($chain)) {
             // Post-gate output for a restricted body: never stored, so a revoked grant bites on the
             // next request rather than living on in a shared cache (ADR-0122, ADR-0209 §8).
             $response->headers->set('Cache-Control', 'no-store, private');
@@ -244,6 +251,12 @@ class PublicEntryController
         return [
             'url' => $this->artifactUrl($request, $chrome, $preview?->versionFor((string) $chrome->getKey())),
             'version' => $this->artifactVersion($chrome, $preview),
+            'components' => array_map(fn ($component) => $component->toArray(), app(\Splicewire\Beam\Ux\Components\ComponentDelivery::class)->published(
+                $chrome,
+                $preview === null ? app(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class)->read($chrome)
+                    : app(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class)->readPreview($chrome, $preview),
+                $request, (string) ($request->route()?->defaults['beamUxRealm'] ?? BeamUxEntry::REALM_SITE),
+            )),
             'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme($theme ?? app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
             'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss($theme ?? app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
         ];

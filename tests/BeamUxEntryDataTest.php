@@ -111,8 +111,9 @@ class BeamUxEntryDataTest extends TestCase
         $this->actingAs((new User)->forceFill(['id' => 1]));
         Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
         $schema = $this->getJson('/frame/resources/beam-ux-entry/schema')->assertOk()->json();
-        $this->assertSame(['type', 'title', 'slug', 'realm', 'parentId', 'segment', 'navOrder', 'fileLanguage'], array_keys($schema['properties']));
+        $this->assertSame(['type', 'title', 'slug', 'realm', 'parentId', 'segment', 'navOrder', 'fileLanguage', 'componentKind'], array_keys($schema['properties']));
         $this->assertSame(['tsx', 'mdx', null], $schema['properties']['fileLanguage']['enum'], 'optional: unset takes the parent\'s, then the host\'s');
+        $this->assertSame(['authored', 'source', null], $schema['properties']['componentKind']['enum']);
         $this->assertNotContains('id', $schema['required']);
         $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $schema['properties']['type']['enum']);
         $this->assertSame('combobox', $schema['properties']['realm']['x-stud-widget']);

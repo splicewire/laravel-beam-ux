@@ -105,5 +105,8 @@ class BeamUxEntryBodyData extends BeamData
         public array $intakeForms = [],
         #[Optional]
         public bool $mediaLibrary = false,
+        /** @var list<ComponentCanvasData> */
+        #[\Spatie\LaravelData\Attributes\DataCollectionOf(ComponentCanvasData::class)]
+        public array $authoredComponents = [],
     ) {}
 }

@@ -178,6 +178,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
         'schema_ref',
         // Draft-schema marker (S9): is `schema_ref` an INFERRED draft, not an authored/graduated spec?
         'schema_is_draft',
+        'component_kind',
         'facade_ref',
         'type',
         'format',
@@ -238,6 +239,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
             'type' => UxType::class,
             'format' => UxFormat::class,
             'body_style' => BodyStyle::class,
+            'component_kind' => \Splicewire\Beam\Ux\Components\ComponentKind::class,
             // The inferred-draft marker (S9): true only when `schema_ref` is an inference draft.
             'schema_is_draft' => 'boolean',
             // The ordered realm fallback stack (ticket 03) — a list<string>, same shape as
@@ -285,6 +287,15 @@ class BeamUxEntry extends Model implements WorkflowManaged
         static::saved(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());
         static::deleted(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());
         static::restored(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());
+        static::deleting(function (BeamUxEntry $entry): void {
+            $components = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class);
+            if ($components->authored($entry) && $components->working($entry) !== []
+                && ($users = $components->usedBy($entry)) !== []) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'component' => 'This component is used by entries: '.implode(', ', $users),
+                ]);
+            }
+        });
         static::creating(function (BeamUxEntry $entry): void {
             // `format` defaults by `type`, not a single fleet-wide constant (found live: a `theme`
             // entry left at the old flat `tsx` default silently resolved TsxBodyCodec, which returns
@@ -569,7 +580,8 @@ class BeamUxEntry extends Model implements WorkflowManaged
         }
 
         if ($type === UxType::Component) {
-            return BodyKind::Source;
+            return $this->getAttribute('component_kind') === \Splicewire\Beam\Ux\Components\ComponentKind::Authored
+                ? BodyKind::Blocks : BodyKind::Source;
         }
 
         return $this->codec() instanceof AcceptsJsonDoc ? BodyKind::Blocks : BodyKind::Source;

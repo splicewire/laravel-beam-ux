@@ -150,8 +150,10 @@ class EntryPublication
             $unauthored = $before->headVersion === null && $before->versions === []
                 && $this->publishedVersionId($locked) === null
                 && $this->particle($locked)?->getAttribute('head_version') === null;
-            if (! $unauthored && ($before->headVersion === null || $before->publishedVersion === null
-                || ! array_filter($before->versions, fn ($version) => $version->id === $before->publishedVersion))) {
+            $unpublishedComponent = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->authored($locked)
+                && $before->publishedVersion === null;
+            if (! $unauthored && ($before->headVersion === null || (! $unpublishedComponent && ($before->publishedVersion === null
+                || ! array_filter($before->versions, fn ($version) => $version->id === $before->publishedVersion))))) {
                 throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('This entry has history but no valid Publication Pin. Repair its pin before editing.');
             }
             if ($unauthored) {
@@ -165,12 +167,15 @@ class EntryPublication
                 // The writer may normalize legacy styles: compile and mirror the frozen snapshot.
                 $baseline = $version->snapshot['payload'];
                 app(CompileEntryBody::class)->forVersion($locked, (string) $version->id, $baseline);
-                $locked->published_version = (string) $version->id;
-                $locked->save();
-                $snapshot = clone $locked;
-                $locked->getConnection()->afterCommit(function () use ($snapshot, $baseline) {
-                    $this->mirror->mirror($snapshot, $this->placements->resolve($snapshot)->pathFor($snapshot), $baseline);
-                });
+                // A new component has no guest-visible default page to preserve. Its first draft is not publication.
+                if (! app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->authored($locked)) {
+                    $locked->published_version = (string) $version->id;
+                    $locked->save();
+                    $snapshot = clone $locked;
+                    $locked->getConnection()->afterCommit(function () use ($snapshot, $baseline) {
+                        $this->mirror->mirror($snapshot, $this->placements->resolve($snapshot)->pathFor($snapshot), $baseline);
+                    });
+                }
             }
 
             $state = $this->recordDraftAfterLocks($locked, $body, $label, $pageSettings);
@@ -224,7 +229,7 @@ class EntryPublication
                 $body = $version->snapshot['payload'];
                 $pin = $this->publishedVersionId($entry);
                 $publishedBody = $pin === null ? null : ($this->versions->version($particle, $pin)?->snapshot['payload'] ?? null);
-                app(CanvasBodyGuard::class)->assertPublishable(app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->validationEntry($entry, $version->snapshot['meta']['pageSettings'] ?? null, false), $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
+                app(CanvasBodyGuard::class)->assertPublishable(app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->validationEntry($entry, $version->snapshot['meta']['pageSettings'] ?? null, false), $body, JsonDocShape::is($publishedBody) ? $publishedBody : [], $refs);
                 $before[$id] = $this->mirroredFile($entry, is_array($publishedBody) ? $publishedBody : null);
                 $settings = $version->snapshot['meta']['pageSettings'] ?? null;
                 if ($settings !== null) {
@@ -331,7 +336,13 @@ class EntryPublication
         }
         $version = $this->versions->snapshot($this->requireParticle($entry), $label ?? 'draft');
 
-        return $this->state($entry->refresh(), $this->compileDraft($entry, $version));
+        $state = $this->state($entry->refresh(), $this->compileDraft($entry, $version));
+        $components = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class);
+        if ($components->authored($entry)) {
+            $state->diagnostics = $components->strandedInstances($entry, app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve($entry));
+        }
+
+        return $state;
     }
 
     /**
@@ -598,6 +609,7 @@ class EntryPublication
      */
     public function write(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): array
     {
+        $body = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->prepare($entry, $body);
         // ADR-0227 d1 / ADR-0228 d8 — THE CHOKE: every canvas-body write that goes through publication
         // (save-body, save-source, a draft via recordDraft) is held to the realm's Manifest Profile here,
         // including its code boundary, so no op can bypass it by forgetting to call the guard. A non-canvas

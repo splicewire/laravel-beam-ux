@@ -83,6 +83,9 @@ class EntryBodyEnvelope
             ] : null,
             fileLanguages: $pageSettings !== null ? \Splicewire\Beam\Ux\Format\FileLanguage::choices($entry) : null,
             intakeForms: JsonDocShape::is($body) ? app(\Splicewire\Beam\Ux\Intake\IntakeForms::class)->schemasFor($body) : [],
+            authoredComponents: JsonDocShape::is($body)
+                ? app(\Splicewire\Beam\Ux\Components\ComponentDelivery::class)->working($entry, $body, app(\Illuminate\Http\Request::class))
+                : [],
         );
     }
 
