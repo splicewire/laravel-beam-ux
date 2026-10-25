@@ -9,6 +9,7 @@ use Splicewire\Beam\Ux\Body\BodyKind;
 use Splicewire\Beam\Ux\Codec\CssBodyCodec;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
+use Splicewire\Beam\Ux\Codec\TsxBodyCodec;
 use Splicewire\Beam\Ux\Containment\PageFields;
 use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
 use Splicewire\Beam\Ux\Data\FileBatchReconcileInputData;
@@ -31,8 +32,8 @@ use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
- * Fixed Theme/CSS and Page/MDX dispatch over the same guarded current-file orchestration. A Page/MDX that holds blocks
- * (ADR-0233 d1) reconciles its {@see MdxPageFile}: page settings as frontmatter, then the body the MDX Lens prints.
+ * Fixed Theme/CSS and Page dispatch over the same guarded current-file orchestration: body-only MDX, blocks MDX
+ * through {@see MdxPageFile}, and blocks TSX.
  */
 class ThemeReconciliation
 {
@@ -103,7 +104,7 @@ class ThemeReconciliation
                 throw new FileConflict('file-moved', 'The local file changed during validation. Nothing was imported. Reload comparison.');
             }
             $draft = app(EntryPublication::class)->draftFromBase($locked, $body, $input->expectedHeadVersion,
-                $this->isMdx($locked) || MdxPageFile::applies($locked) ? 'Taken from canonical local MDX file' : 'Taken from local Theme file',
+                $this->isMdx($locked) || MdxPageFile::applies($locked) ? 'Taken from canonical local MDX file' : ($this->isTsxBlocks($locked) ? 'Taken from local TSX file as blocks' : 'Taken from local Theme file'),
                 $actor instanceof \Illuminate\Database\Eloquent\Model ? $actor : null, $settings);
             if ($draft->compileError !== null) {
                 $diagnostic = FileDraftDiagnosticData::compileFailed();
@@ -295,8 +296,9 @@ class ThemeReconciliation
     /** @return array{\Splicewire\Beam\Ux\Models\BeamUxEntry, \Splicewire\Beam\Ux\Data\EntryPublicationData, array{absolute: string, path: string, fingerprint: string}, string} */
     private function context(BeamUxEntry $entry): array
     {
-        if (! $this->isMdx($entry) && ! MdxPageFile::applies($entry) && ($entry->getAttribute('type') !== UxType::Theme || $entry->codec()::class !== CssBodyCodec::class)) {
-            throw new FileConflict('unsupported', 'Only canonical Theme/CSS or body-only Page/MDX with its native codec is supported here.', 422);
+        if (! $this->isMdx($entry) && ! MdxPageFile::applies($entry) && ! $this->isTsxBlocks($entry)
+            && ($entry->getAttribute('type') !== UxType::Theme || $entry->codec()::class !== CssBodyCodec::class)) {
+            throw new FileConflict('unsupported', 'Only canonical Theme/CSS, body-only Page/MDX, block-body Page/MDX, or block-body Page/TSX with its native codec is supported here.', 422);
         }
         $state = app(EntryPublication::class)->state($entry);
         if ($state->headVersion === null || $state->publishedVersion === null) {
@@ -306,6 +308,9 @@ class ThemeReconciliation
         $published = $this->published($entry, $body);
         if ($this->isMdx($entry) || MdxPageFile::applies($entry)) {
             // The existing code/profile guard remains authoritative; losslessness is not admission.
+            app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
+        } elseif ($this->isTsxBlocks($entry)) {
+            // Lossless lowering is not admission: the same profile/body guard as editor writes remains authoritative.
             app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
         }
         if (strlen($published) > LocalThemeFile::LIMIT || ! mb_check_encoding($published, 'UTF-8')) {
@@ -339,19 +344,6 @@ class ThemeReconciliation
         return app(PlacedDiskMirror::class)->bytes($entry, $body);
     }
 
-    /** The body a file drafts, and for a blocks MDX page the page settings its header changed (else null).
-     * @param  array<string, mixed>  $published
-     * @return array{0: array<string, mixed>, 1: ?EntryPageSettingsData}
-     */
-    private function decodeFile(BeamUxEntry $entry, string $bytes, array $published): array
-    {
-        if (MdxPageFile::applies($entry)) {
-            return $this->decodeMdxPageFile($entry, $bytes, $published);
-        }
-
-        return [$this->isMdx($entry) ? $this->mdx->decode($bytes, $published) : $this->themes->decode($bytes, $published), null];
-    }
-
     /**
      * ADR-0233 d3: the header is the page's settings and the rest is its body. A header key the parent's Page Fields
      * declare is one of those (d4), checked as a save checks it; one nothing declares is kept with the settings as
@@ -383,6 +375,41 @@ class ThemeReconciliation
         }
 
         return [$body, $settings];
+    }
+
+    private function isTsxBlocks(BeamUxEntry $entry): bool
+    {
+        return $entry->getAttribute('type') === UxType::Page && $entry->getAttribute('format') === UxFormat::Tsx
+            && $entry->codec()::class === TsxBodyCodec::class && $entry->bodyKind() === BodyKind::Blocks;
+    }
+
+    /** @param array<string, mixed> $published
+     * @return array{0: array<string, mixed>, 1: ?EntryPageSettingsData}
+     */
+    private function decodeFile(BeamUxEntry $entry, string $bytes, array $published): array
+    {
+        if (MdxPageFile::applies($entry)) {
+            return $this->decodeMdxPageFile($entry, $bytes, $published);
+        }
+        if ($this->isMdx($entry)) {
+            return [$this->mdx->decode($bytes, $published), null];
+        }
+        if ($this->isTsxBlocks($entry)) {
+            if (strlen($bytes) > LocalThemeFile::LIMIT || ! mb_check_encoding($bytes, 'UTF-8')) {
+                throw new FileConflict('invalid', 'TSX source must be bounded UTF-8 text.', 422);
+            }
+            try {
+                $body = app(SourceToBlocks::class)->convert($bytes, app(CanvasBodyGuard::class)->workingHead($entry),
+                    app(ManifestProfileResolver::class)->resolve($entry));
+                app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
+
+                return [$body, null];
+            } catch (\Illuminate\Validation\ValidationException $failure) {
+                throw new FileConflict('invalid', 'The TSX file could not be lowered to an admitted block document.', 422);
+            }
+        }
+
+        return [$this->themes->decode($bytes, $published), null];
     }
 
     /** @return array<string, mixed> */

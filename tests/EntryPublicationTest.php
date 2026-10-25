@@ -21,6 +21,8 @@ use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
 use Splicewire\Beam\Ux\Data\EntryPublicationData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
+use Splicewire\Beam\Ux\JsonDoc\TsxLens;
 use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
 use Splicewire\Beam\Ux\Particle\EntryDraftSaveOp;
 use Splicewire\Beam\Ux\Particle\EntryPublishOp;
@@ -853,6 +855,57 @@ class EntryPublicationTest extends TestCase
         } catch (ValidationException $failure) {
             $this->assertArrayHasKey('pageSettings.description', $failure->errors());
         }
+    }
+
+    public function test_tsx_file_take_lowers_source_to_blocks_and_records_only_a_draft(): void
+    {
+        $root = $this->ownedFileFixtureRoot();
+        $directory = $root.'/tsx-'.bin2hex(random_bytes(6));
+        mkdir($directory, 0700);
+        config(['filesystems.disks.tsx-file' => ['driver' => 'local', 'root' => $directory], 'beam.ux.storage.mirror_disk' => 'tsx-file']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+        [$releases, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        $entry = BeamUxEntry::create(['slug' => 'file-tsx', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $publication = app(EntryPublication::class);
+        $publication->write($entry, self::BODY_ONE);
+        $publication->publishAuthoredBody($entry);
+        $release = $releases->requestOne($entry->fresh(), $publication->state($entry->fresh())->headVersion, $author);
+        $member = $release->members()->sole();
+        $target = app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class)->target($entry->fresh());
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $before = $publication->state($entry->fresh());
+
+        $this->app->instance(TsxLens::class, new class implements TsxLens
+        {
+            public function lower(string $source): array
+            {
+                if ($source !== '<h2>Two</h2>') {
+                    throw new \LogicException('Unexpected TSX source in fake lens.');
+                }
+
+                return [[
+                    'kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false,
+                    'props' => [], 'children' => [['kind' => 'text', 'value' => 'Two']],
+                ]];
+            }
+        });
+        $this->app->instance(SourceToBlocks::class, new SourceToBlocks(app(TsxLens::class)));
+        file_put_contents($target['absolute'], '<h2>Two</h2>');
+
+        $inspection = $service->inspect($member, $author);
+        $this->assertSame('differs', $inspection->state);
+        $this->assertSame('tsx', $inspection->format);
+        $result = $service->take($member, $author, $this->fileInput($inspection));
+
+        $after = $publication->state($entry->fresh());
+        $this->assertSame('drafted', $result->status);
+        $this->assertSame($before->publishedVersion, $after->publishedVersion);
+        $this->assertNotSame($before->headVersion, $after->headVersion);
+        $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($entry->fresh()->versionable(), $after->headVersion);
+        $this->assertSame('Two', $version->snapshot['payload'][0]['children'][0]['value']);
+        $this->assertSame('<h2>Two</h2>', file_get_contents($target['absolute']));
     }
 
     public function test_take_all_as_drafts_uses_one_exact_batch_and_refuses_if_any_file_moved(): void
