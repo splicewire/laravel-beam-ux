@@ -24,7 +24,7 @@ class ReleaseReadTest extends TestCase
     {
         parent::setUp();
         $this->runBeamWorkflowsMigrations();
-        foreach (['create_beam_ux_releases_table', 'add_origin_to_beam_ux_releases_table'] as $stub) {
+        foreach (['create_beam_ux_releases_table', 'add_origin_to_beam_ux_releases_table', 'add_preview_links_to_beam_ux_releases_table'] as $stub) {
             (require __DIR__."/../database/migrations/shared/{$stub}.php.stub")->up();
         }
         // A Release projects its members' pins from the entries table; this one has none, but the read still asks.
@@ -55,6 +55,25 @@ class ReleaseReadTest extends TestCase
         $this->getJson("/beam-ux-releases/{$this->release->id}")->assertOk()
             ->assertJsonPath('data.id', $this->release->id)
             ->assertJsonPath('data.title', 'Spring launch');
+    }
+
+    public function test_a_release_shows_its_author_whether_preview_links_are_on_and_a_fresh_link_when_they_are(): void
+    {
+        // ADR-0232 d8 (EP-18): the Release panel offers the link to copy; it is minted on read, so it lasts 7 days from then.
+        config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
+        \Illuminate\Support\Facades\Route::beamUxSite('site/entry');
+        app('router')->getRoutes()->refreshNameLookups();
+        $this->actingAs($this->user('author'));
+
+        $this->getJson("/beam-ux-releases/{$this->release->id}")->assertOk()
+            ->assertJsonPath('data.previewLinksEnabled', false)->assertJsonPath('data.previewLink', null);
+
+        app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->previewLinks($this->release, true, $this->user('author'));
+        $link = $this->getJson("/beam-ux-releases/{$this->release->id}")->assertOk()
+            ->assertJsonPath('data.previewLinksEnabled', true)->json('data.previewLink');
+
+        $this->assertStringContainsString("/_beam/preview/release/{$this->release->id}?", (string) $link);
+        $this->assertStringNotContainsString((string) $this->release->fresh()->getAttribute('preview_link_secret'), (string) $link, 'the secret never leaves the server');
     }
 
     public function test_someone_who_cannot_author_can_neither_list_nor_open_a_release(): void

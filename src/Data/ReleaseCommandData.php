@@ -14,7 +14,7 @@ final class ReleaseCommandData extends BeamData
     use RejectsUnknownInputKeys;
 
     public function __construct(
-        #[Description('What to do to the Release: `member` places an entry, `drop` removes one, `rebase` re-checks a member against the entry as it is now while keeping its selected version, `use-latest` moves a member to the entry\'s newest saved version, and `submit`, `approve`, `publish`, `schedule` and `rollback` move the Release itself.')]
+        #[Description('What to do to the Release: `member` places an entry, `drop` removes one, `rebase` re-checks a member against the entry as it is now while keeping its selected version, `use-latest` moves a member to the entry\'s newest saved version, and `submit`, `approve`, `publish`, `schedule` and `rollback` move the Release itself; `links-on`, `links-off` and `rotate-links` manage its Preview Links (rotating ends every link).')]
         public string $action,
         #[Description('The entry the member actions (`member`, `drop`, `rebase`, `use-latest`) act on: its uuid. Required for those, ignored by the others.')]
         public ?string $entryId = null,
@@ -31,7 +31,7 @@ final class ReleaseCommandData extends BeamData
     public static function rules(): array
     {
         return [
-            'action' => ['required', 'in:member,drop,rebase,use-latest,submit,approve,publish,schedule,rollback'],
+            'action' => ['required', 'in:member,drop,rebase,use-latest,submit,approve,publish,schedule,rollback,links-on,links-off,rotate-links'],
             'entryId' => ['required_if:action,member,drop,rebase,use-latest', 'nullable', 'uuid'],
             'ref' => ['nullable', 'string'], 'redirectTarget' => ['nullable', 'string', 'max:255'],
             'dueAt' => ['required_if:action,schedule', 'nullable', 'string'],

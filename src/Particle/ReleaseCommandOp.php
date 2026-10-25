@@ -28,6 +28,8 @@ final class ReleaseCommandOp
             'drop' => $service->dropMember($model, $input->entryId, $actor),
             'rebase', 'use-latest' => $service->rebase($model, $input->entryId, $actor, $input->action === 'use-latest'),
             'schedule' => $service->schedule($model, $input->dueAt, $input->timezone, $actor),
+            'links-on', 'links-off' => $service->previewLinks($model, $input->action === 'links-on', $actor),
+            'rotate-links' => $service->rotatePreviewLinks($model, $actor),
             'rollback' => $model = $service->rollback($model, $actor),
             default => $service->transition($model, $input->action, $actor),
         };

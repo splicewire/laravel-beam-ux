@@ -21,10 +21,13 @@ class BeamUxRelease extends Model implements ParticipatesInWorkflowTransaction, 
 
     protected $guarded = ['*'];
 
+    /** The Preview Links' secret signs every link (ADR-0232 d8); it never leaves the server. */
+    protected $hidden = ['preview_link_secret'];
+
     /** @return array<string, string> */
     protected function casts(): array
     {
-        return ['origin' => ReleaseOrigin::class];
+        return ['origin' => ReleaseOrigin::class, 'preview_links_enabled' => 'boolean'];
     }
 
     public function workflowType(): string

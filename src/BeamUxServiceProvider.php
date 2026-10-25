@@ -119,6 +119,8 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 // A Release's provenance (`origin`: direct | built). An ALTER beside the create for the same reason
                 // as its siblings; existing Releases are `built`.
                 'shared/add_origin_to_beam_ux_releases_table',
+                // A Release's Preview Links (ADR-0232 d8): on/off and the secret they are signed with.
+                'shared/add_preview_links_to_beam_ux_releases_table',
                 'shared/create_beam_ux_release_recordings_table',
                 'shared/create_beam_ux_preview_grants_table',
                 // The BASELINE (ADR-0225 decision 2; launch ticket 00, 2026-10-16): pins every already-written

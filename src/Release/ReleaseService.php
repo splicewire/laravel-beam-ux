@@ -14,6 +14,7 @@ use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
+use Splicewire\Beam\Ux\Preview\ReleasePreviewLinks;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Control\TransitionResult;
@@ -113,6 +114,36 @@ final class ReleaseService
                 'observed_pin' => $entry->published_version, 'observed_marking' => $entry->workflow_marking,
                 'redirect_target' => $redirectTarget,
             ])->save();
+        });
+    }
+
+    /**
+     * ADR-0232 d8: turn the Release's Preview Links on or off. Anyone who can edit its members may. Links change no
+     * member, so a review stands. Off clears the secret, so turning them on again ends every earlier link.
+     */
+    public function previewLinks(BeamUxRelease $release, bool $on, Authenticatable $actor): void
+    {
+        $release->getConnection()->transaction(function () use ($release, $on, $actor) {
+            $locked = $release->newQuery()->lockForUpdate()->findOrFail($release->id);
+            $this->assertEditable($locked);
+            $this->authorizeLinks($locked, $actor);
+            $locked->forceFill($on
+                ? ['preview_links_enabled' => true, 'preview_link_secret' => $locked->getAttribute('preview_link_secret') ?: ReleasePreviewLinks::newSecret()]
+                : ['preview_links_enabled' => false, 'preview_link_secret' => null])->save();
+        });
+    }
+
+    /** Rotating the secret ends every link to the Release, and every Preview a link opened, at once. */
+    public function rotatePreviewLinks(BeamUxRelease $release, Authenticatable $actor): void
+    {
+        $release->getConnection()->transaction(function () use ($release, $actor) {
+            $locked = $release->newQuery()->lockForUpdate()->findOrFail($release->id);
+            $this->assertEditable($locked);
+            $this->authorizeLinks($locked, $actor);
+            if (! $locked->getAttribute('preview_links_enabled')) {
+                $this->refuse('Turn Preview Links on before rotating them.');
+            }
+            $locked->forceFill(['preview_link_secret' => ReleasePreviewLinks::newSecret()])->save();
         });
     }
 
@@ -371,6 +402,30 @@ final class ReleaseService
     }
 
     /** A direct Release's single check: `ux.author`, then the publish ladder alone. */
+    /** Whether the actor may manage the Release's Preview Links: the check the link actions make, without refusing. */
+    public function mayManageLinks(BeamUxRelease $release, ?Authenticatable $actor): bool
+    {
+        if ($actor === null) {
+            return false;
+        }
+        try {
+            $this->authorizeLinks($release, $actor);
+        } catch (AuthorizationException) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /** Whoever can edit every member of the Release may manage its Preview Links (ADR-0232 d8). */
+    private function authorizeLinks(BeamUxRelease $release, Authenticatable $actor): void
+    {
+        Gate::forUser($actor)->authorize('ux.author');
+        foreach ($release->members()->pluck('entry_id') as $entryId) {
+            $this->authorizeEntry($this->entry($release, (string) $entryId), $actor, false);
+        }
+    }
+
     private function authorizeDirect(BeamUxEntry $entry, Authenticatable $actor): void
     {
         $gate = Gate::forUser($actor);

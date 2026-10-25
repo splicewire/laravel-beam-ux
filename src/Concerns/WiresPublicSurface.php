@@ -11,6 +11,7 @@ use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Head\PageHead;
 use Splicewire\Beam\Ux\Http\Controllers\EntryArtifactController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewExitController;
+use Splicewire\Beam\Ux\Http\Controllers\PreviewLinkController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewStartController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewViewAsMeController;
 use Splicewire\Beam\Ux\Http\Controllers\PublicEntryController;
@@ -152,6 +153,10 @@ trait WiresPublicSurface
             $apply($this->get('_beam/preview/view-as-me', PreviewViewAsMeController::class)
                 ->middleware([ResolvePreviewContext::class, 'auth'])
                 ->name($previewViewerName));
+
+            // A Release's Preview Link (ADR-0232 d8): two segments, so the one-segment token route below never takes it.
+            $apply($this->get('_beam/preview/release/{release}', PreviewLinkController::class)
+                ->name("{$routeName}site.preview.link"));
 
             $apply($this->get('_beam/preview/{token}', PreviewStartController::class)
                 ->name("{$routeName}site.preview.start"));

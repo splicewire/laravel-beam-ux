@@ -247,6 +247,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Preview Links (ADR-0232 d8)
+    |--------------------------------------------------------------------------
+    |
+    | `link_days` — how long a Release's Preview Link lasts. A link opens the
+    |               same Preview a version preview does, for at most 8 hours
+    |               per open; rotating the Release's secret ends every link.
+    |
+    */
+    'preview' => [
+        'link_days' => (int) env('BEAM_UX_PREVIEW_LINK_DAYS', 7),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Compile on save (ADR-0209 §7)
     |--------------------------------------------------------------------------
     |

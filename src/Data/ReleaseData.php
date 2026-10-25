@@ -36,6 +36,10 @@ final class ReleaseData extends BeamData
         public ?ReleaseRecordingData $recording = null,
         public ?string $filesMemberId = null,
         public ?string $filesHref = null,
+        /** ADR-0232 d8: whether the Release's Preview Links are on. */
+        public bool $previewLinksEnabled = false,
+        /** A Preview Link minted for this read (7 days), for whoever may manage the links; never the secret. */
+        public ?string $previewLink = null,
     ) {}
 
     public static function scope(Builder $query): Builder
@@ -61,6 +65,9 @@ final class ReleaseData extends BeamData
             ReleaseRecordingData::project($model, request()->user()),
             $members->first()?->id,
             $model->status === 'published' ? self::filesHref($members->first()?->id) : null,
+            (bool) $model->getAttribute('preview_links_enabled'),
+            $model->getAttribute('preview_links_enabled') && app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->mayManageLinks($model, request()->user())
+                ? app(\Splicewire\Beam\Ux\Preview\ReleasePreviewLinks::class)->url($model) : null,
         );
     }
 
