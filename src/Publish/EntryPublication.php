@@ -754,12 +754,15 @@ class EntryPublication
             'last_published_at' => now(),
         ]);
         // ADR-0233 d5: the File Language; the mirror moves with it (see mirroredFile()).
+        // Checked whether or not it changes: a Hosted site's page names none at all (d6).
         $format = $entry->format instanceof \Splicewire\Beam\Ux\Format\UxFormat ? $entry->format->value : $entry->getAttribute('format');
-        if ($data->fileLanguage !== null && $data->fileLanguage !== $format) {
+        if ($data->fileLanguage !== null) {
             if (! \Splicewire\Beam\Ux\Format\FileLanguage::allows($entry, $data->fileLanguage)) {
                 throw ValidationException::withMessages(['pageSettings.fileLanguage' => "This page cannot be written in {$data->fileLanguage} on this host."]);
             }
-            $entry->forceFill(['format' => $data->fileLanguage]);
+            if ($data->fileLanguage !== $format) {
+                $entry->forceFill(['format' => $data->fileLanguage]);
+            }
         }
         // ADR-0233 d4: the Page Fields this page declares for its child pages, where the host migrated the column.
         if (Schema::connection($entry->getConnectionName())->hasColumn('beam_ux_entries', 'child_fields')) {

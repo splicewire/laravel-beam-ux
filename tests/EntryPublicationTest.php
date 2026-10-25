@@ -759,6 +759,28 @@ class EntryPublicationTest extends TestCase
         $publication->publishAuthoredBody($entry->fresh());
         $this->assertNotNull($entry->fresh()->published_version);
         $this->assertSame([], array_values(array_diff(scandir($directory), ['.', '..'])), 'nothing is mirrored for a Hosted page');
+
+        // review-r1 (EP-26 F, #2): its page settings name no File Language either, not even the tsx codec it has.
+        foreach (['tsx', 'mdx'] as $named) {
+            try {
+                $publication->recordDraft($entry->fresh(), self::BODY_ONE, null, \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'Tenant page', 'fileLanguage' => $named]));
+                $this->fail("A Hosted draft named the File Language {$named}");
+            } catch (ValidationException $failure) {
+                $this->assertArrayHasKey('pageSettings.fileLanguage', $failure->errors());
+            }
+        }
+        // A version that names one anyway (written before this check) is refused at Publish too.
+        $publication->recordDraft($entry->fresh(), self::BODY_TWO, null, \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'Tenant page']));
+        $particle = $entry->fresh()->particle;
+        $particle->meta = [...$particle->meta, 'pageSettings' => [...$particle->meta['pageSettings'], 'fileLanguage' => 'tsx']];
+        $particle->save();
+        $legacy = app(\Rushing\Versioning\Contracts\VersionStore::class)->snapshot($particle, 'legacy');
+        try {
+            $publication->publishVersion($entry->fresh(), (string) $legacy->id);
+            $this->fail('A Hosted version naming tsx was published');
+        } catch (ValidationException $failure) {
+            $this->assertArrayHasKey('pageSettings.fileLanguage', $failure->errors());
+        }
     }
 
     /** @return array{0: BeamUxEntry, 1: string, 2: EntryPublication} a published tsx page and its mirror path */

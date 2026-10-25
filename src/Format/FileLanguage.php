@@ -47,11 +47,18 @@ final class FileLanguage
         return $entry->format instanceof UxFormat ? $entry->format->value : $entry->getAttribute('format');
     }
 
-    /** May this page take `$language`? Its current language always may (a host turning the gate off strands none). */
+    /**
+     * May this page take `$language`? A Hosted site's page takes none, not even the codec its `format` names (d6);
+     * a central page may keep its current language (a host turning the gate off strands none) or take a choice.
+     */
     public static function allows(BeamUxEntry $entry, string $language): bool
     {
+        $choices = self::choices($entry);
+        if ($choices === []) {
+            return false;
+        }
         $current = $entry->format instanceof UxFormat ? $entry->format->value : $entry->getAttribute('format');
 
-        return $language === $current || in_array($language, self::choices($entry), true);
+        return $language === $current || in_array($language, $choices, true);
     }
 }
