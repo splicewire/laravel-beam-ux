@@ -175,6 +175,19 @@ class EntryArtifactStore
         return $this->disk->exists($path) ? (string) $this->disk->get($path) : null;
     }
 
+    /** Read a previously compiled immutable snapshot artifact without compiling or changing pins. */
+    public function readVersion(BeamUxEntry $entry, string $versionId): ?string
+    {
+        $path = $this->path($entry, $this->versionKey($versionId));
+
+        return $this->disk->exists($path) ? (string) $this->disk->get($path) : null;
+    }
+
+    public function hasVersion(BeamUxEntry $entry, string $versionId): bool
+    {
+        return $this->disk->exists($this->path($entry, $this->versionKey($versionId)));
+    }
+
     /**
      * Write the current artifact and prune addresses no longer held by the pin or working head.
      * Pruning is per-entry; other entries are never in the blast radius.

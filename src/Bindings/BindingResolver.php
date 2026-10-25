@@ -10,6 +10,7 @@ use Splicewire\Beam\Particle\ParticleFrameResourceHandler;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Ux\Data\RepeatRecordsData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 
 /** ADR-0229: saved declarations execute as this request's visitor, not their author. */
 final class BindingResolver
@@ -19,7 +20,13 @@ final class BindingResolver
     /** @return array<string, RepeatRecordsData> keyed by stable block identity */
     public function resolve(BeamUxEntry $entry, Request $request, string $realm): array
     {
-        return $this->resolveDocument($entry, $this->documents->read($entry), $request, $realm);
+        $preview = $request->attributes->get('beam.ux.preview');
+        if ($preview instanceof PreviewContext) {
+            $request = clone $request;
+            $request->setUserResolver(static fn () => null);
+        }
+
+        return $this->resolveDocument($entry, $this->documents->read($entry, $preview instanceof PreviewContext ? $preview : null), $request, $realm);
     }
 
     /** Internal author-envelope path: the same reader, on the already authorized current body. */

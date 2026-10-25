@@ -11,6 +11,7 @@ use Rushing\DataNav\NavTree;
 use Splicewire\Beam\Ux\Access\EntryAccessResolver;
 use Splicewire\Beam\Ux\Access\TokenAccessGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 use Splicewire\Beam\Ux\Sitemap\WorkflowMarkingPublishGate;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -82,7 +83,7 @@ class NavProjector
      * It is an argument rather than constructor state precisely so the gate pass can run live per
      * request over a tree a host is free to cache (ADR-0212 §4).
      */
-    public function project(string $realm, ?Authenticatable $actor = null): NavTree
+    public function project(string $realm, ?Authenticatable $actor = null, ?PreviewContext $preview = null): NavTree
     {
         $query = BeamUxEntry::query()
             ->whereJsonContains('realms', $realm)
@@ -126,7 +127,17 @@ class NavProjector
         // ONE adjacency load; both gate passes then run in memory over it, so gating adds no query.
         $entries = $query->orderBy('slug')->get();
 
-        return NavTree::make($this->nodesFor($entries, null, [], $actor));
+        if ($preview !== null) {
+            $entries = $entries->map(function (BeamUxEntry $entry) use ($preview): ?BeamUxEntry {
+                if ($preview->contains((string) $entry->getKey()) && ! $preview->admitsDraft((string) $entry->getKey())) {
+                    return null;
+                }
+
+                return $preview->project($entry);
+            })->filter()->values();
+        }
+
+        return NavTree::make($this->nodesFor($entries, null, [], $actor, $preview));
     }
 
     /**
@@ -146,7 +157,7 @@ class NavProjector
      * @param  array<int, BeamUxEntry>  $trail
      * @return array<int, NavLink>
      */
-    private function nodesFor(Collection $all, ?string $parentId, array $trail, ?Authenticatable $actor): array
+    private function nodesFor(Collection $all, ?string $parentId, array $trail, ?Authenticatable $actor, ?PreviewContext $preview = null): array
     {
         $nodes = [];
 
@@ -157,12 +168,13 @@ class NavProjector
 
         $visible = $all
             ->where('parent_id', $parentId)
-            ->reject(fn (BeamUxEntry $entry) => $this->publish !== null && ! $this->publish->isPublished($entry))
+            ->reject(fn (BeamUxEntry $entry) => $this->publish !== null && ! $this->publish->isPublished($entry)
+                && ! $preview?->admitsDraft((string) $entry->getKey()))
             ->reject(fn (BeamUxEntry $entry) => ! $this->access->canList($actor, [...$trail, $entry]));
 
         foreach ($visible as $entry) {
             $chain = [...$trail, $entry];
-            $children = $this->nodesFor($all, $entry->getKey(), $chain, $actor);
+            $children = $this->nodesFor($all, $entry->getKey(), $chain, $actor, $preview);
 
             if ($entry->segment === null || $entry->segment === '') {
                 // Pass-through: lift the children, emit nothing for the node itself.

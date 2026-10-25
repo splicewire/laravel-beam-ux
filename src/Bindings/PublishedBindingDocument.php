@@ -5,13 +5,16 @@ namespace Splicewire\Beam\Ux\Bindings;
 use LogicException;
 use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 
 /** Read declarations from the publication pin only, never an author's mutable working body. */
 class PublishedBindingDocument
 {
-    public function read(BeamUxEntry $entry): array
+    public function read(BeamUxEntry $entry, ?PreviewContext $preview = null): array
     {
-        $pin = $entry->getAttribute('published_version');
+        $pin = $preview === null
+            ? $entry->getAttribute('published_version')
+            : $preview->versionFor((string) $entry->getKey());
         if ($pin === null || $entry->particle_id === null) {
             return [];
         }

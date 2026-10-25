@@ -6,7 +6,9 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Splicewire\Beam\Ux\Access\EntryAccessResolver;
 use Splicewire\Beam\Ux\Access\Right;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
+use Splicewire\Beam\Ux\Containment\PreviewEntryPathResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 
 /**
@@ -29,6 +31,7 @@ class PublicEntryGate
         private EntryPathResolver $paths,
         private EntryAccessResolver $access,
         private ?EntryPublishGate $publish = null,
+        private PreviewEntryPathResolver $previewPaths = new PreviewEntryPathResolver,
     ) {}
 
     /**
@@ -39,9 +42,11 @@ class PublicEntryGate
      *
      * @return array<int, BeamUxEntry>|null
      */
-    public function chainFor(string $path, string $realm, ?Authenticatable $actor = null): ?array
+    public function chainFor(string $path, string $realm, ?Authenticatable $actor = null, ?PreviewContext $preview = null): ?array
     {
-        $chain = $this->paths->resolve($path, $realm);
+        $chain = $preview === null
+            ? $this->paths->resolve($path, $realm)
+            : $this->previewPaths->resolve($path, $realm, $preview);
 
         if ($chain === null) {
             return null;
@@ -49,8 +54,17 @@ class PublicEntryGate
 
         $target = $chain[array_key_last($chain)];
 
-        if ($this->publish !== null && ! $this->publish->isPublished($target)) {
+        if ($this->publish !== null && ! $this->publish->isPublished($target)
+            && ! $preview?->admitsDraft((string) $target->getKey())) {
             return null;
+        }
+
+        if ($preview !== null) {
+            foreach ($chain as $node) {
+                if ($preview->contains((string) $node->getKey()) && ! $preview->admitsDraft((string) $node->getKey())) {
+                    return null;
+                }
+            }
         }
 
         return $this->access->canRender($actor, $chain) ? $chain : null;
@@ -69,7 +83,7 @@ class PublicEntryGate
      *
      * @return array<int, BeamUxEntry>|null
      */
-    public function chainForEntry(BeamUxEntry $entry, string $realm, ?Authenticatable $actor = null): ?array
+    public function chainForEntry(BeamUxEntry $entry, string $realm, ?Authenticatable $actor = null, ?PreviewContext $preview = null): ?array
     {
         $realms = $entry->realms ?? [$entry->realm];
 
@@ -82,7 +96,8 @@ class PublicEntryGate
             return null;
         }
 
-        if ($this->publish !== null && ! $this->publish->isPublished($entry)) {
+        if ($this->publish !== null && ! $this->publish->isPublished($entry)
+            && ! $preview?->admitsDraft((string) $entry->getKey())) {
             return null;
         }
 

@@ -8,10 +8,13 @@ use Rushing\Popcorn\Concerns\Chained;
 use Splicewire\Beam\Ux\Access\EntryAccessResolver;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Http\Controllers\EntryArtifactController;
+use Splicewire\Beam\Ux\Http\Controllers\PreviewExitController;
+use Splicewire\Beam\Ux\Http\Controllers\PreviewStartController;
 use Splicewire\Beam\Ux\Http\Controllers\PublicEntryController;
 use Splicewire\Beam\Ux\Http\EntryPageProps;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
 use Splicewire\Beam\Ux\Http\InertiaEntryRenderer;
+use Splicewire\Beam\Ux\Http\Middleware\ResolvePreviewContext;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
@@ -111,17 +114,20 @@ trait WiresPublicSurface
             // each replaced the other. A host adds; it cannot subtract the baseline.
             $reservedPrefixes = array_values(array_unique(array_merge(
                 PublicEntryController::RESERVED_BY_BEAM,
+                ['_beam'],
                 (array) config('beam.ux.site.reserved_prefixes', []),
                 $reservedPrefixes ?? [],
             )));
 
             $artifactName = "{$routeName}site.artifact";
+            $previewExitName = "{$routeName}site.preview.exit";
 
             $defaults = [
                 'beamUxRealm' => $realm,
                 'beamUxPage' => $page,
                 'beamUxNav' => $withNav,
                 'beamUxArtifactRoute' => $artifactName,
+                'beamUxPreviewExitRoute' => "{$routeName}site.preview.exit",
             ];
 
             $apply = function ($route) use ($defaults) {
@@ -135,7 +141,14 @@ trait WiresPublicSurface
             // `{version?}` is what earns the immutable cache header (ADR-0209 §7). Without it the
             // artifact sat at a FIXED address served `immutable, max-age=1y`, so a browser that had
             // loaded a page once never asked again and no body edit ever reached a returning reader.
+            $apply($this->get('_beam/preview/exit', PreviewExitController::class)
+                ->name($previewExitName));
+
+            $apply($this->get('_beam/preview/{token}', PreviewStartController::class)
+                ->name("{$routeName}site.preview.start"));
+
             $apply($this->get("{$artifactRoot}/{entry}/{version?}", EntryArtifactController::class)
+                ->middleware(ResolvePreviewContext::class)
                 ->name($artifactName));
 
             if ($claimRoot) {
@@ -144,6 +157,7 @@ trait WiresPublicSurface
             }
 
             $apply($this->get('{path}', PublicEntryController::class)
+                ->middleware(ResolvePreviewContext::class)
                 ->where('path', PublicEntryController::pathConstraint($reservedPrefixes))
                 ->name("{$routeName}site.show"));
         });

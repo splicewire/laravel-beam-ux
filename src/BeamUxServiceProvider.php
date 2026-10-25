@@ -46,6 +46,8 @@ use Splicewire\Beam\Ux\Doctor\BeamUxRouteShadowAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxThemeResolutionAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxVersionStoreAudit;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Preview\PreviewGrantResolver;
+use Splicewire\Beam\Ux\Preview\PreviewGrantService;
 use Splicewire\Beam\Ux\Query\BeamUxEntryResourceQuery;
 use Splicewire\Beam\Write\ParticleWriter;
 
@@ -109,6 +111,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 // as its siblings; existing Releases are `built`.
                 'shared/add_origin_to_beam_ux_releases_table',
                 'shared/create_beam_ux_release_recordings_table',
+                'shared/create_beam_ux_preview_grants_table',
                 // The BASELINE (ADR-0225 decision 2; launch ticket 00, 2026-10-16): pins every already-written
                 // entry to its live body inside `migrate`, so the pin is never required-but-missing. A
                 // separate file because hosts that already ran the ALTER (or got the column from the create)
@@ -122,6 +125,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
     public function packageRegistered(): void
     {
+        $this->app->bind(PreviewGrantResolver::class, PreviewGrantService::class);
         // DOCS-06b: the templates the provenance backfill may match an unstamped row against; packages register theirs.
         $this->app->singleton(Provenance\ProvenanceTemplates::class);
 

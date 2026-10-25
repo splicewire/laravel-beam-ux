@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Models\BeamUxPreviewGrant;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Theme\ThemeResolver;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -159,5 +161,22 @@ class ThemeResolverPublicationPinTest extends TestCase
         BeamParticle::where('id', $entry->particle_id)->update(['payload' => ['canvas' => ['accent' => '#888888']]]);
 
         $this->assertSame('#777777', (new ThemeResolver)->resolve()['canvas']['accent']);
+    }
+
+    public function test_a_preview_uses_its_versioned_theme_without_changing_the_public_pin(): void
+    {
+        $entry = $this->themeEntry(['canvas' => ['accent' => '#777777']]);
+        app(EntryPublication::class)->baseline($entry->fresh());
+        $this->overwriteWorkingCopy($entry, ['canvas' => ['accent' => '#999999']]);
+        $previewVersion = app(\Rushing\Versioning\Contracts\VersionStore::class)
+            ->snapshot(BeamParticle::find($entry->particle_id), 'preview')->getKey();
+        $grant = new BeamUxPreviewGrant;
+        $grant->forceFill(['entry_id' => (string) $entry->getKey(), 'version_id' => (string) $previewVersion]);
+
+        $resolver = new ThemeResolver;
+
+        $this->assertSame('#999999', $resolver->resolve(preview: new PreviewContext($grant))['canvas']['accent']);
+        $this->assertSame('#777777', $resolver->resolve()['canvas']['accent']);
+        $this->assertSame('#999999', BeamParticle::find($entry->particle_id)->payload['canvas']['accent']);
     }
 }
