@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Redirect;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 use Rushing\Versioning\Contracts\VersionStore;
+use Splicewire\Beam\Ux\Access\EntryAccessResolver;
 use Splicewire\Beam\Ux\Bindings\RecordPages;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -17,10 +18,9 @@ use Splicewire\Beam\Ux\Type\UxType;
  * readiness report and its Preview all read one plan.
  *
  * A move leaves a Redirect at every URL a guest could open before it (a published page whose chain the publish gate
- * passes: decision 8) that no page answers after it, to the page that was there, by identity. Read rights don't
- * enter here: a page only some readers may read keeps its old URL for them, because a Redirect answers only a reader
- * who may read its target (decision 10), and a page answers its URL whoever may read it, as EP-30's save check and
- * prune count it. That covers the moved
+ * passes, decision 8, and that an anonymous visitor may render, as the renderer decides it) that no page answers for a
+ * guest after it, to the page that was there, by identity. A guest is anonymous (EP-31 ruling, orch-lead 23:26Z): a
+ * page gated to signed-in readers or requirements leaves none when it moves. That covers the moved
  * pages and every page under them whose URL changed, composed with all of the publish's moves at once, as
  * {@see \Splicewire\Beam\Ux\Publish\EntryUrlChanges} composes them. A swap, a new page at an old URL, a root-absolute
  * segment and a hidden page leave none. A Record Page that moves leaves a path-and-below Redirect from its old static
@@ -35,6 +35,7 @@ final class ReleaseRedirects
     public function __construct(
         private UrlResolver $urls,
         private VersionStore $versions,
+        private EntryAccessResolver $access,
         private ?EntryPublishGate $gate = null,
     ) {}
 
@@ -127,8 +128,9 @@ final class ReleaseRedirects
     }
 
     /**
-     * Each page's URL in each of its realms, where it has a URL a guest could open: it qualifies itself, and every page
-     * of its chain passes the gate (decision 8).
+     * Each page's URL in each of its realms, where it has a URL a guest could open: it qualifies itself, every page of
+     * its chain passes the gate (decision 8), and an anonymous visitor may render it (`traverse` and `access`, as
+     * {@see \Splicewire\Beam\Ux\Http\PublicEntryGate::chainFor()} decides for a null actor).
      *
      * @param  Collection<string, BeamUxEntry>  $entries
      * @param  callable(BeamUxEntry): bool  $live  whether the page itself has a live version
@@ -144,7 +146,7 @@ final class ReleaseRedirects
                 continue;
             }
             $chain = $this->chain($entries, (string) $id);
-            if ($chain === null || in_array(false, array_map($visible, $chain), true)) {
+            if ($chain === null || in_array(false, array_map($visible, $chain), true) || ! $this->access->canRender(null, $chain)) {
                 continue;
             }
             $url = $this->urls->resolveChain($chain);

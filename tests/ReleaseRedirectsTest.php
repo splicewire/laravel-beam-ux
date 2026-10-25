@@ -52,15 +52,19 @@ class ReleaseRedirectsTest extends AuthoredComponentNativeTestCase
         ], $this->rows($plan));
     }
 
-    public function test_a_page_only_readers_may_read_keeps_its_old_url_for_them(): void
+    public function test_a_guest_is_anonymous_so_a_gated_page_leaves_none_and_takes_no_url_from_a_guest(): void
     {
-        // Review of 5eb6e6a2: "a URL a guest could open" (d2) means any visitor's, read rights aside. Read rights apply
-        // when the Redirect answers (d10: only a reader who may read the target gets it, no-store), so a members-only
-        // page that moves keeps its members' links, as EP-30's save check and prune already count it as answering.
+        // Review of 5eb6e6a2; orch-lead's ruling (23:26Z): d2's "a URL a guest could open" is an anonymous visitor's,
+        // decided as the renderer decides it for a null actor. A page gated to signed-in readers leaves no Redirect
+        // when it moves.
         $members = $this->livePage('members', null, ['access' => ['auth']]);
         $this->assertSame(['auth'], $members->access, 'a page only signed-in readers may read');
+        $this->assertSame([], $this->rows($this->plan([$members->id => $this->move($members, 'team')])));
 
-        $this->assertSame([['/members', 'exact', 'page', $members->id, 'moved']], $this->rows($this->plan([$members->id => $this->move($members, 'team')])));
+        // Nor does a gated page answer an old URL for a guest: the public page that left it still leaves its Redirect.
+        $old = $this->livePage('old');
+        $this->assertSame([['/old', 'exact', 'page', $old->id, 'moved']],
+            $this->rows($this->plan([$old->id => $this->move($old, 'new'), $members->id => $this->move($members, 'old')])));
     }
 
     public function test_a_swap_a_new_page_at_an_old_url_a_root_absolute_segment_and_a_hidden_page_leave_none(): void
