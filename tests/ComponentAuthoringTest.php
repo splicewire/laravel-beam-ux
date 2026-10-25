@@ -125,6 +125,29 @@ class ComponentAuthoringTest extends AuthoredComponentNativeTestCase
         $this->assertSame(0, \Splicewire\Beam\Models\BeamParticle::count());
         $this->assertSame(0, \Rushing\Versioning\Models\Version::count());
     }
+
+    public function test_reach_counts_direct_component_and_page_referrers_without_claiming_transitive_pages(): void
+    {
+        $actor = new ComponentAuthoringFixtureUser(['id' => (string) \Illuminate\Support\Str::uuid(), 'author' => true, 'edit' => true]);
+        $this->actingAs($actor);
+        $root = BeamUxEntry::rootFor('site');
+        $block = fn ($name, $children = []) => ['kind' => 'block', 'name' => $name, 'isComponent' => ctype_upper($name[0]), 'dynamic' => false, 'props' => [], 'children' => $children];
+        $create = function ($slug, $type, $body) use ($root) {
+            $entry = BeamUxEntry::create(['slug' => $slug, 'type' => $type, 'realm' => 'site', 'parent_id' => $root->id, 'format' => 'tsx', 'component_kind' => $type === 'component' ? 'authored' : null]);
+            app(\Splicewire\Beam\Ux\Publish\EntryPublication::class)->write($entry, $body);
+
+            return $entry;
+        };
+        $target = $create('price', 'component', [array_merge($block('section'), ['component' => ['name' => 'Price', 'props' => []]])]);
+        $wrapper = $create('pricing-card', 'component', [array_merge($block('section', [$block('Price')]), ['component' => ['name' => 'PricingCard', 'props' => []]])]);
+        $direct = $create('direct', 'page', [$block('Price')]);
+        $create('indirect', 'page', [$block('PricingCard')]);
+        $before = [BeamUxEntry::count(), \Splicewire\Beam\Models\BeamParticle::count(), \Rushing\Versioning\Models\Version::count()];
+        $result = app(ComponentAuthoring::class)->capabilities($target->fresh(), $actor);
+        $this->assertSame(2, $result->reachEntries);
+        $this->assertEqualsCanonicalizing([(string) $wrapper->id, (string) $direct->id], app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->usedBy($target->fresh()));
+        $this->assertSame($before, [BeamUxEntry::count(), \Splicewire\Beam\Models\BeamParticle::count(), \Rushing\Versioning\Models\Version::count()]);
+    }
 }
 
 class ComponentAuthoringFixturePolicy

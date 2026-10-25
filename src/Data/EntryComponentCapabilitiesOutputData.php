@@ -8,6 +8,6 @@ use Splicewire\Beam\Data\BeamData;
 #[TypeScript]
 final class EntryComponentCapabilitiesOutputData extends BeamData
 {
-    /** reachEntries counts entries at Working Head or Publication Pin, never pages or instance occurrences. */
+    /** Counts direct referring entries across retained heads/pins/releases, not transitive pages or instance occurrences. */
     public function __construct(public string $id, public bool $canEdit, public ?int $reachEntries, public int $reachLimit, public bool $reachUnavailable) {}
 }
