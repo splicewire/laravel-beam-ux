@@ -263,6 +263,29 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
         $this->assertNotNull($team);
     }
 
+    public function test_a_previews_redirect_to_a_page_only_readers_may_read_answers_its_readers(): void
+    {
+        // Review of 52f2e938: a Take-down's target that only signed-in readers may read is where its Redirect leads.
+        // A guest gets the uniform 404; a viewer who previews as themselves, and may read it, is sent there (d10).
+        (require dirname(__DIR__).'/database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
+        $members = $this->livePage('members');
+        $members->forceFill(['access' => ['auth']])->save();
+        $legacy = $this->livePage('legacy');
+        $release = $this->release([$legacy->id => null]);
+        $release->members()->where('entry_id', $legacy->id)->update(['redirect_target' => $members->id]);
+        $credential = $this->openLink($release);
+
+        $guest = $this->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)->get('/legacy');
+        $guest->assertNotFound();
+        $this->assertSame([['from' => '/legacy', 'to' => '/members', 'reason' => 'takedown']],
+            $this->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)->get('/')->json('props.preview.redirects'));
+
+        $asMe = $this->actingAs($this->user('reader'))->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)
+            ->withUnencryptedCookie(ResolvePreviewContext::VIEWER_COOKIE, 'me')->get('/legacy');
+        $asMe->assertStatus(302)->assertRedirect('/members');
+        $this->assertStringContainsString('no-store', (string) $asMe->headers->get('Cache-Control'));
+    }
+
     private function release(array $members): BeamUxRelease
     {
         $release = tap((new BeamUxRelease)->forceFill([

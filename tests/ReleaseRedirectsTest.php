@@ -67,6 +67,25 @@ class ReleaseRedirectsTest extends AuthoredComponentNativeTestCase
             $this->rows($this->plan([$old->id => $this->move($old, 'new'), $members->id => $this->move($members, 'old')])));
     }
 
+    public function test_where_a_redirect_leads_is_the_page_wherever_it_is_whoever_may_read_it(): void
+    {
+        // Review of 52f2e938: guests qualify the URLs a Redirect starts from, not where it leads. A Take-down's target
+        // or a moved page that only readers may read is still where the Redirect goes; the renderer applies each
+        // reader's own read gate when it answers (d10).
+        $members = $this->livePage('members', null, ['access' => ['auth']]);
+        $legacy = $this->livePage('legacy');
+        $plan = $this->plan([], [$legacy->id => $members->id]);
+        $this->assertSame([['/legacy', 'exact', 'page', $members->id, 'takedown']], $this->rows($plan));
+        $this->assertSame('/members', $plan['redirects'][0]['to']);
+
+        $public = $this->livePage('public');
+        $settings = EntryPageSettingsData::from([...EntryPageSettingsData::fromEntry($public->fresh())->toArray(), 'parentId' => $members->id]);
+        $ref = (string) app(EntryPublication::class)->recordDraft($public->fresh(), [$this->node()], null, $settings)->headVersion;
+        $moved = $this->plan([$public->id => $ref]);
+        $this->assertSame([['/public', 'exact', 'page', $public->id, 'moved']], $this->rows($moved), 'it moves under a page only readers may read');
+        $this->assertSame('/members/public', $moved['redirects'][0]['to']);
+    }
+
     public function test_a_swap_a_new_page_at_an_old_url_a_root_absolute_segment_and_a_hidden_page_leave_none(): void
     {
         $x = $this->livePage('x');

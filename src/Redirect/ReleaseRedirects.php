@@ -58,7 +58,11 @@ final class ReleaseRedirects
     {
         [$now, $after, $publishing, $removed, $visibleAfter] = $this->graph($context, $refs, $takedowns);
         $before = $this->addresses($now, fn (BeamUxEntry $entry) => $entry->published_version !== null && $this->published($entry));
-        $afterUrls = $this->addresses($after, fn (BeamUxEntry $entry) => isset($publishing[(string) $entry->getKey()]) || $entry->published_version !== null, $visibleAfter);
+        $liveAfter = fn (BeamUxEntry $entry) => isset($publishing[(string) $entry->getKey()]) || $entry->published_version !== null;
+        // Guests qualify where a Redirect starts and which URLs a page answers for them. Where one leads is the page's
+        // URL whoever may read it: the renderer applies each reader's own gate when it answers (d10).
+        $afterUrls = $this->addresses($after, $liveAfter, $visibleAfter);
+        $afterReach = $this->addresses($after, $liveAfter, $visibleAfter, anonymous: false);
 
         $answered = [];
         $redirects = [];
@@ -66,7 +70,7 @@ final class ReleaseRedirects
         foreach ($before as $key => $was) {
             [$realm, $id] = explode('|', $key, 2);
             $entry = $now[$id];
-            $is = $afterUrls[$key] ?? null;
+            $is = $afterReach[$key] ?? null;
             if ($is !== null && $is === $was) {
                 continue;
             }
@@ -96,13 +100,14 @@ final class ReleaseRedirects
             $target = $this->target($now, $removed[$takenDown]);
             $target === null
                 ? $gone[] = ['realm' => $realm, 'path' => $was, 'entryId' => $id]
-                : $redirects[] = $this->row($realm, $was, 'exact', 'page', $target, null, $afterUrls[$realm.'|'.$target] ?? null, 'takedown', $id);
+                : $redirects[] = $this->row($realm, $was, 'exact', 'page', $target, null, $afterReach[$realm.'|'.$target] ?? null, 'takedown', $id);
         }
 
         return [
             'redirects' => $redirects,
             'gone' => $gone,
-            'replaced' => $this->replaced($context, $after, $afterUrls, $publishing),
+            // As EP-30's prune does it: a page takes its URL whoever may read it.
+            'replaced' => $this->replaced($context, $after, $afterReach, $publishing),
             'staysHidden' => array_values(array_filter(array_keys($publishing), fn (string $id) => $after->has($id)
                 && $after[$id]->type === UxType::Page && ! array_key_exists((string) $id, $removed)
                 && ! $this->chainVisible($after, $id, $visibleAfter))),
@@ -198,16 +203,17 @@ final class ReleaseRedirects
     }
 
     /**
-     * Each page's URL in each of its realms, where it has a URL a guest could open: it qualifies itself, every page of
-     * its chain passes the gate (decision 8), and an anonymous visitor may render it (`traverse` and `access`, as
-     * {@see \Splicewire\Beam\Ux\Http\PublicEntryGate::chainFor()} decides for a null actor).
+     * Each page's URL in each of its realms, where it has one: it qualifies itself and every page of its chain passes the
+     * gate (decision 8). With `$anonymous`, only a URL a guest could open: an anonymous visitor may render it too
+     * (`traverse` and `access`, as {@see \Splicewire\Beam\Ux\Http\PublicEntryGate::chainFor()} decides for a null
+     * actor). Without it, where a page is whoever may read it.
      *
      * @param  Collection<string, BeamUxEntry>  $entries
      * @param  callable(BeamUxEntry): bool  $live  whether the page itself has a live version
      * @param  callable(BeamUxEntry): bool|null  $visible  the gate for a node of the chain
      * @return array<string, string> `realm|id` => URL
      */
-    private function addresses(Collection $entries, callable $live, ?callable $visible = null): array
+    private function addresses(Collection $entries, callable $live, ?callable $visible = null, bool $anonymous = true): array
     {
         $visible ??= fn (BeamUxEntry $entry) => $this->published($entry);
         $out = [];
@@ -216,7 +222,7 @@ final class ReleaseRedirects
                 continue;
             }
             $chain = $this->chain($entries, (string) $id);
-            if ($chain === null || in_array(false, array_map($visible, $chain), true) || ! $this->access->canRender(null, $chain)) {
+            if ($chain === null || in_array(false, array_map($visible, $chain), true) || ($anonymous && ! $this->access->canRender(null, $chain))) {
                 continue;
             }
             $url = $this->urls->resolveChain($chain);
