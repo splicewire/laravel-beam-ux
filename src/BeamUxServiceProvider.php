@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux;
 
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Rushing\DataFilters\Registry\ResourceDefinition as FilterResourceDefinition;
 use Rushing\DataFilters\Registry\ResourceRegistry as FilterResourceRegistry;
@@ -179,6 +180,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // hid the seat. One declaration, consumed by all four; the `beam-ux-entry.*` family is seeded to
         // a host's admin role by the host. `EntryAccessGate` (the public surface) is a different question.
         CascadePolicyRegistrar::register(BeamUxEntry::class);
+
+        // A Release reads by the rule its resource declares, `ux.author`, whether listed or opened (EP-15 receipt).
+        Gate::policy(Models\BeamUxRelease::class, Release\ReleasePolicy::class);
 
         // The boot half of the same concerns — route macros, commands, the workflow and schema
         // handovers. `WiresSitemap` and `WiresPublicSurface` each contribute to BOTH chains, one
