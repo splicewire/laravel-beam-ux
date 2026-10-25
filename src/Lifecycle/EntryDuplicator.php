@@ -29,9 +29,26 @@ class EntryDuplicator
 
     public function duplicate(BeamUxEntry $source): BeamUxEntry
     {
-        $particle = $this->writer->write(new BeamParticle, $source->particle?->payload ?? []);
+        return $source->getConnection()->transaction(fn () => $this->duplicateAfterLocks($source));
+    }
 
-        return BeamUxEntry::create([
+    private function duplicateAfterLocks(BeamUxEntry $source): BeamUxEntry
+    {
+        $body = $source->particle?->payload ?? [];
+        $components = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class);
+        if ($components->authored($source) && \Splicewire\Beam\Ux\Codec\JsonDocShape::is($body)) {
+            $base = $components->definition($body)->name.'Copy';
+            $name = $base;
+            $suffix = 1;
+            while ($source->newQuery()->where('realm', $source->realm)->where(fn ($query) => $query->whereRaw('LOWER(component_name) = ?', [strtolower($name)])
+                ->orWhereRaw('LOWER(published_component_name) = ?', [strtolower($name)]))->exists()) {
+                $name = $base.(++$suffix);
+            }
+            $body[0]['component']['name'] = $name;
+        }
+        $particle = $this->writer->write(new BeamParticle, $body);
+
+        $copy = BeamUxEntry::create([
             'slug' => $this->uniqueSlug($source),
             'title' => $source->title,
             'schema_ref' => $source->schema_ref,
@@ -51,6 +68,9 @@ class EntryDuplicator
             'parent_id' => $source->parent_id,
             'segment' => null,
         ]);
+        $components->reserveName($copy, $body);
+
+        return $copy;
     }
 
     /**

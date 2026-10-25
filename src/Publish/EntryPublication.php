@@ -134,7 +134,7 @@ class EntryPublication
     {
         $this->requireVersionStore();
 
-        return $entry->getConnection()->transaction(function () use ($entry, $body, $baseVersion, $label, $actor, $pageSettings) {
+        return app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reservationTransaction($entry->getConnection(), function () use ($entry, $body, $baseVersion, $label, $actor, $pageSettings) {
             if ($pageSettings?->recordPage !== null) {
                 app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->lockForSettings($entry, $pageSettings);
             }
@@ -412,7 +412,7 @@ class EntryPublication
     {
         $this->requireVersionStore();
 
-        return $entry->getConnection()->transaction(function () use ($entry, $ref, $label, $actor) {
+        return app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reservationTransaction($entry->getConnection(), function () use ($entry, $ref, $label, $actor) {
             $entry = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
             $particle = $this->particle($entry);
 
@@ -611,7 +611,7 @@ class EntryPublication
      */
     public function write(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): array
     {
-        return $entry->getConnection()->transaction(fn () => $this->writeAfterLocks($entry, $body, $pageSettings));
+        return app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reservationTransaction($entry->getConnection(), fn () => $this->writeAfterLocks($entry, $body, $pageSettings));
     }
 
     private function writeAfterLocks(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings): array

@@ -286,6 +286,18 @@ class BeamUxEntry extends Model implements WorkflowManaged
     {
         static::saved(fn () => app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget());
         static::deleted(fn () => app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget());
+        static::softDeleted(function (BeamUxEntry $entry): void {
+            if ($entry->getConnection()->getSchemaBuilder()->hasColumn($entry->getTable(), 'component_name')) {
+                $entry->newQuery()->withTrashed()->whereKey($entry->getKey())->update(['component_name' => null, 'published_component_name' => null]);
+            }
+        });
+        static::restoring(function (BeamUxEntry $entry): void {
+            $components = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class);
+            if ($components->authored($entry)) {
+                $components->reserveName($entry, $components->working($entry));
+                $components->setPublishedName($entry, $components->version($entry, $entry->published_version));
+            }
+        });
         static::restored(fn () => app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget());
         static::saved(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());
         static::deleted(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());

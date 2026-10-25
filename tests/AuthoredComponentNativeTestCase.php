@@ -26,7 +26,7 @@ abstract class AuthoredComponentNativeTestCase extends TestCase
         foreach (['create_beam_particles_table', 'create_beam_versions_table', 'create_activity_log_table'] as $name) {
             (require $core.'/database/migrations/shared/'.$name.'.php.stub')->up();
         }
-        foreach (['create_beam_ux_entries_table', 'add_page_settings_to_beam_ux_entries_table', 'add_child_fields_to_beam_ux_entries_table', 'add_record_page_to_beam_ux_entries_table', 'add_component_kind_to_beam_ux_entries_table'] as $name) {
+        foreach (['create_beam_ux_entries_table', 'add_page_settings_to_beam_ux_entries_table', 'add_child_fields_to_beam_ux_entries_table', 'add_record_page_to_beam_ux_entries_table', 'add_component_kind_to_beam_ux_entries_table', 'add_component_names_to_beam_ux_entries_table'] as $name) {
             (require dirname(__DIR__).'/database/migrations/shared/'.$name.'.php.stub')->up();
         }
         $this->assertSame('sqlite', Schema::getConnection()->getDriverName());

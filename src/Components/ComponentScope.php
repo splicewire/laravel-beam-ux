@@ -20,6 +20,5 @@ final class ComponentScope
     public function forget(): void
     {
         $this->lookups = $this->documents = $this->issues = $this->columns = $this->deliveries = [];
-        $this->privateCache = false;
     }
 }

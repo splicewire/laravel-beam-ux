@@ -21,6 +21,19 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['beam.taxonomy.models.tag' => Fixtures\Tag::class]);
+        \Illuminate\Support\Facades\Schema::create('tags', function (\Illuminate\Database\Schema\Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->string('name');
+            $table->string('slug');
+            $table->string('type')->nullable();
+            $table->timestamps();
+        });
+        \Illuminate\Support\Facades\Schema::create('taggables', function (\Illuminate\Database\Schema\Blueprint $table) {
+            $table->uuid('tag_id');
+            $table->uuid('taggable_id');
+            $table->string('taggable_type');
+        });
         \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
         \Illuminate\Support\Facades\Gate::define('update', fn ($user = null) => true);
     }
@@ -118,7 +131,8 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
         $page = BeamUxEntry::create(['slug' => 'repairable-page', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
         $profile = app(ManifestProfileResolver::class)->resolve($page);
         $this->assertContains('HealthyName', array_column($profile['nodes'], 'name'));
-        $this->assertNotContains('RepeatedName', array_column($profile['nodes'], 'name'));
+        $this->assertContains('RepeatedName', array_column($profile['nodes'], 'name'));
+        $this->assertSame('RepeatedNameCopy', app(AuthoredComponents::class)->definition(app(AuthoredComponents::class)->working($duplicate))->name);
         $publication->recordDraft($page, [$this->node('div')]);
         $this->assertNotNull($publication->state($page->fresh())->headVersion);
     }
@@ -386,7 +400,19 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
         $pub->publishVersion($first->fresh(), $old->headVersion);
         $new = $pub->recordDraft($first->fresh(), $this->body('NewOwnerName'));
         $second = $this->reviewComponent('waiting-name-owner');
-        $waiting = $pub->recordDraft($second, $this->body('HeldPinName'));
+        try {
+            $pub->recordDraft($second, $this->body('HeldPinName'));
+            $this->fail('Reservation ignored the published name');
+        } catch (ValidationException $error) {
+            $this->assertStringContainsString('unique', $error->getMessage());
+        }
+        // A pre-existing historical snapshot still reaches the publish guard, including a same-Release swap.
+        $waiting = $pub->recordDraft($second->fresh(), $this->body('TemporaryName'));
+        $particle = $second->fresh()->particle;
+        $particle->payload = $this->body('HeldPinName');
+        $particle->save();
+        $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->snapshot($particle->fresh(), 'historical name');
+        $waiting->headVersion = (string) $version->id;
         try {
             $pub->publishVersion($second->fresh(), $waiting->headVersion);
             $this->fail('A pending rename released a still-published name');
@@ -397,5 +423,136 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
         $pub->publishVersions($first->fresh(), [$first->id => $new->headVersion, $second->id => $waiting->headVersion]);
         $this->assertSame('NewOwnerName', $first->fresh()->published_component_name);
         $this->assertSame('HeldPinName', $second->fresh()->published_component_name);
+    }
+
+    public function test_case_insensitive_reservations_and_delete_release_names(): void
+    {
+        $pub = app(EntryPublication::class);
+        $one = $this->reviewComponent('case-one');
+        $pub->recordDraft($one, $this->body('CaseName'));
+        $two = $this->reviewComponent('case-two');
+        try {
+            $pub->recordDraft($two, $this->body('Casename'));
+            $this->fail('Case variant reserved');
+        } catch (ValidationException $error) {
+            $this->assertStringContainsString('unique', $error->getMessage());
+        }
+        $one->fresh()->delete();
+        $pub->recordDraft($two->fresh(), $this->body('CaseName'));
+        $this->assertSame('CaseName', $two->fresh()->component_name);
+        try {
+            $one->fresh()->restore();
+            $this->fail('Restoration stole a reused name');
+        } catch (ValidationException $error) {
+            $this->assertStringContainsString('unique', $error->getMessage());
+        }
+    }
+
+    public function test_memo_invalidation_never_downgrades_private_cache(): void
+    {
+        $scope = app(\Splicewire\Beam\Ux\Components\ComponentScope::class);
+        $scope->privateCache = true;
+        $scope->documents['old'] = [];
+        $scope->forget();
+        $this->assertTrue($scope->privateCache);
+        $this->assertSame([], $scope->documents);
+    }
+
+    public function test_reservation_retries_once_then_refuses_without_committing(): void
+    {
+        $components = app(AuthoredComponents::class);
+        $connection = (new BeamUxEntry)->getConnection();
+        $calls = 0;
+        $result = $components->reservationTransaction($connection, function () use (&$calls) {
+            if (++$calls === 1) {
+                throw new \PDOException('deadlock detected', 40001);
+            }
+
+            return 'saved';
+        });
+        $this->assertSame('saved', $result);
+        $this->assertSame(2, $calls);
+        $calls = 0;
+        $components->reservationTransaction($connection, function () use ($components, $connection, &$calls) {
+            return $components->reservationTransaction($connection, function () use (&$calls) {
+                if (++$calls === 1) {
+                    throw new \PDOException('deadlock detected', 40001);
+                }
+            });
+        });
+        $this->assertSame(2, $calls);
+        $calls = 0;
+        try {
+            $components->reservationTransaction($connection, function () use (&$calls) {
+                $calls++;
+                throw new \PDOException('deadlock detected', 40001);
+            });
+            $this->fail('Exhausted conflict escaped as success');
+        } catch (ValidationException $error) {
+            $this->assertStringContainsString('conflicted', $error->getMessage());
+        }
+        $this->assertSame(2, $calls);
+    }
+
+    public function test_unreadable_unrelated_rows_do_not_block_unused_component_deletion(): void
+    {
+        $entry = $this->reviewComponent('deletable');
+        app(EntryPublication::class)->recordDraft($entry, $this->body('Deletable'));
+        BeamUxEntry::create(['slug' => 'broken-storage', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site', 'particle_id' => 'missing-row']);
+        $this->assertSame([], app(AuthoredComponents::class)->usedBy($entry->fresh()));
+        $this->assertNotEmpty(app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->issues);
+        $entry->fresh()->delete();
+        $this->assertNotNull($entry->fresh()->deleted_at);
+    }
+
+    public function test_new_name_migration_upgrades_an_already_installed_kind_stub(): void
+    {
+        $migration = require dirname(__DIR__).'/database/migrations/shared/add_component_names_to_beam_ux_entries_table.php.stub';
+        $migration->down();
+        $schema = (new BeamUxEntry)->getConnection()->getSchemaBuilder();
+        $this->assertTrue($schema->hasColumn('beam_ux_entries', 'component_kind'));
+        $this->assertFalse($schema->hasColumn('beam_ux_entries', 'component_name'));
+        $entry = $this->reviewComponent('old-host');
+        app(AuthoredComponents::class)->reserveName($entry, $this->body('OldHost'));
+        app(AuthoredComponents::class)->setPublishedName($entry, $this->body('OldHost'));
+        $this->assertNull($entry->getAttribute('published_component_name'));
+        $migration->up();
+        $migration->up();
+        $this->assertTrue($schema->hasColumn('beam_ux_entries', 'component_name'));
+        $this->assertNull($entry->fresh()->component_name);
+    }
+
+    public function test_legacy_unreserved_duplicate_preserves_reservation_holders_profile_and_edit(): void
+    {
+        $pub = app(EntryPublication::class);
+        $one = $this->reviewComponent('reservation-holder');
+        $pub->recordDraft($one, $this->body('ReservedOriginal'));
+        $page = BeamUxEntry::create(['slug' => 'holder-user', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $pub->recordDraft($page, [$this->node('ReservedOriginal')]);
+        $copy = app(EntryDuplicator::class)->duplicate($one->fresh());
+        $copy->forceFill(['component_name' => null])->save();
+        $particle = $copy->particle;
+        $particle->payload = $this->body('ReservedOriginal');
+        $particle->save();
+        app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget();
+        $profile = app(ManifestProfileResolver::class)->resolve($one->fresh());
+        $this->assertContains('ReservedOriginal', array_column($profile['nodes'], 'name'));
+        $pub->recordDraft($one->fresh(), $this->body('ReservedOriginal'));
+        $copy->fresh()->delete();
+        $this->assertNull($one->fresh()->deleted_at);
+    }
+
+    public function test_soft_delete_releases_a_reservation_without_altering_other_rows(): void
+    {
+        $pub = app(EntryPublication::class);
+        $one = $this->reviewComponent('deleted-owner');
+        $pub->recordDraft($one, $this->body('FreedName'));
+        $one->fresh()->delete();
+        $this->assertNull($one->fresh()->component_name);
+        $this->assertNull($one->fresh()->published_component_name);
+        $two = $this->reviewComponent('new-owner');
+        $pub->recordDraft($two, $this->body('FreedName'));
+        $this->assertSame('FreedName', $two->fresh()->component_name);
+        $this->assertNotNull($one->fresh()->deleted_at);
     }
 }

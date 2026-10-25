@@ -162,7 +162,7 @@ class AuthoredComponents
     public function extendProfile(BeamUxEntry $context, array $profile, bool $inspectAll = false): array
     {
         $registered = array_column($profile['nodes'], null, 'name');
-        $pending = $owners = $duplicates = [];
+        $pending = $owners = $duplicates = $reserved = [];
         $scope = app(ComponentScope::class);
         foreach ($this->entries($context) as $entry) {
             if (! $this->authored($entry) || (! $inspectAll && ! $this->canRead($entry, request()->user()))) {
@@ -178,10 +178,23 @@ class AuthoredComponents
                     continue;
                 }
                 if (isset($owners[$name])) {
-                    $duplicates[$name] = true;
-                    $scope->issues[(string) $entry->getKey()] = 'Duplicate component name';
+                    $holder = $entry->getAttribute('component_name') === $name;
+                    if ($reserved[$name] ?? false) {
+                        $scope->issues[(string) $entry->getKey()] = 'Duplicate component name';
+
+                        continue;
+                    }
+                    if ($holder) {
+                        unset($duplicates[$name]);
+                    } else {
+                        $duplicates[$name] = true;
+                    }
                     $scope->issues[$owners[$name]] = 'Duplicate component name';
+                    if (! $holder) {
+                        $scope->issues[(string) $entry->getKey()] = 'Duplicate component name';
+                    }
                 }
+                $reserved[$name] = $entry->getAttribute('component_name') === $name;
                 $owners[$name] = (string) $entry->getKey();
                 $pending[$name] = $body;
             } catch (\Throwable) {
@@ -278,9 +291,15 @@ class AuthoredComponents
                 continue;
             }
             if (array_key_exists($name, $byName)) {
-                $byName[$name] = null; // Ambiguous stored declarations are unavailable, not a realm outage.
+                $prior = $byName[$name];
+                if ($prior?->getAttribute('component_name') === $name) {
+                    continue;
+                }
+                if ($component->getAttribute('component_name') !== $name) {
+                    $byName[$name] = null;
 
-                continue;
+                    continue;
+                }
             }
             $byName[$name] = $component;
         }
@@ -312,7 +331,7 @@ class AuthoredComponents
                     } else {
                         $otherName = $other->getAttribute('published_version') === null ? null : $other->getAttribute('published_component_name');
                     }
-                    if ($otherName === $name) {
+                    if (is_string($otherName) && strcasecmp($otherName, $name) === 0) {
                         $this->refuse('Published component names must be unique in their realm. Publish the rename first or in the same Release.');
                     }
                 }
@@ -357,15 +376,35 @@ class AuthoredComponents
     {
         $names = $name === null ? [] : [$name];
         if ($name === null) {
-            foreach ($this->retainedBodies($component) as $body) {
+            $names = array_filter([$component->getAttribute('component_name'), $component->getAttribute('published_component_name')], 'is_string');
+            try {
+                $retained = $this->retainedBodies($component);
+            } catch (\Throwable) {
+                app(ComponentScope::class)->issues[(string) $component->getKey()] = 'Unreadable component declaration';
+                $retained = [];
+            }
+            foreach ($retained as $body) {
                 if (JsonDocShape::is($body)) {
                     $names[] = $this->definition($body)->name;
                 }
             }
         }
+        // An unreserved legacy copy cannot own usages belonging to the actual reservation holder.
+        if ($component->getAttribute('component_name') === null && $component->getAttribute('published_version') === null) {
+            $names = array_values(array_filter($names, fn ($candidate) => ! $component->newQuery()
+                ->where('realm', $component->realm)->whereKeyNot($component->getKey())
+                ->where('component_name', $candidate)->exists()));
+        }
         $used = [];
         foreach ($component->newQuery()->where('realm', $component->realm)->whereKeyNot($component->getKey())->get() as $entry) {
-            foreach ($this->retainedBodies($entry) as $body) {
+            try {
+                $bodies = $this->retainedBodies($entry);
+            } catch (\Throwable) {
+                app(ComponentScope::class)->issues[(string) $entry->getKey()] = 'Unreadable component dependency';
+
+                continue;
+            }
+            foreach ($bodies as $body) {
                 if (array_intersect($names, $this->names($body))) {
                     $used[] = (string) $entry->getKey();
                     break;
@@ -376,13 +415,45 @@ class AuthoredComponents
         return $used;
     }
 
+    /** Retry the whole owning transaction once; a rolled-back body must not leave memoized reads. */
+    public function reservationTransaction(\Illuminate\Database\Connection $connection, \Closure $callback): mixed
+    {
+        if ($connection->transactionLevel() > 0) {
+            // The outer owner retries the complete save, not a half-finished nested writer.
+            return $callback();
+        }
+        try {
+            return $connection->transaction(function () use ($callback) {
+                app(ComponentScope::class)->forget();
+
+                return $callback();
+            }, 2);
+        } catch (\Throwable $failure) {
+            if (in_array((string) $failure->getCode(), ['40001', '1213'], true)
+                || str_contains(strtolower($failure->getMessage()), 'deadlock')
+                || str_contains(strtolower($failure->getMessage()), 'serialization failure')) {
+                $this->refuse('The component reservation conflicted. Retry the save against the current head.');
+            }
+            throw $failure;
+        }
+    }
+
     /** Name reservation shares the caller's body transaction; the DB owns concurrent uniqueness. */
     public function reserveName(BeamUxEntry $entry, array $body): void
     {
         if (! $this->authored($entry) || ! JsonDocShape::is($body)) {
             return;
         }
+        if (! $entry->getConnection()->getSchemaBuilder()->hasColumn($entry->getTable(), 'component_name')) {
+            return;
+        }
         $name = $this->definition($body)->name;
+        $taken = $entry->newQuery()->where('realm', $entry->realm)->whereKeyNot($entry->getKey())
+            ->where(fn ($query) => $query->whereRaw('LOWER(component_name) = ?', [strtolower($name)])
+                ->orWhereRaw('LOWER(published_component_name) = ?', [strtolower($name)]))->exists();
+        if ($taken) {
+            $this->refuse('Component names must be unique in their realm; this name is taken.');
+        }
         try {
             $entry->forceFill(['component_name' => $name])->save();
         } catch (\Illuminate\Database\UniqueConstraintViolationException) {
@@ -392,7 +463,7 @@ class AuthoredComponents
 
     public function setPublishedName(BeamUxEntry $entry, array $body): void
     {
-        if ($this->authored($entry)) {
+        if ($this->authored($entry) && $entry->getConnection()->getSchemaBuilder()->hasColumn($entry->getTable(), 'published_component_name')) {
             $entry->setAttribute('published_component_name', $body === [] ? null : $this->definition($body)->name);
         }
     }
