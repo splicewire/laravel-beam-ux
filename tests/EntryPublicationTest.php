@@ -2369,8 +2369,8 @@ class EntryPublicationTest extends TestCase
         $entry = $this->publishedPage(self::BODY_ONE);
         $oldVersion = (string) $entry->published_version;
         [, $author] = $this->releaseFixture(reviewedAndMapped: false);
-        Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
-        Illuminate\Support\Facades\Gate::define('update', fn ($user = null, $subject = null) =>
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        \Illuminate\Support\Facades\Gate::define('update', fn ($user = null, $subject = null) =>
             $user?->getAuthIdentifier() === 'author' && $subject instanceof BeamUxEntry && $subject->is($entry));
 
         $this->assertTrue($this->artifacts()->hasVersion($entry, $oldVersion));
