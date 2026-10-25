@@ -207,6 +207,34 @@ class DiskEntriesPublicationTest extends TestCase
         @unlink($this->root.'/page/untitled.mdx');
     }
 
+    public function test_a_parent_file_declares_page_fields_and_its_childs_frontmatter_holds_them_typed(): void
+    {
+        // ADR-0233 d4: the parent's `childFields` names the host's class; the child's keys it declares are Page Fields.
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        (require dirname(__DIR__).'/database/migrations/shared/add_child_fields_to_beam_ux_entries_table.php.stub')->up();
+        config(['beam.ux.page_fields' => ['recipe' => Fixtures\RecipeFields::class]]);
+        $this->holdMdxAsBlocks();
+        mkdir($this->root.'/recipes/page', 0777, true);
+        file_put_contents($this->root.'/page/recipes.mdx', "---\ntitle: Recipes\nchildFields: recipe\n---\n\n## From MDX\n");
+        file_put_contents($this->root.'/recipes/page/pie.mdx', "---\ntitle: Pie\nservings: 4\nvegetarian: true\nschema_type: Recipe\n---\n\n## From MDX\n");
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $parent = BeamUxEntry::query()->where('slug', 'recipes')->firstOrFail();
+        $this->assertSame('recipe', $parent->child_fields);
+        $pie = BeamUxEntry::query()->where('slug', 'pie')->firstOrFail();
+        $this->assertSame($parent->id, $pie->parent_id);
+        $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($pie->versionable(), $pie->published_version)->snapshot;
+        $this->assertSame(['servings' => 4, 'vegetarian' => true], $version['meta']['pageSettings']['fields']);
+        $this->assertSame(['schema_type' => 'Recipe'], $version['meta']['pageSettings']['unclaimed']);
+        $this->assertArrayNotHasKey('recipes/page/pie.mdx', $result['failed']);
+
+        @unlink($this->root.'/recipes/page/pie.mdx');
+        @rmdir($this->root.'/recipes/page');
+        @rmdir($this->root.'/recipes');
+        @unlink($this->root.'/page/recipes.mdx');
+    }
+
     /** Hold MDX as blocks with a fake MDX Lens: the Node run is proven in laravel-beam-mdx. */
     private function holdMdxAsBlocks(): void
     {

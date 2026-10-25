@@ -489,6 +489,69 @@ class EntryPublicationTest extends TestCase
         $this->assertSame('unchanged', $service->inspect($member, $author)->state);
     }
 
+    public function test_a_blocks_mdx_file_with_page_fields_and_unclaimed_keys_round_trips_byte_stable_through_mirror_and_take(): void
+    {
+        // ADR-0233 d3/d4, review-r1's E1 finding: the mirror prints every key a file carries — page settings, the Page
+        // Fields its parent declares, and the keys nothing declares — so mirror, Take, publish, mirror is byte-stable.
+        [$entry, $member, $author, , $target, $publication] = $this->blocksMdxFileFixture();
+        $parent = $this->recipesParent();
+        $entry->forceFill(['parent_id' => $parent->id])->save();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $bytes = "---\ntitle: Help\nsegment: help\nnavOrder: 2\npublishedDate: 2026-10-01\nservings: 4\nvegetarian: true\naudience: admins\nschema_type: HowTo\n---\n\nEdited MDX\n";
+        file_put_contents($target['absolute'], $bytes);
+
+        $result = $service->take($member, $author, $this->fileInput($service->inspect($member, $author)));
+        $head = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($entry->fresh()->versionable(), $result->headVersion)->snapshot;
+        $this->assertSame(['servings' => 4, 'vegetarian' => true], $head['meta']['pageSettings']['fields']);
+        $this->assertSame(['audience' => 'admins', 'schema_type' => 'HowTo'], $head['meta']['pageSettings']['unclaimed']);
+        $publication->publishVersion($entry->fresh(), $result->headVersion);
+
+        $this->assertSame($bytes, file_get_contents($target['absolute']));
+        $this->assertSame('unchanged', $service->inspect($member, $author)->state);
+        $records = app(\Splicewire\Beam\Ux\Bindings\ChildPageRecords::class)->read((string) $parent->id, 'site', null);
+        $this->assertSame(['servings' => 4, 'vegetarian' => true], collect($records)->firstWhere('slug', 'file-mdx')['fields'] ?? null, 'the Page Fields are Record fields');
+        $schema = app(\Splicewire\Beam\Ux\Bindings\ProfileCollections::class)->fieldSchema(\Splicewire\Beam\Ux\Bindings\CollectionSource::childPages('recipes', (string) $parent->id));
+        $this->assertSame(['servings', 'cuisine', 'vegetarian'], array_keys($schema['properties']['fields']['properties']));
+    }
+
+    public function test_the_save_checks_a_childs_page_fields_against_the_class_its_parent_declares(): void
+    {
+        [$entry, , , , , $publication] = $this->blocksMdxFileFixture();
+        $settings = fn (array $fields, ?string $parentId) => \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'Help', 'parentId' => $parentId, 'fields' => $fields]);
+        $refused = function (callable $save, string $key): void {
+            try {
+                $save();
+                $this->fail("Saved Page Fields the parent refuses: {$key}");
+            } catch (ValidationException $failure) {
+                $this->assertArrayHasKey($key, $failure->errors());
+            }
+        };
+
+        $refused(fn () => $publication->recordDraft($entry->fresh(), self::BODY_ONE, null, $settings(['servings' => 4], null)), 'pageSettings.fields');
+        $parent = $this->recipesParent();
+        $refused(fn () => $publication->recordDraft($entry->fresh(), self::BODY_ONE, null, $settings(['colour' => 'red'], $parent->id)), 'pageSettings.fields.colour');
+        $refused(fn () => $publication->recordDraft($entry->fresh(), self::BODY_ONE, null, $settings(['servings' => 'many'], $parent->id)), 'pageSettings.fields.servings');
+        $refused(fn () => $publication->recordDraft($parent->fresh(), self::BODY_ONE, null, \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'Recipes', 'childFields' => 'unregistered'])), 'pageSettings.childFields');
+
+        $publication->recordDraft($entry->fresh(), self::BODY_ONE, null, $settings(['vegetarian' => false, 'servings' => 2], $parent->id));
+        $head = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($entry->fresh()->versionable(), $publication->state($entry->fresh())->headVersion)->snapshot;
+        $this->assertSame(['servings' => 2, 'vegetarian' => false], $head['meta']['pageSettings']['fields'], 'normalized to the declaration order');
+        $envelope = app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->of($entry->fresh()->forceFill(['parent_id' => $parent->id]), self::BODY_ONE);
+        $this->assertSame(['recipe'], $envelope->pageFields['names']);
+        $this->assertSame(['servings', 'cuisine', 'vegetarian'], array_keys($envelope->pageFields['schema']['properties']));
+    }
+
+    /** A published parent page whose children carry the host's `recipe` Page Fields (ADR-0233 d4). */
+    private function recipesParent(): BeamUxEntry
+    {
+        (require dirname(__DIR__).'/database/migrations/shared/add_child_fields_to_beam_ux_entries_table.php.stub')->up();
+        config(['beam.ux.page_fields' => ['recipe' => Fixtures\RecipeFields::class]]);
+        $parent = $this->publishedPage(self::BODY_ONE);
+        $parent->forceFill(['child_fields' => 'recipe', 'title' => 'Recipes'])->save();
+
+        return $parent->fresh();
+    }
+
     public function test_the_doctor_fails_while_mdx_holds_blocks_is_on_and_a_stored_mdx_page_still_holds_source(): void
     {
         $audit = new \Splicewire\Beam\Ux\Doctor\BeamUxMdxPagesAudit;

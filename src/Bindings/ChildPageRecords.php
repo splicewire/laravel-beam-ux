@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Bindings;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Ux\Access\EntryAccessResolver;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Data\ChildPageRecordData;
@@ -40,10 +41,25 @@ final class ChildPageRecords
                 $node = $node->parent_id === null ? null : $entries->get($node->parent_id);
             }
             if ($this->access->canList($visitor, $chain)) {
-                $records[] = (new ChildPageRecordData((string) $entry->id, $entry->slug, $entry->title, $this->urls->resolveChain($chain)))->toArray();
+                $records[] = (new ChildPageRecordData((string) $entry->id, $entry->slug, $entry->title, $this->urls->resolveChain($chain), $this->fields($entry)))->toArray();
             }
         }
 
         return $records;
+    }
+
+    /**
+     * A child's Page Fields as its published version holds them (ADR-0233 d4).
+     *
+     * @return array<string, string|int|float|bool>
+     */
+    private function fields(BeamUxEntry $entry): array
+    {
+        $pin = $entry->getAttribute('published_version');
+        if ($entry->particle_id === null || $pin === null || ! app()->bound(VersionStore::class)) {
+            return [];
+        }
+
+        return app(VersionStore::class)->version($entry->versionable(), (string) $pin)?->snapshot['meta']['pageSettings']['fields'] ?? [];
     }
 }

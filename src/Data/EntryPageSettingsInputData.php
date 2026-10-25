@@ -26,6 +26,9 @@ final class EntryPageSettingsInputData extends BeamData
         public ?string $socialImage = null,
         public string $pageType = 'WebPage',
         public ?string $publishedDate = null,
+        public ?string $childFields = null,
+        /** @var array<string, string|int|float|bool> */
+        public array $fields = [],
         /** @var array<string, string> */
         public array $unclaimed = [],
     ) {}
@@ -50,6 +53,8 @@ final class EntryPageSettingsInputData extends BeamData
             socialImage: $this->socialImage,
             pageType: $this->pageType,
             publishedDate: $this->publishedDate,
+            childFields: $this->childFields,
+            fields: $this->fields,
             unclaimed: $this->unclaimed,
         );
     }

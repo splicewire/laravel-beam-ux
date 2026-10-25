@@ -105,6 +105,8 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 // and each no-ops for the other.
                 'shared/add_published_version_to_beam_ux_entries_table',
                 'shared/add_page_settings_to_beam_ux_entries_table',
+                // The Page Fields a parent declares for its child pages (ADR-0233 d4). Nullable, beside its siblings.
+                'shared/add_child_fields_to_beam_ux_entries_table',
                 'shared/create_beam_ux_releases_table',
                 // A Release's provenance (`origin`: direct | built). An ALTER beside the create for the same reason
                 // as its siblings; existing Releases are `built`.

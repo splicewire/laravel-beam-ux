@@ -290,6 +290,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Page Fields (ADR-0233 d4)
+    |--------------------------------------------------------------------------
+    |
+    | The Data classes whose fields a parent page may declare for its child
+    | pages, by name. A parent's page settings name one (`childFields`); this
+    | map is the only way a class is named, never client input. A class's
+    | properties are flat scalars (string, int, float, bool, nullable), since
+    | they print as frontmatter. Each child's values are page settings held
+    | in its version; page settings shows them, the save checks them, and the
+    | parent's child-page Collection carries them as Record fields.
+    |
+    */
+    'page_fields' => [],
+
+    /*
+    |--------------------------------------------------------------------------
     | Access (ADR-0212 — the two conjunctive rights)
     |--------------------------------------------------------------------------
     |

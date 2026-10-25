@@ -70,6 +70,9 @@ class BeamUxEntryBodyData extends BeamData
      *                                     publicly and `beam:doctor` names it. Absence is reported in
      *                                     three places and degrades in none, which is what §7's
      *                                     no-silent-fallback rule actually asks for.
+     * @param  array<string, mixed>|null  $pageFields  a page's Page Fields (ADR-0233 d4): `names`, the names its
+     *                                                 `childFields` may take, and `schema`, the schema of the fields
+     *                                                 its own parent declares (null when it declares none).
      */
     public function __construct(
         public string $slug,
@@ -85,5 +88,6 @@ class BeamUxEntryBodyData extends BeamData
         public ?array $styleRegistry = null,
         public ?EntryPageSettingsData $pageSettings = null,
         public array $bindings = [],
+        public ?array $pageFields = null,
     ) {}
 }

@@ -6,6 +6,7 @@ use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
 use Splicewire\Beam\Ux\Files\FileConflict;
 use Splicewire\Beam\Ux\Files\MdxPageFile;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /** ADR-0233 d3: the canonical page-settings header of a blocks MDX page's file. */
 class MdxPageFileTest extends TestCase
@@ -31,6 +32,13 @@ class MdxPageFileTest extends TestCase
         $this->assertSame(['audience' => 'admins', 'schema_type' => 'HowTo'], MdxPageFile::read(MdxPageFile::print($settings, "Body\n"))['unknown']);
     }
 
+    public function test_page_fields_print_after_the_settings_and_before_the_unclaimed_keys(): void
+    {
+        $settings = new EntryPageSettingsData(title: 'Pie', fields: ['servings' => 4, 'vegetarian' => false], unclaimed: ['audience' => 'cooks']);
+
+        $this->assertSame("---\ntitle: Pie\nservings: 4\nvegetarian: false\naudience: cooks\n---\n\nBody\n", MdxPageFile::print($settings, "Body\n"));
+    }
+
     public function test_reading_accepts_either_key_spelling_and_names_the_keys_nothing_declares(): void
     {
         $file = MdxPageFile::read("---\ntitle: Guide\nnav_order: 3\nsocial-image: /og.png\naudience: admins\n---\n\nBody\n");
@@ -38,7 +46,7 @@ class MdxPageFileTest extends TestCase
         $this->assertSame(['title' => 'Guide', 'navOrder' => '3', 'socialImage' => '/og.png'], $file['fields']);
         $this->assertSame(['audience' => 'admins'], $file['unknown']);
         $this->assertSame("Body\n", $file['body']);
-        $this->assertSame(3, MdxPageFile::settingsFrom($file['fields'], null)->navOrder);
+        $this->assertSame(3, MdxPageFile::settingsFrom($file['fields'], [], new BeamUxEntry(['type' => 'page']))->navOrder);
     }
 
     public function test_a_file_without_a_header_is_not_a_page_file(): void

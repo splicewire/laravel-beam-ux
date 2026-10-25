@@ -74,6 +74,11 @@ class EntryBodyEnvelope
                     ? \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from($settings)
                     : \Splicewire\Beam\Ux\Data\EntryPageSettingsData::fromEntry($entry))
                 : null,
+            pageFields: $this->typeValue($entry) === 'page' ? [
+                'names' => \Splicewire\Beam\Ux\Containment\PageFields::names(),
+                'schema' => ($class = \Splicewire\Beam\Ux\Containment\PageFields::forChild($entry)) === null
+                    ? null : \Splicewire\Beam\Ux\Containment\PageFields::schema($class),
+            ] : null,
         );
     }
 

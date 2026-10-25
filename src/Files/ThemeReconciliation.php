@@ -9,6 +9,7 @@ use Splicewire\Beam\Ux\Body\BodyKind;
 use Splicewire\Beam\Ux\Codec\CssBodyCodec;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
+use Splicewire\Beam\Ux\Containment\PageFields;
 use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
 use Splicewire\Beam\Ux\Data\FileBatchReconcileInputData;
 use Splicewire\Beam\Ux\Data\FileBatchReconcileResultData;
@@ -351,8 +352,9 @@ class ThemeReconciliation
     }
 
     /**
-     * ADR-0233 d3: the header is the page's settings and the rest is its body. A header key no page setting declares
-     * is kept with the settings as written; the body reads through the MDX Lens with ids reattached against the
+     * ADR-0233 d3: the header is the page's settings and the rest is its body. A header key the parent's Page Fields
+     * declare is one of those (d4), checked as a save checks it; one nothing declares is kept with the settings as
+     * written; the body reads through the MDX Lens with ids reattached against the
      * published blocks the file was printed from.
      *
      * @param  array<int, array<string, mixed>>  $published
@@ -365,12 +367,12 @@ class ThemeReconciliation
         }
         $file = MdxPageFile::read($bytes);
         $served = MdxPageFile::settingsOf($entry);
-        $header = [$file['fields'], $file['unknown']];
-        $current = [MdxPageFile::fields($served), $served->unclaimed];
+        $header = [$file['fields'], ...PageFields::fromFrontmatter(PageFields::forChild($entry), $file['unknown'])];
+        $current = [MdxPageFile::fields($served), $served->fields, $served->unclaimed];
         array_walk($header, fn (array &$keys) => ksort($keys));
         array_walk($current, fn (array &$keys) => ksort($keys));
         try {
-            $settings = $header === $current ? null : MdxPageFile::settingsFrom($file['fields'], $entry->parent_id, $file['unknown']);
+            $settings = $header === $current ? null : MdxPageFile::settingsFrom($file['fields'], $file['unknown'], $entry);
             if ($settings !== null) {
                 MdxPageFile::assertPrintable($settings);
             }

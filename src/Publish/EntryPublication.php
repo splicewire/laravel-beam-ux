@@ -271,6 +271,15 @@ class EntryPublication
         if ($pageSettings !== null && $entry->type !== \Splicewire\Beam\Ux\Type\UxType::Page) {
             throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);
         }
+        if ($pageSettings !== null) {
+            // ADR-0233 d4: a page names only Page Fields the host registers, and its own are checked against the
+            // class its parent declares.
+            if ($pageSettings->childFields !== null && \Splicewire\Beam\Ux\Containment\PageFields::classNamed($pageSettings->childFields) === null) {
+                throw ValidationException::withMessages(['pageSettings.childFields' => 'The host registers no Page Fields by this name (beam.ux.page_fields).']);
+            }
+            $pageSettings->fields = \Splicewire\Beam\Ux\Containment\PageFields::check(
+                \Splicewire\Beam\Ux\Containment\PageFields::forChild($entry, $pageSettings->parentId), $pageSettings->fields);
+        }
         if ($pageSettings !== null && \Splicewire\Beam\Ux\Files\MdxPageFile::applies($entry)) {
             \Splicewire\Beam\Ux\Files\MdxPageFile::assertPrintable($pageSettings);
         }
@@ -726,6 +735,12 @@ class EntryPublication
             'first_published_at' => $entry->first_published_at ?? now(),
             'last_published_at' => now(),
         ]);
+        // ADR-0233 d4: the Page Fields this page declares for its child pages, where the host migrated the column.
+        if (Schema::connection($entry->getConnectionName())->hasColumn('beam_ux_entries', 'child_fields')) {
+            $entry->forceFill(['child_fields' => $data->childFields]);
+        } elseif ($data->childFields !== null) {
+            throw ValidationException::withMessages(['pageSettings.childFields' => 'Migrate beam-ux (add_child_fields_to_beam_ux_entries_table) before a page declares Page Fields.']);
+        }
     }
 
     private function compileDraft(BeamUxEntry $entry, Version $version): ?string
