@@ -635,7 +635,8 @@ class EntryBodyOpsTest extends TestCase
     public function test_save_blocks_uses_the_publication_path_and_refuses_non_block_kinds(): void
     {
         $entry = BeamUxEntry::create(['slug' => 'typed-blocks', 'type' => 'page', 'format' => 'tsx']);
-        $body = [['kind' => 'text', 'value' => 'Typed canvas']];
+        // A body the Manifest Profile admits at the root: a bare text node is refused there before the write.
+        $body = [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Typed canvas']]]];
         $result = \Splicewire\Beam\Ux\Particle\EntryBlocksSaveOp::handle($entry, $this->saveRequest($entry, $body), null);
         $this->assertSame((string) $entry->fresh()->particle_id, $result['key']);
         foreach ([['theme', 'css'], ['component', 'tsx']] as [$type, $format]) {
@@ -653,12 +654,13 @@ class EntryBodyOpsTest extends TestCase
     public function test_save_blocks_refuses_unknown_nodes_and_dictionary_payloads_without_a_write(): void
     {
         $entry = BeamUxEntry::create(['slug' => 'typed-bad', 'type' => 'page', 'format' => 'tsx']);
-        foreach ([[['kind' => 'unknown', 'value' => 'x']], ['source' => '<p>Legacy source</p>']] as $body) {
+        // Each refusal names where it failed: the unknown node's own kind, or the body that is not a list.
+        foreach ([[[['kind' => 'unknown', 'value' => 'x']], 'body.0.kind'], [['source' => '<p>Legacy source</p>'], 'body']] as [$body, $key]) {
             try {
                 \Splicewire\Beam\Ux\Particle\EntryBlocksSaveOp::handle($entry, $this->saveRequest($entry, $body), null);
                 $this->fail('save-blocks admitted an undeclared body');
             } catch (ValidationException $error) {
-                $this->assertArrayHasKey('body', $error->errors());
+                $this->assertArrayHasKey($key, $error->errors());
             }
             $this->assertNull($entry->fresh()->particle_id);
         }
