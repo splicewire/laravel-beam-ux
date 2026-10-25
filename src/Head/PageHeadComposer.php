@@ -72,6 +72,19 @@ final class PageHeadComposer
             return null;
         }
 
+        // Inside a Preview that holds this page, its head reads the Preview's page settings and chain, as the renderer's
+        // does (ADR-0232 d10; EP-18: a host's own page, such as a starter's home).
+        $preview = $request->attributes->get('beam.ux.preview');
+        if ($preview instanceof \Splicewire\Beam\Ux\Preview\PreviewContext && $preview->admitsDraft((string) $entry->getKey())) {
+            $projected = $preview->project($entry);
+            if ($projected !== null) {
+                $chain = app(\Splicewire\Beam\Ux\Containment\PreviewEntryPathResolver::class)
+                    ->chainForEntry((string) $entry->getKey(), (string) $entry->realm, $preview);
+
+                return $this->compose($projected, $request->path(), $chain === null || $this->gate->isRestricted($chain), $request, $chain ?? []);
+            }
+        }
+
         // A broken ancestry denies, as it does for the renderer, so it reads as restricted.
         $chain = $this->paths->ancestry($entry);
 

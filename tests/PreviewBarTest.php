@@ -142,6 +142,29 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
         $this->assertTrue(\Splicewire\Beam\Ux\Support\PageEntryRef::hiddenByPreview('home-page', $context), 'the host route answers 404, as the renderer does');
     }
 
+    public function test_a_host_pages_head_reads_the_previews_page_settings(): void
+    {
+        // Review of 8e2cee5a: the starter's `/` composed its head from the live row inside a Preview.
+        $pub = app(EntryPublication::class);
+        $home = $this->livePage('home-page');
+        $home->forceFill(['namespace' => config('beam.ux.namespace', 'starter'), 'title' => 'Live title', 'seo_description' => 'Live description'])->save();
+        $draft = $pub->recordDraft($home->fresh(), [$this->node('section')], pageSettings: new \Splicewire\Beam\Ux\Data\EntryPageSettingsData(
+            title: 'Previewed title', parentId: $home->parent_id, segment: 'home-page', description: 'Previewed description'))->headVersion;
+        $release = $this->release([$home->id => $draft]);
+        $grant = tap(new \Splicewire\Beam\Ux\Models\BeamUxPreviewGrant)->forceFill(['release_id' => $release->id])->setRelation('release', $release);
+        $request = \Illuminate\Http\Request::create('/');
+
+        $live = implode("\n", \Splicewire\Beam\Ux\Head\PageHead::forPage('home-page', $request));
+        $request->attributes->set('beam.ux.preview', new \Splicewire\Beam\Ux\Preview\PreviewContext($grant));
+        $previewed = implode("\n", \Splicewire\Beam\Ux\Head\PageHead::forPage('home-page', $request));
+
+        $this->assertStringContainsString('Live title', $live);
+        $this->assertStringContainsString('Live description', $live);
+        $this->assertStringContainsString('Previewed title', $previewed);
+        $this->assertStringContainsString('Previewed description', $previewed);
+        $this->assertStringNotContainsString('Live title', $previewed);
+    }
+
     public function test_the_switch_needs_a_preview_and_returns_only_to_this_site(): void
     {
         $credential = $this->openLink($this->release([$this->livePage('about')->id => null]));
