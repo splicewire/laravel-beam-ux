@@ -11,6 +11,6 @@ final class EntryImageData extends BeamData
 
     public static function fromMedia(\Spatie\MediaLibrary\MediaCollections\Models\Media $media): self
     {
-        return new self((string) $media->getKey(), $media->file_name, $media->getUrl());
+        return new self((string) $media->getKey(), $media->name, $media->getUrl());
     }
 }

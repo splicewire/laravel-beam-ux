@@ -282,6 +282,9 @@ class BeamUxEntry extends Model implements WorkflowManaged
      */
     protected static function booted(): void
     {
+        static::saved(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetRequest());
+        static::deleted(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetRequest());
+        static::restored(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetRequest());
         static::creating(function (BeamUxEntry $entry): void {
             // `format` defaults by `type`, not a single fleet-wide constant (found live: a `theme`
             // entry left at the old flat `tsx` default silently resolved TsxBodyCodec, which returns
@@ -321,6 +324,10 @@ class BeamUxEntry extends Model implements WorkflowManaged
                 // restored, and its artifact is still addressed by the version it was compiled at.
                 app(EntryArtifactStore::class)->forget($entry);
                 $entry->forgetBody();
+                if (\Splicewire\Beam\Ux\Media\EntryMedia::available()) {
+                    \Splicewire\Beam\Ux\Media\EntryMediaOwner::forEntry($entry)->media()
+                        ->where('collection_name', 'entry-images')->each(fn ($media) => $media->delete());
+                }
 
                 return;
             }

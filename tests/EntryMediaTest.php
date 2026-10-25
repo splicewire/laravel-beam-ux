@@ -26,6 +26,12 @@ class EntryMediaTest extends TestCase
         return [...parent::getPackageProviders($app), MediaLibraryServiceProvider::class, BeamMediaServiceProvider::class];
     }
 
+    protected function getEnvironmentSetUp($app): void
+    {
+        parent::getEnvironmentSetUp($app);
+        $app['config']->set('media-library.media_model', Media::class);
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -81,6 +87,92 @@ class EntryMediaTest extends TestCase
         $this->assertSame([$image->id], array_map(fn ($item) => $item->id, $service->library($entry, $actor)->items));
         $this->assertSame([], $service->library($other, $actor)->items);
         $this->assertSame(2, DB::table('beam_ux_entries')->count(), 'Upload must not create an owner entry or draft.');
+    }
+
+    public function test_http_multipart_upload_and_list_require_the_author_ability_and_parent_update(): void
+    {
+        \Splicewire\Beam\Facades\Particle::ops('beam-ux-entries', 'beam-ux-entry', ['media', 'upload-image']);
+        $entry = $this->entry();
+        $url = '/beam-ux-entries/'.$entry->id;
+        $this->actingAs($this->actor(false));
+        $this->getJson($url.'/media')->assertForbidden();
+        $this->post($url.'/upload-image', ['file' => UploadedFile::fake()->image('denied.png')], ['Accept' => 'application/json'])->assertForbidden();
+        $this->assertSame(0, Media::count());
+        $this->actingAs($this->actor());
+        $upload = $this->post($url.'/upload-image', ['file' => UploadedFile::fake()->image('photo.png')], ['Accept' => 'application/json'])->assertOk();
+        $id = $upload->json('data.id');
+        $this->assertNotEmpty($id);
+        $this->getJson($url.'/media')->assertOk()->assertJsonPath('data.items.0.id', $id);
+        $locked = $this->entry('locked');
+        $this->getJson('/beam-ux-entries/'.$locked->id.'/media')->assertForbidden();
+        $this->post('/beam-ux-entries/'.$locked->id.'/upload-image', ['file' => UploadedFile::fake()->image('denied.png')], ['Accept' => 'application/json'])->assertForbidden();
+        $this->assertSame(1, Media::count());
+    }
+
+    public function test_body_envelope_does_not_offer_media_to_a_non_author(): void
+    {
+        $entry = $this->entry();
+        $this->actingAs($this->actor(false));
+        $this->assertFalse(app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->of($entry, [])->mediaLibrary);
+        $this->actingAs($this->actor());
+        $this->assertTrue(app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->of($entry, [])->mediaLibrary);
+    }
+
+    public function test_detected_raster_bytes_never_keep_a_client_html_extension(): void
+    {
+        $path = $this->ownedFileFixtureRoot().'/polyglot';
+        file_put_contents($path, 'GIF89a;<html><script>alert(1)</script></html>');
+        $image = app(EntryMedia::class)->upload($this->entry(), new UploadedFile($path, 'x.html', null, null, true), $this->actor());
+        $row = Media::findOrFail($image->id);
+        $this->assertMatchesRegularExpression('/^[a-f0-9-]{36}\\.gif$/', $row->file_name);
+        $this->assertStringNotContainsString('.html', $image->url);
+        $this->assertSame('image/gif', $row->mime_type);
+    }
+
+    public function test_soft_delete_keeps_images_for_restore_and_force_delete_removes_files(): void
+    {
+        Schema::create('activity_log', function (Blueprint $table) {
+            $table->id();
+            $table->string('log_name')->nullable();
+            $table->text('description');
+            $table->nullableUuidMorphs('subject');
+            $table->string('event')->nullable();
+            $table->nullableUuidMorphs('causer');
+            $table->json('attribute_changes')->nullable();
+            $table->json('properties')->nullable();
+            $table->timestamps();
+        });
+        config(['beam.taxonomy.models.tag' => Fixtures\Tag::class]);
+        Schema::create('tags', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+        });
+        Schema::create('taggables', function (Blueprint $table) {
+            $table->uuid('tag_id');
+            $table->uuid('taggable_id');
+            $table->string('taggable_type');
+        });
+        $entry = $this->entry();
+        $image = app(EntryMedia::class)->upload($entry, UploadedFile::fake()->image('photo.png'), $this->actor());
+        $path = Media::findOrFail($image->id)->getPathRelativeToRoot();
+        $entry->delete();
+        Storage::disk('public')->assertExists($path);
+        $this->assertNotNull(Media::find($image->id));
+        $entry->restore();
+        $this->assertCount(1, app(EntryMedia::class)->library($entry, $this->actor())->items);
+        $entry->forceDelete();
+        $this->assertNull(Media::find($image->id));
+        Storage::disk('public')->assertMissing($path);
+    }
+
+    public function test_library_is_bounded_to_fifty_addressed_images(): void
+    {
+        $entry = $this->entry();
+        for ($i = 0; $i < 51; $i++) {
+            Media::create(['model_type' => \Splicewire\Beam\Ux\Media\EntryMediaOwner::MORPH, 'model_id' => $entry->id,
+                'collection_name' => 'entry-images', 'name' => 'Photo '.$i, 'file_name' => $i.'.png', 'mime_type' => 'image/png',
+                'disk' => 'public', 'size' => 1, 'manipulations' => [], 'custom_properties' => [], 'generated_conversions' => [], 'responsive_images' => []]);
+        }
+        $this->assertCount(50, app(EntryMedia::class)->library($entry, $this->actor())->items);
     }
 
     public function test_both_ux_author_and_the_addressed_parent_update_policy_are_required(): void

@@ -45,9 +45,9 @@ class EntrySitemapSource implements LiveSitemapSource
 
         // Route gate (coarse): only Page-typed entries are routable. The
         // per-entry URL resolution + marking + entitlement gates run below.
-        $entries = BeamUxEntry::query()
-            ->where('type', UxType::Page->value)
-            ->cursor();
+        $all = BeamUxEntry::query()->get();
+        $resolver = app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)->snapshot($all);
+        $entries = $all->filter(fn ($entry) => $entry->type === UxType::Page);
 
         foreach ($entries as $entry) {
             if (! $this->routable($entry)) {
@@ -62,7 +62,7 @@ class EntrySitemapSource implements LiveSitemapSource
                 continue;
             }
 
-            $chain = app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)->ancestry($entry);
+            $chain = $resolver->ancestry($entry);
             if ($chain === null || ! app(\Splicewire\Beam\Ux\Access\EntryAccessResolver::class)->canList(null, $chain)) {
                 continue;
             }
@@ -73,7 +73,7 @@ class EntrySitemapSource implements LiveSitemapSource
                 $pages = app(\Splicewire\Beam\Ux\Bindings\RecordPages::class);
                 foreach ($pages->records($entry, $request, BeamUxEntry::REALM_SITE) as $row) {
                     $url = $pages->url($entry, $row);
-                    $resolved = $url === null ? null : app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)->resolve($url);
+                    $resolved = $url === null ? null : $resolver->resolve($url);
                     if ($resolved !== null && end($resolved)->getKey() === $entry->getKey()) {
                         yield Url::create($base.$url);
                     }

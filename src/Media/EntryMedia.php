@@ -47,8 +47,9 @@ final class EntryMedia
     public function library(BeamUxEntry $entry, mixed $actor): EntryImageLibraryData
     {
         $this->authorize($entry, $actor);
-        $items = EntryMediaOwner::forEntry($entry)->getMedia('entry-images')
-            ->filter(fn ($media) => in_array($media->mime_type, self::MIMES, true))
+        $relation = EntryMediaOwner::forEntry($entry)->media();
+        $items = $relation->where('collection_name', 'entry-images')->whereIn('mime_type', self::MIMES)
+            ->orderBy($relation->getRelated()->getKeyName())->limit(50)->get()
             ->map(fn ($media) => EntryImageData::fromMedia($media))->values()->all();
 
         return new EntryImageLibraryData($items);
@@ -57,11 +58,13 @@ final class EntryMedia
     public function upload(BeamUxEntry $entry, UploadedFile $file, mixed $actor): EntryImageData
     {
         $this->authorize($entry, $actor);
+        $mime = $file->isValid() ? (new \finfo(FILEINFO_MIME_TYPE))->file($file->getRealPath()) : false;
+        $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp', 'image/avif' => 'avif'];
         // Inspect bytes, never trust a filename or browser Content-Type. SVG/HTML and remote URLs are not uploads.
-        if (! $file->isValid() || ! in_array((new \finfo(FILEINFO_MIME_TYPE))->file($file->getRealPath()), self::MIMES, true) || $file->getSize() > 8 * 1024 * 1024) {
+        if (! isset($extensions[$mime]) || $file->getSize() > 8 * 1024 * 1024) {
             throw ValidationException::withMessages(['file' => 'Choose a JPEG, PNG, GIF, WebP or AVIF image up to 8 MiB.']);
         }
-        $media = EntryMediaOwner::forEntry($entry)->addMedia($file)->toMediaCollection('entry-images');
+        $media = EntryMediaOwner::forEntry($entry)->addMedia($file)->usingName($file->getClientOriginalName())->usingFileName((string) \Illuminate\Support\Str::uuid().'.'.$extensions[$mime])->toMediaCollection('entry-images');
 
         return EntryImageData::fromMedia($media);
     }

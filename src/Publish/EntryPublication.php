@@ -135,9 +135,6 @@ class EntryPublication
         $this->requireVersionStore();
 
         return $entry->getConnection()->transaction(function () use ($entry, $body, $baseVersion, $label, $actor, $pageSettings) {
-            if ($pageSettings?->recordPage !== null) {
-                $entry->newQuery()->orderBy('id')->lockForUpdate()->get();
-            }
             $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
             if ($pageSettings !== null) {
                 app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->assertSettings($locked, $pageSettings);
@@ -282,6 +279,10 @@ class EntryPublication
 
     public function recordDraft(BeamUxEntry $entry, array $body, ?string $label = null, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): EntryPublicationData
     {
+        // Keep the Collection/parent reservation locks through the draft write even for direct callers.
+        if ($pageSettings?->recordPage !== null && $entry->getConnection()->transactionLevel() === 0) {
+            return $entry->getConnection()->transaction(fn () => $this->recordDraft($entry, $body, $label, $pageSettings));
+        }
         $this->assertStorable($entry, $body);
         if ($pageSettings !== null && $entry->type !== \Splicewire\Beam\Ux\Type\UxType::Page) {
             throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);

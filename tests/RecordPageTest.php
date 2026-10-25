@@ -61,8 +61,8 @@ class RecordPageTest extends TestCase
             '$id' => 'https://example.test/posts/1', 'type' => 'object',
             'x-beam-collection' => ['label' => 'Posts', 'nameField' => 'title'],
             'properties' => ['slug' => ['type' => 'string', 'x-beam-unique' => true], 'title' => ['type' => 'string'],
-                'description' => ['type' => 'string'], 'visible' => ['type' => 'boolean'], 'secret' => ['type' => 'string']],
-            'x-beam-public-read' => ['fields' => ['slug', 'title', 'description'], 'where' => ['all' => [['field' => 'visible', 'operator' => 'equals', 'value' => true]]]],
+                'image' => ['type' => 'string'], 'description' => ['type' => 'string'], 'visible' => ['type' => 'boolean'], 'secret' => ['type' => 'string']],
+            'x-beam-public-read' => ['fields' => ['slug', 'title', 'description', 'image'], 'where' => ['all' => [['field' => 'visible', 'operator' => 'equals', 'value' => true]]]],
         ]);
         $this->app->instance(\Splicewire\Beam\Collections\CollectionSchemaResolver::class,
             new \Splicewire\Beam\Collections\CollectionSchemaResolver(new \Splicewire\Beam\Schema\RegistrySchemaTargetResolver($registry), $registry));
@@ -79,7 +79,7 @@ class RecordPageTest extends TestCase
         });
         foreach (['hello' => true, 'hidden' => false] as $slug => $visible) {
             \Illuminate\Support\Facades\DB::table('beam_particles')->insert(['id' => $slug, 'schema_ref' => 'https://example.test/posts/1', 'schema_id' => 'https://example.test/posts/1',
-                'payload' => json_encode(['slug' => $slug, 'title' => 'Record '.$slug, 'description' => 'SEO '.$slug, 'visible' => $visible, 'secret' => 'NEVER PUBLIC'])]);
+                'payload' => json_encode(['slug' => $slug, 'title' => 'Record '.$slug, 'image' => '/images/'.$slug.'.png', 'description' => 'SEO '.$slug, 'visible' => $visible, 'secret' => 'NEVER PUBLIC'])]);
         }
     }
 
@@ -88,7 +88,7 @@ class RecordPageTest extends TestCase
         $parent = BeamUxEntry::create(['slug' => 'posts', 'type' => UxType::Page, 'segment' => 'posts', 'parent_id' => BeamUxEntry::rootFor()->id]);
 
         return BeamUxEntry::create(['slug' => 'post', 'type' => UxType::Page, 'segment' => '{slug}', 'parent_id' => $parent->id,
-            'record_page' => ['collection' => 'posts', 'field' => 'slug', 'titleField' => 'title', 'descriptionField' => 'description']]);
+            'record_page' => ['collection' => 'posts', 'field' => 'slug', 'titleField' => 'title', 'descriptionField' => 'description', 'socialImageField' => 'image']]);
     }
 
     public function test_parameter_page_uses_the_visitors_record_and_seo_without_private_fields(): void
@@ -97,7 +97,7 @@ class RecordPageTest extends TestCase
         $response = $this->getJson('/posts/hello')->assertOk();
         $response->assertJsonPath('props.entry.id', $page->id)->assertJsonPath('props.entry.url', '/posts/hello')
             ->assertJsonPath('props.entry.title', 'Record hello')->assertJsonPath('props.entry.description', 'SEO hello')
-            ->assertJsonPath('props.record.fields.slug', 'hello');
+            ->assertJsonPath('props.record.fields.slug', 'hello')->assertJsonPath('props.entry.socialImage', '/images/hello.png');
         $this->assertStringNotContainsString('NEVER PUBLIC', $response->getContent());
         $this->assertStringNotContainsString('{slug}', json_encode($response->json('props.nav')));
     }
@@ -179,11 +179,97 @@ class RecordPageTest extends TestCase
         $this->assertFalse($entry->relationLoaded('particle'));
     }
 
+    public function test_slug_lookup_filters_before_public_projection_and_has_a_bounded_query_count(): void
+    {
+        $this->page();
+        for ($i = 0; $i < 220; $i++) {
+            \Illuminate\Support\Facades\DB::table('beam_particles')->insert(['id' => 'bulk-'.$i, 'schema_ref' => 'https://example.test/posts/1', 'schema_id' => 'https://example.test/posts/1',
+                'payload' => json_encode(['slug' => 'bulk-'.$i, 'title' => 'Bulk', 'visible' => true])]);
+        }
+        \Illuminate\Support\Facades\DB::enableQueryLog();
+        $missing = $this->getJson('/posts/absent')->assertNotFound();
+        $queries = array_values(array_filter(\Illuminate\Support\Facades\DB::getQueryLog(), fn ($q) => str_contains($q['query'], 'from "beam_particles"')));
+        $this->assertLessThanOrEqual(6, count($queries));
+        foreach ($queries as $query) {
+            $this->assertContains('absent', $query['bindings'], 'Every particle read, including Public Read evaluation, must already be narrowed to this slug.');
+        }
+        $hidden = $this->getJson('/posts/hidden')->assertNotFound();
+        $this->assertSame($missing->getContent(), $hidden->getContent());
+        $headers = fn ($response) => array_diff_key($response->headers->all(), ['date' => true]);
+        $this->assertSame($headers($missing), $headers($hidden));
+    }
+
+    public function test_a_draft_moving_away_does_not_release_its_still_published_record_page(): void
+    {
+        $page = $this->page();
+        \Illuminate\Support\Facades\DB::table('beam_particles')->insert(['id' => 'page-draft', 'schema_ref' => 'https://example.test/posts/1', 'schema_id' => 'https://example.test/posts/1', 'payload' => '{}',
+            'meta' => json_encode(['pageSettings' => ['title' => 'Moving away', 'segment' => 'plain', 'recordPage' => null]])]);
+        $page->update(['particle_id' => 'page-draft']);
+        $other = BeamUxEntry::create(['slug' => 'other', 'type' => UxType::Page, 'parent_id' => $page->parent_id, 'segment' => 'other']);
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        app(RecordPages::class)->assertSettings($other, new EntryPageSettingsData(title: 'Other', parentId: $other->parent_id, segment: '{slug}', recordPage: new RecordPageData('posts', 'slug')));
+    }
+
+    public function test_sitemap_does_not_resolve_the_whole_entry_tree_for_every_record(): void
+    {
+        $this->page();
+        for ($i = 0; $i < 40; $i++) {
+            \Illuminate\Support\Facades\DB::table('beam_particles')->insert(['id' => 'sitemap-'.$i, 'schema_ref' => 'https://example.test/posts/1', 'schema_id' => 'https://example.test/posts/1',
+                'payload' => json_encode(['slug' => 'item-'.$i, 'title' => 'Item', 'visible' => true])]);
+        }
+        \Illuminate\Support\Facades\DB::enableQueryLog();
+        $urls = iterator_to_array(app(\Splicewire\Beam\Ux\Sitemap\EntrySitemapSource::class)->urls());
+        $this->assertGreaterThanOrEqual(41, count($urls));
+        $this->assertLessThanOrEqual(35, count(\Illuminate\Support\Facades\DB::getQueryLog()));
+    }
+
+    public function test_save_refuses_a_unique_field_that_is_not_publicly_projected(): void
+    {
+        $page = $this->page();
+        (new \Splicewire\Beam\Schema\DatabaseSchemaRegistry)->register([
+            '$id' => 'https://example.test/posts/2', 'type' => 'object',
+            'x-beam-collection' => ['label' => 'Posts', 'nameField' => 'title'],
+            'properties' => ['slug' => ['type' => 'string', 'x-beam-unique' => true], 'title' => ['type' => 'string']],
+            'x-beam-public-read' => ['fields' => ['title']],
+        ]);
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $this->expectExceptionMessage('Public Read projection');
+        app(RecordPages::class)->assertSettings($page, new EntryPageSettingsData(title: 'Page', segment: '{slug}', recordPage: new RecordPageData('posts', 'slug')));
+    }
+
+    public function test_preview_resolves_the_frozen_parameter_settings_without_changing_the_published_page(): void
+    {
+        $page = $this->page();
+        $declaration = $page->record_page;
+        \Illuminate\Support\Facades\DB::table('beam_particles')->insert(['id' => 'preview-body', 'schema_ref' => 'https://example.test/posts/1', 'schema_id' => 'https://example.test/posts/1', 'payload' => '[]']);
+        $page->update(['particle_id' => 'preview-body', 'segment' => 'published-literal', 'record_page' => null]);
+        $version = new \Rushing\Versioning\Models\Version;
+        $version->forceFill(['snapshot' => ['payload' => [], 'meta' => ['pageSettings' => [
+            'title' => 'Frozen template', 'parentId' => $page->parent_id, 'segment' => '{slug}', 'recordPage' => $declaration,
+        ]]]]);
+        $store = \Mockery::mock(\Rushing\Versioning\Contracts\VersionStore::class);
+        $store->shouldReceive('version')->with(\Mockery::type(\Splicewire\Beam\Models\BeamParticle::class), 'saved-version')->andReturn($version);
+        $this->app->instance(\Rushing\Versioning\Contracts\VersionStore::class, $store);
+        $grant = new \Splicewire\Beam\Ux\Models\BeamUxPreviewGrant;
+        $grant->forceFill(['entry_id' => $page->id, 'version_id' => 'saved-version']);
+        $context = new \Splicewire\Beam\Ux\Preview\PreviewContext($grant);
+        $chain = app(\Splicewire\Beam\Ux\Containment\PreviewEntryPathResolver::class)->resolve('/posts/hello', 'site', $context);
+        $this->assertNotNull($chain);
+        $projected = $chain[array_key_last($chain)];
+        $this->assertSame($page->id, $projected->id);
+        $this->assertSame($declaration, $projected->record_page);
+        $this->assertSame('hello', $projected->getAttribute('_record_page_value'));
+        $this->assertSame('hello', app(RecordPages::class)->resolve($projected, 'hello', \Illuminate\Http\Request::create('/posts/hello'), 'site')['fields']['slug']);
+        $this->assertSame('published-literal', $page->fresh()->segment);
+        $this->assertNull($page->fresh()->record_page);
+    }
+
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->uuid('particle_id')->nullable()->index();
+            $table->string('published_version')->nullable();
             $table->string('slug')->index();
             $table->string('title')->nullable();
             $table->string('schema_ref')->nullable()->index();

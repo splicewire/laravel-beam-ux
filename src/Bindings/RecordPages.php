@@ -18,6 +18,45 @@ final class RecordPages
 {
     public function __construct(private ProfileCollections $profiles) {}
 
+    /** Request-local declaration metadata only; never caches Record reads or authorization decisions. */
+    private function memo(): \stdClass
+    {
+        $request = app(Request::class);
+        $memo = $request->attributes->get('_beamUxRecordPages');
+        if (! $memo instanceof \stdClass) {
+            $memo = (object) ['columns' => [], 'pages' => [], 'matches' => [], 'offers' => []];
+            $request->attributes->set('_beamUxRecordPages', $memo);
+        }
+
+        return $memo;
+    }
+
+    public static function forgetRequest(): void
+    {
+        if (app()->bound('request')) {
+            app(Request::class)->attributes->remove('_beamUxRecordPages');
+        }
+    }
+
+    private function storageKey(BeamUxEntry $entry): string
+    {
+        return ($entry->getConnectionName() ?? 'default').'|'.(string) app(\Splicewire\Beam\Realm\Contracts\TenancyContext::class)->currentTenantId();
+    }
+
+    public function hasPublished(BeamUxEntry $entry): bool
+    {
+        return $this->published($entry)->isNotEmpty();
+    }
+
+    private function published(BeamUxEntry $entry): \Illuminate\Support\Collection
+    {
+        $memo = $this->memo();
+        $key = $this->storageKey($entry);
+        $memo->columns[$key] ??= Schema::connection($entry->getConnectionName())->hasColumn('beam_ux_entries', 'record_page');
+
+        return $memo->pages[$key] ??= $memo->columns[$key] ? $entry->newQuery()->whereNotNull('record_page')->get() : collect();
+    }
+
     public function assertSettings(BeamUxEntry $entry, EntryPageSettingsData $settings): void
     {
         $declaration = $settings->recordPage;
@@ -45,27 +84,49 @@ final class RecordPages
         if (($property['type'] ?? null) !== 'string' || ! in_array($declaration->field, $definition->uniqueFields(), true)) {
             $this->refuse('The URL field must be a declared unique string field of the Collection.');
         }
+        if (! $definition->hasPublicRead() || ! in_array($declaration->field, $definition->publicFieldNames(), true)) {
+            $this->refuse('The Record Page URL field must be included in the Collection Public Read projection.');
+        }
         foreach ([$declaration->titleField, $declaration->descriptionField, $declaration->socialImageField] as $field) {
             if ($field !== null && ($definition->properties()[$field]['type'] ?? null) !== 'string') {
                 $this->refuse('Title and SEO bindings must name declared string fields.');
             }
         }
-        foreach ($entry->newQuery()->whereKeyNot($entry->getKey())->orderBy('id')->lockForUpdate()->get() as $other) {
+        // Same native schema anchor as Collection unique writes; serialize this Collection, never the whole entries table.
+        $connection = $entry->getConnection();
+        $anchor = $connection->table(\Splicewire\Beam\Facades\Beam::table('schemas'))
+            ->where('schema_name', $definition->stem())->orderBy('version')->orderBy('id')->lockForUpdate()->first();
+        if ($anchor === null) {
+            $this->refuse('Record Pages require a registered database schema anchor.');
+        }
+        if ($settings->parentId !== null) {
+            $entry->newQuery()->whereKey($settings->parentId)->lockForUpdate()->first();
+        }
+        $others = $entry->newQuery()->whereKeyNot($entry->getKey())->where(function ($query) use ($settings) {
+            $query->whereNotNull('record_page')
+                ->orWhereHas('particle', fn ($particle) => $particle->whereNotNull('meta->pageSettings->recordPage'))
+                ->orWhere(fn ($siblings) => $siblings->where('parent_id', $settings->parentId)->where('segment', 'like', '{%'));
+        })->with('particle')->orderBy('id')->lockForUpdate()->get();
+        foreach ($others as $other) {
             if (! array_intersect((array) ($entry->realms ?? [$entry->realm]), (array) ($other->realms ?? [$other->realm]))) {
                 continue;
             }
-            // A pending declaration reserves its address too. Never read it when serving the public page.
             $working = $other->particle?->meta['pageSettings'] ?? null;
-            $otherDeclaration = is_array($working) ? ($working['recordPage'] ?? null) : $other->getAttribute('record_page');
-            $otherSegment = is_array($working) ? ($working['segment'] ?? null) : $other->segment;
-            $otherParent = is_array($working) ? ($working['parentId'] ?? null) : $other->parent_id;
-            if ($otherParent === $settings->parentId && self::parameter($otherSegment) !== null) {
-                $this->refuse('A parent may have only one parameter child.');
+            // A draft moving away never releases the address that is STILL published.
+            $reservations = [['recordPage' => $other->record_page, 'segment' => $other->segment, 'parentId' => $other->parent_id]];
+            if (is_array($working)) {
+                $reservations[] = $working;
             }
-            if (is_array($otherDeclaration)) {
-                $otherSource = $this->profiles->sources($other)[$otherDeclaration['collection'] ?? ''] ?? null;
-                if (($otherSource?->address['collection'] ?? null) === $stem) {
-                    $this->refuse('A Collection may have only one Record Page per site.');
+            foreach ($reservations as $reservation) {
+                if (($reservation['parentId'] ?? null) === $settings->parentId && self::parameter($reservation['segment'] ?? null) !== null) {
+                    $this->refuse('A parent may have only one parameter child.');
+                }
+                $otherDeclaration = $reservation['recordPage'] ?? null;
+                if (is_array($otherDeclaration)) {
+                    $otherSource = $this->profiles->sources($other)[$otherDeclaration['collection'] ?? ''] ?? null;
+                    if (($otherSource?->address['collection'] ?? null) === $stem) {
+                        $this->refuse('A Collection may have only one Record Page per site.');
+                    }
                 }
             }
         }
@@ -97,7 +158,7 @@ final class RecordPages
     }
 
     /** @return iterable<array<string,mixed>> The same guarded and projected rows as the visitor's Collection list. */
-    public function records(BeamUxEntry $page, Request $request, string $realm): iterable
+    public function records(BeamUxEntry $page, Request $request, string $realm, ?string $value = null): iterable
     {
         $declaration = $page->getAttribute('record_page');
         if (! is_array($declaration)) {
@@ -105,6 +166,7 @@ final class RecordPages
         }
         $source = $this->profiles->require($page, $declaration['collection']);
         $resource = app(ParticleResourceRegistry::class)->get($source->resource);
+        $records = $value === null ? null : new RecordPageRecords(app(\Splicewire\Beam\Collections\StandaloneRecordQuery::class), $declaration['field'], $value);
         try {
             for ($offset = 0; ; $offset += 100) {
                 $rows = app(BindingRequestScope::class)->run($request, $source->address,
@@ -113,7 +175,7 @@ final class RecordPages
 
                         return app(ParticleFrameResourceHandler::class)->forRequest($read, $realm)
                             ->indexWindow($resource->toResourceDefinition(), 100, $offset);
-                    });
+                    }, $records);
                 foreach ($rows as $row) {
                     if (self::slug(Arr::get($row, 'fields.'.$declaration['field'])) !== null) {
                         yield $row;
@@ -134,7 +196,7 @@ final class RecordPages
         if (! is_string($field) || self::slug($value) === null) {
             return null;
         }
-        foreach ($this->records($page, $request, $realm) as $row) {
+        foreach ($this->records($page, $request, $realm, $value) as $row) {
             if (Arr::get($row, 'fields.'.$field) === $value) {
                 $row['url'] = $this->url($page, $row);
 
@@ -156,21 +218,27 @@ final class RecordPages
 
     public function pageFor(BeamUxEntry $context, CollectionSource $source): ?BeamUxEntry
     {
-        if (! isset($source->address['collection']) || ! Schema::connection($context->getConnectionName())->hasColumn('beam_ux_entries', 'record_page')) {
+        if (! isset($source->address['collection'])) {
             return null;
         }
+        $memo = $this->memo();
+        $key = $this->storageKey($context).'|'.json_encode([$context->realms ?? [$context->realm], $source->address['collection']]);
+        if (array_key_exists($key, $memo->matches)) {
+            return $memo->matches[$key];
+        }
         $matches = [];
-        foreach ($context->newQuery()->whereNotNull('record_page')->get() as $page) {
+        foreach ($this->published($context) as $page) {
             if (! array_intersect((array) ($context->realms ?? [$context->realm]), (array) ($page->realms ?? [$page->realm]))) {
                 continue;
             }
-            $offer = $this->profiles->sources($page)[$page->getAttribute('record_page')['collection'] ?? ''] ?? null;
+            $offers = $memo->offers[$this->storageKey($page).'|'.$page->id] ??= $this->profiles->sources($page);
+            $offer = $offers[$page->getAttribute('record_page')['collection'] ?? ''] ?? null;
             if (($offer?->address['collection'] ?? null) === $source->address['collection']) {
                 $matches[] = $page;
             }
         }
 
-        return count($matches) === 1 ? $matches[0] : null;
+        return $memo->matches[$key] = count($matches) === 1 ? $matches[0] : null;
     }
 
     private function refuse(string $message): never
