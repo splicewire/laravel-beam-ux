@@ -1189,7 +1189,22 @@ class EntryPublicationTest extends TestCase
         parent::setUp();
         // Fake disks may sit inside a checkout; dedicated recordingRepository explicitly opts in.
         config(['beam.ux.recording.git' => PHP_BINARY.'-publication-test-no-git']);
+        config(['beam.taxonomy.models.tag' => Fixtures\Tag::class]);
         $this->createTables();
+
+        // HasTags detaches on soft delete; the deleted-parent dataset needs the host taxonomy fixture.
+        Schema::create('tags', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->string('name');
+            $table->string('slug');
+            $table->string('type')->nullable();
+            $table->timestamps();
+        });
+        Schema::create('taggables', function (Blueprint $table) {
+            $table->uuid('tag_id');
+            $table->uuid('taggable_id');
+            $table->string('taggable_type');
+        });
 
         Storage::fake('artifacts');
         config(['beam.ux.compile.disk' => 'artifacts']);

@@ -500,6 +500,45 @@ class BindingRenderTest extends TestCase
         $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.children.records', []);
     }
 
+    public function test_repeat_empty_walks_a_nested_subtree_only_when_the_outer_query_is_empty(): void
+    {
+        $this->installCollectionFixtures();
+        $documents = new class extends PublishedBindingDocument
+        {
+            public string $outerTitle = 'no matching article';
+
+            public function read(BeamUxEntry $entry): array
+            {
+                return [[
+                    'kind' => 'block', 'id' => 'outer', 'name' => 'article',
+                    'repeat' => ['collection' => 'articles', 'query' => ['filter' => ['title' => $this->outerTitle]],
+                        'empty' => [[
+                            'kind' => 'block', 'id' => 'empty-wrapper', 'name' => 'section',
+                            'children' => [[
+                                'kind' => 'block', 'id' => 'nested-events', 'name' => 'article',
+                                'repeat' => ['collection' => 'events'],
+                                'children' => [['kind' => 'text', 'value' => '', 'field' => 'fields.title']],
+                            ]],
+                        ]]],
+                    'children' => [['kind' => 'text', 'value' => '', 'field' => 'fields.title']],
+                ]];
+            }
+        };
+        $this->app->instance(PublishedBindingDocument::class, $documents);
+        $response = $this->getJson('/bound')->assertOk();
+        $this->assertSame([], $response->json('props.bindings.outer.records'));
+        $this->assertSame('events public', $response->json('props.bindings.nested-events.records.0.fields.title'));
+        $this->assertCount(1, $response->json('props.bindings.nested-events.records'));
+        $this->assertStringNotContainsString('author only', $response->getContent());
+        $this->assertStringNotContainsString('private field', $response->getContent());
+
+        // Same saved subtree, but a nonempty outer result must not resolve its inactive empty branch.
+        $documents->outerTitle = 'articles public';
+        $populated = $this->getJson('/bound')->assertOk();
+        $this->assertSame('articles public', $populated->json('props.bindings.outer.records.0.fields.title'));
+        $this->assertArrayNotHasKey('nested-events', $populated->json('props.bindings'));
+    }
+
     private function installCollectionFixtures(): void
     {
         Schema::create(\Splicewire\Beam\Facades\Beam::table('schemas'), function (Blueprint $table) {
