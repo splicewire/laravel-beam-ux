@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Manifest;
 
+use Laravel\Fortify\Contracts\ConfirmPasswordViewResponse;
 use Laravel\Fortify\Features;
 use Schemastud\Blockdoc\Contracts\ManifestNodeSource;
 use Schemastud\Blockdoc\Schema\ManifestBuilder;
@@ -19,9 +20,12 @@ use Splicewire\Beam\Ux\Manifest\Nodes\Auth\AuthVerifyEmail;
  * ({@see \Splicewire\Beam\Ux\Publish\EntryInitialBody}) and `@splicewire/beam-inertia` registers.
  *
  * Each is offered where the host serves its page, gated as beam-inertia's registry gates it: login, forgot and
- * reset always; register, two-factor and email verification on their Fortify features; confirm-password always,
- * since Fortify always serves that route. A host without Fortify serves no auth pages, so it gets none. Where a
- * host's JS build gates differently, `beam:doctor`'s registry check reports the drift.
+ * reset always; register, two-factor and email verification on their Fortify features; confirm-password where the
+ * host serves that page, i.e. it registered `Fortify::confirmPasswordView()`. Fortify has no confirm feature, and the
+ * host's `password-confirmation` switch (the starter's chisel block) is the same block that registers the view and
+ * lists the JS feature, so the binding is the PHP side of the flag beam-inertia reads. A host without Fortify serves
+ * no auth pages, so it gets none. Where a host's JS build gates differently, `beam:doctor`'s registry check reports
+ * the drift.
  */
 final class AuthIslandNodeSource implements ManifestNodeSource
 {
@@ -41,7 +45,7 @@ final class AuthIslandNodeSource implements ManifestNodeSource
             Features::enabled(Features::registration()) ? AuthRegister::class : null,
             AuthForgotPassword::class,
             AuthResetPassword::class,
-            AuthConfirmPassword::class,
+            app()->bound(ConfirmPasswordViewResponse::class) ? AuthConfirmPassword::class : null,
             Features::enabled(Features::twoFactorAuthentication()) ? AuthTwoFactorChallenge::class : null,
             Features::enabled(Features::emailVerification()) ? AuthVerifyEmail::class : null,
         ]));

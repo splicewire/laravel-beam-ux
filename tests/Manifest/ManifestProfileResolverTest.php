@@ -214,17 +214,19 @@ class ManifestProfileResolverTest extends TestCase
         // N3447: beam's default auth trees place these and beam-inertia registers them; the profile now declares them.
         config(['fortify.features' => []]);
         $names = fn () => array_column($this->resolver('central_db')->resolve($this->entry('central'))['nodes'], 'name');
-        $always = ['AuthLogin', 'AuthForgotPassword', 'AuthResetPassword', 'AuthConfirmPassword'];
+        $always = ['AuthLogin', 'AuthForgotPassword', 'AuthResetPassword'];
         foreach ($always as $name) {
             $this->assertContains($name, $names());
         }
-        foreach (['AuthRegister', 'AuthTwoFactorChallenge', 'AuthVerifyEmail'] as $name) {
-            $this->assertNotContains($name, $names(), "{$name} is offered only where its Fortify feature is on");
+        foreach (['AuthRegister', 'AuthTwoFactorChallenge', 'AuthVerifyEmail', 'AuthConfirmPassword'] as $name) {
+            $this->assertNotContains($name, $names(), "{$name} is offered only where the host serves its page");
         }
 
         config(['fortify.features' => [\Laravel\Fortify\Features::registration(), \Laravel\Fortify\Features::twoFactorAuthentication(), \Laravel\Fortify\Features::emailVerification()]]);
+        // review-r1 (WP-EP07): confirm-password follows the host's own switch, the confirm view it registers.
+        \Laravel\Fortify\Fortify::confirmPasswordView('auth.confirm-password');
         $profile = $this->resolver('central_db')->resolve($this->entry('central'));
-        foreach (['AuthRegister', 'AuthTwoFactorChallenge', 'AuthVerifyEmail', ...$always] as $name) {
+        foreach (['AuthRegister', 'AuthTwoFactorChallenge', 'AuthVerifyEmail', 'AuthConfirmPassword', ...$always] as $name) {
             $node = collect($profile['nodes'])->firstWhere('name', $name);
             $this->assertSame(['type' => 'object', 'additionalProperties' => false], $node['attrsSchema'] ?? null, "{$name} is sealed");
             $this->assertSame([], $node['admitsChildCategories'] ?? null);
