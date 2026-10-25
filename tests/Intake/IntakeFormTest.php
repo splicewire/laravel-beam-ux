@@ -93,6 +93,20 @@ class IntakeFormTest extends TestCase
         $this->assertSame(['contact' => self::CONTACT], $forms->schemasFor([...$this->form('contact'), ...$this->form('private', '01a1f000-0000-7000-8000-000000000002')]));
     }
 
+    public function test_publish_rechecks_every_form_so_a_restore_or_a_shrunk_allow_list_never_goes_live(): void
+    {
+        // The save checks changed forms only; Publish checks them all.
+        $this->openDoor();
+        $guard = app(CanvasBodyGuard::class);
+        $entry = new BeamUxEntry(['type' => 'page', 'format' => 'tsx']);
+        $body = $this->form('contact');
+        $guard->assertPublishable($entry, $body, $body);
+
+        config(['beam.core.intake.public_schemas' => []]);
+        $this->expectException(ValidationException::class);
+        $guard->assertPublishable($entry, $body, $body);
+    }
+
     public function test_the_editor_envelope_carries_the_schema_each_form_renders(): void
     {
         $this->openDoor();

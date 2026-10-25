@@ -127,8 +127,12 @@ class PublicEntryRendererTest extends TestCase
         $this->page('contact-us', ['segment' => 'contact-us', 'parent_id' => $root->getKey()]);
         $this->page('about', ['segment' => 'about', 'parent_id' => $root->getKey()]);
 
-        $this->assertSame(['contact' => $schema], $this->get('/contact-us')->json('props.intakeForms'));
+        config(['beam.core.intake.honeypot.field' => 'nickname']);
+        $response = $this->get('/contact-us');
+        $this->assertSame(['contact' => $schema], $response->json('props.intakeForms'));
+        $this->assertSame('nickname', $response->json('props.intakeHoneypotField'), 'the form sends the field the door watches');
         $this->assertArrayNotHasKey('intakeForms', $this->get('/about')->json('props'), 'a page without a form carries nothing');
+        $this->assertArrayNotHasKey('intakeHoneypotField', $this->get('/about')->json('props'));
     }
 
     public function test_a_root_absolute_segment_resolves_even_though_a_top_down_walk_could_never_reach_it(): void

@@ -127,6 +127,9 @@ final class CanvasBodyGuard
         $profile = $this->resolver->resolve($entry);
         app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $working, $profile);
         $this->legality->assert($working, $profile, $this->diff->changedIds($published, $working));
+        // EP-07d: at Publish EVERY form is re-checked, not only the changed ones, so a restored version or an allow-list
+        // that shrank since the save never puts a form live that posts to a schema the door refuses.
+        app(\Splicewire\Beam\Ux\Intake\IntakeForms::class)->assertBody($working);
     }
 
     /**

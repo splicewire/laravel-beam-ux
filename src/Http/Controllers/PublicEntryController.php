@@ -130,7 +130,11 @@ class PublicEntryController
 
         $response = $this->renderer->render($page, [
             ...($bindings === [] ? [] : ['bindings' => array_map(fn ($binding) => $binding->toArray(), $bindings)]),
-            ...($intakeForms === [] ? [] : ['intakeForms' => $intakeForms]),
+            ...($intakeForms === [] ? [] : [
+                'intakeForms' => $intakeForms,
+                // The door's honeypot field, so the form sends the one its middleware watches (and the doctor names).
+                'intakeHoneypotField' => (string) config('beam.core.intake.honeypot.field', 'website'),
+            ]),
             'entry' => [
                 'id' => (string) $entry->getKey(),
                 'slug' => (string) $entry->slug,
