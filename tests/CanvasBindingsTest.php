@@ -69,6 +69,33 @@ class CanvasBindingsTest extends AuthoredComponentNativeTestCase
         $this->assertSame(0, \Rushing\Versioning\Models\Version::count());
     }
 
+    public function test_typed_post_preserves_string_props_and_named_slot_arrays_without_writes(): void
+    {
+        \Splicewire\Beam\Facades\Particle::ops('canvas-entries', 'beam-ux-entry', ['canvas-bindings']);
+        $entry = $this->entry();
+        $this->actingAs(new GenericUser(['id' => 'author', 'author' => true]));
+        $slot = ['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false,
+            'props' => [['name' => 'title', 'kind' => 'string', 'value' => 'Slot title']],
+            'children' => [['kind' => 'text', 'value' => 'Caller content']]];
+        $body = [['kind' => 'block', 'name' => 'Card', 'isComponent' => true, 'dynamic' => false,
+            'props' => [['name' => 'title', 'kind' => 'string', 'value' => 'Fixture title']],
+            'children' => [$slot], 'slots' => ['aside' => [$slot]]]];
+        $before = $entry->fresh()->getAttributes();
+        $db = $entry->getConnection();
+        $db->enableQueryLog();
+        $db->flushQueryLog();
+        $this->postJson('/canvas-entries/'.$entry->id.'/canvas-bindings', ['body' => $body])
+            ->assertOk()->assertJsonPath('data.bindings', [])->assertJsonPath('data.record', null);
+        $queries = $db->getQueryLog();
+        $db->disableQueryLog();
+        foreach ($queries as $query) {
+            $this->assertDoesNotMatchRegularExpression('/^\s*(insert|update|delete|replace|create|alter|drop)\b/i', $query['query']);
+        }
+        $this->assertSame($before, $entry->fresh()->getAttributes());
+        $this->assertSame(0, \Splicewire\Beam\Models\BeamParticle::count());
+        $this->assertSame(0, \Rushing\Versioning\Models\Version::count());
+    }
+
     public function test_page_public_uses_guest_ancestor_guards_and_reports_unknown_chains(): void
     {
         $page = $this->entry();
