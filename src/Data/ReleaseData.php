@@ -42,6 +42,8 @@ final class ReleaseData extends BeamData
         public ?string $previewLink = null,
         /** ADR-0232 d15: where a signed-in author opens this Release's Preview; null when it has nothing saved to render. */
         public ?string $previewHref = null,
+        /** ADR-0232 d8: whether this reader may turn the Preview Links on or off and rotate them (edit on every member). */
+        public bool $canManagePreviewLinks = false,
     ) {}
 
     public static function scope(Builder $query): Builder
@@ -55,6 +57,8 @@ final class ReleaseData extends BeamData
         $members = $model->members()->orderBy('entry_id')->get();
         $entries = BeamUxEntry::on($model->getConnectionName())->whereKey($members->pluck('entry_id'))->get()->keyBy('id');
         $projection = app(WorkflowActuator::class)->projection($model);
+        $manages = $model->status !== 'published'
+            && app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->mayManageLinks($model, request()->user());
 
         return new self($model->id, $model->title, $model->realm, $model->status, $model->reviewed_by,
             $members->map(fn ($member) => new ReleaseMemberData($member->entry_id, $member->version_id,
@@ -68,9 +72,10 @@ final class ReleaseData extends BeamData
             $members->first()?->id,
             $model->status === 'published' ? self::filesHref($members->first()?->id) : null,
             (bool) $model->getAttribute('preview_links_enabled'),
-            $model->getAttribute('preview_links_enabled') && app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->mayManageLinks($model, request()->user())
+            $model->getAttribute('preview_links_enabled') && $manages
                 ? app(\Splicewire\Beam\Ux\Preview\ReleasePreviewLinks::class)->url($model) : null,
             self::previewHref($model, $members),
+            $manages,
         );
     }
 

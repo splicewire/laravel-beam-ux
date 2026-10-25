@@ -125,6 +125,27 @@ class ReleaseReadTest extends TestCase
             ->assertJsonPath('data.previewHref', "/_beam/preview/open/{$this->release->id}");
     }
 
+    public function test_a_release_says_whether_its_reader_may_manage_its_preview_links(): void
+    {
+        // Review of beam 3d7565ec: the panel offered link controls to an author the link actions refuse, one who can
+        // read Releases but not edit every member (ADR-0232 d8: whoever can edit the Release makes the links).
+        \Illuminate\Support\Facades\Schema::table('beam_ux_entries', fn (\Illuminate\Database\Schema\Blueprint $table) => $table->string('realm')->nullable());
+        $entry = (string) \Illuminate\Support\Str::uuid();
+        \Illuminate\Support\Facades\DB::table('beam_ux_entries')->insert(['id' => $entry, 'realm' => 'site']);
+        \Illuminate\Support\Facades\DB::table('beam_ux_release_members')->insert(['id' => (string) \Illuminate\Support\Str::uuid(),
+            'release_id' => $this->release->id, 'entry_id' => $entry, 'version_id' => (string) \Illuminate\Support\Str::uuid()]);
+        config(['beam.ux.releases.edit_ability' => 'update']);
+        Gate::define('ux.author', fn ($user = null) => in_array($user?->getAuthIdentifier(), ['author', 'helper'], true));
+        // An entry's ability is answered by its policy; this one lets the author edit and no one else.
+        Gate::policy(\Splicewire\Beam\Ux\Models\BeamUxEntry::class, ReleaseReadEntryPolicy::class);
+
+        $this->actingAs($this->user('author'));
+        $this->getJson("/beam-ux-releases/{$this->release->id}")->assertOk()->assertJsonPath('data.canManagePreviewLinks', true);
+
+        $this->actingAs($this->user('helper'));
+        $this->getJson("/beam-ux-releases/{$this->release->id}")->assertOk()->assertJsonPath('data.canManagePreviewLinks', false);
+    }
+
     public function test_someone_who_cannot_author_can_neither_list_nor_open_a_release(): void
     {
         $this->actingAs($this->user('reader'));
@@ -140,5 +161,14 @@ class ReleaseReadTest extends TestCase
         $user->forceFill(['id' => $id]);
 
         return $user;
+    }
+}
+
+/** Edit on an entry, for the author alone. */
+class ReleaseReadEntryPolicy
+{
+    public function update(\Illuminate\Contracts\Auth\Authenticatable $user, \Splicewire\Beam\Ux\Models\BeamUxEntry $entry): bool
+    {
+        return $user->getAuthIdentifier() === 'author';
     }
 }

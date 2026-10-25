@@ -440,7 +440,8 @@ final class ReleaseService
         }
         try {
             $this->authorizeLinks($release, $actor);
-        } catch (AuthorizationException) {
+        } catch (AuthorizationException|ValidationException|\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            // A member that can't be read for this Release (gone, another realm) can't be edited either.
             return false;
         }
 
