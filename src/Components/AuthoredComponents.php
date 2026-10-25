@@ -298,6 +298,25 @@ class AuthoredComponents
             if (array_key_exists($name, $byName) && ($byName[$name] === null || (string) $byName[$name]->getKey() !== (string) $entry->getKey())) {
                 $this->refuse('Component names must be unique in their realm.');
             }
+            if ($publishing) {
+                // A pending rename cannot release its still-visible Pin name. The existing publication
+                // transaction locks the complete set; fixed Release refs can move both claims together.
+                foreach ($this->entries($entry) as $other) {
+                    $id = (string) $other->getKey();
+                    if ($id === (string) $entry->getKey() || ! $this->authored($other)) {
+                        continue;
+                    }
+                    if (array_key_exists($id, $refs)) {
+                        $selected = $refs[$id] === null ? [] : $this->version($other, (string) $refs[$id]);
+                        $otherName = $selected === [] ? null : $this->definition($selected)->name;
+                    } else {
+                        $otherName = $other->getAttribute('published_version') === null ? null : $other->getAttribute('published_component_name');
+                    }
+                    if ($otherName === $name) {
+                        $this->refuse('Published component names must be unique in their realm. Publish the rename first or in the same Release.');
+                    }
+                }
+            }
             $byName[$name] = $entry;
         }
         $visit = function (BeamUxEntry $owner, array $doc, array $path) use (&$visit, $byName, $entry, $body, $publishing, $refs, $registered): void {

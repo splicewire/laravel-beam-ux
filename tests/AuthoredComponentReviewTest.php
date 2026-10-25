@@ -377,4 +377,25 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
         $this->assertTrue($denied, 'The in-use gate did not refuse before deletion; later failure: '.($otherFailure ?? 'none'));
         $this->assertNull($component->fresh()->deleted_at);
     }
+
+    public function test_a_renamed_pending_head_does_not_release_its_still_published_name(): void
+    {
+        $pub = app(EntryPublication::class);
+        $first = $this->reviewComponent('pinned-name-owner');
+        $old = $pub->recordDraft($first, $this->body('HeldPinName'));
+        $pub->publishVersion($first->fresh(), $old->headVersion);
+        $new = $pub->recordDraft($first->fresh(), $this->body('NewOwnerName'));
+        $second = $this->reviewComponent('waiting-name-owner');
+        $waiting = $pub->recordDraft($second, $this->body('HeldPinName'));
+        try {
+            $pub->publishVersion($second->fresh(), $waiting->headVersion);
+            $this->fail('A pending rename released a still-published name');
+        } catch (ValidationException $error) {
+            $this->assertStringContainsString('unique', $error->getMessage());
+        }
+        $this->assertNull($second->fresh()->published_version);
+        $pub->publishVersions($first->fresh(), [$first->id => $new->headVersion, $second->id => $waiting->headVersion]);
+        $this->assertSame('NewOwnerName', $first->fresh()->published_component_name);
+        $this->assertSame('HeldPinName', $second->fresh()->published_component_name);
+    }
 }
