@@ -23,7 +23,13 @@ final class BindingBodyGuard
             $offer['source'] = $this->profiles->require($entry, $offer['name']);
         }
         unset($offer);
-        $this->fields->assert($body, [...$profile, 'x-collections' => $offers], fn ($scope, $relation) => $this->relation($scope, $relation));
+        $declaration = $entry->getAttribute('record_page');
+        $recordScope = null;
+        if (is_array($declaration)) {
+            $source = $this->profiles->require($entry, $declaration['collection']);
+            $recordScope = ['source' => $source, 'schema' => $this->profiles->fieldSchema($source), 'hasRecordPage' => true, 'recordPageRoot' => true];
+        }
+        $this->fields->assert($body, [...$profile, 'x-collections' => $offers, 'x-record' => $recordScope], fn ($scope, $relation) => $this->relation($scope, $relation));
         $ids = [];
         $this->queries($body, $entry, null, $ids);
     }

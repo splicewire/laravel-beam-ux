@@ -28,7 +28,7 @@ use Splicewire\Beam\Ux\Type\UxType;
 final class MdxPageFile
 {
     /** The page settings a header carries, in the order it prints them. */
-    public const KEYS = ['title', 'segment', 'navOrder', 'navGroup', 'layout', 'template', 'description', 'socialImage', 'pageType', 'publishedDate', 'childFields'];
+    public const KEYS = ['title', 'segment', 'navOrder', 'navGroup', 'layout', 'template', 'description', 'socialImage', 'pageType', 'publishedDate', 'childFields', 'recordPage'];
 
     /** The settings whose default is a value rather than null, left out of a header like a null. */
     private const DEFAULTS = ['pageType' => 'WebPage'];
@@ -88,7 +88,8 @@ final class MdxPageFile
             if ($value === null || $value === '' || $value === (self::DEFAULTS[$key] ?? null)) {
                 continue;
             }
-            $fields[$key] = (string) $value;
+            $fields[$key] = $value instanceof \Splicewire\Beam\Ux\Data\RecordPageData
+                ? json_encode($value->toArray(), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) : (string) $value;
         }
 
         return $fields;
@@ -134,6 +135,13 @@ final class MdxPageFile
     {
         if (isset($fields['navOrder']) && preg_match('/^-?[0-9]+$/D', $fields['navOrder']) === 1) {
             $fields['navOrder'] = (int) $fields['navOrder'];
+        }
+        if (isset($fields['recordPage'])) {
+            try {
+                $fields['recordPage'] = json_decode($fields['recordPage'], true, flags: JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                throw ValidationException::withMessages(['pageSettings.recordPage' => 'The Record Page declaration must be a JSON object.']);
+            }
         }
         $class = PageFields::forChild($entry);
         [$pageFields, $unclaimed] = PageFields::fromFrontmatter($class, $unknown);

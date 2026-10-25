@@ -1,15 +1,87 @@
 [
   {
-    "kind": "block", "name": "article", "id": "outer", "isComponent": false, "dynamic": false, "props": [],
-    "repeat": {"collection": "articles", "empty": [{"kind": "text", "value": "No records"}]},
-    "when": {"all": [{"field": "title", "operator": "is set"}]},
+    "kind": "block",
+    "name": "h1",
+    "isComponent": false,
+    "props": [],
     "children": [
-      {"kind": "text", "value": "Fallback", "field": "title"},
-      {"kind": "block", "name": "RichMarkdown", "id": "rich", "isComponent": true, "dynamic": false,
-       "props": [{"kind": "field", "name": "content", "value": "body"}], "children": []},
-      {"kind": "block", "name": "p", "id": "inner", "isComponent": false, "dynamic": false, "props": [],
-       "repeat": {"relation": "related", "empty": [{"kind": "text", "value": "No related"}]},
-       "children": [{"kind": "text", "value": "", "field": "title"}]}
+      {
+        "kind": "text",
+        "value": "Record fallback",
+        "field": "fields.title"
+      }
+    ],
+    "dynamic": false
+  },
+  {
+    "kind": "block",
+    "name": "article",
+    "id": "outer",
+    "isComponent": false,
+    "dynamic": false,
+    "props": [],
+    "repeat": {
+      "collection": "articles",
+      "empty": [
+        {
+          "kind": "text",
+          "value": "No records"
+        }
+      ]
+    },
+    "when": {
+      "all": [
+        {
+          "field": "title",
+          "operator": "is set"
+        }
+      ]
+    },
+    "children": [
+      {
+        "kind": "text",
+        "value": "Fallback",
+        "field": "title"
+      },
+      {
+        "kind": "block",
+        "name": "RichMarkdown",
+        "id": "rich",
+        "isComponent": true,
+        "dynamic": false,
+        "props": [
+          {
+            "kind": "field",
+            "name": "content",
+            "value": "body"
+          }
+        ],
+        "children": []
+      },
+      {
+        "kind": "block",
+        "name": "p",
+        "id": "inner",
+        "isComponent": false,
+        "dynamic": false,
+        "props": [],
+        "repeat": {
+          "relation": "related",
+          "empty": [
+            {
+              "kind": "text",
+              "value": "No related"
+            }
+          ]
+        },
+        "children": [
+          {
+            "kind": "text",
+            "value": "",
+            "field": "title"
+          }
+        ]
+      }
     ]
   }
 ]

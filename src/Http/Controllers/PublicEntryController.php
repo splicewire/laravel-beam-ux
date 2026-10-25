@@ -120,6 +120,23 @@ class PublicEntryController
         abort_if($chain === null, Response::HTTP_NOT_FOUND);
 
         $entry = $chain[array_key_last($chain)];
+        $record = null;
+        if (\Splicewire\Beam\Ux\Bindings\RecordPages::parameter($entry->segment) !== null) {
+            // A denied read and an absent Record produce the same response, before any body read.
+            $read = clone $request;
+            $read->setUserResolver(fn () => $actor);
+            $record = app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->resolve(
+                $entry, (string) $entry->getAttribute('_record_page_value'), $read, $realm);
+            abort_if($record === null, Response::HTTP_NOT_FOUND);
+            $entry = clone $entry;
+            foreach (['titleField' => 'title', 'descriptionField' => 'seo_description', 'socialImageField' => 'seo_social_image'] as $field => $attribute) {
+                $name = $entry->getAttribute('record_page')[$field] ?? null;
+                if ($name !== null) {
+                    $entry->setAttribute($attribute, \Illuminate\Support\Arr::get($record, 'fields.'.$name));
+                }
+            }
+            $chain[array_key_last($chain)] = $entry;
+        }
 
         // Chrome (ADR-0213 §4), resolved from the chain the gate walk already produced — nearest
         // declaring ancestor per axis, per-entry override. Names, not components: what a name means is
@@ -139,6 +156,7 @@ class PublicEntryController
                 // The door's honeypot field, so the form sends the one its middleware watches (and the doctor names).
                 'intakeHoneypotField' => (string) config('beam.core.intake.honeypot.field', 'website'),
             ]),
+            ...($record === null ? [] : ['record' => $record]),
             'entry' => [
                 'id' => (string) $entry->getKey(),
                 'slug' => (string) $entry->slug,
@@ -148,7 +166,8 @@ class PublicEntryController
                 // ADR-0228 d1 / beam JS ADR-0006 d1: the declared Body Kind chooses the editor surface. An MDX page
                 // is `blocks` on a host that holds MDX as blocks (ADR-0233 d1) and `source` on one that does not.
                 'bodyKind' => $entry->bodyKind()->value,
-                'url' => $this->urls->resolveChain($chain),
+                'url' => $record['url'] ?? $this->urls->resolveChain($chain),
+                ...($record === null ? [] : ['description' => $entry->seo_description, 'socialImage' => $entry->seo_social_image]),
                 'layout' => $chrome['layout'],
                 'template' => $chrome['template'],
             ],
@@ -188,7 +207,7 @@ class PublicEntryController
             ...$this->pageProps->for($chrome['layout'], $entry, $chain, $actor),
         ], );
 
-        if ($bindings !== [] || $this->gate->isRestricted($chain)) {
+        if ($record !== null || $bindings !== [] || $this->gate->isRestricted($chain)) {
             // Post-gate output for a restricted body: never stored, so a revoked grant bites on the
             // next request rather than living on in a shared cache (ADR-0122, ADR-0209 §8).
             $response->headers->set('Cache-Control', 'no-store, private');

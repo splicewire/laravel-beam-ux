@@ -51,6 +51,62 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 class EntryPathResolver
 {
+    private ?\Illuminate\Support\Collection $snapshotEntries = null;
+
+    private array $snapshotLookups = [];
+
+    /** One read-only routing snapshot for a bulk sitemap; ordinary HTTP lookups still query their request scope. */
+    public function snapshot(\Illuminate\Support\Collection $entries): self
+    {
+        $copy = clone $this;
+        $copy->snapshotEntries = $entries->keyBy('id');
+        $copy->snapshotLookups = [];
+        foreach ($copy->snapshotEntries as $entry) {
+            $entry->setRelation('parent', $copy->snapshotEntries->get($entry->parent_id));
+        }
+
+        return $copy;
+    }
+
+    private function snapshotLookup(string $realm): array
+    {
+        if (isset($this->snapshotLookups[$realm])) {
+            return $this->snapshotLookups[$realm];
+        }
+        $lookup = ['absolute' => [], 'children' => [], 'through' => [], 'parameters' => [], 'root' => null];
+        foreach ($this->snapshotEntries->sortBy('id') as $entry) {
+            if ($entry->namespace === 'realms' && $entry->slug === $realm) {
+                $lookup['root'] ??= $entry;
+            }
+            $reachable = array_key_exists('realms', $entry->getAttributes())
+                ? $entry->isReachableIn($realm) : $entry->realm === $realm;
+            if ($entry->type !== UxType::Page || ! $reachable) {
+                continue;
+            }
+            $segment = $entry->segment;
+            $parent = (string) $entry->parent_id;
+            if ($segment === null || $segment === '') {
+                $lookup['through'][$parent][] = $entry;
+
+                continue;
+            }
+            if (str_starts_with($segment, '/')) {
+                $old = $lookup['absolute'][$segment] ?? null;
+                if ($old === null || ($old->parent_id !== null && $entry->parent_id === null)) {
+                    $lookup['absolute'][$segment] = $entry;
+                }
+            } else {
+                $piece = str_starts_with($segment, './') ? substr($segment, 2) : $segment;
+                $lookup['children'][$parent][$piece] ??= $entry;
+                if (\Splicewire\Beam\Ux\Bindings\RecordPages::parameter($segment) !== null && is_array($entry->record_page)) {
+                    $lookup['parameters'][$parent][] = $entry;
+                }
+            }
+        }
+
+        return $this->snapshotLookups[$realm] = $lookup;
+    }
+
     /**
      * Resolve a public path to its **root-first containment chain** (`[root, …, target]`), or null when
      * nothing in the realm resolves to it.
@@ -72,7 +128,7 @@ class EntryPathResolver
         //
         // Same guard style, and the same reasoning, as `SeedsEntries::canSeed()`: absent table ⇒
         // degrade quietly, never fabricate and never fatal.
-        if (! Schema::hasTable('beam_ux_entries')) {
+        if ($this->snapshotEntries === null && ! Schema::hasTable('beam_ux_entries')) {
             return null;
         }
 
@@ -128,6 +184,10 @@ class EntryPathResolver
      */
     protected function absolute(array $pieces, string $realm): ?BeamUxEntry
     {
+        if ($this->snapshotEntries !== null) {
+            return $this->snapshotLookup($realm)['absolute']['/'.implode('/', $pieces)] ?? null;
+        }
+
         return $this->routable($realm)
             ->where('segment', '/'.implode('/', $pieces))
             ->orderByRaw('case when parent_id is null then 0 else 1 end')
@@ -153,7 +213,7 @@ class EntryPathResolver
         $chain = [];
         $node = $anchor;
 
-        foreach ($pieces as $piece) {
+        foreach ($pieces as $index => $piece) {
             $next = $this->child($node, $piece, $realm);
 
             if ($next !== null) {
@@ -166,7 +226,26 @@ class EntryPathResolver
             $through = $this->passThroughChild($node, $piece, $realm);
 
             if ($through === null) {
-                return null;
+                // Literal children (including pass-through) always win over a parameter.
+                if ($index !== array_key_last($pieces)) {
+                    return null;
+                }
+                if ($this->snapshotEntries !== null) {
+                    $parameters = collect($this->snapshotLookup($realm)['parameters'][(string) $node->id] ?? []);
+                } else {
+                    if (! app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->hasPublished($node)) {
+                        return null;
+                    }
+                    $parameters = $this->routable($realm)->where('parent_id', $node->getKey())->whereNotNull('record_page')->get()
+                        ->filter(fn ($entry) => \Splicewire\Beam\Ux\Bindings\RecordPages::parameter($entry->segment) !== null);
+                }
+                if ($parameters->count() !== 1) {
+                    return null;
+                }
+                $parameter = $parameters->first();
+                $parameter->setAttribute('_record_page_value', rawurldecode($piece));
+
+                return [...$chain, $parameter];
             }
 
             $chain = [...$chain, ...$through];
@@ -182,6 +261,10 @@ class EntryPathResolver
      */
     protected function child(BeamUxEntry $parent, string $piece, string $realm): ?BeamUxEntry
     {
+        if ($this->snapshotEntries !== null) {
+            return $this->snapshotLookup($realm)['children'][(string) $parent->id][$piece] ?? null;
+        }
+
         return $this->routable($realm)
             ->where('parent_id', $parent->getKey())
             ->whereIn('segment', [$piece, './'.$piece])
@@ -198,7 +281,7 @@ class EntryPathResolver
      */
     protected function passThroughChild(BeamUxEntry $parent, string $piece, string $realm): ?array
     {
-        $candidates = $this->routable($realm)
+        $candidates = $this->snapshotEntries !== null ? collect($this->snapshotLookup($realm)['through'][(string) $parent->id] ?? []) : $this->routable($realm)
             ->where('parent_id', $parent->getKey())
             ->where(fn ($q) => $q->whereNull('segment')->orWhere('segment', ''))
             ->orderBy('id')
@@ -223,6 +306,10 @@ class EntryPathResolver
      */
     protected function realmRoot(string $realm): ?BeamUxEntry
     {
+        if ($this->snapshotEntries !== null) {
+            return $this->snapshotLookup($realm)['root'];
+        }
+
         return BeamUxEntry::query()
             ->where('namespace', 'realms')
             ->where('slug', $realm)
@@ -271,13 +358,23 @@ class EntryPathResolver
 
         // Guarded like every other aspect column: a consumer that has not migrated containment yet
         // resolves nothing rather than dying on a missing column.
-        if (Schema::hasColumn('beam_ux_entries', 'realms')) {
+        if ($this->hasRealmsColumn()) {
             $query->whereJsonContains('realms', $realm);
         } else {
             $query->where('realm', $realm);
         }
 
         return $query;
+    }
+
+    private function hasRealmsColumn(): bool
+    {
+        $scope = app(\Splicewire\Beam\Ux\Bindings\RecordPageScope::class);
+        $connection = \Illuminate\Support\Facades\DB::connection();
+        $key = json_encode([$connection->getName(), $connection->getDatabaseName(),
+            app(\Splicewire\Beam\Realm\Contracts\TenancyContext::class)->currentTenantId()]);
+
+        return $scope->realmsColumns[$key] ??= Schema::hasColumn('beam_ux_entries', 'realms');
     }
 
     /**

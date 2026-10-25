@@ -107,6 +107,7 @@ final readonly class PreviewContext
                 'nav_group' => $settings['navGroup'] ?? $projected->nav_group,
                 'layout' => $settings['layout'] ?? $projected->layout,
                 'template' => $settings['template'] ?? $projected->template,
+                'record_page' => $settings['recordPage'] ?? null,
                 'seo_description' => $settings['description'] ?? $projected->seo_description,
                 'seo_social_image' => $settings['socialImage'] ?? $projected->seo_social_image,
                 'seo_page_type' => $settings['pageType'] ?? $projected->seo_page_type,

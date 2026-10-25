@@ -1,4 +1,11 @@
 // Generated from EntryPageSettingsData by scripts/export-page-settings.php; do not edit.
+export interface RecordPageData {
+  collection: string;
+  field: string;
+  titleField: string | null;
+  descriptionField: string | null;
+  socialImageField: string | null;
+}
 export interface EntryPageSettings {
   title: string;
   parentId: string | null;
@@ -15,4 +22,5 @@ export interface EntryPageSettings {
   childFields: string | null;
   fields: Record<string, string | number | boolean>;
   unclaimed: Record<string, string>;
+  recordPage?: RecordPageData | null;
 }

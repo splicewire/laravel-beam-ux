@@ -173,6 +173,10 @@ class NavProjector
             ->reject(fn (BeamUxEntry $entry) => ! $this->access->canList($actor, [...$trail, $entry]));
 
         foreach ($visible as $entry) {
+            // A Record Page has concrete Record URLs, never a destination containing {field}.
+            if (\Splicewire\Beam\Ux\Bindings\RecordPages::parameter($entry->segment) !== null) {
+                continue;
+            }
             $chain = [...$trail, $entry];
             $children = $this->nodesFor($all, $entry->getKey(), $chain, $actor, $preview);
 

@@ -56,6 +56,7 @@ class EntryBodyEnvelope
     public function of(BeamUxEntry $entry, array $body, ?string $compileError = null): BeamUxEntryBodyData
     {
         return new BeamUxEntryBodyData(
+            mediaLibrary: \Splicewire\Beam\Ux\Media\EntryMedia::available() && app(\Splicewire\Beam\Ux\Media\EntryMedia::class)->allowed($entry, app(\Splicewire\Beam\Authorization\ActorPort::class)->actor()),
             slug: (string) $entry->slug,
             id: (string) $entry->id,
             type: $this->typeValue($entry),

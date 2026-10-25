@@ -135,7 +135,13 @@ class EntryPublication
         $this->requireVersionStore();
 
         return $entry->getConnection()->transaction(function () use ($entry, $body, $baseVersion, $label, $actor, $pageSettings) {
+            if ($pageSettings?->recordPage !== null) {
+                app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->lockForSettings($entry, $pageSettings);
+            }
             $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
+            if ($pageSettings !== null) {
+                app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->assertSettings($locked, $pageSettings);
+            }
             $before = $this->state($locked);
             if ($before->headVersion !== $baseVersion) {
                 throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('The editor base version has moved. Reload or explicitly save your changes against the new base.');
@@ -167,7 +173,7 @@ class EntryPublication
                 });
             }
 
-            $state = $this->recordDraft($locked, $body, $label, $pageSettings);
+            $state = $this->recordDraftAfterLocks($locked, $body, $label, $pageSettings);
             $this->audit($locked, 'drafted', $actor, $state);
 
             return $state;
@@ -218,7 +224,7 @@ class EntryPublication
                 $body = $version->snapshot['payload'];
                 $pin = $this->publishedVersionId($entry);
                 $publishedBody = $pin === null ? null : ($this->versions->version($particle, $pin)?->snapshot['payload'] ?? null);
-                app(CanvasBodyGuard::class)->assertPublishable($entry, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
+                app(CanvasBodyGuard::class)->assertPublishable(app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->validationEntry($entry, $version->snapshot['meta']['pageSettings'] ?? null, false), $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
                 $before[$id] = $this->mirroredFile($entry, is_array($publishedBody) ? $publishedBody : null);
                 $settings = $version->snapshot['meta']['pageSettings'] ?? null;
                 if ($settings !== null) {
@@ -276,11 +282,25 @@ class EntryPublication
 
     public function recordDraft(BeamUxEntry $entry, array $body, ?string $label = null, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): EntryPublicationData
     {
+        if ($pageSettings?->recordPage !== null) {
+            return $entry->getConnection()->transaction(function () use ($entry, $body, $label, $pageSettings) {
+                app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->lockForSettings($entry, $pageSettings);
+
+                return $this->recordDraftAfterLocks($entry, $body, $label, $pageSettings);
+            });
+        }
+
+        return $this->recordDraftAfterLocks($entry, $body, $label, $pageSettings);
+    }
+
+    private function recordDraftAfterLocks(BeamUxEntry $entry, array $body, ?string $label, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings): EntryPublicationData
+    {
         $this->assertStorable($entry, $body);
         if ($pageSettings !== null && $entry->type !== \Splicewire\Beam\Ux\Type\UxType::Page) {
             throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);
         }
         if ($pageSettings !== null) {
+            app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->assertSettings($entry, $pageSettings);
             // ADR-0233 d4: a page names only Page Fields the host registers, its own are checked against the class
             // the parent it names declares (a draft that moves the page answers to its new parent), and an unclaimed
             // key may name nothing declared (d3).
@@ -301,7 +321,7 @@ class EntryPublication
         // An author-requested draft still needs the current public body mirrored as its baseline.
         $this->baseline($entry, mirror: true);
         $priorSettings = $this->particle($entry)?->meta['pageSettings'] ?? null;
-        $this->write($entry, $body);
+        $this->write($entry, $body, $pageSettings);
         if ($pageSettings !== null || $priorSettings !== null) {
             $particle = $this->requireParticle($entry->refresh());
             $meta = $particle->meta ?? [];
@@ -354,7 +374,7 @@ class EntryPublication
         $guard = app(CanvasBodyGuard::class);
         $pinned = $this->publishedVersionId($entry);
         $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
-        $guard->assertPublishable($entry, $guard->workingHead($entry), JsonDocShape::is($publishedBody) ? $publishedBody : []);
+        $guard->assertPublishable(app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->validationEntry($entry), $guard->workingHead($entry), JsonDocShape::is($publishedBody) ? $publishedBody : []);
 
         $this->baseline($entry, mirror: true);
         $particle = $this->particle($entry->refresh()) ?? $particle;
@@ -576,13 +596,13 @@ class EntryPublication
      * @param  array<string, mixed>  $body
      * @return array{key: string, body: array<string, mixed>}
      */
-    public function write(BeamUxEntry $entry, array $body): array
+    public function write(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): array
     {
         // ADR-0227 d1 / ADR-0228 d8 — THE CHOKE: every canvas-body write that goes through publication
         // (save-body, save-source, a draft via recordDraft) is held to the realm's Manifest Profile here,
         // including its code boundary, so no op can bypass it by forgetting to call the guard. A non-canvas
         // body is source: refused where the profile refuses code, except a clear and a Form-kind token object.
-        app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
+        app(CanvasBodyGuard::class)->assertAdmitted(app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->validationEntry($entry, $pageSettings?->toArray()), $body);
         try {
             if (JsonDocShape::is($body)) {
                 $body = \Splicewire\Beam\Ux\Style\NormalizeBlockStyles::apply($body,
@@ -713,7 +733,7 @@ class EntryPublication
         $particle = $this->requireParticle($entry);
         $pinned = $this->publishedVersionId($entry);
         $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
-        app(CanvasBodyGuard::class)->assertPublishable($entry, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
+        app(CanvasBodyGuard::class)->assertPublishable(app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->validationEntry($entry, $version->snapshot['meta']['pageSettings'] ?? null, false), $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
         $before = $mirror ? $this->mirroredFile($entry, is_array($publishedBody) ? $publishedBody : null) : null;
         $this->applyPageSettings($entry, $version);
         app(CompileEntryBody::class)->forVersion($entry, (string) $version->id, $body);
@@ -738,6 +758,10 @@ class EntryPublication
             return; // Historical versions predate page settings; do not invent their old values.
         }
         $data = \Splicewire\Beam\Ux\Data\EntryPageSettingsData::validateAndCreate($settings);
+        app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->assertSettings($entry, $data);
+        if (Schema::connection($entry->getConnectionName())->hasColumn('beam_ux_entries', 'record_page')) {
+            $entry->setAttribute('record_page', $data->recordPage?->toArray());
+        }
         if ($validateUrl) {
             app(EntryUrlChanges::class)->assertAllowed($entry, [$entry->id => [
                 'parentId' => $data->parentId, 'segment' => $data->segment,

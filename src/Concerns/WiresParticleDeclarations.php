@@ -76,10 +76,16 @@ trait WiresParticleDeclarations
             return;
         }
 
+        if (\Splicewire\Beam\Ux\Media\EntryMedia::available()) {
+            \Splicewire\Beam\Ux\Media\EntryMedia::registerOwnerMorph();
+        }
+
         (new AttributedParticleDiscovery(
             $this->app->make(ParticleResourceRegistry::class),
             $this->app->make(ParticleOperationRegistry::class),
-        ))->discover(paths: self::PARTICLE_DECLARATION_PATHS);
+        ))->discover(paths: [...self::PARTICLE_DECLARATION_PATHS,
+            ...(\Splicewire\Beam\Ux\Media\EntryMedia::available() ? [__DIR__.'/../Media/Particle'] : []),
+        ]);
     }
 
     /**

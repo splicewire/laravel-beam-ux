@@ -45,9 +45,13 @@ class EntrySitemapSource implements LiveSitemapSource
 
         // Route gate (coarse): only Page-typed entries are routable. The
         // per-entry URL resolution + marking + entitlement gates run below.
-        $entries = BeamUxEntry::query()
-            ->where('type', UxType::Page->value)
-            ->cursor();
+        $routing = ['id', 'slug', 'namespace', 'type', 'realm', 'realms', 'parent_id', 'segment',
+            'access', 'traverse', 'requirements', 'record_page', 'workflow_marking', 'workflow_version',
+            'schema_ref', 'format', 'residency_mode'];
+        $columns = array_values(array_intersect($routing, \Illuminate\Support\Facades\Schema::getColumnListing('beam_ux_entries')));
+        $all = BeamUxEntry::query()->select($columns)->where('type', UxType::Page->value)->get();
+        $resolver = app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)->snapshot($all);
+        $entries = $all->filter(fn ($entry) => $entry->type === UxType::Page);
 
         foreach ($entries as $entry) {
             if (! $this->routable($entry)) {
@@ -62,11 +66,25 @@ class EntrySitemapSource implements LiveSitemapSource
                 continue;
             }
 
-            $chain = app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)->ancestry($entry);
+            $chain = $resolver->ancestry($entry);
             if ($chain === null || ! app(\Splicewire\Beam\Ux\Access\EntryAccessResolver::class)->canList(null, $chain)) {
                 continue;
             }
 
+            if (\Splicewire\Beam\Ux\Bindings\RecordPages::parameter($entry->segment) !== null) {
+                $request = \Illuminate\Http\Request::create('/');
+                $request->setUserResolver(fn () => null);
+                $pages = app(\Splicewire\Beam\Ux\Bindings\RecordPages::class);
+                foreach ($pages->records($entry, $request, BeamUxEntry::REALM_SITE) as $row) {
+                    $url = $pages->url($entry, $row);
+                    $resolved = $url === null ? null : $resolver->resolve($url);
+                    if ($resolved !== null && end($resolved)->getKey() === $entry->getKey()) {
+                        yield Url::create($base.$url);
+                    }
+                }
+
+                continue;
+            }
             yield Url::create($base.$entry->url());
         }
     }

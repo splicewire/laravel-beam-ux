@@ -10,7 +10,7 @@ use Splicewire\Beam\Collections\CollectionBacking;
 /** Bounded bridge for legacy request-resolved backings; actor and tenant remain the visitor's. */
 final class BindingRequestScope
 {
-    public function run(Request $visitor, array $query, Closure $read): mixed
+    public function run(Request $visitor, array $query, Closure $read, ?\Splicewire\Beam\Collections\StandaloneRecordQuery $records = null): mixed
     {
         $container = app();
         $original = $container->make(Request::class);
@@ -27,7 +27,7 @@ final class BindingRequestScope
             $scoped->setUserResolver(fn () => $actor);
             Facade::clearResolvedInstance('request');
             // Parameterized make bypasses cached instances; each Repeat owns its saved address.
-            $container->instance(CollectionBacking::class, $container->makeWith(CollectionBacking::class, ['request' => $scoped]));
+            $container->instance(CollectionBacking::class, $container->makeWith(CollectionBacking::class, ['request' => $scoped, ...($records === null ? [] : ['records' => $records])]));
 
             return $read($scoped);
         } finally {

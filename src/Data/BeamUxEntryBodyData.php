@@ -103,5 +103,7 @@ class BeamUxEntryBodyData extends BeamData
         public ?array $fileLanguages = null,
         #[Optional]
         public array $intakeForms = [],
+        #[Optional]
+        public bool $mediaLibrary = false,
     ) {}
 }

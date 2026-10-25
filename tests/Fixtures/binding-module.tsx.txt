@@ -1,7 +1,10 @@
-export default function Page({ components = {}, styleRegistry, bindings = {}, bindingRuntime } = {}) {
+export default function Page({ components = {}, styleRegistry, bindings = {}, record, bindingRuntime } = {}) {
   const { RichMarkdown} = components;
   return (
     <>
+      <h1>
+        {bindingRuntime.text(record, "fields.title", "Record fallback")}
+      </h1>
       {bindingRuntime.repeat(bindings["outer"], (record) => (<>
         {bindingRuntime.when({"all":[{"field":"title","operator":"is set","value":null}],"any":null}, record) ? (<>
           <article>

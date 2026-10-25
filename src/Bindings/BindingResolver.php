@@ -102,16 +102,17 @@ final class BindingResolver
             }
         }
         $more = count($rows) > $limit;
-        $records = $this->project($node, array_slice($rows, 0, $limit), $source, $request, true, $context);
+        $records = $this->project($node, array_slice($rows, 0, $limit), $source, $request, true, $context, $entry);
 
         return new RepeatRecordsData($records, $more, $page);
     }
 
     /** Project each level as a batch; never resolve a relation inside an outer-record loop. */
-    private function project(array $node, array $rows, CollectionSource $source, Request $request, bool $enriched, ?\Splicewire\Beam\Read\ReadContext $context): array
+    private function project(array $node, array $rows, CollectionSource $source, Request $request, bool $enriched, ?\Splicewire\Beam\Read\ReadContext $context, ?BeamUxEntry $entry = null): array
     {
         $fields = $this->fields($node);
-        $records = array_map(function (array $row) use ($fields, $source): array {
+        $recordPage = $entry === null ? null : app(RecordPages::class)->pageFor($entry, $source);
+        $records = array_map(function (array $row) use ($fields, $source, $recordPage): array {
             $visible = [];
             foreach ($fields as $field) {
                 if (Arr::has($row, $field)) {
@@ -119,7 +120,7 @@ final class BindingResolver
                 }
             }
             // EP-23 owns Record Pages. Do not invent an editor URL for visitors.
-            $visible['url'] = $source->parentEntryId !== null ? $row['url'] : null;
+            $visible['url'] = $source->parentEntryId !== null ? $row['url'] : ($recordPage === null ? null : app(RecordPages::class)->url($recordPage, $row));
 
             return $visible;
         }, $rows);
