@@ -105,6 +105,71 @@ class ReachTest extends AuthoredComponentNativeTestCase
             [$reach[$layout->id]->kind, $reach[$layout->id]->name, $reach[$layout->id]->count, array_map(fn ($p) => $p->entryId, $reach[$layout->id]->pages)]);
     }
 
+    public function test_component_reach_reads_the_body_each_page_renders_in_the_preview_not_every_body_it_retains(): void
+    {
+        // Review of 0aca02b4: usedBy() unions every retained body, which is right for delete safety and wrong here.
+        $pub = app(EntryPublication::class);
+        $card = $this->liveComponent('card', $this->body('Card'));
+        $dropping = $this->livePage('dropping', [], [$this->node('Card')]);
+        $adding = $this->livePage('adding');
+        $elsewhere = $this->livePage('elsewhere');
+        $release = $this->releaseHolding([
+            $dropping->id => $pub->recordDraft($dropping, [$this->node('div')])->headVersion,
+            $adding->id => $pub->recordDraft($adding, [$this->node('Card')])->headVersion,
+        ]);
+        // Another open Release, and a working draft, that use Card on `elsewhere`: neither renders in this Preview.
+        $this->releaseHolding([$elsewhere->id => $pub->recordDraft($elsewhere, [$this->node('Card')])->headVersion]);
+
+        $live = app(Reach::class)->of($card->fresh());
+        $previewed = collect(app(ReleaseChanges::class)->of($release)->reach);
+
+        $this->assertSame([$dropping->id], array_map(fn ($p) => $p->entryId, $live->pages), 'live: only the published bodies count');
+        $this->assertSame([], $previewed->all(), 'Card is not a member of this Release, so it has no reach row');
+        $map = app(Reach::class)->map('site', null, new \Splicewire\Beam\Ux\Preview\PreviewContext(
+            tap(new \Splicewire\Beam\Ux\Models\BeamUxPreviewGrant)->forceFill(['release_id' => $release->id])->setRelation('release', $release)));
+        $this->assertSame([$adding->id], array_map(fn ($p) => $p->entryId, $map->of($card->fresh())->pages),
+            'in the Preview: the page that adds Card, not the one that drops it, nor another Release\'s');
+    }
+
+    public function test_a_release_reads_one_map_however_many_pages_the_site_has(): void
+    {
+        // Review of 0aca02b4: the map is read once per Release, its bodies in one query, so pages add no queries.
+        $pub = app(EntryPublication::class);
+        $card = $this->liveComponent('card', $this->body('Card'));
+        $layout = $this->entry('SiteLayout', 'layout');
+        $this->publish($layout, [array_replace($this->node('div'), ['children' => [$this->node('Slot')]])]);
+        $pages = [];
+        for ($i = 0; $i < 20; $i++) {
+            $pages[] = $this->livePage("page-{$i}", $i % 2 === 0 ? ['layout' => 'SiteLayout'] : [], $i % 3 === 0 ? [$this->node('Card')] : []);
+        }
+        $release = $this->releaseHolding([
+            $pages[0]->id => $pub->recordDraft($pages[0], [$this->node('div')])->headVersion,
+            $pages[1]->id => $pub->recordDraft($pages[1], [$this->node('Card')])->headVersion,
+            $pages[2]->id => $pub->recordDraft($pages[2], [$this->node('div')])->headVersion,
+            $card->id => $pub->recordDraft($card->fresh(), $this->body('Card', ['span']))->headVersion,
+            $layout->id => $pub->recordDraft($layout->fresh(), [array_replace($this->node('section'), ['children' => [$this->node('Slot')]])])->headVersion,
+        ]);
+        $count = function () use ($release): int {
+            $connection = \Illuminate\Support\Facades\DB::connection();
+            $connection->flushQueryLog();
+            $connection->enableQueryLog();
+            app(ReleaseChanges::class)->of($release->fresh());
+            $queries = count($connection->getQueryLog());
+            $connection->disableQueryLog();
+
+            return $queries;
+        };
+
+        $twenty = $count();
+        for ($i = 20; $i < 40; $i++) {
+            $this->livePage("page-{$i}", ['layout' => 'SiteLayout'], [$this->node('Card')]);
+        }
+        $forty = $count();
+
+        $this->assertLessThanOrEqual(30, $twenty, '20 pages and 5 members');
+        $this->assertSame($twenty, $forty, 'twenty more pages add no queries');
+    }
+
     /** @param array<string, string> $versions */
     private function releaseHolding(array $versions): BeamUxRelease
     {

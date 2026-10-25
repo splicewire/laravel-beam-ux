@@ -21,7 +21,7 @@ final class ReleaseChanges
 
     public function of(BeamUxRelease $release): ReleaseChangesData
     {
-        $preview = new PreviewContext(self::grant($release));
+        $map = $this->reach->map((string) $release->realm, $release->getConnectionName(), new PreviewContext(self::grant($release)));
         $pages = $reach = [];
         $members = $release->members()->whereNotNull('version_id')->orderBy('entry_id')->get();
         $entries = BeamUxEntry::on($release->getConnectionName())->whereKey($members->pluck('entry_id')->all())->get()->keyBy('id');
@@ -31,7 +31,7 @@ final class ReleaseChanges
                 continue;
             }
             if ($entry->type === UxType::Page) {
-                $pages = [...$pages, ...$this->reach->of($entry, $preview)->pages];
+                $pages = [...$pages, ...$map->of($entry)->pages];
 
                 continue;
             }
@@ -39,7 +39,7 @@ final class ReleaseChanges
             if (! in_array($kind, ['component', 'layout', 'template', 'theme'], true)) {
                 continue;
             }
-            $of = $this->reach->of($entry, $preview);
+            $of = $map->of($entry);
             $name = (string) ($entry->getAttribute('component_name') ?? $entry->getAttribute('published_component_name') ?? $entry->slug ?? $entry->title);
             $reach[] = new ReleaseMemberReachData((string) $entry->getKey(), $name, $kind, $of->everyPage, $of->count, $of->pages);
         }
