@@ -201,6 +201,7 @@ class EntryPublication
             $entries = $context->newQuery()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             $prepared = [];
             $changes = [];
+            $before = [];
             foreach ($refs as $id => $ref) {
                 $entry = $entries->get($id);
                 if ($entry === null) {
@@ -218,6 +219,7 @@ class EntryPublication
                 $pin = $this->publishedVersionId($entry);
                 $publishedBody = $pin === null ? null : ($this->versions->version($particle, $pin)?->snapshot['payload'] ?? null);
                 app(CanvasBodyGuard::class)->assertPublishable($entry, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
+                $before[$id] = $this->mirroredFile($entry, is_array($publishedBody) ? $publishedBody : null);
                 $settings = $version->snapshot['meta']['pageSettings'] ?? null;
                 if ($settings !== null) {
                     $data = \Splicewire\Beam\Ux\Data\EntryPageSettingsData::validateAndCreate($settings);
@@ -248,11 +250,18 @@ class EntryPublication
                 $entry->save();
                 $states[$id] = $this->state($entry);
                 $this->audit($entry, 'published', $actor, $states[$id]);
+                // ADR-0233 d5: a File Language change moves the mirror file; the old path rides with the member as
+                // its named `moved` slot ({@see mirroredFile()}), beside the [entry, version, body] the recording reads.
+                $moved = $this->moved($before[$id] ?? null, $entry);
+                $prepared[$id]['moved'] = $moved;
                 // A later member may still refuse: no disk mirror escapes a rolled-back Release.
                 $snapshot = clone $entry;
                 if ($completion === null) {
-                    $entry->getConnection()->afterCommit(function () use ($snapshot, $body) {
+                    $entry->getConnection()->afterCommit(function () use ($snapshot, $body, $moved) {
                         $this->mirror->mirror($snapshot, $this->placements->resolve($snapshot)->pathFor($snapshot), $body);
+                        if ($moved !== null) {
+                            $this->mirror->removeIfUnchanged($moved['path'], $moved['bytes']);
+                        }
                         app(CompileEntryBody::class)->artifacts()->prune($snapshot->fresh());
                     });
                 }
@@ -270,6 +279,23 @@ class EntryPublication
         $this->assertStorable($entry, $body);
         if ($pageSettings !== null && $entry->type !== \Splicewire\Beam\Ux\Type\UxType::Page) {
             throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);
+        }
+        if ($pageSettings !== null) {
+            // ADR-0233 d4: a page names only Page Fields the host registers, its own are checked against the class
+            // the parent it names declares (a draft that moves the page answers to its new parent), and an unclaimed
+            // key may name nothing declared (d3).
+            if ($pageSettings->fileLanguage !== null && ! \Splicewire\Beam\Ux\Format\FileLanguage::allows($entry, $pageSettings->fileLanguage)) {
+                throw ValidationException::withMessages(['pageSettings.fileLanguage' => "This page cannot be written in {$pageSettings->fileLanguage} on this host (ADR-0233 d5)."]);
+            }
+            if ($pageSettings->childFields !== null && \Splicewire\Beam\Ux\Containment\PageFields::classNamed($pageSettings->childFields) === null) {
+                throw ValidationException::withMessages(['pageSettings.childFields' => 'The host registers no Page Fields by this name (beam.ux.page_fields).']);
+            }
+            $class = \Splicewire\Beam\Ux\Containment\PageFields::forParent($entry, $pageSettings->parentId);
+            $pageSettings->fields = \Splicewire\Beam\Ux\Containment\PageFields::check($class, $pageSettings->fields);
+            \Splicewire\Beam\Ux\Containment\PageFields::assertUnclaimed($class, $pageSettings->unclaimed);
+        }
+        if ($pageSettings !== null && \Splicewire\Beam\Ux\Files\MdxPageFile::applies($entry)) {
+            \Splicewire\Beam\Ux\Files\MdxPageFile::assertPrintable($pageSettings);
         }
         $this->requireVersionStore();
         // An author-requested draft still needs the current public body mirrored as its baseline.
@@ -688,12 +714,16 @@ class EntryPublication
         $pinned = $this->publishedVersionId($entry);
         $publishedBody = $pinned === null ? null : ($this->versions->version($particle, $pinned)?->snapshot['payload'] ?? null);
         app(CanvasBodyGuard::class)->assertPublishable($entry, $body, JsonDocShape::is($publishedBody) ? $publishedBody : []);
+        $before = $mirror ? $this->mirroredFile($entry, is_array($publishedBody) ? $publishedBody : null) : null;
         $this->applyPageSettings($entry, $version);
         app(CompileEntryBody::class)->forVersion($entry, (string) $version->id, $body);
         $entry->setAttribute('published_version', (string) $version->id);
         $entry->save();
         if ($mirror) {
             $this->mirror->mirror($entry, $this->placements->resolve($entry)->pathFor($entry), $body);
+            if (($moved = $this->moved($before, $entry)) !== null) {
+                $this->mirror->removeIfUnchanged($moved['path'], $moved['bytes']);
+            }
         }
         app(CompileEntryBody::class)->artifacts()->prune($entry->refresh());
 
@@ -723,6 +753,23 @@ class EntryPublication
             'first_published_at' => $entry->first_published_at ?? now(),
             'last_published_at' => now(),
         ]);
+        // ADR-0233 d5: the File Language; the mirror moves with it (see mirroredFile()).
+        // Checked whether or not it changes: a Hosted site's page names none at all (d6).
+        $format = $entry->format instanceof \Splicewire\Beam\Ux\Format\UxFormat ? $entry->format->value : $entry->getAttribute('format');
+        if ($data->fileLanguage !== null) {
+            if (! \Splicewire\Beam\Ux\Format\FileLanguage::allows($entry, $data->fileLanguage)) {
+                throw ValidationException::withMessages(['pageSettings.fileLanguage' => "This page cannot be written in {$data->fileLanguage} on this host."]);
+            }
+            if ($data->fileLanguage !== $format) {
+                $entry->forceFill(['format' => $data->fileLanguage]);
+            }
+        }
+        // ADR-0233 d4: the Page Fields this page declares for its child pages, where the host migrated the column.
+        if (Schema::connection($entry->getConnectionName())->hasColumn('beam_ux_entries', 'child_fields')) {
+            $entry->forceFill(['child_fields' => $data->childFields]);
+        } elseif ($data->childFields !== null) {
+            throw ValidationException::withMessages(['pageSettings.childFields' => 'Migrate beam-ux (add_child_fields_to_beam_ux_entries_table) before a page declares Page Fields.']);
+        }
     }
 
     private function compileDraft(BeamUxEntry $entry, Version $version): ?string
@@ -737,6 +784,35 @@ class EntryPublication
         } finally {
             $compiler->artifacts()->prune($entry->refresh());
         }
+    }
+
+    /**
+     * ADR-0233 d5 — where an entry's mirror file sits and the bytes it holds, read before Publish applies a version's
+     * page settings, so a File Language change can move the file. Null when no mirror is configured or nothing has
+     * been published yet.
+     *
+     * @param  array<string, mixed>|null  $publishedBody
+     * @return array{path: string, bytes: string, codec: string}|null
+     */
+    private function mirroredFile(BeamUxEntry $entry, ?array $publishedBody): ?array
+    {
+        if (! $this->mirror->enabled() || $publishedBody === null) {
+            return null;
+        }
+
+        return ['path' => $this->placements->resolve($entry)->pathFor($entry),
+            'bytes' => $this->mirror->bytes($entry, $publishedBody), 'codec' => $entry->codec()::class];
+    }
+
+    /**
+     * The file a publish moved the entry away from, or null when its mirror stays where it was.
+     *
+     * @param  array{path: string, bytes: string, codec: string}|null  $before
+     * @return array{path: string, bytes: string, codec: string}|null
+     */
+    private function moved(?array $before, BeamUxEntry $entry): ?array
+    {
+        return $before !== null && $before['path'] !== $this->placements->resolve($entry)->pathFor($entry) ? $before : null;
     }
 
     /**

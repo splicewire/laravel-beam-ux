@@ -119,6 +119,141 @@ class DiskEntriesPublicationTest extends TestCase
         @unlink($this->root.'/page/home.tsx');
     }
 
+    public function test_a_registered_mdx_page_is_lowered_through_the_mdx_lens_on_a_host_that_holds_mdx_as_blocks(): void
+    {
+        // ADR-0233 d2, per host: registration from disk reads the file's BODY through the MDX Lens (its frontmatter
+        // is read into the entry's own fields, never the lens), and the rematch mints fresh ids.
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        $lens = new class implements \Splicewire\Beam\Mdx\Lens\MdxLens
+        {
+            /** @var list<string> */
+            public array $bodies = [];
+
+            public function read(string $body, array $context = []): array
+            {
+                $this->bodies[] = $body;
+
+                return ['doc' => [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'From MDX']], 'dynamic' => false]], 'meta' => null];
+            }
+
+            public function print(array $doc): string
+            {
+                return "## From MDX\n";
+            }
+        };
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, $lens);
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\n---\n\n## From MDX\n");
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $entry = BeamUxEntry::query()->where('slug', 'guide')->whereNull('namespace')->firstOrFail();
+        $body = app(StorageDriverResolver::class)->resolve($entry)->read($entry->particle_id)->body;
+
+        $this->assertSame('h2', $body[0]['name']);
+        $this->assertArrayHasKey('id', $body[0]);
+        $this->assertCount(1, $lens->bodies);
+        $this->assertStringNotContainsString('title: Guide', $lens->bodies[0], 'the lens reads the body, never the frontmatter');
+        $this->assertSame('Guide', $entry->title);
+
+        @unlink($this->root.'/page/guide.mdx');
+    }
+
+    public function test_a_blocks_mdx_page_takes_its_seo_fields_from_frontmatter_and_refuses_an_invalid_one(): void
+    {
+        // ADR-0233 d3: on a host that holds MDX as blocks, frontmatter is the page's settings, SEO fields included.
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        $page = "---\ntitle: Handbook\ndescription: How the handbook works\npageType: Article\npublished_date: 2026-10-01\n---\n\n## From MDX\n";
+        $invalid = "---\ntitle: Notes\npage_type: Blog\n---\n\n## From MDX\n";
+        file_put_contents($this->root.'/page/legacy.mdx', $page);
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+        $this->assertNull(BeamUxEntry::query()->where('slug', 'legacy')->firstOrFail()->seo_description, 'a host that keeps MDX as source is unchanged');
+        @unlink($this->root.'/page/legacy.mdx');
+
+        $this->holdMdxAsBlocks();
+        file_put_contents($this->root.'/page/handbook.mdx', $page);
+        file_put_contents($this->root.'/page/notes.mdx', $invalid);
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $handbook = BeamUxEntry::query()->where('slug', 'handbook')->firstOrFail();
+        $this->assertSame('How the handbook works', $handbook->seo_description);
+        $this->assertSame('Article', $handbook->seo_page_type);
+        $this->assertSame('2026-10-01', $handbook->seo_published_date);
+        $notes = BeamUxEntry::query()->where('slug', 'notes')->firstOrFail();
+        $this->assertNull($notes->seo_page_type);
+        $this->assertStringContainsString('page_type', $result['failed']['page/notes.mdx'] ?? '');
+
+        @unlink($this->root.'/page/handbook.mdx');
+        @unlink($this->root.'/page/notes.mdx');
+    }
+
+    public function test_a_blocks_mdx_page_keeps_the_frontmatter_keys_nothing_declares_in_its_registered_version(): void
+    {
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        $this->holdMdxAsBlocks();
+        file_put_contents($this->root.'/page/recipe.mdx', "---\ntitle: Recipe\nnavOrder: 4\nschemaType: HowTo\naudience: cooks\n---\n\n## From MDX\n");
+        file_put_contents($this->root.'/page/untitled.mdx', "---\naudience: cooks\n---\n\n## From MDX\n");
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $recipe = BeamUxEntry::query()->where('slug', 'recipe')->firstOrFail();
+        $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($recipe->versionable(), $recipe->published_version)->snapshot;
+        $this->assertSame(['schema_type' => 'HowTo', 'audience' => 'cooks'], $version['meta']['pageSettings']['unclaimed']);
+        $this->assertSame('Recipe', $version['meta']['pageSettings']['title']);
+        $this->assertSame(4, $version['meta']['pageSettings']['navOrder']);
+        $this->assertStringContainsString('were not kept', $result['failed']['page/untitled.mdx'] ?? '', 'a page with no title cannot hold settings');
+
+        @unlink($this->root.'/page/recipe.mdx');
+        @unlink($this->root.'/page/untitled.mdx');
+    }
+
+    public function test_a_parent_file_declares_page_fields_and_its_childs_frontmatter_holds_them_typed(): void
+    {
+        // ADR-0233 d4: the parent's `childFields` names the host's class; the child's keys it declares are Page Fields.
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        (require dirname(__DIR__).'/database/migrations/shared/add_child_fields_to_beam_ux_entries_table.php.stub')->up();
+        config(['beam.ux.page_fields' => ['recipe' => Fixtures\RecipeFields::class]]);
+        $this->holdMdxAsBlocks();
+        mkdir($this->root.'/recipes/page', 0777, true);
+        file_put_contents($this->root.'/page/recipes.mdx', "---\ntitle: Recipes\nchildFields: recipe\n---\n\n## From MDX\n");
+        file_put_contents($this->root.'/recipes/page/pie.mdx', "---\ntitle: Pie\nservings: 4\nvegetarian: true\nschema_type: Recipe\n---\n\n## From MDX\n");
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $parent = BeamUxEntry::query()->where('slug', 'recipes')->firstOrFail();
+        $this->assertSame('recipe', $parent->child_fields);
+        $pie = BeamUxEntry::query()->where('slug', 'pie')->firstOrFail();
+        $this->assertSame($parent->id, $pie->parent_id);
+        $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($pie->versionable(), $pie->published_version)->snapshot;
+        $this->assertSame(['servings' => 4, 'vegetarian' => true], $version['meta']['pageSettings']['fields']);
+        $this->assertSame(['schema_type' => 'Recipe'], $version['meta']['pageSettings']['unclaimed']);
+        $this->assertArrayNotHasKey('recipes/page/pie.mdx', $result['failed']);
+
+        @unlink($this->root.'/recipes/page/pie.mdx');
+        @rmdir($this->root.'/recipes/page');
+        @rmdir($this->root.'/recipes');
+        @unlink($this->root.'/page/recipes.mdx');
+    }
+
+    /** Hold MDX as blocks with a fake MDX Lens: the Node run is proven in laravel-beam-mdx. */
+    private function holdMdxAsBlocks(): void
+    {
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, new class implements \Splicewire\Beam\Mdx\Lens\MdxLens
+        {
+            public function read(string $body, array $context = []): array
+            {
+                return ['doc' => [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'From MDX']], 'dynamic' => false]], 'meta' => null];
+            }
+
+            public function print(array $doc): string
+            {
+                return "## From MDX\n";
+            }
+        });
+    }
+
     /** A fake lens (the Node run is proven end-to-end elsewhere) and a mirror disk rooted at the scanned tree. */
     private function mirrorOverScannedTree(): \Illuminate\Contracts\Filesystem\Filesystem
     {

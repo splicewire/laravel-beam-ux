@@ -7,10 +7,10 @@ use Illuminate\Http\Request;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Routing\HttpMethod;
-use Splicewire\Beam\Ux\Codec\JsonDocPrinter;
 use Splicewire\Beam\Ux\Data\BeamUxEntryBodyInputData;
 use Splicewire\Beam\Ux\Data\EntrySourceData;
 use Splicewire\Beam\Ux\JsonDoc\SourceMode;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 #[ParticleOp(resource: 'beam-ux-entry', name: 'print-source', kind: OperationKind::Read,
     ability: 'ux.author', abilityModel: false, affordance: false,
@@ -22,6 +22,7 @@ class EntrySourcePrintOp
         SourceMode::assertAvailable($model);
         $input = BeamUxEntryBodyInputData::validateAndCreate($request->all());
 
-        return new EntrySourceData(JsonDocPrinter::print($input->body));
+        /** @var BeamUxEntry $model */
+        return new EntrySourceData(SourceMode::print($model, $input->body));
     }
 }

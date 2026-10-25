@@ -3,6 +3,8 @@
 namespace Splicewire\Beam\Ux\Storage;
 
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Splicewire\Beam\Ux\Files\MdxPageFile;
+use Splicewire\Beam\Ux\Manifest\EntryResidency;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Placement\FilePlacement;
 
@@ -50,13 +52,43 @@ class PlacedDiskMirror
      */
     public function mirror(BeamUxEntry $entry, string $path, array $body): bool
     {
-        if ($this->disk === null || $path === '') {
+        // ADR-0233 d6: a Hosted site's page has no file, so a tenant-resident entry is never mirrored.
+        if ($this->disk === null || $path === '' || ! app(EntryResidency::class)->isCentralResident($entry)) {
             return false;
         }
 
-        $this->disk->put($path, $entry->codec()->decode($body));
+        $this->disk->put($path, $this->bytes($entry, $body));
 
         return true;
+    }
+
+    /**
+     * The bytes the mirror writes for an entry's body: its codec's source, and for an MDX page that holds blocks its
+     * page settings as the frontmatter header first (ADR-0233 d3), since such a page keeps them out of its body. The
+     * Release recording and the Files action read the same bytes, so a commit and a comparison match the file.
+     *
+     * @param  array<string, mixed>  $body
+     */
+    public function bytes(BeamUxEntry $entry, array $body): string
+    {
+        $source = $entry->codec()->decode($body);
+
+        return MdxPageFile::applies($entry) && array_is_list($body)
+            ? MdxPageFile::print(MdxPageFile::settingsOf($entry), $source) : $source;
+    }
+
+    /**
+     * Remove the file a publish moved an entry away from (ADR-0233 d5: its File Language changed), only while it still
+     * holds the bytes that were published there. A file someone edited since is left in place, never destroyed. Returns
+     * whether it was removed.
+     */
+    public function removeIfUnchanged(string $path, string $bytes): bool
+    {
+        if ($this->disk === null || $path === '' || ! $this->disk->exists($path) || $this->disk->get($path) !== $bytes) {
+            return false;
+        }
+
+        return $this->remove($path);
     }
 
     /**

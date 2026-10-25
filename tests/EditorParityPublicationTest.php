@@ -112,7 +112,8 @@ class EditorParityPublicationTest extends TestCase
         $this->assertSame(self::BODY_TWO, $version->snapshot['payload']);
         $this->assertEquals($settings->toArray(), $version->snapshot['meta']['pageSettings']);
         $pub->publishVersion($entry->fresh(), $draft->headVersion);
-        $expected = array_replace($settings->toArray(), ['publishedDate' => $expectedDate]);
+        // A null File Language leaves the row's (ADR-0233 d5), and the row reports the one it serves.
+        $expected = array_replace($settings->toArray(), ['publishedDate' => $expectedDate, 'fileLanguage' => 'tsx']);
         $this->assertEquals($expected, EntryPageSettingsData::fromEntry($entry->fresh())->toArray());
         $this->assertSame('2026-01-02', substr($entry->fresh()->first_published_at, 0, 10));
         $firstDate = $entry->fresh()->first_published_at;

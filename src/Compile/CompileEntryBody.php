@@ -7,6 +7,7 @@ use Splicewire\Beam\Ux\Codec\JsonDocPrinter;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\Console\CompileEntriesCommand;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
+use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -114,7 +115,7 @@ class CompileEntryBody
         if (! $force && $this->artifacts->disk()->exists($path)) {
             return $path;
         }
-        $source = $entry->codec() instanceof AcceptsJsonDoc && JsonDocShape::is($body)
+        $source = self::printsAsModule($entry, $body)
             ? JsonDocPrinter::printModule($body)
             : $entry->codec()->decode($body);
 
@@ -171,11 +172,23 @@ class CompileEntryBody
             return null; // a bound particle holding an empty document is still "no body yet"
         }
 
-        if ($entry->codec() instanceof AcceptsJsonDoc && JsonDocShape::is($body)) {
+        if (self::printsAsModule($entry, $body)) {
             return JsonDocPrinter::printModule($body);
         }
 
         return $entry->codec()->decode($body);
+    }
+
+    /**
+     * Whether a body compiles from the TSX module printer: a JsonDoc in a `tsx` entry. An MDX page that holds
+     * blocks compiles from the MDX printer's output instead, through its codec, because every compile of an MDX
+     * page reads the canonical printer (ADR-0233 d2) and the worker compiles by the entry's format.
+     *
+     * @param  array<mixed>  $body
+     */
+    private static function printsAsModule(BeamUxEntry $entry, array $body): bool
+    {
+        return $entry->codec() instanceof AcceptsJsonDoc && JsonDocShape::is($body) && $entry->format !== UxFormat::Mdx;
     }
 
     /**

@@ -40,6 +40,9 @@ use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxIntakeFormAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxManifestRegistryAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxMdxPagesAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxReachabilityAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxRouteShadowAudit;
@@ -106,6 +109,8 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 // and each no-ops for the other.
                 'shared/add_published_version_to_beam_ux_entries_table',
                 'shared/add_page_settings_to_beam_ux_entries_table',
+                // The Page Fields a parent declares for its child pages (ADR-0233 d4). Nullable, beside its siblings.
+                'shared/add_child_fields_to_beam_ux_entries_table',
                 'shared/create_beam_ux_releases_table',
                 // A Release's provenance (`origin`: direct | built). An ALTER beside the create for the same reason
                 // as its siblings; existing Releases are `built`.
@@ -128,6 +133,10 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         $this->app->bind(PreviewGrantResolver::class, PreviewGrantService::class);
         // DOCS-06b: the templates the provenance backfill may match an unstamped row against; packages register theirs.
         $this->app->singleton(Provenance\ProvenanceTemplates::class);
+
+        // EP-07 (N3447): the shipped auth-page islands, composed into every realm's Manifest Profile. Packages tag their
+        // own ManifestNodeSource the same way.
+        $this->app->tag([Manifest\AuthIslandNodeSource::class, Manifest\IntakeFormNodeSource::class], Manifest\ManifestProfileResolver::PACKAGE_SOURCES);
 
         // Merge `config('beam.ux.*')`. Both keys OUTLIVED the retired `Route::beamUxEntries()` macro
         // they were introduced for (ADR-0214 §6, as amended): `api_root` positions beam core's Scribe
@@ -195,6 +204,26 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxChromeAudit::class,
+            );
+
+            // ADR-0233: FAILS while beam.ux.mdx.holds_blocks is on and any stored MDX page still holds source (the
+            // gate is only for a converted host, d9), and reports the frontmatter keys published pages keep (d3).
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxMdxPagesAudit::class,
+            );
+
+            // EP-07 (ADR-0228 d6): each realm's Manifest Profile against the host's JS registry snapshot, both ways.
+            // Without a snapshot it is INCONCLUSIVE, reported as a warning and never as a pass (WP-EP07 ruling).
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxManifestRegistryAudit::class,
+            );
+
+            // EP-07d: page forms post to the public intake door; its honeypot and the honeypot's field name are host facts.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxIntakeFormAudit::class,
             );
 
             // theme-entries-and-authoring ticket 07: `ThemeResolver::resolve()` never throws, so a query

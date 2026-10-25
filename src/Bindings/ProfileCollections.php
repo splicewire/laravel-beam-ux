@@ -42,7 +42,7 @@ final class ProfileCollections
         $out = [];
         foreach ($this->sources($entry, $profile) as $source) {
             if ($source->parentEntryId !== null) {
-                $out[] = ['name' => $source->name, 'schema' => app(Generator::class)->forResponse()->generate(new ReflectionClass(\Splicewire\Beam\Ux\Data\ChildPageRecordData::class)), 'hasRecordPage' => true];
+                $out[] = ['name' => $source->name, 'schema' => $this->fieldSchema($source), 'hasRecordPage' => true];
 
                 continue;
             }
@@ -57,7 +57,16 @@ final class ProfileCollections
     public function fieldSchema(CollectionSource $source): array
     {
         if ($source->parentEntryId !== null) {
-            return app(Generator::class)->forResponse()->generate(new ReflectionClass(\Splicewire\Beam\Ux\Data\ChildPageRecordData::class));
+            $schema = app(Generator::class)->forResponse()->generate(new ReflectionClass(\Splicewire\Beam\Ux\Data\ChildPageRecordData::class));
+            // ADR-0233 d4: the Page Fields the parent declares are the Record fields beside the child's own.
+            $parent = BeamUxEntry::query()->find($source->parentEntryId);
+            $class = $parent === null || ! \Illuminate\Support\Facades\Schema::hasColumn('beam_ux_entries', 'child_fields')
+                ? null : \Splicewire\Beam\Ux\Containment\PageFields::classNamed($parent->getAttribute('child_fields'));
+            if ($class !== null) {
+                $schema['properties']['fields'] = \Splicewire\Beam\Ux\Containment\PageFields::schema($class);
+            }
+
+            return $schema;
         }
         $resource = app(ParticleResourceRegistry::class)->get($source->resource);
         if (! isset($source->address['collection'])) {

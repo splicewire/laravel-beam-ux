@@ -156,6 +156,29 @@ class AuthoringCommandsTest extends TestCase
         $this->assertStringContainsString('songs', $body['content']);
     }
 
+    public function test_enrich_page_schemas_refuses_where_mdx_pages_hold_blocks_and_the_doctor_warns_if_it_is_scheduled(): void
+    {
+        // EP-26 G1 (ADR-0233 d3): the batch would write a {frontmatter, content} source body over every MDX page that
+        // holds blocks, so it does not run there, and a schedule that still names it is reported.
+        Config::set('beam.ux.namespace', 'demo');
+        Config::set('beam.ux.mdx.holds_blocks', true);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        $blocks = [['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Blocks']]]];
+        $entry = BeamUxEntry::create(['slug' => 'about', 'namespace' => 'demo', 'type' => 'page', 'format' => 'mdx', 'realm' => 'site']);
+        $item = app(StorageDriverResolver::class)->resolve($entry)->write('', $blocks, 'demo');
+        $entry->forceFill(['particle_id' => $item->key])->save();
+
+        $this->artisan('splicewire:beam:ux:enrich-page-schemas')->expectsOutputToContain('hold blocks')->assertFailed();
+
+        $this->assertSame($blocks, app(StorageDriverResolver::class)->resolve($entry)->read($entry->particle_id)?->body);
+        $audit = new \Splicewire\Beam\Ux\Doctor\BeamUxMdxPagesAudit;
+        $this->assertCount(2, $audit->run(), 'nothing scheduled: no warning');
+        app(\Illuminate\Console\Scheduling\Schedule::class)->command('splicewire:beam:ux:enrich-page-schemas')->daily();
+        $scheduled = $audit->run()[2] ?? null;
+        $this->assertSame('warn', $scheduled?->status->value);
+        $this->assertStringContainsString('still scheduled', (string) $scheduled?->detail);
+    }
+
     private function createTables(): void
     {
         Schema::create('beam_ux_entries', function (Blueprint $table) {

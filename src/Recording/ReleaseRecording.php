@@ -46,9 +46,10 @@ class ReleaseRecording
             $disk = $this->disk();
             $seen = [];
             $size = 0;
-            foreach ($prepared as [$entry, $version, $body]) {
+            foreach ($prepared as $member) {
+                [$entry, $version, $body] = $member;
                 $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
-                $bytes = $entry->codec()->decode($body);
+                $bytes = app(PlacedDiskMirror::class)->bytes($entry, $body);
                 $absolute = $disk->path($path);
                 $this->contained($disk->path(''), $path);
                 $size += strlen($bytes);
@@ -60,10 +61,26 @@ class ReleaseRecording
                     'codec' => $entry->codec()::class, 'path' => $path, 'absolute' => $absolute,
                     'mode' => is_file($absolute) && is_executable($absolute) ? '100755' : '100644',
                     'bytes' => base64_encode($bytes), 'sha256' => hash('sha256', $bytes)];
+                // ADR-0233 d5: a File Language change moved this member's file. The old path is a frozen deletion in
+                // the same commit, of exactly the bytes published there, so an edited old file refuses like a Take-down.
+                if (($moved = $member['moved'] ?? null) !== null) {
+                    $old = $disk->path($moved['path']);
+                    $this->contained($disk->path(''), $moved['path']);
+                    $size += strlen($moved['bytes']);
+                    if ($size > 4194304 || isset($seen[strtolower($old)]) || ! is_file($old)
+                        || hash_file('sha256', $old) !== hash('sha256', $moved['bytes'])) {
+                        throw new RecordingFailure('mirror-drift', 'A moved page\'s old mirror differs from its published bytes.');
+                    }
+                    $seen[strtolower($old)] = true;
+                    $manifest[] = ['action' => 'delete', 'move' => true, 'entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
+                        'codec' => $moved['codec'], 'path' => $moved['path'], 'absolute' => $old,
+                        'mode' => is_executable($old) ? '100755' : '100644',
+                        'bytes' => base64_encode($moved['bytes']), 'sha256' => hash('sha256', $moved['bytes'])];
+                }
             }
             foreach ($takedowns as [$entry, $version, $body]) {
                 $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
-                $bytes = $entry->codec()->decode($body);
+                $bytes = app(PlacedDiskMirror::class)->bytes($entry, $body);
                 $absolute = $disk->path($path);
                 $this->contained($disk->path(''), $path);
                 $size += strlen($bytes);
@@ -121,7 +138,7 @@ class ReleaseRecording
             try {
                 $this->authorize($release, $actor);
                 $receipt = $this->receipt($release);
-                if ($receipt === null || $receipt->state === 'unavailable' || count($receipt->manifest) !== $release->members()->count()) {
+                if ($receipt === null || $receipt->state === 'unavailable' || count(self::memberFiles($receipt->manifest)) !== $release->members()->count()) {
                     throw new RecordingFailure('unavailable', 'No durable recording receipt is available.');
                 }
                 $git = new LocalGit($this->disk()->path(''));
@@ -182,10 +199,11 @@ class ReleaseRecording
                         throw new RecordingFailure('mirror', 'A Release mirror could not be completed.');
                     }
                     $actual = $disk->get($path);
-                    if ($actual !== $entry->codec()->decode($body)) {
+                    if ($actual !== app(PlacedDiskMirror::class)->bytes($entry, $body)) {
                         throw new RecordingFailure('mirror', 'A Release mirror did not match its published snapshot.');
                     }
                 }
+                $this->completeMoves($release, $disk, $local, $preparedIds, $allMembers);
                 if ($takedowns !== []) {
                     $receipt = $this->receipt($release);
                     if ($receipt === null || $receipt->state === 'unavailable') {
@@ -228,6 +246,58 @@ class ReleaseRecording
                 fclose($lock);
             }
         }
+    }
+
+    /**
+     * ADR-0233 d5 — remove the files a File Language change moved members away from. A move the receipt froze is
+     * drift-checked against its frozen bytes and deleted like a Take-down, so the one commit holds both paths; without a
+     * frozen move (no receipt, or recording unavailable) the mirror still removes the old file only while it is
+     * unchanged.
+     *
+     * @param  array<string, true>  $preparedIds
+     * @param  list<array<int, mixed>>  $allMembers
+     */
+    private function completeMoves(BeamUxRelease $release, \Illuminate\Contracts\Filesystem\Filesystem $disk, bool $local, array $preparedIds, array $allMembers): void
+    {
+        $receipt = null;
+        $deleted = false;
+        foreach ($allMembers as $member) {
+            $moved = $member['moved'] ?? null;
+            if ($moved === null || ! isset($preparedIds[(string) $member[0]->getKey()])) {
+                continue;
+            }
+            $receipt ??= $this->receipt($release);
+            $file = $receipt === null || $receipt->state === 'unavailable' || ! $local ? null
+                : collect($receipt->manifest)->first(fn (array $item) => ($item['move'] ?? false) === true && $item['entryId'] === (string) $member[0]->id);
+            if ($file === null) {
+                app(PlacedDiskMirror::class)->removeIfUnchanged($moved['path'], $moved['bytes']);
+
+                continue;
+            }
+            $this->mirrorContained($disk->path(''), $file['path']);
+            if (! is_file($disk->path($file['path'])) || hash_file('sha256', $disk->path($file['path'])) !== $file['sha256']
+                || (is_executable($disk->path($file['path'])) ? '100755' : '100644') !== $file['mode']) {
+                throw new RecordingFailure('mirror-drift', 'A moved page\'s old mirror differs from the frozen published bytes.');
+            }
+            if (! app(PlacedDiskMirror::class)->remove($file['path']) || $disk->exists($file['path'])) {
+                throw new RecordingFailure('mirror', 'A moved page\'s old mirror could not be removed.');
+            }
+            $deleted = true;
+        }
+        if ($deleted) {
+            $receipt?->forceFill(['state' => 'mirror-deleted'])->save();
+        }
+    }
+
+    /**
+     * The manifest's one file per member: a File Language move adds its old path's deletion beside it.
+     *
+     * @param  list<array<string, mixed>>  $manifest
+     * @return list<array<string, mixed>>
+     */
+    private static function memberFiles(array $manifest): array
+    {
+        return array_values(array_filter($manifest, fn (array $file) => ($file['move'] ?? false) !== true));
     }
 
     /** Retry never remirrors, republishes, changes a pin or reads the real index. */
@@ -287,9 +357,13 @@ class ReleaseRecording
     {
         $this->authorize($release, $actor);
         $row = $this->receipt($release);
+        $members = $row === null ? [] : self::memberFiles($row->manifest);
+        $moves = $row === null ? [] : array_values(array_filter($row->manifest, fn (array $file) => ($file['move'] ?? false) === true));
         if ($row === null || $row->state === 'unavailable' || $row->manifest === []
-            || count($row->manifest) !== $release->members()->count()
-            || count(array_unique(array_column($row->manifest, 'entryId'))) !== count($row->manifest)) {
+            || count($members) !== $release->members()->count()
+            || count(array_unique(array_column($members, 'entryId'))) !== count($members)
+            || count(array_unique(array_column($moves, 'entryId'))) !== count($moves)
+            || array_diff(array_column($moves, 'entryId'), array_column($members, 'entryId')) !== []) {
             throw new RecordingFailure('unavailable', 'This Release has no supported frozen recording receipt.');
         }
         $git->assertSupported();
@@ -303,8 +377,12 @@ class ReleaseRecording
             $member = $release->members()->where('entry_id', $entry->id)->first();
             $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
             $deleting = ($file['action'] ?? null) === 'delete';
-            if ($member === null || ($deleting ? $member->version_id !== null : $member->version_id !== $file['versionId'])
-                || $this->disk()->path($path) !== $file['absolute']) {
+            // A move's deletion belongs to a publishing member whose placement has left the frozen old path.
+            $moving = $deleting && ($file['move'] ?? false) === true;
+            $placed = $this->disk()->path($path) === $file['absolute'];
+            if ($member === null || ($moving
+                ? $member->version_id !== $file['versionId'] || $placed
+                : ($deleting ? $member->version_id !== null : $member->version_id !== $file['versionId']) || ! $placed)) {
                 throw new RecordingFailure('manifest', 'Release membership or mirror placement no longer matches its frozen receipt.');
             }
             $file['path'] = $git->relative($file['absolute']);

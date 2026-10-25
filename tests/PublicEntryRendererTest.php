@@ -84,6 +84,60 @@ class PublicEntryRendererTest extends TestCase
         $this->assertSame('/docs/api', $response->json('props.entry.url'));
     }
 
+    public function test_the_entry_props_carry_its_declared_body_kind_which_chooses_the_editor(): void
+    {
+        // beam JS ADR-0006 d1: the client opens the canvas for a blocks entry. An MDX page is source on a host that
+        // keeps MDX as source (the default) and blocks on one that holds it as blocks (ADR-0233 d1).
+        $root = BeamUxEntry::rootFor();
+        $this->page('guide', ['segment' => 'guide', 'parent_id' => $root->getKey()]);
+        $this->page('home-tsx', ['segment' => 'home-tsx', 'parent_id' => $root->getKey(), 'format' => UxFormat::Tsx]);
+
+        $this->assertSame('mdx', $this->get('/guide')->json('props.entry.format'));
+        $this->assertSame('source', $this->get('/guide')->json('props.entry.bodyKind'));
+        $this->assertSame('blocks', $this->get('/home-tsx')->json('props.entry.bodyKind'));
+
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        $this->assertSame('blocks', $this->get('/guide')->json('props.entry.bodyKind'));
+    }
+
+    public function test_a_published_form_carries_the_schema_it_renders_only_for_a_public_intake_key(): void
+    {
+        // EP-07d: the server resolves each form's fields, so the page needs no public schema read of its own.
+        $schema = ['type' => 'object', 'properties' => ['email' => ['type' => 'string']]];
+        $this->app->instance(\Splicewire\Beam\Schema\Contracts\SchemaTargetResolver::class, new class($schema) implements \Splicewire\Beam\Schema\Contracts\SchemaTargetResolver
+        {
+            public function __construct(private array $schema) {}
+
+            public function targetFor(string $recordType, ?int $version = null): array
+            {
+                return in_array($recordType, ['contact', 'private'], true) ? $this->schema : [];
+            }
+        });
+        config(['beam.core.intake.enabled' => true, 'beam.core.intake.public_schemas' => ['contact']]);
+        $form = fn (string $key, string $id) => ['kind' => 'block', 'name' => 'IntakeForm', 'isComponent' => true, 'dynamic' => false, 'id' => $id,
+            'props' => [['name' => 'captureKey', 'kind' => 'string', 'value' => $key]], 'children' => []];
+        $this->app->instance(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class, new class([$form('contact', 'f1'), $form('private', 'f2')]) extends \Splicewire\Beam\Ux\Bindings\PublishedBindingDocument
+        {
+            public function __construct(private array $body) {}
+
+            public function read(BeamUxEntry $entry): array
+            {
+                return $entry->slug === 'contact-us' ? $this->body : [];
+            }
+        });
+        $root = BeamUxEntry::rootFor();
+        $this->page('contact-us', ['segment' => 'contact-us', 'parent_id' => $root->getKey()]);
+        $this->page('about', ['segment' => 'about', 'parent_id' => $root->getKey()]);
+
+        config(['beam.core.intake.honeypot.field' => 'nickname']);
+        $response = $this->get('/contact-us');
+        $this->assertSame(['contact' => $schema], $response->json('props.intakeForms'));
+        $this->assertSame('nickname', $response->json('props.intakeHoneypotField'), 'the form sends the field the door watches');
+        $this->assertArrayNotHasKey('intakeForms', $this->get('/about')->json('props'), 'a page without a form carries nothing');
+        $this->assertArrayNotHasKey('intakeHoneypotField', $this->get('/about')->json('props'));
+    }
+
     public function test_a_root_absolute_segment_resolves_even_though_a_top_down_walk_could_never_reach_it(): void
     {
         // The docs subtree sits under the realm root but declares an absolute segment, so its URL

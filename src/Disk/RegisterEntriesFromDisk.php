@@ -5,11 +5,14 @@ namespace Splicewire\Beam\Ux\Disk;
 use FilesystemIterator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
+use Splicewire\Beam\Mdx\MdxBody;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\Access\EntryAccessGate;
 use Splicewire\Beam\Ux\Access\Right;
@@ -18,7 +21,11 @@ use Splicewire\Beam\Ux\Codec\CodecRegistry;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
+use Splicewire\Beam\Ux\Containment\PageFields;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
+use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
+use Splicewire\Beam\Ux\Files\MdxPageFile;
+use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Inference\InferDraftSchema;
 use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
 use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
@@ -327,8 +334,16 @@ class RegisterEntriesFromDisk
             // `format` default docblock records finding for themes, in a second place.
             // A tsx file the Lens cannot lower is recorded like a compile failure and falls back to raw
             // source so the batch still registers it (ADR-0228 d9).
+            // ADR-0233 d3/d4 — an MDX page that holds blocks takes its SEO fields and its Page Fields declaration from the
+            // file's frontmatter too. They are not mass-assignable (page settings force-fill them at publish), so they
+            // land here, after the create.
+            if (($columns = $this->settingColumnsFor($source, $relative, $envelope)) !== []) {
+                $entry->forceFill($columns)->save();
+            }
+
             try {
                 $this->writeBody($entry, $source);
+                $this->keepFrontmatter($entry, $source, $relative);
             } catch (ValidationException $e) {
                 $this->failures[$relative] = $e->errors()['source'][0] ?? 'the TSX lens could not lower the source.';
                 $this->writeBody($entry, $source, lower: false);
@@ -421,13 +436,58 @@ class RegisterEntriesFromDisk
         // fresh id. Every other kind encodes its text through the codec unchanged. `$lower = false` is the
         // batch's fallback when the Lens cannot read a file (see the caller).
         $body = ($lower && $entry->bodyKind() === BodyKind::Blocks)
-            ? app(SourceToBlocks::class)->convert($source, [], app(ManifestProfileResolver::class)->resolve($entry))
+            ? app(SourceToBlocks::class)->convert(self::lowerable($entry, $source), [], app(ManifestProfileResolver::class)->resolve($entry), $entry->format)
             : $entry->codec()->encode($source, $entry->body_style);
         $item = $this->drivers->resolveOnEntryConnection($entry)->write('', $body, $entry->namespace);
         if ($entry->particle_id === null && $item->key !== '') {
             $entry->particle_id = $item->key;
             $entry->save();
         }
+    }
+
+    /**
+     * ADR-0233 d3/d4 — a blocks MDX page holds the frontmatter keys its parent's Page Fields declare, and keeps the
+     * keys nothing declares, in its registered version's page settings, so the mirror prints them back. Registration's
+     * own keys (`realm`, the rights, `workflow_marking`) are claimed here and land on columns as before. A key set the
+     * page settings refuse (a page with no title, a Page Field its class refuses, a value the flat grammar cannot
+     * carry) is recorded with this run's failures rather than kept half-way.
+     */
+    private function keepFrontmatter(BeamUxEntry $entry, string $source, string $relative): void
+    {
+        if (! MdxPageFile::applies($entry)) {
+            return;
+        }
+        $unknown = array_diff_key($this->frontmatter($source), array_flip(EntryPageSettingsData::reservedFrontmatterKeys()));
+        if ($unknown === []) {
+            return;
+        }
+        $class = PageFields::forChild($entry->refresh());
+        $settings = EntryPageSettingsData::fromEntry($entry);
+        [$settings->fields, $settings->unclaimed] = PageFields::fromFrontmatter($class, $unknown);
+        try {
+            EntryPageSettingsData::validateAndCreate($settings->toArray());
+            $settings->fields = PageFields::check($class, $settings->fields);
+            MdxPageFile::assertPrintable($settings);
+        } catch (ValidationException $e) {
+            $this->failures[$relative] = 'frontmatter keys '.implode(', ', array_keys($unknown)).' were not kept: '
+                .(collect($e->errors())->flatten()->first() ?? 'the page settings are not valid.');
+
+            return;
+        }
+        $particle = $entry->particle;
+        $meta = $particle->meta ?? [];
+        $meta['pageSettings'] = $settings->toArray();
+        $particle->meta = $meta;
+        $particle->save();
+    }
+
+    /**
+     * ADR-0233 d3 — what the lens reads from a disk file: an MDX file's body without its frontmatter, which
+     * registration reads into the entry's own fields; any other file whole.
+     */
+    private static function lowerable(BeamUxEntry $entry, string $source): string
+    {
+        return $entry->format === UxFormat::Mdx ? MdxBody::encode($source)[MdxBody::CONTENT_KEY] : $source;
     }
 
     /**
@@ -515,6 +575,39 @@ class RegisterEntriesFromDisk
                 $this->assertKnownTokens($tokens, $right, $relative);
                 $out[$right->column()] = $tokens;
             }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The SEO columns and the Page Fields declaration (`child_fields`, d4) an MDX page's frontmatter names, on a host
+     * whose MDX pages hold blocks (ADR-0233 d3), where the frontmatter is the page's settings. Each is checked against
+     * the page-settings rule for it and column-guarded like every other aspect field; a value the rule refuses is left
+     * out and recorded with this run's failures.
+     *
+     * @param  array{slug: string, type: ?string, namespace: ?string, format: string}  $envelope
+     * @return array<string, string>
+     */
+    protected function settingColumnsFor(string $source, string $relative, array $envelope): array
+    {
+        if ($envelope['type'] !== UxType::Page->value || $envelope['format'] !== UxFormat::Mdx->value || ! config('beam.ux.mdx.holds_blocks')) {
+            return [];
+        }
+        $fm = $this->frontmatter($source);
+        $rules = EntryPageSettingsData::rules();
+        $out = [];
+        foreach (['description' => 'seo_description', 'social_image' => 'seo_social_image', 'page_type' => 'seo_page_type', 'published_date' => 'seo_published_date', 'child_fields' => 'child_fields'] as $field => $column) {
+            if (! isset($fm[$field]) || $fm[$field] === '' || ! Schema::hasColumn('beam_ux_entries', $column)) {
+                continue;
+            }
+            $setting = Str::camel($field);
+            if (Validator::make([$setting => $fm[$field]], [$setting => $rules[$setting]])->fails()) {
+                $this->failures[$relative] = "frontmatter `{$field}` is not a valid page setting; it was left out.";
+
+                continue;
+            }
+            $out[$column] = $fm[$field];
         }
 
         return $out;

@@ -71,6 +71,10 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         public ?string $segment = null,
         #[Title('Nav order'), MapInputName('navOrder')]
         public ?int $navOrder = null,
+        // ADR-0233 d5: a page's File Language, chosen at creation. Unset, it is the parent's, then the host's
+        // (`beam.ux.file_language`). Afterwards page settings change it and Publish moves the mirror file.
+        #[Title('File language'), In(['tsx', 'mdx']), MapInputName('fileLanguage')]
+        public ?string $fileLanguage = null,
     ) {}
 
     /** Existing untitled rows open as an empty required field; identity and namespace stay server-owned. */
@@ -84,6 +88,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             parentId: $entry->parent_id,
             segment: $entry->segment,
             navOrder: $entry->nav_order,
+            fileLanguage: $entry->type === \Splicewire\Beam\Ux\Type\UxType::Page ? $entry->format?->value : null,
         );
     }
 
@@ -120,6 +125,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             // the documented, permitted shape (ContainmentTest::test_unplaced_page_entries_without_a_segment_are_excluded_from_nav).
             'segment' => ['nullable', 'string', 'max:255', self::segmentUniqueRule($context)],
             'navOrder' => ['nullable', 'integer'],
+            'fileLanguage' => ['nullable', 'string', Rule::in(['tsx', 'mdx'])],
         ];
     }
 
@@ -166,7 +172,8 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
     {
         $current = self::currentEntry();
         if ($current?->type === \Splicewire\Beam\Ux\Type\UxType::Page) {
-            foreach (['title' => $this->title, 'parent_id' => $this->parentId, 'segment' => $this->segment, 'nav_order' => $this->navOrder] as $column => $value) {
+            $format = $this->fileLanguage === null ? $current->getAttribute('format') : \Splicewire\Beam\Ux\Format\UxFormat::tryFrom($this->fileLanguage);
+            foreach (['title' => $this->title, 'parent_id' => $this->parentId, 'segment' => $this->segment, 'nav_order' => $this->navOrder, 'format' => $format] as $column => $value) {
                 if ($current->getAttribute($column) !== $value) {
                     throw \Illuminate\Validation\ValidationException::withMessages([
                         'pageSettings' => 'Edit page settings in the editor and publish their version.',
@@ -186,6 +193,46 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             'parent_id' => $this->type === 'page' ? null : $this->parentId,
             'segment' => $this->type === 'page' ? null : $this->segment,
             'nav_order' => $this->navOrder,
+            ...($this->type === 'page' ? ['format' => $this->createdFileLanguage()] : $this->withoutFileLanguage()),
         ];
+    }
+
+    /**
+     * A new page's `format`: the File Language chosen, or its parent's, then the host's (ADR-0233 d5).
+     *
+     * A Hosted site's page has no File Language (d6), and naming one is refused. Its `format` is still `tsx`, the
+     * value it had before File Languages existed: the column is NOT NULL (default `tsx`) and names the body codec, and
+     * a Hosted page's blocks are stored through the tsx codec. For a Hosted page it is that codec, never a file:
+     * page settings offer it no language, and the mirror writes no file for it ({@see \Splicewire\Beam\Ux\Storage\PlacedDiskMirror}).
+     */
+    private function createdFileLanguage(): string
+    {
+        $probe = new BeamUxEntry(['type' => 'page']);
+        $choices = \Splicewire\Beam\Ux\Format\FileLanguage::choices($probe);
+        if ($choices === []) {
+            if ($this->fileLanguage !== null) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['fileLanguage' => 'A Hosted site\'s pages have no File Language (ADR-0233 d6).']);
+            }
+
+            return \Splicewire\Beam\Ux\Format\UxFormat::Tsx->value;
+        }
+        if ($this->fileLanguage === null) {
+            return \Splicewire\Beam\Ux\Format\FileLanguage::defaultFor($probe, $this->parentId);
+        }
+        if (! in_array($this->fileLanguage, $choices, true)) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['fileLanguage' => "This host does not write pages in {$this->fileLanguage}."]);
+        }
+
+        return $this->fileLanguage;
+    }
+
+    /** @return array{} only a page chooses a File Language */
+    private function withoutFileLanguage(): array
+    {
+        if ($this->fileLanguage !== null) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['fileLanguage' => 'Only a page chooses its File Language here.']);
+        }
+
+        return [];
     }
 }

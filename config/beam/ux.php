@@ -268,6 +268,76 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | MDX pages hold blocks (ADR-0233 d1, per host)
+    |--------------------------------------------------------------------------
+    |
+    | `holds_blocks` — when true, this host's MDX entries hold a JsonDoc, as a
+    |                  `tsx` page does. Source writes and registration from disk
+    |                  read MDX through the MDX Lens (`splicewire/laravel-beam-mdx`,
+    |                  Node), and the mirror prints it through the canonical printer.
+    |                  When false (the default), MDX stays source-kind and the
+    |                  body-only MDX loop is unchanged. A host turns it on only
+    |                  once its MDX is converted (ADR-0233 d9). Its frontmatter is
+    |                  then the page's settings, held in the version (d3), and the
+    |                  mirror prints them back as the file's header. `beam:doctor`
+    |                  FAILS (BeamUxMdxPagesAudit) while this is on and any stored
+    |                  MDX page still holds source.
+    |
+    */
+    'mdx' => [
+        'holds_blocks' => (bool) env('BEAM_UX_MDX_HOLDS_BLOCKS', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Manifest Profiles per realm (ADR-0228 d6/d7, EP-07)
+    |--------------------------------------------------------------------------
+    |
+    | `realms` — realm => a ManifestNodeSource class: the host's placeable
+    |            `#[NodeType]` components for that realm's profile. A realm
+    |            without an entry uses the app-wide bound ManifestNodeSource.
+    | `js_registry` — the path of a JSON snapshot of the host's JS component
+    |            registry (a list of names, or realm => list), written by the
+    |            host's build (`@splicewire/beam-inertia`'s registry snapshot).
+    |            `beam:doctor` compares it with each realm's profile; without
+    |            one the comparison is reported INCONCLUSIVE, never a pass.
+    |
+    */
+    'manifest' => [
+        'realms' => [],
+        'js_registry' => env('BEAM_UX_JS_REGISTRY'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Page Fields (ADR-0233 d4)
+    |--------------------------------------------------------------------------
+    |
+    | The Data classes whose fields a parent page may declare for its child
+    | pages, by name. A parent's page settings name one (`childFields`); this
+    | map is the only way a class is named, never client input. A class's
+    | properties are flat scalars (string, int, float, bool, nullable), since
+    | they print as frontmatter. Each child's values are page settings held
+    | in its version; page settings shows them, the save checks them, and the
+    | parent's child-page Collection carries them as Record fields.
+    |
+    */
+    'page_fields' => [],
+
+    /*
+    |--------------------------------------------------------------------------
+    | File Language (ADR-0233 d5)
+    |--------------------------------------------------------------------------
+    |
+    | The language a new page's file is written in when its parent's is not
+    | one it may take: `tsx`, or `mdx` where `mdx.holds_blocks` is on. A page
+    | changes it in page settings, and Publish moves its mirror file.
+    |
+    */
+    'file_language' => env('BEAM_UX_FILE_LANGUAGE', 'tsx'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Access (ADR-0212 — the two conjunctive rights)
     |--------------------------------------------------------------------------
     |
