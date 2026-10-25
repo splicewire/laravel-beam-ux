@@ -4,13 +4,10 @@ namespace Splicewire\Beam\Ux\Tests;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
-use Splicewire\Beam\Ux\Compile\NodeEntryBodyCompiler;
 use Splicewire\Beam\Ux\Components\AuthoredComponents;
 use Splicewire\Beam\Ux\Components\ComponentDelivery;
 use Splicewire\Beam\Ux\Manifest\ManifestProfileResolver;
@@ -18,35 +15,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 
 /** Native version store, owning migration stubs and real Node compiler, on a fresh in-memory database. */
-class AuthoredComponentPublicationTest extends TestCase
+class AuthoredComponentPublicationTest extends AuthoredComponentNativeTestCase
 {
-    protected function defineEnvironment($app): void
-    {
-        parent::defineEnvironment($app);
-        $app['config']->set('database.default', 'testing');
-        $app['config']->set('database.connections.testing', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-        $core = dirname((new \ReflectionClass(\Splicewire\Beam\BeamServiceProvider::class))->getFileName(), 2);
-        foreach (['create_beam_particles_table', 'create_beam_versions_table', 'create_activity_log_table'] as $name) {
-            (require $core.'/database/migrations/shared/'.$name.'.php.stub')->up();
-        }
-        foreach (['create_beam_ux_entries_table', 'add_page_settings_to_beam_ux_entries_table', 'add_child_fields_to_beam_ux_entries_table', 'add_record_page_to_beam_ux_entries_table', 'add_component_kind_to_beam_ux_entries_table'] as $name) {
-            (require dirname(__DIR__).'/database/migrations/shared/'.$name.'.php.stub')->up();
-        }
-        $this->assertSame('sqlite', Schema::getConnection()->getDriverName());
-        $this->assertSame(':memory:', Schema::getConnection()->getDatabaseName());
-        Storage::fake('component-artifacts');
-        Storage::fake('component-mirror');
-        config(['beam.ux.compile.disk' => 'component-artifacts', 'beam.ux.storage.mirror_disk' => 'component-mirror']);
-        $this->app->singleton(EntryBodyCompiler::class, fn () => new NodeEntryBodyCompiler(workingDirectory: __DIR__.'/Fixtures/entry-body-host'));
-        $this->app->forgetInstance(CompileEntryBody::class);
-        $this->app->forgetInstance(EntryArtifactStore::class);
-    }
-
     private function block(string $name, array $children = []): array
     {
         return ['kind' => 'block', 'name' => $name, 'isComponent' => ctype_upper($name[0]), 'dynamic' => false, 'props' => [], 'children' => $children];

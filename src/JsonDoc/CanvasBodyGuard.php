@@ -99,6 +99,7 @@ final class CanvasBodyGuard
         $this->assertWellFormed($body);
 
         [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $body, $this->resolver->resolve($entry));
+        app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->assertGraph($entry, $body, profile: $profile);
         ['code' => $code, 'legality' => $legality] = $this->legality->violations($body, $profile, component: $component);
 
         if ($code !== []) {

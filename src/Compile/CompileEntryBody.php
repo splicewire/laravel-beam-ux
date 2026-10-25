@@ -62,6 +62,11 @@ class CompileEntryBody
             return null;
         }
 
+        // A failed/transient body read is not evidence that a current artifact was cleared.
+        if (! $force && $this->artifacts->has($entry)) {
+            return $this->artifacts->path($entry);
+        }
+
         // Backfills must compile the pin's snapshot, never file a newer working body at its address.
         $pin = $entry->getAttribute('published_version');
         if ($pin !== null && $entry->particle_id !== null) {
@@ -88,10 +93,6 @@ class CompileEntryBody
             $this->artifacts->forget($entry);
 
             return null;
-        }
-
-        if (! $force && $this->artifacts->has($entry)) {
-            return $this->artifacts->path($entry);
         }
 
         return $this->artifacts->put($entry, $this->compiler->compile($entry, $source));

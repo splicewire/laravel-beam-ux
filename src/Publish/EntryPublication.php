@@ -257,6 +257,7 @@ class EntryPublication
                     $entry->refresh();
                     $this->applyPageSettings($entry, $version, validateUrl: false);
                 }
+                app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->setPublishedName($entry, $body);
                 $entry->published_version = (string) $version->id;
                 $entry->save();
                 $states[$id] = $this->state($entry);
@@ -428,6 +429,7 @@ class EntryPublication
             $restoredBody = $version->snapshot['payload'] ?? null;
             $diagnostics = app(CanvasBodyGuard::class)->admitForRestore($entry, is_array($restoredBody) ? $restoredBody : []);
 
+            app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reserveName($entry, is_array($restoredBody) ? $restoredBody : []);
             $this->versions->restore($particle, (string) $version->id);
 
             $draft = $this->versions->snapshot($this->requireParticle($entry->refresh()), $label ?? "restore of {$version->readableVersion()}");
@@ -609,6 +611,11 @@ class EntryPublication
      */
     public function write(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): array
     {
+        return $entry->getConnection()->transaction(fn () => $this->writeAfterLocks($entry, $body, $pageSettings));
+    }
+
+    private function writeAfterLocks(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings): array
+    {
         $body = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->prepare($entry, $body);
         // ADR-0227 d1 / ADR-0228 d8 — THE CHOKE: every canvas-body write that goes through publication
         // (save-body, save-source, a draft via recordDraft) is held to the realm's Manifest Profile here,
@@ -626,6 +633,7 @@ class EntryPublication
             throw ValidationException::withMessages(['body' => $e->getMessage()]);
         }
 
+        app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reserveName($entry, $body);
         $written = $this->authoringDriver()->write(
             (string) ($entry->particle_id ?? ''),
             $body,
@@ -636,6 +644,8 @@ class EntryPublication
             $entry->particle_id = $written->key;
             $entry->save();
         }
+
+        app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget();
 
         return ['key' => $written->key, 'body' => $written->body];
     }
@@ -737,6 +747,7 @@ class EntryPublication
         // System registration/seed retains its established pin + diagnostic contract. EP-10
         // changes explicit publication, not boot-time availability of shipped entries.
         if (! $requireCompiled) {
+            app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->setPublishedName($entry, $body);
             $entry->setAttribute('published_version', (string) $version->id);
             $entry->save();
 
@@ -749,6 +760,7 @@ class EntryPublication
         $before = $mirror ? $this->mirroredFile($entry, is_array($publishedBody) ? $publishedBody : null) : null;
         $this->applyPageSettings($entry, $version);
         app(CompileEntryBody::class)->forVersion($entry, (string) $version->id, $body);
+        app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->setPublishedName($entry, $body);
         $entry->setAttribute('published_version', (string) $version->id);
         $entry->save();
         if ($mirror) {

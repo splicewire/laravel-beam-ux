@@ -40,13 +40,18 @@ class AuthoredComponents
         if ($entry->particle_id === null) {
             return [];
         }
+        $scope = app(ComponentScope::class);
+        $key = 'working|'.($entry->getConnectionName() ?? 'default').'|'.$entry->getConnection()->getDatabaseName().'|'.$entry->particle_id;
+        if (array_key_exists($key, $scope->documents)) {
+            return $scope->documents[$key];
+        }
         $item = app(\Splicewire\Beam\Ux\Storage\StorageDriverResolver::class)
             ->resolveOnEntryConnection($entry)->read((string) $entry->particle_id);
         if ($item === null) {
             $this->refuse('A component dependency has no readable Working Head.');
         }
 
-        return $item->body;
+        return $scope->documents[$key] = $item->body;
     }
 
     public function version(BeamUxEntry $entry, ?string $ref): array
@@ -75,7 +80,9 @@ class AuthoredComponents
             return [];
         }
 
-        return $context->newQuery()->where('realm', $context->realm)->where('type', UxType::Component->value)->get()->all();
+        $key = 'entries|'.($connection ?? 'default').'|'.$context->getConnection()->getDatabaseName().'|'.$context->realm;
+
+        return app(ComponentScope::class)->lookups[$key] ??= $context->newQuery()->where('realm', $context->realm)->where('type', UxType::Component->value)->get()->all();
     }
 
     public function definition(array $body): ComponentDefinitionData
@@ -152,38 +159,67 @@ class AuthoredComponents
     }
 
     /** Append Working Head declarations, preserving every registered name's priority. */
-    public function extendProfile(BeamUxEntry $context, array $profile): array
+    public function extendProfile(BeamUxEntry $context, array $profile, bool $inspectAll = false): array
     {
         $registered = array_column($profile['nodes'], null, 'name');
-        $pending = [];
+        $pending = $owners = $duplicates = [];
+        $scope = app(ComponentScope::class);
         foreach ($this->entries($context) as $entry) {
-            if (! $this->authored($entry) || ! $this->canRead($entry, request()->user()) || ($body = $this->working($entry)) === []) {
+            if (! $this->authored($entry) || (! $inspectAll && ! $this->canRead($entry, request()->user()))) {
                 continue;
             }
-            $name = $this->definition($body)->name;
-            if (! isset($registered[$name])) {
-                if (isset($pending[$name])) {
-                    $this->refuse('Component names must be unique in their realm.');
+            try {
+                $body = $this->working($entry);
+                if ($body === []) {
+                    continue;
                 }
+                $name = $this->definition($body)->name;
+                if (isset($registered[$name])) {
+                    continue;
+                }
+                if (isset($owners[$name])) {
+                    $duplicates[$name] = true;
+                    $scope->issues[(string) $entry->getKey()] = 'Duplicate component name';
+                    $scope->issues[$owners[$name]] = 'Duplicate component name';
+                }
+                $owners[$name] = (string) $entry->getKey();
                 $pending[$name] = $body;
+            } catch (\Throwable) {
+                // Stored corruption is a doctor finding, never a realm-wide editor outage.
+                $scope->issues[(string) $entry->getKey()] = 'Unreadable component declaration';
             }
         }
-        $visiting = [];
-        $add = function (string $name) use (&$add, &$profile, &$registered, &$pending, &$visiting): void {
-            if (isset($registered[$name]) || ! isset($pending[$name])) {
-                return;
+        foreach (array_keys($duplicates) as $name) {
+            unset($pending[$name]);
+        }
+        $visiting = $failed = [];
+        $add = function (string $name) use (&$add, &$profile, &$registered, &$pending, &$visiting, &$failed, $scope, $owners): bool {
+            if (isset($registered[$name])) {
+                return true;
             }
-            if (isset($visiting[$name])) {
-                $this->refuse('Components cannot contain a cycle.');
+            if (! isset($pending[$name]) || isset($visiting[$name]) || isset($failed[$name])) {
+                return false;
             }
             $visiting[$name] = true;
-            foreach ($this->names($pending[$name]) as $dependency) {
-                $add($dependency);
+            try {
+                foreach ($this->names($pending[$name]) as $dependency) {
+                    if (! $add($dependency)) {
+                        throw new \LogicException('Unavailable or cyclic dependency');
+                    }
+                }
+                $node = $this->node($pending[$name], $profile);
+                $profile['nodes'][] = $node;
+                $registered[$name] = $node;
+
+                return true;
+            } catch (\Throwable) {
+                $failed[$name] = true;
+                $scope->issues[$owners[$name]] = 'Invalid or cyclic component declaration';
+
+                return false;
+            } finally {
+                unset($visiting[$name]);
             }
-            $node = $this->node($pending[$name], $profile);
-            $profile['nodes'][] = $node;
-            $registered[$name] = $node;
-            unset($visiting[$name]);
         };
         foreach (array_keys($pending) as $name) {
             $add($name);
@@ -229,27 +265,37 @@ class AuthoredComponents
             if (! $this->authored($component)) {
                 continue;
             }
-            $doc = (string) $component->getKey() === (string) $entry->getKey() ? $body : $this->working($component);
-            if ($doc === []) {
+            try {
+                $doc = (string) $component->getKey() === (string) $entry->getKey() ? $body : $this->working($component);
+                if ($doc === []) {
+                    continue;
+                }
+                $name = $this->definition($doc)->name;
+            } catch (\Throwable) {
                 continue;
             }
-            $name = $this->definition($doc)->name;
             if (isset($registered[$name])) {
                 continue;
             }
-            if (isset($byName[$name])) {
-                $this->refuse('Component names must be unique in their realm.');
+            if (array_key_exists($name, $byName)) {
+                $byName[$name] = null; // Ambiguous stored declarations are unavailable, not a realm outage.
+
+                continue;
             }
             $byName[$name] = $component;
         }
         if ($this->authored($entry)) {
             $name = $this->definition($body)->name;
             $previous = $this->working($entry);
+            if ($previous === []) {
+                $previous = $this->version($entry, $entry->getAttribute('published_version'));
+            }
             $oldName = $previous === [] ? null : $this->definition($previous)->name;
-            if ($oldName !== null && $oldName !== $name && $this->usedBy($entry, $oldName) !== []) {
+            $ownsOldName = $entry->getAttribute('component_name') !== null || $entry->getAttribute('published_version') !== null;
+            if ($ownsOldName && $oldName !== null && $oldName !== $name && $this->usedBy($entry, $oldName) !== []) {
                 $this->refuse('A component in use cannot be renamed.');
             }
-            if (isset($byName[$name]) && (string) $byName[$name]->getKey() !== (string) $entry->getKey()) {
+            if (array_key_exists($name, $byName) && ($byName[$name] === null || (string) $byName[$name]->getKey() !== (string) $entry->getKey())) {
                 $this->refuse('Component names must be unique in their realm.');
             }
             $byName[$name] = $entry;
@@ -275,6 +321,9 @@ class AuthoredComponents
                         $this->refuse('Publish the component '.$name.' first, or include it in the same Release.');
                     }
                     $next = $this->version($target, (string) $ref);
+                    if ($this->definition($next)->name !== $name) {
+                        $this->refuse('Publish the renamed component first, or include its matching version in the same Release.');
+                    }
                 } else {
                     $next = $targetId === (string) $entry->getKey() ? $body : $this->working($target);
                 }
@@ -287,11 +336,18 @@ class AuthoredComponents
     /** Both histories matter: a pending draft and a guest-visible pin can independently use the name. */
     public function usedBy(BeamUxEntry $component, ?string $name = null): array
     {
-        $name ??= $this->definition($this->working($component))->name;
+        $names = $name === null ? [] : [$name];
+        if ($name === null) {
+            foreach ($this->retainedBodies($component) as $body) {
+                if (JsonDocShape::is($body)) {
+                    $names[] = $this->definition($body)->name;
+                }
+            }
+        }
         $used = [];
         foreach ($component->newQuery()->where('realm', $component->realm)->whereKeyNot($component->getKey())->get() as $entry) {
-            foreach ([$this->working($entry), $this->version($entry, $entry->getAttribute('published_version'))] as $body) {
-                if (in_array($name, $this->names($body), true)) {
+            foreach ($this->retainedBodies($entry) as $body) {
+                if (array_intersect($names, $this->names($body))) {
                     $used[] = (string) $entry->getKey();
                     break;
                 }
@@ -301,13 +357,51 @@ class AuthoredComponents
         return $used;
     }
 
+    /** Name reservation shares the caller's body transaction; the DB owns concurrent uniqueness. */
+    public function reserveName(BeamUxEntry $entry, array $body): void
+    {
+        if (! $this->authored($entry) || ! JsonDocShape::is($body)) {
+            return;
+        }
+        $name = $this->definition($body)->name;
+        try {
+            $entry->forceFill(['component_name' => $name])->save();
+        } catch (\Illuminate\Database\UniqueConstraintViolationException) {
+            $this->refuse('Component names must be unique in their realm; this name is taken.');
+        }
+    }
+
+    public function setPublishedName(BeamUxEntry $entry, array $body): void
+    {
+        if ($this->authored($entry)) {
+            $entry->setAttribute('published_component_name', $body === [] ? null : $this->definition($body)->name);
+        }
+    }
+
+    public function retainedBodies(BeamUxEntry $entry): array
+    {
+        $bodies = [$this->working($entry), $this->version($entry, $entry->getAttribute('published_version'))];
+        $connection = $entry->getConnection();
+        if ($connection->getSchemaBuilder()->hasTable('beam_ux_release_members') && $connection->getSchemaBuilder()->hasTable('beam_ux_releases')) {
+            $refs = $connection->table('beam_ux_release_members as member')
+                ->join('beam_ux_releases as release', 'release.id', '=', 'member.release_id')
+                ->where('member.entry_id', $entry->getKey())->where('release.status', '!=', 'published')
+                ->whereNotNull('member.version_id')->pluck('member.version_id');
+            foreach ($refs as $ref) {
+                $bodies[] = $this->version($entry, (string) $ref);
+            }
+        }
+
+        return $bodies;
+    }
+
     /** Interface edits diagnose readable affected pages; they never rewrite or refuse those pages. */
     public function strandedInstances(BeamUxEntry $component, array $profile): array
     {
-        if (! $this->authored($component)) {
+        if (! $this->authored($component) || ($working = $this->working($component)) === []) {
             return [];
         }
-        $name = $this->definition($this->working($component))->name;
+        $name = $this->definition($working)->name;
         $diagnostics = [];
         $probeProfile = $profile;
         $probeProfile['doc']['admitsChildCategories'] = null;

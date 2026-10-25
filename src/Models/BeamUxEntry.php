@@ -284,12 +284,15 @@ class BeamUxEntry extends Model implements WorkflowManaged
      */
     protected static function booted(): void
     {
+        static::saved(fn () => app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget());
+        static::deleted(fn () => app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget());
+        static::restored(fn () => app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget());
         static::saved(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());
         static::deleted(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());
         static::restored(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());
         static::deleting(function (BeamUxEntry $entry): void {
             $components = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class);
-            if ($components->authored($entry) && $components->working($entry) !== []
+            if ($components->authored($entry)
                 && ($users = $components->usedBy($entry)) !== []) {
                 throw \Illuminate\Validation\ValidationException::withMessages([
                     'component' => 'This component is used by entries: '.implode(', ', $users),

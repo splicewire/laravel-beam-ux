@@ -207,11 +207,19 @@ class PublicEntryController
             ...$this->pageProps->for($chrome['layout'], $entry, $chain, $actor),
         ], );
 
-        if ($record !== null || $bindings !== [] || $componentData !== [] || ($chromeArtifacts['layout']['components'] ?? []) !== []
-            || ($chromeArtifacts['template']['components'] ?? []) !== [] || $this->gate->isRestricted($chain)) {
+        if ($record !== null || $bindings !== [] || app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->privateCache
+            || $this->gate->isRestricted($chain)) {
             // Post-gate output for a restricted body: never stored, so a revoked grant bites on the
             // next request rather than living on in a shared cache (ADR-0122, ADR-0209 §8).
             $response->headers->set('Cache-Control', 'no-store, private');
+        }
+
+        if ($record === null && $bindings === [] && ! app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->privateCache
+            && ! $this->gate->isRestricted($chain) && ($componentData !== [] || ($chromeArtifacts['layout']['components'] ?? []) !== [] || ($chromeArtifacts['template']['components'] ?? []) !== [])) {
+            // Each request projects current dependency pins; a publish changes this validator without recompiling callers.
+            $response->setEtag(hash('sha256', json_encode([$this->artifactVersion($entry, $preview), $componentData, $chromeArtifacts], JSON_THROW_ON_ERROR)));
+            // Other host page props/nav may be actor-specific; validators do not grant shared-cache permission.
+            $response->headers->set('Cache-Control', 'private, max-age=0, must-revalidate');
         }
 
         return $response;
