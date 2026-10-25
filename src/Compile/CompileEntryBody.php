@@ -25,10 +25,10 @@ use Splicewire\Beam\Ux\Type\UxType;
  * compilable, what counts as already-current, what happens when compilation fails — has to be identical
  * in all three or the doctor check that reports staleness is checking a rule only some producers follow.
  *
- * **Compilable means a `page` whose format the bound compiler handles.** `page` is the sole routable
- * type (ADR-0209 §6), so it is the only type whose body is ever fetched by a reader; compiling themes
- * and components would spend Node on bodies nothing streams. A page in a format the compiler does not
- * handle is reported by the doctor rather than silently passed over — see {@see uncompilable()}.
+ * **Pages, components, layouts and templates compile independently** when the bound compiler handles
+ * their format. Component and chrome artifacts are composed at render at their own Publication Pins;
+ * changing one never requires recompiling its callers. Theme data is not a body artifact.
+ * Unsupported body formats remain a doctor finding — see {@see uncompilable()}.
  *
  * **Nothing here degrades.** A failure propagates as {@see CompilationFailed} to whichever producer
  * called: a save 500s, a batch reports the file, a backfill exits non-zero. That is the whole content of
@@ -44,7 +44,7 @@ class CompileEntryBody
 
     /**
      * Compile one entry and store the artifact for its current version. Returns the artifact path, or
-     * null when the entry is not compilable at all (not a page, or a format this compiler does not
+     * null when the entry is not compilable at all (not a body-artifact type, or a format this compiler does not
      * handle) — a no-op the producers can call unconditionally.
      *
      * `$source` is passed by producers that already hold it (a save, an import) so the body is not read
@@ -62,6 +62,11 @@ class CompileEntryBody
             return null;
         }
 
+        // A failed/transient body read is not evidence that a current artifact was cleared.
+        if (! $force && $this->artifacts->has($entry)) {
+            return $this->artifacts->path($entry);
+        }
+
         // Backfills must compile the pin's snapshot, never file a newer working body at its address.
         $pin = $entry->getAttribute('published_version');
         if ($pin !== null && $entry->particle_id !== null) {
@@ -76,13 +81,9 @@ class CompileEntryBody
             return $path;
         }
 
-        if (! $force && $this->artifacts->has($entry)) {
-            return $this->artifacts->path($entry);
-        }
-
         $source ??= $this->sourceFor($entry);
 
-        if ($source === null) {
+        if ($source === null || $source === '') {
             // No body is no artifact. A cleared document (`[]`) used to compile to a module that
             // exported nothing, and the reader then told every GUEST to run an artisan command over a
             // page whose honest state is "nothing authored yet" — measured 2026-09-12 on beam.test,
@@ -112,12 +113,19 @@ class CompileEntryBody
 
             return null;
         }
-        if (! $force && $this->artifacts->disk()->exists($path)) {
-            return $path;
-        }
         $source = self::printsAsModule($entry, $body)
             ? JsonDocPrinter::printModule($body)
             : $entry->codec()->decode($body);
+
+        if ($source === '') {
+            // Legacy token data can carry component/tsx without a source facet. It is data, not a module.
+            $this->artifacts->forgetVersion($entry, $versionId);
+
+            return null;
+        }
+        if (! $force && $this->artifacts->disk()->exists($path)) {
+            return $path;
+        }
 
         return $this->artifacts->putVersion($entry, $versionId, $this->compiler->compile($entry, $source));
     }
@@ -125,7 +133,8 @@ class CompileEntryBody
     /** Whether this entry is one the action compiles at all. */
     public function compilable(BeamUxEntry $entry): bool
     {
-        return $entry->type === UxType::Page && $this->compiler->handles($entry);
+        return in_array($entry->type, [UxType::Page, UxType::Component, UxType::Layout, UxType::Template], true)
+            && $this->compiler->handles($entry);
     }
 
     /**
@@ -136,7 +145,8 @@ class CompileEntryBody
      */
     public function uncompilable(BeamUxEntry $entry): bool
     {
-        return $entry->type === UxType::Page && ! $this->compiler->handles($entry);
+        return in_array($entry->type, [UxType::Page, UxType::Component, UxType::Layout, UxType::Template], true)
+            && ! $this->compiler->handles($entry);
     }
 
     /**

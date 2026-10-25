@@ -40,9 +40,12 @@ class JsonDocPrinter
      */
     public static function print(array $doc, int $depth = 0): string
     {
+        $nodes = self::hydrate($doc);
+        $componentBody = count($nodes) === 1 && $nodes[0] instanceof JsonBlockNode && $nodes[0]->component !== null;
+
         return implode("\n", array_map(
-            fn (JsonNode $n) => self::printNode($n, $depth).';',
-            self::hydrate($doc),
+            fn (JsonNode $n) => self::printNode($n, $depth, componentBody: $componentBody).';',
+            $nodes,
         ));
     }
 
@@ -98,6 +101,18 @@ class JsonDocPrinter
 
         if (self::hasComponentReferences($nodes)) {
             $signature = 'Page({ components = {}, styleRegistry, bindings = {}, record, bindingRuntime, ...componentProps } = {})';
+        }
+
+        $definition = count($nodes) === 1 && $nodes[0] instanceof JsonBlockNode ? $nodes[0]->component : null;
+        if ($definition !== null) {
+            $defaults = [];
+            foreach ($definition->props as $prop) {
+                if ($prop->default !== null) {
+                    $defaults[$prop->name] = $prop->default;
+                }
+            }
+            $signature = 'Page({ components = {}, styleRegistry, bindings = {}, bindingRuntime, ...suppliedComponentProps } = {})';
+            $styleSetup = '  const componentProps = { ...'.json_encode((object) $defaults, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).", ...suppliedComponentProps };\n".$styleSetup;
         }
 
         return "export default function {$signature} {\n{$destructure}{$styleSetup}  return (\n    <>\n{$styleTag}{$body}\n    </>\n  );\n}\n";
@@ -165,7 +180,7 @@ class JsonDocPrinter
         return array_keys($found);
     }
 
-    private static function printNode(JsonNode $node, int $depth, bool $module = false, ?array &$styles = null, string $record = 'undefined', string $bindings = 'bindings'): string
+    private static function printNode(JsonNode $node, int $depth, bool $module = false, ?array &$styles = null, string $record = 'undefined', string $bindings = 'bindings', bool $componentBody = false): string
     {
         $pad = str_repeat(self::INDENT, $depth);
 
@@ -211,7 +226,7 @@ class JsonDocPrinter
 
             return $pad.'{bindingRuntime.when('.json_encode($node->when->toArray(), JSON_THROW_ON_ERROR).', '.$record.') ? (<>'."\n".$content."\n".$pad.'</>) : null}';
         }
-        if ($node->name === 'Slot') {
+        if ($node->name === 'Slot' && (! $componentBody || $module)) {
             $name = 'children';
             foreach ($node->props as $prop) {
                 if ($prop->name !== 'name' || $prop->kind !== PropKind::StringValue) {
@@ -220,13 +235,27 @@ class JsonDocPrinter
                 $name = $prop->value;
             }
             \Splicewire\Beam\Ux\JsonDoc\ComponentReference::assert($name);
-            $fallback = $node->children === [] ? '' : ' ?? '.self::slotValue($node->children, $depth, $module, $styles, $record, $bindings);
+            $fallback = $node->children === [] ? '' : ' ?? '.self::slotValue($node->children, $depth, $module, $styles, $record, $bindings, $componentBody);
 
             return $pad.'{'.($module ? 'componentProps.' : '').$name.$fallback.'}';
         }
         $isFragment = $node->name === null;
         $tag = (string) ($node->name ?? '');
         $props = $node->props;
+        if ($module && $node->component !== null) {
+            // The authored single root receives instance styles; the versioned body stays unchanged.
+            $rootClass = '""';
+            $props = array_values(array_filter($props, static function (JsonProp $prop) use (&$rootClass): bool {
+                if ($prop->name !== 'className') {
+                    return true;
+                }
+                $rootClass = $prop->kind === PropKind::Prop ? 'componentProps.'.$prop->value
+                    : ($prop->kind === PropKind::Expression ? '('.$prop->value.')' : json_encode((string) $prop->value, JSON_THROW_ON_ERROR));
+
+                return false;
+            }));
+            $props[] = new JsonProp('className', PropKind::Expression, '['.$rootClass.',componentProps.className].filter(Boolean).join(" ")');
+        }
         $style = $node->style?->toArray();
         if ($style !== null) {
             if ($isFragment) {
@@ -268,8 +297,11 @@ class JsonDocPrinter
                 $attrs .= ' bdStyle={'.json_encode($style, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}';
             }
         }
+        if (! $module && $node->component !== null) {
+            $attrs .= ' bdComponent={'.json_encode($node->component->toArray(), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).'}';
+        }
         foreach ($node->slots as $name => $children) {
-            $attrs .= ' '.$name.'={'.self::slotValue($children, $depth, $module, $styles, $record, $bindings).'}';
+            $attrs .= ' '.$name.'={'.self::slotValue($children, $depth, $module, $styles, $record, $bindings, $componentBody).'}';
         }
         $open = $isFragment ? '<>' : "<{$tag}{$attrs}>";
         $close = $isFragment ? '</>' : "</{$tag}>";
@@ -293,7 +325,7 @@ class JsonDocPrinter
 
         $childParts = [];
         foreach ($children as $child) {
-            $childParts[] = self::printNode($child, $depth + 1, $module, $styles, $record, $bindings);
+            $childParts[] = self::printNode($child, $depth + 1, $module, $styles, $record, $bindings, $componentBody);
         }
         $kids = implode("\n", $childParts);
 
@@ -394,14 +426,14 @@ class JsonDocPrinter
         return (string) preg_replace_callback('/[{}<>]/', fn (array $m) => "{'{$m[0]}'}", $s);
     }
 
-    private static function slotValue(array $nodes, int $depth, bool $module, ?array &$styles, string $record, string $bindings): string
+    private static function slotValue(array $nodes, int $depth, bool $module, ?array &$styles, string $record, string $bindings, bool $componentBody = false): string
     {
         if (count($nodes) === 1 && $nodes[0] instanceof JsonBlockNode && $nodes[0]->name !== 'Slot') {
-            return ltrim(self::printNode($nodes[0], $depth, $module, $styles, $record, $bindings));
+            return ltrim(self::printNode($nodes[0], $depth, $module, $styles, $record, $bindings, $componentBody));
         }
         $parts = [];
         foreach ($nodes as $node) {
-            $parts[] = self::printNode($node, $depth + 1, $module, $styles, $record, $bindings);
+            $parts[] = self::printNode($node, $depth + 1, $module, $styles, $record, $bindings, $componentBody);
         }
 
         return '<>'.implode("\n", $parts).'</>';

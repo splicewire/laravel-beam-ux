@@ -153,7 +153,9 @@ class BeamUxEntry extends Model implements WorkflowManaged
     use HasFacets;
     use HasUuids;
     use HasVisibility;
-    use SoftDeletes;
+    use SoftDeletes {
+        restore as private restoreSoftDeleted;
+    }
     use WorkflowManagedTrait;
 
     protected $table = 'beam_ux_entries';
@@ -178,6 +180,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
         'schema_ref',
         // Draft-schema marker (S9): is `schema_ref` an INFERRED draft, not an authored/graduated spec?
         'schema_is_draft',
+        'component_kind',
         'facade_ref',
         'type',
         'format',
@@ -238,6 +241,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
             'type' => UxType::class,
             'format' => UxFormat::class,
             'body_style' => BodyStyle::class,
+            'component_kind' => \Splicewire\Beam\Ux\Components\ComponentKind::class,
             // The inferred-draft marker (S9): true only when `schema_ref` is an inference draft.
             'schema_is_draft' => 'boolean',
             // The ordered realm fallback stack (ticket 03) — a list<string>, same shape as
@@ -273,6 +277,23 @@ class BeamUxEntry extends Model implements WorkflowManaged
         return array_values(array_map(strval(...), (array) $tokens));
     }
 
+    /** The name claim and the soft-delete transition commit or roll back together. */
+    public function restore()
+    {
+        if (! app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->authored($this)) {
+            return $this->restoreSoftDeleted();
+        }
+
+        return $this->getConnection()->transaction(function () {
+            $locked = $this->newQuery()->withTrashed()->lockForUpdate()->findOrFail($this->getKey());
+            $result = $locked->restoreSoftDeleted();
+            $this->setRawAttributes($locked->getAttributes(), true);
+            $this->setRelations($locked->getRelations());
+
+            return $result;
+        });
+    }
+
     /**
      * Default a new entry's `realms` fallback stack onto `[realm]` (ticket 03). Only fires when the
      * entry has a realm and no stack was set explicitly — so a host that authors a multi-realm entry
@@ -282,9 +303,35 @@ class BeamUxEntry extends Model implements WorkflowManaged
      */
     protected static function booted(): void
     {
+        static::saved(fn () => app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget());
+        static::deleted(fn () => app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget());
+        static::softDeleted(function (BeamUxEntry $entry): void {
+            if ($entry->getConnection()->getSchemaBuilder()->hasColumn($entry->getTable(), 'component_name')) {
+                $entry->newQuery()->withTrashed()->whereKey($entry->getKey())->update(['component_name' => null, 'published_component_name' => null]);
+            }
+        });
+        static::restoring(function (BeamUxEntry $entry): void {
+            $components = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class);
+            if ($components->authored($entry)) {
+                $pin = $components->version($entry, $entry->published_version);
+                $components->assertRestoredPublishedName($entry, $pin);
+                $components->reserveName($entry, $components->working($entry));
+                $components->setPublishedName($entry, $pin);
+            }
+        });
+        static::restored(fn () => app(\Splicewire\Beam\Ux\Components\ComponentScope::class)->forget());
         static::saved(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());
         static::deleted(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());
         static::restored(fn () => \Splicewire\Beam\Ux\Bindings\RecordPages::forgetScope());
+        static::deleting(function (BeamUxEntry $entry): void {
+            $components = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class);
+            if ($components->authored($entry)
+                && ($users = $components->usedBy($entry)) !== []) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'component' => 'This component is used by entries: '.implode(', ', $users),
+                ]);
+            }
+        });
         static::creating(function (BeamUxEntry $entry): void {
             // `format` defaults by `type`, not a single fleet-wide constant (found live: a `theme`
             // entry left at the old flat `tsx` default silently resolved TsxBodyCodec, which returns
@@ -569,7 +616,8 @@ class BeamUxEntry extends Model implements WorkflowManaged
         }
 
         if ($type === UxType::Component) {
-            return BodyKind::Source;
+            return $this->getAttribute('component_kind') === \Splicewire\Beam\Ux\Components\ComponentKind::Authored
+                ? BodyKind::Blocks : BodyKind::Source;
         }
 
         return $this->codec() instanceof AcceptsJsonDoc ? BodyKind::Blocks : BodyKind::Source;

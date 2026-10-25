@@ -11,5 +11,10 @@ use Splicewire\Beam\Data\BeamData;
 final class RepeatRecordsData extends BeamData
 {
     /** @param list<array<string, mixed>> $records Resource-owned projected fields. */
-    public function __construct(public array $records, public bool $hasMore, public int $page) {}
+    public function __construct(
+        #[\Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType('Record<string, unknown>[]')]
+        public array $records,
+        public bool $hasMore,
+        public int $page,
+    ) {}
 }

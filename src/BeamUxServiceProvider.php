@@ -112,6 +112,8 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 // The Page Fields a parent declares for its child pages (ADR-0233 d4). Nullable, beside its siblings.
                 'shared/add_child_fields_to_beam_ux_entries_table',
                 'shared/add_record_page_to_beam_ux_entries_table',
+                'shared/add_component_kind_to_beam_ux_entries_table',
+                'shared/add_component_names_to_beam_ux_entries_table',
                 'shared/create_beam_ux_releases_table',
                 // A Release's provenance (`origin`: direct | built). An ALTER beside the create for the same reason
                 // as its siblings; existing Releases are `built`.
@@ -132,6 +134,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
     public function packageRegistered(): void
     {
         $this->app->scoped(Bindings\RecordPageScope::class);
+        $this->app->scoped(Components\ComponentScope::class);
         $this->app->bind(PreviewGrantResolver::class, PreviewGrantService::class);
         // DOCS-06b: the templates the provenance backfill may match an unstamped row against; packages register theirs.
         $this->app->singleton(Provenance\ProvenanceTemplates::class);
@@ -189,6 +192,10 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 Doctor\RecordPageIsolationAudit::class,
+            );
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                Doctor\AuthoredComponentAudit::class,
             );
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',

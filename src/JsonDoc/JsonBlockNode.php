@@ -51,6 +51,8 @@ class JsonBlockNode extends JsonNode
         #[LiteralTypeScriptType('Record<string, JsonNode[]>')]
         #[Optional]
         public array $slots = [],
+        #[Optional]
+        public ?\Splicewire\Beam\Ux\Components\ComponentDefinitionData $component = null,
     ) {
         parent::__construct($kind);
         foreach ($slots as $slot => $nodes) {

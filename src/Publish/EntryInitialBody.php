@@ -22,6 +22,12 @@ class EntryInitialBody
         if (! $entry->codec() instanceof AcceptsJsonDoc) {
             return [];
         }
+        if (in_array($entry->type, [\Splicewire\Beam\Ux\Type\UxType::Layout, \Splicewire\Beam\Ux\Type\UxType::Template], true)) {
+            return [[
+                'kind' => 'block', 'name' => 'div', 'isComponent' => false, 'props' => [], 'dynamic' => false,
+                'children' => [['kind' => 'block', 'name' => 'Slot', 'isComponent' => true, 'props' => [], 'children' => [], 'dynamic' => false]],
+            ]];
+        }
         $defaults = json_decode(file_get_contents(__DIR__.'/../../resources/editor/default-trees.json'), true, flags: JSON_THROW_ON_ERROR);
 
         return $defaults[(string) $entry->slug] ?? [[

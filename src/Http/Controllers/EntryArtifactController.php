@@ -69,6 +69,9 @@ class EntryArtifactController
             ]);
         }
 
+        // An Authored Working Head is never public, including the legacy version-less route.
+        abort_if(app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->authored($model)
+            && $model->getAttribute('published_version') === null, Response::HTTP_NOT_FOUND);
         abort_unless($this->compile->compilable($model), Response::HTTP_NOT_FOUND);
 
         $code = $this->artifacts->read($model);

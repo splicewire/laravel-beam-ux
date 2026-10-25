@@ -68,10 +68,12 @@ final class CanvasBodyGuard
         $this->assertWellFormed($body);
 
         $profile = $this->resolver->resolve($entry);
+        [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $body, $profile);
+        app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->assertGraph($entry, $body, profile: $profile);
         app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $body, $profile);
         $checkIds = $this->diff->changedIds($this->workingHead($entry), $body);
 
-        $this->legality->assert($body, $profile, $checkIds);
+        $this->legality->assert($body, $profile, $checkIds, $component);
         // EP-07d: a changed form posts only to a public intake schema this host's door accepts.
         app(\Splicewire\Beam\Ux\Intake\IntakeForms::class)->assertBody($body, $checkIds);
     }
@@ -96,7 +98,9 @@ final class CanvasBodyGuard
 
         $this->assertWellFormed($body);
 
-        ['code' => $code, 'legality' => $legality] = $this->legality->violations($body, $this->resolver->resolve($entry));
+        [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $body, $this->resolver->resolve($entry));
+        app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->assertGraph($entry, $body, profile: $profile);
+        ['code' => $code, 'legality' => $legality] = $this->legality->violations($body, $profile, component: $component);
 
         if ($code !== []) {
             throw ValidationException::withMessages(['body' => $code]);
@@ -114,7 +118,7 @@ final class CanvasBodyGuard
      * @param  array<int|string, mixed>  $working  the working copy about to be pinned
      * @param  array<int|string, mixed>  $published  the body of the currently published version ([] if none)
      */
-    public function assertPublishable(BeamUxEntry $entry, array $working, array $published): void
+    public function assertPublishable(BeamUxEntry $entry, array $working, array $published, array $componentRefs = []): void
     {
         if (! JsonDocShape::is($working)) {
             $this->assertNotSourceWhereCodeIsRefused($entry, $working);
@@ -125,8 +129,10 @@ final class CanvasBodyGuard
         $this->assertWellFormed($working);
 
         $profile = $this->resolver->resolve($entry);
+        [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $working, $profile);
+        app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->assertGraph($entry, $working, publishing: true, refs: $componentRefs, profile: $profile);
         app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $working, $profile);
-        $this->legality->assert($working, $profile, $this->diff->changedIds($published, $working));
+        $this->legality->assert($working, $profile, $this->diff->changedIds($published, $working), $component);
         // EP-07d: at Publish EVERY form is re-checked, not only the changed ones, so a restored version or an allow-list
         // that shrank since the save never puts a form live that posts to a schema the door refuses.
         app(\Splicewire\Beam\Ux\Intake\IntakeForms::class)->assertBody($working);

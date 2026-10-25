@@ -75,6 +75,8 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         // (`beam.ux.file_language`). Afterwards page settings change it and Publish moves the mirror file.
         #[Title('File language'), In(['tsx', 'mdx']), MapInputName('fileLanguage')]
         public ?string $fileLanguage = null,
+        #[Title('Component kind'), In(['authored', 'source']), MapInputName('componentKind')]
+        public ?string $componentKind = null,
     ) {}
 
     /** Existing untitled rows open as an empty required field; identity and namespace stay server-owned. */
@@ -89,6 +91,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             segment: $entry->segment,
             navOrder: $entry->nav_order,
             fileLanguage: $entry->type === \Splicewire\Beam\Ux\Type\UxType::Page ? $entry->format?->value : null,
+            componentKind: $entry->getAttribute('component_kind')?->value,
         );
     }
 
@@ -126,6 +129,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             'segment' => ['nullable', 'string', 'max:255', self::segmentUniqueRule($context)],
             'navOrder' => ['nullable', 'integer'],
             'fileLanguage' => ['nullable', 'string', Rule::in(['tsx', 'mdx'])],
+            'componentKind' => ['nullable', 'string', Rule::in(['authored', 'source'])],
         ];
     }
 
@@ -171,6 +175,13 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
     public function toModelAttributes(): array
     {
         $current = self::currentEntry();
+        if ($this->componentKind !== null && $this->type !== 'component') {
+            throw \Illuminate\Validation\ValidationException::withMessages(['componentKind' => 'Only a component declares an authored or source kind.']);
+        }
+        if ($this->componentKind !== null && $current?->particle_id !== null
+            && $this->componentKind !== ($current->getAttribute('component_kind')?->value ?? 'source')) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['componentKind' => 'A component with a body cannot change its declared kind.']);
+        }
         if ($current?->type === \Splicewire\Beam\Ux\Type\UxType::Page) {
             $format = $this->fileLanguage === null ? $current->getAttribute('format') : \Splicewire\Beam\Ux\Format\UxFormat::tryFrom($this->fileLanguage);
             foreach (['title' => $this->title, 'parent_id' => $this->parentId, 'segment' => $this->segment, 'nav_order' => $this->navOrder, 'format' => $format] as $column => $value) {
@@ -193,6 +204,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             'parent_id' => $this->type === 'page' ? null : $this->parentId,
             'segment' => $this->type === 'page' ? null : $this->segment,
             'nav_order' => $this->navOrder,
+            ...($this->componentKind === null ? [] : ['component_kind' => $this->componentKind]),
             ...($this->type === 'page' ? ['format' => $this->createdFileLanguage()] : $this->withoutFileLanguage()),
         ];
     }

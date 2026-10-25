@@ -63,7 +63,7 @@ final class ManifestProfileResolver
             }
         }
 
-        return [
+        return app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->extendProfile($entry, [
             'profile' => $base['profile'],
             'version' => 1,
             'doc' => $base['doc'],
@@ -72,7 +72,7 @@ final class ManifestProfileResolver
             'x-prose' => $base['x-prose'],
             'x-admits-code' => $this->residency->isCentralResident($entry),
             ...(($collections = app(\Splicewire\Beam\Ux\Bindings\ProfileCollections::class)->manifest($entry, $profile)) === [] ? [] : ['x-collections' => $collections]),
-        ];
+        ]);
     }
 
     /**
