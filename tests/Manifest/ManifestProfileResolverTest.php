@@ -74,22 +74,32 @@ class ManifestProfileResolverTest extends TestCase
         }
     }
 
-    public function test_an_mdx_entry_resolves_the_beam_mdx_kit_as_code_components_and_a_tsx_entry_does_not(): void
+    public function test_an_mdx_entry_resolves_the_beam_mdx_kit_only_on_a_host_that_holds_mdx_as_blocks(): void
     {
-        // ADR-0233 d7 — the kit is declared on the server (splicewire/laravel-beam-mdx), so an MDX page's kit
-        // tags are checked against the profile like any other block.
+        // ADR-0233 d7 — the kit is declared on the server (splicewire/laravel-beam-mdx), so on a host whose MDX
+        // pages hold blocks an MDX page's kit tags are checked against the profile like any other block. A host
+        // that keeps MDX as source (the default) serves the manifest it always has.
         $mdx = $this->entry('central');
         $mdx->format = 'mdx';
         $tsx = $this->entry('central');
         $tsx->format = 'tsx';
+        $kit = array_column((new \Splicewire\Beam\Mdx\Kit\MdxKitNodeSource)->manifest('content')['nodes'], 'name');
+        $this->assertCount(12, $kit);
 
+        $off = array_column($this->resolver('central_db')->resolve($mdx)['nodes'], 'name');
+        foreach ($kit as $name) {
+            $this->assertNotContains($name, $off, 'the default-off manifest is unchanged');
+        }
+
+        config(['beam.ux.mdx.holds_blocks' => true]);
         $mdxNames = array_column($this->resolver('central_db')->resolve($mdx)['nodes'], 'name');
         $tsxNames = array_column($this->resolver('central_db')->resolve($tsx)['nodes'], 'name');
 
-        foreach (['Callout', 'Steps', 'Step', 'CardGrid', 'Card', 'Ref', 'Artifact'] as $kit) {
-            $this->assertContains($kit, $mdxNames);
-            $this->assertNotContains($kit, $tsxNames);
+        foreach ($kit as $name) {
+            $this->assertContains($name, $mdxNames);
+            $this->assertNotContains($name, $tsxNames);
         }
+        $this->assertSame(array_values(array_diff($mdxNames, $kit)), $off, 'the gate adds the kit and nothing else');
         $this->assertNotContains('Content', $mdxNames, 'a fragment is an Authored Component placed by its own tag (d8)');
         $this->assertSame(count($mdxNames), count(array_unique($mdxNames)), 'the kit never redeclares a base name');
     }
