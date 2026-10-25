@@ -11,6 +11,21 @@ class ComponentPropData extends BeamData
 {
     public const RUNTIME_PROPS = ['children', 'components', 'bindings', 'bindingRuntime', 'styleRegistry', 'className', 'key', 'ref'];
 
+    /** @return array<string, mixed> */
+    public static function rules(): array
+    {
+        return [
+            // Override intersection inference for the scalar union, retaining optional defaults.
+            'default' => ['sometimes', 'nullable', function (string $attribute, mixed $value, \Closure $fail): void {
+                if (! is_scalar($value)) {
+                    $fail('The '.$attribute.' field must be a string, number, boolean or null.');
+                }
+            }],
+            'choices' => ['sometimes', 'array', 'list'],
+            'choices.*' => ['string'],
+        ];
+    }
+
     /** @param list<string> $choices */
     public function __construct(
         public string $name,

@@ -10,6 +10,12 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 #[TypeScript]
 class JsonTextNode extends JsonNode
 {
+    /** @return array<string, mixed> */
+    public static function rules(): array
+    {
+        return ['value' => ['present', 'string']];
+    }
+
     public function __construct(
         public string $value,
         // Pin the generated TS discriminant to the literal `'text'` (see JsonBlockNode); the morph
