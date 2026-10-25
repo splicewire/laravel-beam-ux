@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Data;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
+use Spatie\TypeScriptTransformer\Attributes\TypeScriptType;
 use Splicewire\Beam\Data\BeamData;
 
 /** Author-only read projection; nothing here updates the Local Session document or its saved head. */
@@ -12,11 +13,11 @@ use Splicewire\Beam\Data\BeamData;
 final class EntryCanvasBindingsOutputData extends BeamData
 {
     public function __construct(
-        #[LiteralTypeScriptType('Record<string, RepeatRecordsData>')]
+        #[TypeScriptType('array<string, RepeatRecordsData>')]
         public array $bindings,
         #[LiteralTypeScriptType('Record<string, unknown> | null')]
         public ?array $record,
-        #[LiteralTypeScriptType('CanvasRecordChoiceData[]')]
+        #[TypeScriptType('list<CanvasRecordChoiceData>')]
         #[DataCollectionOf(CanvasRecordChoiceData::class)]
         public array $choices,
         public bool $hasMore,
