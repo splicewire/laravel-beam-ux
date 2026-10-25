@@ -75,7 +75,7 @@ final class RecordPages
     public function validationEntry(BeamUxEntry $entry, ?array $settings = null, bool $working = true): BeamUxEntry
     {
         $copy = clone $entry;
-        if ($settings === null && $working) {
+        if ($settings === null && $working && $copy->particle_id !== null) {
             $settings = $copy->particle?->meta['pageSettings'] ?? null;
         }
         if ($settings !== null) {
