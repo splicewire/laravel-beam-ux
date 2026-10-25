@@ -1,0 +1,17 @@
+# Component authoring in the canvas
+
+An Authored Component is an entry with its own Working Head and Publication Pin. Its instance exposes the declared Props and Slots; its internal blocks stay sealed. A registered Code Component with the same name keeps precedence.
+
+Select an instance to edit its Props as literal values or fields from the current Record. Binding choices match the declared scalar type. A required prop without a default cannot be unset. Block Style and display/access declarations apply at the instance root; they do not select an internal node. Caller-owned Slot content remains editable at its caller path inside the rendered component.
+
+**Make component** creates an Authored entry through the native entry resource, saves its component draft, refreshes the readable component catalogue, and then replaces the selected block or contiguous siblings in the page's Local Session. Undo restores the page selection; it does not delete the new entry. If catalogue refresh fails after creation, the entry ID is retained and the page swap is not applied. Source creation and the page's Local Session have separate persistence boundaries.
+
+A caller Record condition on the selected root stays on the instance. An interior caller Record condition is refused with guidance to move it to the selected root: the current grammar has no prop-condition arm. Numeric or boolean caller text bindings are also refused before creation because a component text reference requires a string prop. Literal text or string Record fields can be lifted without inventing a conversion syntax.
+
+**Make prop** moves a selected literal value into the component's declared interface and retains the literal as its default. **Duplicate component** delegates to the native duplicator, which reserves a distinct name; existing instances continue using the original. **Detach component** copies the displayed Working Head one level, substitutes props and Slots, and assigns fresh block IDs. Nested components remain component instances. Detach is available for Authored Components only.
+
+**Edit component** is shown only after the existing addressed `update` check admits the current actor. Opening rechecks that admission. The component has a separate Local Session, Undo and Save; the parent remains mounted and its unsaved history waits unchanged. The reach bar counts referencing **entries** at Working Head or Publication Pin, not pages or instance occurrences. Beyond 500 candidate entries the bar says reach is unavailable rather than scanning an unbounded realm.
+
+The host may supply the optional `componentCapabilities`, `createComponent` and `duplicateComponent` client ports. Their absence makes the corresponding operation unavailable. Native editor routes mount those operations through `EditorRoutes`; creation also checks the native entry-create permission and duplication preserves its particle-create check. This feature adds no editing permission or production binding.
+
+Save still advances a Working Head. Publication retains the existing Release and component-dependency rules; editing a component never silently advances its Publication Pin.
