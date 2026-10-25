@@ -259,7 +259,7 @@ class EntryPublicationTest extends TestCase
         // Supply reverse order directly to the completion boundary: member insertion order cannot
         // change the entry lock order used by publication and completion.
         (new \ReflectionMethod(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class, 'complete'))
-            ->invoke(app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class), $release->fresh(), $prepared, $author);
+            ->invoke(app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class), $release->fresh(), $prepared, [], $author);
         $expected = [(string) $one->id, (string) $two->id];
         sort($expected);
         $this->assertSame([$expected[0]], $reservations);
@@ -363,6 +363,83 @@ class EntryPublicationTest extends TestCase
         $this->assertSame("---\ntitle: Help\nnavOrder: 2\n---\n\n# Current published MDX\n", file_get_contents($target['absolute']));
         $this->assertEquals($before, $publication->state($entry->fresh()));
         $this->assertSame($oldPin, $historicalMember->fresh()->version_id);
+    }
+
+    public function test_mdx_remirror_replaces_only_the_exact_inspected_file_with_current_pin(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->mdxFileFixture();
+        $body['content'] = "\n# New published MDX\n";
+        $draft = $publication->draftFromBase($entry->fresh(), $body, $publication->state($entry->fresh())->headVersion);
+        $publication->publishVersion($entry->fresh(), $draft->headVersion);
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $publishedBytes = file_get_contents($target['absolute']);
+        file_put_contents($target['absolute'], str_replace('# New published MDX', '# External edit', $publishedBytes));
+        $inspection = $service->inspect($member, $author);
+        $this->assertSame('differs', $inspection->state);
+        $this->assertTrue($inspection->canRemirror);
+        $input = $this->fileInput($inspection);
+        file_put_contents($target['absolute'], str_replace('# External edit', '# Changed after inspection', file_get_contents($target['absolute'])));
+        $this->assertFileConflict('file-moved', fn () => $service->remirror($member, $author, $input));
+        $this->assertStringContainsString('Changed after inspection', file_get_contents($target['absolute']));
+        $inspection = $service->inspect($member, $author);
+        $before = $publication->state($entry->fresh());
+        $result = $service->remirror($member, $author, $this->fileInput($inspection));
+        $this->assertSame('remirrored', $result->status);
+        $this->assertSame("---\ntitle: Help\nnavOrder: 2\n---\n\n# New published MDX\n", file_get_contents($target['absolute']));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_take_all_as_drafts_uses_one_exact_batch_and_refuses_if_any_file_moved(): void
+    {
+        [$one, $oneMember, $author, $body, $oneTarget, $publication] = $this->themeFileFixture();
+        $two = BeamUxEntry::create(['slug' => 'file-theme-two', 'type' => 'theme', 'format' => 'css', 'realm' => 'site', 'namespace' => 'theme']);
+        $publication->write($two, $body);
+        $publication->publishAuthoredBody($two);
+        $release = app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->create($one, 'Batch file drafts', $author);
+        app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->putMember($release, $one->id,
+            $publication->state($one->fresh())->headVersion, $author);
+        app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->putMember($release, $two->id,
+            $publication->state($two->fresh())->headVersion, $author);
+        app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->transition($release, 'publish', $author);
+        $members = $release->members()->orderBy('entry_id')->get();
+        $oneMember = $members->firstWhere('entry_id', $one->id);
+        $twoMember = $members->firstWhere('entry_id', $two->id);
+        $twoTarget = app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class)->target($two->fresh());
+        $changed = $body;
+        $changed['site']['accent'] = '#aabbcc';
+        file_put_contents($oneTarget['absolute'], $one->codec()->decode($changed));
+        file_put_contents($twoTarget['absolute'], $two->codec()->decode($changed));
+
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $inspection = $service->inspect($oneMember, $author);
+        $this->assertTrue($inspection->canTakeAll);
+        $this->assertCount(2, $inspection->takeAllItems);
+        $tokens = array_map(fn (array $item): array => array_diff_key($item, ['path' => true]), $inspection->takeAllItems);
+        $input = new \Splicewire\Beam\Ux\Data\FileBatchReconcileInputData($tokens, true);
+        $beforeOne = $publication->state($one->fresh());
+        $beforeTwo = $publication->state($two->fresh());
+        file_put_contents($twoTarget['absolute'], 'changed after batch inspection');
+        $this->assertFileConflict('file-moved', fn () => $service->takeAll($oneMember, $author, $input));
+        $this->assertEquals($beforeOne, $publication->state($one->fresh()));
+        $this->assertEquals($beforeTwo, $publication->state($two->fresh()));
+
+        file_put_contents($twoTarget['absolute'], $two->codec()->decode($changed));
+        $inspection = $service->inspect($oneMember, $author);
+        $beforeOne = $publication->state($one->fresh());
+        $beforeTwo = $publication->state($two->fresh());
+        $result = $service->takeAll($oneMember, $author,
+            new \Splicewire\Beam\Ux\Data\FileBatchReconcileInputData(array_map(
+                fn (array $item): array => array_diff_key($item, ['path' => true]), $inspection->takeAllItems), true));
+        $this->assertSame(2, $result->count);
+        $this->assertSame(['drafted', 'drafted'], array_map(fn ($entry) => $entry->status, $result->entries));
+        $afterOne = $publication->state($one->fresh());
+        $afterTwo = $publication->state($two->fresh());
+        $this->assertSame($beforeOne->publishedVersion, $afterOne->publishedVersion);
+        $this->assertSame($beforeTwo->publishedVersion, $afterTwo->publishedVersion);
+        $this->assertNotSame($beforeOne->headVersion, $afterOne->headVersion);
+        $this->assertNotSame($beforeTwo->headVersion, $afterTwo->headVersion);
+        $this->assertSame($one->codec()->decode($changed), file_get_contents($oneTarget['absolute']));
+        $this->assertSame($two->codec()->decode($changed), file_get_contents($twoTarget['absolute']));
     }
 
     public function test_missing_mdx_restore_preserves_an_appearing_file_and_short_write(): void
@@ -2685,6 +2762,24 @@ class EntryPublicationTest extends TestCase
             $this->assertSame('ux.author', $op->ability, $class);
             $this->assertFalse($op->abilityModel, $class);
             $this->assertSame(EntryPublicationData::class, $op->output, $class);
+        }
+    }
+
+    public function test_files_panel_reconcile_operations_are_author_only_particle_writes(): void
+    {
+        $expected = [
+            \Splicewire\Beam\Ux\Particle\FileRemirrorOp::class => ['remirror-file', \Splicewire\Beam\Ux\Data\FileReconcileInputData::class, \Splicewire\Beam\Ux\Data\FileReconcileResultData::class],
+            \Splicewire\Beam\Ux\Particle\FileTakeAllDraftsOp::class => ['take-all-drafts', \Splicewire\Beam\Ux\Data\FileBatchReconcileInputData::class, \Splicewire\Beam\Ux\Data\FileBatchReconcileResultData::class],
+        ];
+        foreach ($expected as $class => [$name, $input, $output]) {
+            $op = (new ReflectionClass($class))->getAttributes(ParticleOp::class)[0]->newInstance();
+            $this->assertSame('beam-ux-release-files', $op->resource);
+            $this->assertSame($name, $op->name);
+            $this->assertSame(OperationKind::Write, $op->kind);
+            $this->assertSame('ux.author', $op->ability);
+            $this->assertFalse($op->abilityModel);
+            $this->assertSame($input, $op->input);
+            $this->assertSame($output, $op->output);
         }
     }
 

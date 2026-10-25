@@ -85,9 +85,9 @@ through the same Release identity; a file that reappears is treated as drift. Mi
 Take-down Releases still produce one commit. History associates the Take-down recording with the
 version whose published bytes it removes. Move recording remains unavailable.
 
-Canonical Theme import and missing-only Restore are available through the current-file panel.
-Batch Take all as drafts, existing-file Restore overwrite, generic version panel adoption and remote push
-remain broader EP-16 work. See the starter's docs/examples/service-desk-recording.md for the
+Canonical Theme/MDX import, missing-only Restore, exact Re-mirror, and bounded Take all as drafts are
+available through the current-file panel. Existing-file Restore overwrite, generic version panel
+adoption and remote push remain broader EP-16 work. See the starter's docs/examples/service-desk-recording.md for the
 fresh/upgrade and ordinary hook-failure/Files-retry journey. Focused tests and mounted UI/Git proof
 are separate; existing full-suite compatibility limitations are not erased by this feature.
 

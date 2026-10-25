@@ -116,6 +116,7 @@ class ReleaseRecording
         // Match publication's global entry-ID lock order before SQLite reservation or row reads.
         $allMembers = array_merge($prepared, $takedowns);
         usort($allMembers, fn (array $left, array $right): int => strcmp((string) $left[0]->getKey(), (string) $right[0]->getKey()));
+        $preparedIds = array_fill_keys(array_map(fn (array $item): string => (string) $item[0]->getKey(), $prepared), true);
         try {
             try {
                 $this->authorize($release, $actor);
@@ -137,22 +138,20 @@ class ReleaseRecording
             }
             // Keep entry rows locked while completing mirrors; a concurrent publication cannot move
             // their pins between this stale check and the writes. Git does not hold a DB transaction.
-            $release->getConnection()->transaction(function () use ($prepared, $takedowns, $allMembers, $release) {
+            $release->getConnection()->transaction(function () use ($preparedIds, $takedowns, $allMembers, $release) {
                 // Reserve SQLite before pin reads; other drivers retain the existing sorted row locks.
                 if ($allMembers !== [] && $release->getConnection()->getDriverName() === 'sqlite') {
                     $first = reset($allMembers)[0];
                     $first->newQuery()->whereKey($first->getKey())->toBase()->update(['id' => $first->getKey()]);
                 }
-                foreach ($prepared as [$entry, $version]) {
+                foreach ($allMembers as [$entry, $version]) {
                     $current = $entry->newQuery()->lockForUpdate()->find($entry->id);
-                    if ($current === null || $current->published_version !== (string) $version->id
-                        || $current->workflow_marking !== $entry->workflow_marking) {
-                        throw new RecordingFailure('superseded', 'A newer publication superseded this mirror completion.');
-                    }
-                }
-                foreach ($takedowns as [$entry, $version]) {
-                    $current = $entry->newQuery()->lockForUpdate()->find($entry->id);
-                    if ($current === null || $current->published_version !== (string) $version->id
+                    if (isset($preparedIds[(string) $entry->getKey()])) {
+                        if ($current === null || $current->published_version !== (string) $version->id
+                            || $current->workflow_marking !== $entry->workflow_marking) {
+                            throw new RecordingFailure('superseded', 'A newer publication superseded this mirror completion.');
+                        }
+                    } elseif ($current === null || $current->published_version !== (string) $version->id
                         || $current->workflow_marking === BeamUxEntry::MARKING_PUBLISHED) {
                         throw new RecordingFailure('superseded', 'A newer publication superseded this Take-down completion.');
                     }
@@ -166,7 +165,11 @@ class ReleaseRecording
                 if ($takedowns !== [] && ! $local) {
                     throw new RecordingFailure('mirror-disabled', 'Take-down recording needs an enabled local mirror disk.');
                 }
-                foreach ($prepared as [$entry, $version, $body]) {
+                foreach ($allMembers as $member) {
+                    if (! isset($preparedIds[(string) $member[0]->getKey()])) {
+                        continue;
+                    }
+                    [$entry, $version, $body] = $member;
                     $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
                     if ($local) {
                         $this->mirrorContained($disk->path(''), $path);
@@ -188,7 +191,11 @@ class ReleaseRecording
                     if ($receipt === null || $receipt->state === 'unavailable') {
                         return;
                     }
-                    foreach ($takedowns as [$entry]) {
+                    foreach ($allMembers as $member) {
+                        if (isset($preparedIds[(string) $member[0]->getKey()])) {
+                            continue;
+                        }
+                        [$entry] = $member;
                         $file = collect($receipt?->manifest ?? [])->first(fn (array $item) => ($item['action'] ?? null) === 'delete'
                             && $item['entryId'] === (string) $entry->id);
                         if ($file === null) {
