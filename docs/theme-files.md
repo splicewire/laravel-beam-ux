@@ -23,7 +23,8 @@ canvas/shell/site properties declared with `format: color` may change to support
 Generic strings such as shell radius/shadow are not color properties. Font, responsive and
 extension leaves must remain unchanged. Canonical empty
 is explicitly outside key-preserving import; malformed/no-root/duplicate/foreign CSS is invalid.
-Canonical Page/MDX body-only import uses the separate fixed dispatch described below. Other codecs, clearing tokens, batch reconciliation and arbitrary CSS parsing remain unsupported.
+Canonical Page/MDX body-only import uses the separate fixed dispatch described below. Other codecs,
+clearing tokens and arbitrary CSS parsing remain unsupported.
 
 The confirmed input captures working head, current pin, file existence/SHA256 and server-derived
 codec/disk/placement fingerprint. No body/path/actor can be submitted. Under the entry transaction,
@@ -33,6 +34,21 @@ changes a receipt or commits. Explicit Reload obtains new tokens after conflict;
 SQLite reserves its writer using a no-op on the addressed row before reading preconditions because
 SQLite ignores FOR UPDATE. Other supported connections use the ordinary entry row lock. This shares
 publication’s database writer serialization and does not add a second Git lock order.
+
+## Re-mirror and Take all as drafts
+
+Re-mirror is available for an existing differing supported file to an actor with publish
+permission. It replaces only the exact inspected regular file with the current published bytes;
+head, pin, draft history, Release and Git are unchanged. The operation requires fresh confirmation
+tokens and refuses if the head, pin, placement or file bytes moved. Missing files use the separate
+exclusive Restore path; Re-mirror never creates them.
+
+Take all as drafts is available when at least one supported file in the addressed Release differs.
+The server returns a bounded set of member/head/pin/file/placement tokens and requires explicit
+confirmation of that exact set. It checks admission for each member, locks entries in stable order,
+and validates the entire batch before recording drafts in one transaction. A stale, inaccessible,
+unsupported or invalid member blocks the whole batch. Published pins, mirror files, Release state,
+receipts and Git remain unchanged; each imported body still follows ordinary review before publish.
 
 ## Missing-only Restore
 

@@ -132,6 +132,11 @@ class LocalGit
         $env = $this->environment($work, $base);
         $this->run($this->root, ['read-tree', $base], $env);
         foreach ($manifest as $file) {
+            if (($file['action'] ?? null) === 'delete') {
+                $this->run($this->root, ['update-index', '--force-remove', '--', $file['path']], $env);
+
+                continue;
+            }
             $bytes = base64_decode($file['bytes'], true);
             if ($bytes === false || hash('sha256', $bytes) !== $file['sha256']) {
                 throw new RecordingFailure('manifest', 'The frozen recording manifest is invalid.');
@@ -174,8 +179,15 @@ class LocalGit
             }
         }
         foreach ($manifest as $file) {
-            $blob = $this->run($this->root, ['show', $sha.':'.$file['path']], [], null, false);
             $entry = $this->run($this->root, ['ls-tree', $sha, '--', $file['path']]);
+            if (($file['action'] ?? null) === 'delete') {
+                if ($entry !== '') {
+                    throw new RecordingFailure('recovery-required', 'A Git hook restored a frozen Take-down member.');
+                }
+
+                continue;
+            }
+            $blob = $this->run($this->root, ['show', $sha.':'.$file['path']], [], null, false);
             if (hash('sha256', $blob) !== $file['sha256'] || ! str_starts_with($entry, $file['mode'].' blob ')) {
                 throw new RecordingFailure('recovery-required', 'A Git hook changed a frozen Release member.');
             }
@@ -207,6 +219,18 @@ class LocalGit
     public function baseTree(string $base): string
     {
         return $this->run($this->root, ['rev-parse', $base.'^{tree}']);
+    }
+
+    /** A deletion may remove only the exact previously published blob from the captured parent. */
+    public function baseFileMatches(string $base, string $path, string $sha256, string $mode): bool
+    {
+        $entry = $this->run($this->root, ['ls-tree', $base, '--', $path]);
+        if (! str_starts_with($entry, $mode.' blob ')) {
+            return false;
+        }
+        $blob = $this->run($this->root, ['show', $base.':'.$path], [], null, false);
+
+        return hash('sha256', $blob) === $sha256;
     }
 
     /** Private detached HEAD remains a durable object anchor even when a result DB write fails. */

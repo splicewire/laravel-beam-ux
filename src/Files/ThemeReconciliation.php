@@ -7,6 +7,8 @@ use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Ux\Body\BodyKind;
 use Splicewire\Beam\Ux\Codec\CssBodyCodec;
 use Splicewire\Beam\Ux\Codec\MdxBodyCodec;
+use Splicewire\Beam\Ux\Data\FileBatchReconcileInputData;
+use Splicewire\Beam\Ux\Data\FileBatchReconcileResultData;
 use Splicewire\Beam\Ux\Data\FileDraftDiagnosticData;
 use Splicewire\Beam\Ux\Data\FileInspectionData;
 use Splicewire\Beam\Ux\Data\FileReconcileInputData;
@@ -57,11 +59,16 @@ class ThemeReconciliation
                 $data->state = 'differs';
                 $data->message = 'The local file differs from the current published version. Take it as a draft deliberately.';
                 $data->canTake = true;
+                $data->canRemirror = $this->mayRestore($entry, $actor);
             }
         } catch (FileConflict $failure) {
             $data->state = in_array($failure->reason, ['invalid', 'valid-empty-outside-import'], true) ? $failure->reason : 'unsupported';
             $data->message = $failure->getMessage();
         }
+
+        $batchItems = $this->takeAllSnapshot($member, $actor);
+        $data->takeAllItems = $batchItems;
+        $data->canTakeAll = count($batchItems) > 0;
 
         return $data;
     }
@@ -120,6 +127,133 @@ class ThemeReconciliation
 
             return new FileReconcileResultData('restored', 'The missing published file was restored. Draft, history and Git are unchanged.', $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
         });
+    }
+
+    public function remirror(BeamUxReleaseMember $member, Authenticatable $actor, FileReconcileInputData $input): FileReconcileResultData
+    {
+        $entry = $this->entry($member, $actor, true);
+
+        return $entry->getConnection()->transaction(function () use ($entry, $input, $member, $actor) {
+            $this->serializeEntry($entry);
+            $locked = $entry->newQuery()->whereKey($entry->id)->lockForUpdate()->firstOrFail();
+            $this->entry($member, $actor, true);
+            [$locked, $state, $target, $published] = $this->context($locked);
+            $file = $this->check($input, $state, $target);
+            if (! $file['exists']) {
+                throw new FileConflict('file-moved', 'The local file is missing. Use Restore after a fresh comparison.');
+            }
+            if ($file['bytes'] === $published) {
+                return new FileReconcileResultData('unchanged', 'The local file already matches the published version. Nothing changed.', $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
+            }
+            $this->sameTarget($locked, $target);
+            $again = $this->files->read($target);
+            if ($again !== $file) {
+                throw new FileConflict('file-moved', 'The local file changed during validation. Nothing was overwritten. Reload comparison.');
+            }
+            $this->files->replace($target, $published, $file);
+
+            return new FileReconcileResultData('remirrored', 'The local file was replaced with the current published version. Draft and history are unchanged.', $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
+        });
+    }
+
+    public function takeAll(BeamUxReleaseMember $anchor, Authenticatable $actor, FileBatchReconcileInputData $input): FileBatchReconcileResultData
+    {
+        if (! $input->confirmed) {
+            throw new FileConflict('confirmation', 'Explicit confirmation of the inspected batch is required.', 422);
+        }
+        $this->entry($anchor, $actor);
+        $release = BeamUxRelease::on($anchor->getConnectionName())->findOrFail($anchor->release_id);
+        $expected = $this->takeAllSnapshot($anchor, $actor);
+        $provided = $input->items;
+        usort($provided, fn (array $left, array $right): int => strcmp($left['memberId'], $right['memberId']));
+        $expectedTokens = array_map(fn (array $item): array => array_diff_key($item, ['path' => true]), $expected);
+        if (count($expected) < 1 || $provided !== $expectedTokens) {
+            throw new FileConflict('file-moved', 'The Files changed since the batch comparison. Nothing was taken. Reload comparison.');
+        }
+
+        return $release->getConnection()->transaction(function () use ($anchor, $actor, $release, $expected, $provided) {
+            $members = BeamUxReleaseMember::on($release->getConnectionName())
+                ->where('release_id', $release->id)->whereIn('id', array_column($provided, 'memberId'))->get()->keyBy('id');
+            if ($members->count() !== count($provided)) {
+                throw new FileConflict('member-moved', 'A Release member changed since comparison. Nothing was taken.');
+            }
+            $entries = [];
+            foreach ($provided as $item) {
+                $member = $members[$item['memberId']];
+                $entries[] = [$member, $this->entry($member, $actor)];
+            }
+            usort($entries, fn (array $left, array $right): int => strcmp((string) $left[1]->getKey(), (string) $right[1]->getKey()));
+            foreach ($entries as [, $entry]) {
+                $this->serializeEntry($entry);
+            }
+            $drafts = [];
+            foreach ($entries as [$member, $entry]) {
+                $locked = $entry->newQuery()->whereKey($entry->id)->lockForUpdate()->firstOrFail();
+                [$locked, $state, $target] = $this->context($locked);
+                $item = collect($provided)->first(fn (array $candidate) => $candidate['memberId'] === (string) $member->id);
+                $token = new FileReconcileInputData($item['expectedHeadVersion'], $item['expectedPublishedVersion'],
+                    $item['expectedFileExists'], $item['expectedFileSha256'], $item['fingerprint'], true);
+                $file = $this->check($token, $state, $target);
+                if (! $file['exists']) {
+                    throw new FileConflict('file-moved', 'A local file is missing. Nothing was taken. Reload comparison.');
+                }
+                $body = $this->decodeFile($locked, $file['bytes'], $this->pinnedBody($locked));
+                $drafts[] = [$locked, $body, $token, $target, $file];
+            }
+            if ($this->takeAllSnapshot($anchor, $actor) !== $expected) {
+                throw new FileConflict('file-moved', 'The Files changed during batch validation. Nothing was taken. Reload comparison.');
+            }
+            $results = [];
+            foreach ($drafts as [$entry, $body, $token, $target, $file]) {
+                if ($this->files->target($entry) !== $target || $this->files->read($target) !== $file) {
+                    throw new FileConflict('file-moved', 'A local file changed during batch validation. Nothing was taken. Reload comparison.');
+                }
+                $draft = app(EntryPublication::class)->draftFromBase($entry, $body, $token->expectedHeadVersion,
+                    'Taken from local file as part of a confirmed batch', $actor instanceof \Illuminate\Database\Eloquent\Model ? $actor : null);
+                $diagnostic = $draft->compileError === null ? null : FileDraftDiagnosticData::compileFailed();
+                $results[] = new FileReconcileResultData($diagnostic === null ? 'drafted' : 'drafted-with-compile-error',
+                    $diagnostic?->message ?? 'Draft saved. The published version and local file are unchanged.',
+                    $entry->getAttribute('id'), $draft->headVersion, $draft->publishedVersion, $diagnostic);
+            }
+
+            return new FileBatchReconcileResultData(count($results), $results);
+        });
+    }
+
+    /** @return list<array{memberId: string, expectedHeadVersion: string, expectedPublishedVersion: string, expectedFileExists: bool, expectedFileSha256: string, fingerprint: string, path: string}> */
+    private function takeAllSnapshot(BeamUxReleaseMember $anchor, Authenticatable $actor): array
+    {
+        $release = BeamUxRelease::on($anchor->getConnectionName())->findOrFail($anchor->release_id);
+        $items = [];
+        $blocked = false;
+        $members = $release->members()->orderBy('entry_id')->limit(51)->get();
+        if ($members->count() > 50) {
+            return [];
+        }
+        foreach ($members as $member) {
+            try {
+                $entry = $this->entry($member, $actor);
+                [$entry, $state, $target, $published] = $this->context($entry);
+                $file = $this->files->read($target);
+                if (! $file['exists'] || $file['bytes'] === $published) {
+                    continue;
+                }
+                $this->decodeFile($entry, $file['bytes'], $this->pinnedBody($entry));
+                if ($state->headVersion === null || $state->publishedVersion === null || $file['hash'] === null) {
+                    $blocked = true;
+
+                    continue;
+                }
+                $items[] = ['memberId' => (string) $member->id, 'expectedHeadVersion' => $state->headVersion,
+                    'expectedPublishedVersion' => $state->publishedVersion, 'expectedFileExists' => true,
+                    'expectedFileSha256' => $file['hash'], 'fingerprint' => $target['fingerprint'], 'path' => $target['path']];
+            } catch (\Throwable) {
+                $blocked = true;
+            }
+        }
+        usort($items, fn (array $left, array $right): int => strcmp($left['memberId'], $right['memberId']));
+
+        return $blocked ? [] : $items;
     }
 
     private function serializeEntry(BeamUxEntry $entry): void

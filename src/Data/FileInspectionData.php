@@ -25,5 +25,9 @@ final class FileInspectionData extends BeamData
         public bool $canRestore = false,
         public bool $sourceTruncated = false,
         public ?string $format = null,
+        public bool $canRemirror = false,
+        public bool $canTakeAll = false,
+        /** @var list<array{memberId: string, path: string, expectedHeadVersion: string, expectedPublishedVersion: string, expectedFileExists: bool, expectedFileSha256: ?string, fingerprint: string}> */
+        public array $takeAllItems = [],
     ) {}
 }

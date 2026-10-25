@@ -120,6 +120,23 @@ class EntryPublicationTest extends TestCase
         $this->assertSame($index, hash_file('sha256', $repo.'/.git/index'));
     }
 
+    public function test_normal_release_still_mirrors_to_a_non_local_disk(): void
+    {
+        Storage::fake('remote-mirror');
+        config(['filesystems.disks.remote-mirror.driver' => 's3', 'beam.ux.storage.mirror_disk' => 'remote-mirror']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+
+        $result = $this->publishDraftAs($entry, $author);
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+
+        $this->assertSame('published', $result->release->status);
+        $this->assertSame($entry->codec()->decode(self::BODY_TWO), Storage::disk('remote-mirror')->get($path));
+    }
+
     public static function configuredMirrorRoots(): array
     {
         return [['configured-link'], ['platform-temp-alias']];
@@ -242,7 +259,7 @@ class EntryPublicationTest extends TestCase
         // Supply reverse order directly to the completion boundary: member insertion order cannot
         // change the entry lock order used by publication and completion.
         (new \ReflectionMethod(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class, 'complete'))
-            ->invoke(app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class), $release->fresh(), $prepared, $author);
+            ->invoke(app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class), $release->fresh(), $prepared, [], $author);
         $expected = [(string) $one->id, (string) $two->id];
         sort($expected);
         $this->assertSame([$expected[0]], $reservations);
@@ -346,6 +363,83 @@ class EntryPublicationTest extends TestCase
         $this->assertSame("---\ntitle: Help\nnavOrder: 2\n---\n\n# Current published MDX\n", file_get_contents($target['absolute']));
         $this->assertEquals($before, $publication->state($entry->fresh()));
         $this->assertSame($oldPin, $historicalMember->fresh()->version_id);
+    }
+
+    public function test_mdx_remirror_replaces_only_the_exact_inspected_file_with_current_pin(): void
+    {
+        [$entry, $member, $author, $body, $target, $publication] = $this->mdxFileFixture();
+        $body['content'] = "\n# New published MDX\n";
+        $draft = $publication->draftFromBase($entry->fresh(), $body, $publication->state($entry->fresh())->headVersion);
+        $publication->publishVersion($entry->fresh(), $draft->headVersion);
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $publishedBytes = file_get_contents($target['absolute']);
+        file_put_contents($target['absolute'], str_replace('# New published MDX', '# External edit', $publishedBytes));
+        $inspection = $service->inspect($member, $author);
+        $this->assertSame('differs', $inspection->state);
+        $this->assertTrue($inspection->canRemirror);
+        $input = $this->fileInput($inspection);
+        file_put_contents($target['absolute'], str_replace('# External edit', '# Changed after inspection', file_get_contents($target['absolute'])));
+        $this->assertFileConflict('file-moved', fn () => $service->remirror($member, $author, $input));
+        $this->assertStringContainsString('Changed after inspection', file_get_contents($target['absolute']));
+        $inspection = $service->inspect($member, $author);
+        $before = $publication->state($entry->fresh());
+        $result = $service->remirror($member, $author, $this->fileInput($inspection));
+        $this->assertSame('remirrored', $result->status);
+        $this->assertSame("---\ntitle: Help\nnavOrder: 2\n---\n\n# New published MDX\n", file_get_contents($target['absolute']));
+        $this->assertEquals($before, $publication->state($entry->fresh()));
+    }
+
+    public function test_take_all_as_drafts_uses_one_exact_batch_and_refuses_if_any_file_moved(): void
+    {
+        [$one, $oneMember, $author, $body, $oneTarget, $publication] = $this->themeFileFixture();
+        $two = BeamUxEntry::create(['slug' => 'file-theme-two', 'type' => 'theme', 'format' => 'css', 'realm' => 'site', 'namespace' => 'theme']);
+        $publication->write($two, $body);
+        $publication->publishAuthoredBody($two);
+        $release = app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->create($one, 'Batch file drafts', $author);
+        app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->putMember($release, $one->id,
+            $publication->state($one->fresh())->headVersion, $author);
+        app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->putMember($release, $two->id,
+            $publication->state($two->fresh())->headVersion, $author);
+        app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->transition($release, 'publish', $author);
+        $members = $release->members()->orderBy('entry_id')->get();
+        $oneMember = $members->firstWhere('entry_id', $one->id);
+        $twoMember = $members->firstWhere('entry_id', $two->id);
+        $twoTarget = app(\Splicewire\Beam\Ux\Files\LocalThemeFile::class)->target($two->fresh());
+        $changed = $body;
+        $changed['site']['accent'] = '#aabbcc';
+        file_put_contents($oneTarget['absolute'], $one->codec()->decode($changed));
+        file_put_contents($twoTarget['absolute'], $two->codec()->decode($changed));
+
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $inspection = $service->inspect($oneMember, $author);
+        $this->assertTrue($inspection->canTakeAll);
+        $this->assertCount(2, $inspection->takeAllItems);
+        $tokens = array_map(fn (array $item): array => array_diff_key($item, ['path' => true]), $inspection->takeAllItems);
+        $input = new \Splicewire\Beam\Ux\Data\FileBatchReconcileInputData($tokens, true);
+        $beforeOne = $publication->state($one->fresh());
+        $beforeTwo = $publication->state($two->fresh());
+        file_put_contents($twoTarget['absolute'], 'changed after batch inspection');
+        $this->assertFileConflict('file-moved', fn () => $service->takeAll($oneMember, $author, $input));
+        $this->assertEquals($beforeOne, $publication->state($one->fresh()));
+        $this->assertEquals($beforeTwo, $publication->state($two->fresh()));
+
+        file_put_contents($twoTarget['absolute'], $two->codec()->decode($changed));
+        $inspection = $service->inspect($oneMember, $author);
+        $beforeOne = $publication->state($one->fresh());
+        $beforeTwo = $publication->state($two->fresh());
+        $result = $service->takeAll($oneMember, $author,
+            new \Splicewire\Beam\Ux\Data\FileBatchReconcileInputData(array_map(
+                fn (array $item): array => array_diff_key($item, ['path' => true]), $inspection->takeAllItems), true));
+        $this->assertSame(2, $result->count);
+        $this->assertSame(['drafted', 'drafted'], array_map(fn ($entry) => $entry->status, $result->entries));
+        $afterOne = $publication->state($one->fresh());
+        $afterTwo = $publication->state($two->fresh());
+        $this->assertSame($beforeOne->publishedVersion, $afterOne->publishedVersion);
+        $this->assertSame($beforeTwo->publishedVersion, $afterTwo->publishedVersion);
+        $this->assertNotSame($beforeOne->headVersion, $afterOne->headVersion);
+        $this->assertNotSame($beforeTwo->headVersion, $afterTwo->headVersion);
+        $this->assertSame($one->codec()->decode($changed), file_get_contents($oneTarget['absolute']));
+        $this->assertSame($two->codec()->decode($changed), file_get_contents($twoTarget['absolute']));
     }
 
     public function test_missing_mdx_restore_preserves_an_appearing_file_and_short_write(): void
@@ -795,6 +889,128 @@ class EntryPublicationTest extends TestCase
         $recorder->retry($release, $author);
         $this->assertSame($recovered->sha, $recorder->receipt($release)->sha);
         $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+    }
+
+    public function test_release_records_a_take_down_as_one_private_index_deletion(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $takenDown = $this->publishedPage(self::BODY_ONE);
+        $updated = $this->publishedPage(self::BODY_TWO);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $this->enableReleaseTakeDown($takenDown);
+        $draft = app(EntryPublication::class)->recordDraft($updated, self::BODY_ONE);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $takenDownPath = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($takenDown)->pathFor($takenDown);
+        $updatedPath = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($updated)->pathFor($updated);
+        $git(['add', '--', $takenDownPath, $updatedPath]);
+        $git(['commit', '-m', 'published member fixtures']);
+        $base = $git(['rev-parse', 'HEAD']);
+        $release = $service->create($takenDown, 'Mixed publish and take-down', $author);
+        $service->putMember($release, $takenDown->id, null, $author);
+        $service->putMember($release, $updated->id, $draft->headVersion, $author);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $service->transition($release, 'publish', $reviewer);
+
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release->fresh());
+        $this->assertSame('recorded', $receipt?->state, $receipt?->error ?? '');
+        $this->assertSame($base, $git(['rev-parse', 'HEAD^']));
+        $expectedPaths = [$takenDownPath, $updatedPath];
+        sort($expectedPaths);
+        $this->assertSame($expectedPaths, (function () use ($git) {
+            $paths = explode("\n", $git(['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD']));
+            sort($paths);
+
+            return $paths;
+        })());
+        $this->assertFileDoesNotExist($repo.'/'.$takenDownPath);
+        $this->assertFileExists($repo.'/'.$updatedPath);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+        \Illuminate\Support\Facades\Auth::shouldReceive('userResolver')->andReturn(fn () => $author);
+        request()->setUserResolver(fn () => $author);
+        $this->assertSame($author, request()->user());
+        $publishedVersion = app(\Rushing\Versioning\Contracts\VersionStore::class)
+            ->version($takenDown->particle, $takenDown->published_version);
+        \Illuminate\Support\Facades\DB::connection()->flushQueryLog();
+        \Illuminate\Support\Facades\DB::connection()->enableQueryLog();
+        $history = \Splicewire\Beam\Ux\Data\EntryVersionData::fromVersion($publishedVersion, false, false);
+        $queries = \Illuminate\Support\Facades\DB::connection()->getQueryLog();
+        \Illuminate\Support\Facades\DB::connection()->disableQueryLog();
+        $receiptQueries = array_values(array_filter($queries, fn (array $query) => str_contains($query['query'], 'beam_ux_release_recordings')));
+        $this->assertNotEmpty($receiptQueries);
+        $this->assertTrue(collect($receiptQueries)->contains(fn (array $query) => str_contains($query['query'], 'json_each')));
+        foreach ($receiptQueries as $query) {
+            $select = explode(' from ', strtolower($query['query']), 2)[0];
+            $this->assertStringNotContainsString('manifest', $select, 'History queries must not select frozen file bytes.');
+        }
+        $this->assertContains($release->id, array_map(fn ($recording) => $recording->releaseId, $history->recordings));
+    }
+
+    public function test_take_down_refuses_drift_without_deleting_unknown_mirror_content(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $this->enableReleaseTakeDown($entry);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $release = $service->create($entry, 'Take down drifted file', $author);
+        $service->putMember($release, $entry->id, null, $author);
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        $git(['add', '--', $path]);
+        $git(['commit', '-m', 'published member fixture']);
+        file_put_contents($repo.'/'.$path, "unknown local content\n");
+        $base = $git(['rev-parse', 'HEAD']);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $service->transition($release, 'publish', $reviewer);
+
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release->fresh());
+        $this->assertSame('unavailable', $receipt?->state);
+        $this->assertSame('mirror-drift', $receipt?->error);
+        $this->assertSame("unknown local content\n", file_get_contents($repo.'/'.$path));
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+    }
+
+    public function test_failed_take_down_commit_retries_the_same_deletion_once(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $this->enableReleaseTakeDown($entry);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        $git(['add', '--', $path]);
+        $git(['commit', '-m', 'published member fixture']);
+        $base = $git(['rev-parse', 'HEAD']);
+        file_put_contents($repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 1\n");
+        chmod($repo.'/.git/hooks/pre-commit', 0755);
+        $release = $service->create($entry, 'Take down with retry', $author);
+        $service->putMember($release, $entry->id, null, $author);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $service->transition($release, 'publish', $reviewer);
+        $recorder = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class);
+        $failed = $recorder->receipt($release->fresh());
+        $this->assertSame('failed', $failed?->state);
+        $this->assertStringStartsWith('mirror-deleted:git-failed:', $failed?->error ?? '');
+        $this->assertFileDoesNotExist($repo.'/'.$path);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+
+        file_put_contents($repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 0\n");
+        $recorder->retry($release->fresh(), $author);
+        $recorded = $recorder->receipt($release->fresh());
+        $this->assertSame('recorded', $recorded?->state, $recorded?->error ?? '');
+        $this->assertSame($base, $git(['rev-parse', 'HEAD^']));
+        $recorder->retry($release->fresh(), $author);
+        $this->assertSame($recorded->sha, $recorder->receipt($release->fresh())->sha);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+    }
+
+    private function enableReleaseTakeDown(BeamUxEntry $entry): void
+    {
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)
+            ->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => BeamUxEntry::MARKING_PUBLISHED])->save();
     }
 
     public function test_real_result_database_failure_after_git_install_recovers_same_commit(): void
@@ -2546,6 +2762,24 @@ class EntryPublicationTest extends TestCase
             $this->assertSame('ux.author', $op->ability, $class);
             $this->assertFalse($op->abilityModel, $class);
             $this->assertSame(EntryPublicationData::class, $op->output, $class);
+        }
+    }
+
+    public function test_files_panel_reconcile_operations_are_author_only_particle_writes(): void
+    {
+        $expected = [
+            \Splicewire\Beam\Ux\Particle\FileRemirrorOp::class => ['remirror-file', \Splicewire\Beam\Ux\Data\FileReconcileInputData::class, \Splicewire\Beam\Ux\Data\FileReconcileResultData::class],
+            \Splicewire\Beam\Ux\Particle\FileTakeAllDraftsOp::class => ['take-all-drafts', \Splicewire\Beam\Ux\Data\FileBatchReconcileInputData::class, \Splicewire\Beam\Ux\Data\FileBatchReconcileResultData::class],
+        ];
+        foreach ($expected as $class => [$name, $input, $output]) {
+            $op = (new ReflectionClass($class))->getAttributes(ParticleOp::class)[0]->newInstance();
+            $this->assertSame('beam-ux-release-files', $op->resource);
+            $this->assertSame($name, $op->name);
+            $this->assertSame(OperationKind::Write, $op->kind);
+            $this->assertSame('ux.author', $op->ability);
+            $this->assertFalse($op->abilityModel);
+            $this->assertSame($input, $op->input);
+            $this->assertSame($output, $op->output);
         }
     }
 

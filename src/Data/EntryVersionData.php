@@ -8,6 +8,7 @@ use Schemastud\DataSchemas\Attributes\Example;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 
 /**
@@ -91,6 +92,23 @@ class EntryVersionData extends BeamData
         }
         $ids = \Splicewire\Beam\Ux\Models\BeamUxReleaseMember::on($version->getConnectionName())
             ->where('version_id', $version->id)->pluck('release_id');
+        if ($version->getConnection()->getSchemaBuilder()->hasTable('beam_ux_release_recordings')) {
+            $entryId = BeamUxEntry::on($version->getConnectionName())->where('particle_id', $version->versionable_id)->value('id');
+            $recordings = \Splicewire\Beam\Ux\Models\BeamUxReleaseRecording::on($version->getConnectionName())
+                ->select('release_id');
+            $connection = $version->getConnection()->getDriverName();
+            $binding = ['delete', (string) ($entryId ?? ''), (string) $version->id];
+            if ($connection === 'sqlite') {
+                $recordings->whereRaw("exists (select 1 from json_each(beam_ux_release_recordings.manifest) as file where json_extract(file.value, '$.action') = ? and json_extract(file.value, '$.entryId') = ? and json_extract(file.value, '$.versionId') = ?)", $binding);
+            } elseif ($connection === 'pgsql') {
+                $recordings->whereRaw('manifest::jsonb @> ?::jsonb', [json_encode([['action' => $binding[0], 'entryId' => $binding[1], 'versionId' => $binding[2]]], JSON_THROW_ON_ERROR)]);
+            } else {
+                // MySQL's JSON_CONTAINS and compatible drivers support partial-object containment.
+                $recordings->whereJsonContains('manifest', ['action' => $binding[0], 'entryId' => $binding[1], 'versionId' => $binding[2]]);
+            }
+            $takedownIds = $recordings->pluck('release_id');
+            $ids = $ids->merge($takedownIds)->unique()->values();
+        }
         $result = [];
         foreach (\Splicewire\Beam\Ux\Models\BeamUxRelease::on($version->getConnectionName())->whereKey($ids)->where('status', 'published')->get() as $release) {
             try {

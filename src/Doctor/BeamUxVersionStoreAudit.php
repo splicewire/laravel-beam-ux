@@ -6,6 +6,7 @@ use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Schema;
 use Rushing\Doctor\DoctorAudit;
 use Rushing\Doctor\Finding;
+use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Http\Particle\ParticleOperationController;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
@@ -35,6 +36,7 @@ class BeamUxVersionStoreAudit implements DoctorAudit
     public function __construct(
         private Router $router,
         private EntryPublication $publication,
+        private VersionStore $versions,
     ) {}
 
     /**
@@ -49,6 +51,10 @@ class BeamUxVersionStoreAudit implements DoctorAudit
         }
 
         $names = implode(', ', $mounted);
+
+        if (is_a($this->versions, 'Rushing\\Versioning\\Git\\GitVersionStore')) {
+            return [Finding::fail(self::CHECK, "beam-ux-entry ops [{$names}] cannot use GitVersionStore: entry snapshots belong in the database VersionStore; Git records Release mirror projections only.")];
+        }
 
         if (! Schema::hasTable('beam_ux_entries')) {
             return [Finding::fail(self::CHECK, "beam-ux-entry ops [{$names}] are mounted but beam_ux_entries is absent. Run ".self::FIX.'.')];

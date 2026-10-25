@@ -162,6 +162,62 @@ class LocalThemeFile
         }
     }
 
+    /** Atomic, explicit replacement of one inspected regular file with the current published bytes.
+     * @param  array{absolute: string, path: string, fingerprint: string}  $target
+     * @param  array{exists: bool, bytes: ?string, hash: ?string}  $expected
+     */
+    public function replace(array $target, string $bytes, array $expected): void
+    {
+        $path = $target['absolute'];
+        $before = $this->read($target);
+        if (! $expected['exists'] || $before !== $expected) {
+            throw new FileConflict('file-moved', 'The local file changed before Re-mirror. Nothing was overwritten. Reload comparison.');
+        }
+        $this->checkAncestors($path);
+        $temporary = dirname($path).'/.'.basename($path).'.beam-remirror-'.bin2hex(random_bytes(8));
+        $stream = @fopen($temporary, 'x+b');
+        if ($stream === false) {
+            throw new FileConflict('incomplete', 'A temporary mirror file could not be created. Nothing was overwritten.', 503);
+        }
+        try {
+            $written = 0;
+            while ($written < strlen($bytes)) {
+                $count = $this->write($stream, substr($bytes, $written));
+                if ($count === false || $count === 0) {
+                    throw new FileConflict('incomplete', 'Re-mirror could not complete its temporary file. The original is unchanged.', 503);
+                }
+                $written += $count;
+            }
+            if (! @fflush($stream) || ! @fsync($stream)) {
+                throw new FileConflict('incomplete', 'Re-mirror could not confirm durable bytes. The original is unchanged.', 503);
+            }
+            $mode = fileperms($path);
+            if (is_int($mode) && (! @chmod($temporary, $mode & 0777)
+                || ((fileperms($temporary) ?: 0) & 0777) !== ($mode & 0777))) {
+                throw new FileConflict('incomplete', 'Re-mirror could not preserve the local file mode. The original is unchanged.', 503);
+            }
+            fclose($stream);
+            $stream = null;
+            if ($this->read($target) !== $expected) {
+                throw new FileConflict('file-moved', 'The local file changed before Re-mirror. Nothing was overwritten. Reload comparison.');
+            }
+            $this->checkAncestors($path);
+            if (! @rename($temporary, $path)) {
+                throw new FileConflict('incomplete', 'The verified replacement could not be installed. The original is preserved.', 503);
+            }
+            if ($this->read($target)['bytes'] !== $bytes) {
+                throw new FileConflict('incomplete', 'The Re-mirror result could not be verified. Inspect the file before retrying.', 503);
+            }
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+            if (file_exists($temporary) && ! is_link($temporary)) {
+                @unlink($temporary);
+            }
+        }
+    }
+
     private function checkAncestors(string $path, bool $allowMissing = false): void
     {
         clearstatcache();

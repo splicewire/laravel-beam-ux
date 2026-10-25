@@ -265,9 +265,24 @@ final class ReleaseService
                     $pins[$member->entry_id] = $member->observed_pin;
                 }
             }
+            $takedowns = [];
+            foreach ($members as $member) {
+                if ($member->version_id === null) {
+                    $entry = $this->entry($release, $member->entry_id);
+                    $pin = $entry->published_version;
+                    $version = $pin === null || $entry->particle === null
+                        ? null : app(VersionStore::class)->version($entry->particle, $pin);
+                    if ($version === null || ! is_array($version->snapshot['payload'] ?? null)) {
+                        $this->refuse('A Take-down requires the currently published body snapshot.');
+                    }
+                    $takedowns[] = [$entry, $version, $version->snapshot['payload']];
+                }
+            }
             if ($refs !== []) {
                 app(EntryPublication::class)->publishVersions($prototype, $refs, $actor instanceof Model ? $actor : null, $pins,
-                    fn (array $prepared) => app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->prepare($release, $prepared, $actor));
+                    fn (array $prepared) => app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->prepare($release, $prepared, $actor, $takedowns));
+            } elseif ($takedowns !== []) {
+                app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->prepare($release, [], $actor, $takedowns);
             }
             foreach ($members as $member) {
                 if ($member->version_id === null) {

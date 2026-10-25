@@ -3,7 +3,8 @@
 ADR-0226 decisions 3–5 and 7 govern recording. Database versions and publication pins remain
 authority; Git is a local record of published mirror projections, never the VersionStore.
 
-ReleaseService's publish participant collects EntryPublication's fixed prepared snapshots.
+ReleaseService's publish participant collects EntryPublication's fixed prepared snapshots and the
+previously published snapshots for null-version Take-down members.
 The Release-only completion coordinator runs after outer commit, locks current entries, refuses
 superseded pins/markings, completes and reads back every mirror, then records the whole Release.
 Completion reserves and locks entries in the same deterministic entry-ID order as publication.
@@ -76,10 +77,17 @@ reported failure and no partial Git commit is installed. Missing/drifted mirrors
 protected by CAS; concurrent external checkout/rebase/reset is unsupported and detected changes
 refuse. A host may choose its Git executable via beam.ux.recording.git; no request can override it.
 
-Take-down/null-ref/deletion/move recording remains unavailable while publication stays intact.
-Canonical Theme import and missing-only Restore are available through the current-file panel.
-Batch Take all, existing-file Restore overwrite, generic version panel adoption and remote push
-remain broader EP-16 work. See the starter's docs/examples/service-desk-recording.md for the
+Take-down Releases now record their mirror removal in the same private-index Release commit. The
+receipt freezes the old published bytes and SHA; before removal, both the mirror and captured Git
+parent must still contain those bytes and mode. Drift refuses without deleting the unknown file.
+If a hook fails after removal, the receipt marks that fact and retry installs the same deletion
+through the same Release identity; a file that reappears is treated as drift. Mixed publish and
+Take-down Releases still produce one commit. History associates the Take-down recording with the
+version whose published bytes it removes. Move recording remains unavailable.
+
+Canonical Theme/MDX import, missing-only Restore, exact Re-mirror, and bounded Take all as drafts are
+available through the current-file panel. Existing-file Restore overwrite, generic version panel
+adoption and remote push remain broader EP-16 work. See the starter's docs/examples/service-desk-recording.md for the
 fresh/upgrade and ordinary hook-failure/Files-retry journey. Focused tests and mounted UI/Git proof
 are separate; existing full-suite compatibility limitations are not erased by this feature.
 
