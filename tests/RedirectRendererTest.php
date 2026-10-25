@@ -119,9 +119,13 @@ class RedirectRendererTest extends AuthoredComponentNativeTestCase
         $this->app->forgetInstance(\Splicewire\Beam\Ux\Http\PublicEntryGate::class);
         $this->redirect('/old-retired', 'page', ['target_entry_id' => $hidden->id]);
         $this->get('/old-retired')->assertNotFound();
+        // Review of 8ae0219b: a path naming a hidden page is the same dead end, not a host route to send the guest to.
+        $this->redirect('/old-retired-path', 'path', ['target_path' => '/retired']);
+        $this->get('/old-retired-path')->assertNotFound();
 
         $this->redirect('/retired', 'page', ['target_entry_id' => $this->pricing->id]);
         $this->get('/old-retired')->assertStatus(301)->assertRedirect('/pricing');
+        $this->get('/old-retired-path')->assertStatus(301)->assertRedirect('/pricing');
     }
 
     public function test_it_answers_only_a_reader_who_may_read_the_target(): void
@@ -130,12 +134,16 @@ class RedirectRendererTest extends AuthoredComponentNativeTestCase
         $members->forceFill(['access' => ['auth']])->save();
         $this->redirect('/team', 'page', ['target_entry_id' => $members->id]);
 
+        $this->redirect('/team-path', 'path', ['target_path' => '/members']);
+
         $this->get('/team')->assertNotFound();
+        $this->get('/team-path')->assertNotFound();
 
         $reader = (new User)->forceFill(['id' => 1]);
         $answer = $this->actingAs($reader)->get('/team');
         $answer->assertStatus(301)->assertRedirect('/members');
         $this->assertSame('no-store, private', $answer->headers->get('Cache-Control'));
+        $this->assertSame('no-store, private', $this->actingAs($reader)->get('/team-path')->assertStatus(301)->headers->get('Cache-Control'));
     }
 
     public function test_a_page_always_wins(): void

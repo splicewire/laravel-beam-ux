@@ -100,17 +100,30 @@ final class RedirectResolver
 
                 continue;
             }
-            // A path is looked up in turn when a Redirect starts there. Otherwise the guest goes there: the renderer
-            // can't see a host's own routes (a sign-in page, a hand-coded one), so the site answers that URL itself.
+            // A path a page answers for this reader is where the guest goes. A page there that this reader doesn't get
+            // (hidden, or not theirs to read) is looked up in turn, as the renderer would on that miss, and with
+            // nothing further it is a dead end. A path no page is at may be a host's own route (a sign-in page, a
+            // hand-coded one) the renderer can't see: looked up in turn when a Redirect starts there, else sent on.
             $next = RedirectPaths::join((string) $redirect->target_path, $rest);
             $chain = $this->gate->chainFor($next, $realm, $actor, $preview);
-            if ($chain === null && $map->match($next) !== null) {
+            if ($chain !== null) {
+                return $end('answered', $next, $this->gate->isRestricted($chain));
+            }
+            $page = $this->paths->resolve($next, $realm);
+            if ($page !== null && ! $this->gate->hidden($page, $preview)) {
+                // Another reader gets the page here, so whatever this one gets depends on the reader.
+                $trace['private'] = true;
+            }
+            if ($map->match($next) !== null) {
                 $current = $next;
 
                 continue;
             }
+            if ($page !== null) {
+                return $end($this->gate->hidden($page, $preview) ? 'dead-end' : 'denied');
+            }
 
-            return $end('answered', $next, $chain !== null && $this->gate->isRestricted($chain));
+            return $end('answered', $next);
         }
 
         return $end('too-long');
