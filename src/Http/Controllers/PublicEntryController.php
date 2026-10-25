@@ -113,7 +113,7 @@ class PublicEntryController
 
         $preview = $request->attributes->get('beam.ux.preview');
         $preview = $preview instanceof PreviewContext ? $preview : null;
-        $actor = $preview === null ? $request->user() : null;
+        $actor = $preview === null ? $request->user() : $preview->viewer;
         $chain = $this->gate->chainFor($path, $realm, $actor, $preview);
 
         // The uniform 404: unresolvable, unpublished and denied are one answer (§5).
@@ -168,7 +168,11 @@ class PublicEntryController
             ...($preview === null ? [] : ['preview' => [
                 'label' => $preview->grant->release?->title ?? 'saved version',
                 'exitUrl' => route((string) ($defaults['beamUxPreviewExitRoute'] ?? '')),
-                'viewAsMeUrl' => null,
+                'viewAsMeUrl' => PreviewContext::centralViewer($request) === null ? null : route(
+                    (string) ($defaults['beamUxPreviewViewerRoute'] ?? ''),
+                    ['path' => $request->getRequestUri()],
+                    false,
+                ),
             ]]),
             // Props the package owning this page's layout contributes (DOCS-12): none unless one is registered.
             ...$this->pageProps->for($chrome['layout'], $entry, $chain, $actor),

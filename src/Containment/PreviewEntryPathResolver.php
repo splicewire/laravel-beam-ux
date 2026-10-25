@@ -82,12 +82,44 @@ final class PreviewEntryPathResolver
         return $this->urls->resolveChain(array_reverse($chain));
     }
 
-    /** @return \Illuminate\Support\Collection<string, BeamUxEntry> */
-    private function entriesFor(string $realm, PreviewContext $preview): \Illuminate\Support\Collection
+    /** @return list<BeamUxEntry>|null Root-first projected ancestry for a page or chrome artifact. */
+    public function chainForEntry(string $entryId, string $realm, PreviewContext $preview): ?array
     {
-        return BeamUxEntry::query()
-            ->whereJsonContains('realms', $realm)
-            ->where('type', UxType::Page->value)
+        $entries = $this->entriesFor($realm, $preview, pagesOnly: false);
+        $entry = $entries->get($entryId);
+        if (! $entry instanceof BeamUxEntry) {
+            return null;
+        }
+
+        $chain = [];
+        $node = $entry;
+        $seen = [];
+        while ($node !== null) {
+            $id = (string) $node->getKey();
+            if (isset($seen[$id])) {
+                return null;
+            }
+            $seen[$id] = true;
+            $chain[] = $node;
+            $parentId = $node->parent_id;
+            $node = $parentId === null ? null : $entries->get((string) $parentId);
+            if ($parentId !== null && $node === null) {
+                return null;
+            }
+        }
+
+        return array_reverse($chain);
+    }
+
+    /** @return \Illuminate\Support\Collection<string, BeamUxEntry> */
+    private function entriesFor(string $realm, PreviewContext $preview, bool $pagesOnly = true): \Illuminate\Support\Collection
+    {
+        $query = BeamUxEntry::query()->whereJsonContains('realms', $realm);
+        if ($pagesOnly) {
+            $query->where('type', UxType::Page->value);
+        }
+
+        return $query
             ->get()
             ->map(fn (BeamUxEntry $entry) => $preview->project($entry))
             ->filter()

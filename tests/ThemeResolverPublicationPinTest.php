@@ -165,9 +165,15 @@ class ThemeResolverPublicationPinTest extends TestCase
 
     public function test_a_preview_uses_its_versioned_theme_without_changing_the_public_pin(): void
     {
-        $entry = $this->themeEntry(['canvas' => ['accent' => '#777777']]);
+        $entry = $this->themeEntry([
+            'canvas' => ['accent' => '#777777'],
+            'site' => ['logo' => 'published-logo'],
+        ]);
         app(EntryPublication::class)->baseline($entry->fresh());
-        $this->overwriteWorkingCopy($entry, ['canvas' => ['accent' => '#999999']]);
+        $this->overwriteWorkingCopy($entry, [
+            'canvas' => ['accent' => '#999999'],
+            'site' => ['logo' => 'draft-logo'],
+        ]);
         $previewVersion = app(\Rushing\Versioning\Contracts\VersionStore::class)
             ->snapshot(BeamParticle::find($entry->particle_id), 'preview')->getKey();
         $grant = new BeamUxPreviewGrant;
@@ -175,8 +181,10 @@ class ThemeResolverPublicationPinTest extends TestCase
 
         $resolver = new ThemeResolver;
 
-        $this->assertSame('#999999', $resolver->resolve(preview: new PreviewContext($grant))['canvas']['accent']);
-        $this->assertSame('#777777', $resolver->resolve()['canvas']['accent']);
+        $preview = $resolver->resolve(preview: new PreviewContext($grant));
+        $this->assertSame('draft-logo', $preview['site']['logo']);
+        $this->assertSame('#777777', $preview['canvas']['accent'], 'canvas theme stays pinned until publish');
+        $this->assertSame('published-logo', $resolver->resolve()['site']['logo']);
         $this->assertSame('#999999', BeamParticle::find($entry->particle_id)->payload['canvas']['accent']);
     }
 }

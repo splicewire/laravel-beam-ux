@@ -12,7 +12,7 @@ use Splicewire\Beam\Ux\Data\RepeatRecordsData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Preview\PreviewContext;
 
-/** ADR-0229: saved declarations execute as this request's visitor, not their author. */
+/** ADR-0229: declarations execute as the Preview viewer (guest unless a central reviewer opts in). */
 final class BindingResolver
 {
     public function __construct(private PublishedBindingDocument $documents, private ProfileCollections $profiles) {}
@@ -23,10 +23,14 @@ final class BindingResolver
         $preview = $request->attributes->get('beam.ux.preview');
         if ($preview instanceof PreviewContext) {
             $request = clone $request;
-            $request->setUserResolver(static fn () => null);
+            $request->setUserResolver(static fn () => $preview->viewer);
         }
 
-        return $this->resolveDocument($entry, $this->documents->read($entry, $preview instanceof PreviewContext ? $preview : null), $request, $realm);
+        $body = $preview instanceof PreviewContext
+            ? $this->documents->readPreview($entry, $preview)
+            : $this->documents->read($entry);
+
+        return $this->resolveDocument($entry, $body, $request, $realm);
     }
 
     /** Internal author-envelope path: the same reader, on the already authorized current body. */

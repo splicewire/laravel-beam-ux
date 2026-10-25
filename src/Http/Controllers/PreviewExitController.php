@@ -9,6 +9,8 @@ final class PreviewExitController
 {
     public function __invoke(): Response
     {
-        return redirect('/')->withCookie(cookie()->forget(ResolvePreviewContext::COOKIE));
+        return redirect('/')
+            ->withCookie(cookie()->forget(ResolvePreviewContext::COOKIE))
+            ->withCookie(cookie()->forget(ResolvePreviewContext::VIEWER_COOKIE));
     }
 }

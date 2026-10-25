@@ -269,12 +269,13 @@ class ThemeResolver
         }
 
         $versions = $connection !== null ? Version::on($connection) : Version::query();
+        $publishedPin = $entry->getAttribute('published_version');
         $isPreviewVersion = $preview !== null
             && $preview->sharesStorageWith($entry)
             && $preview->contains((string) $entry->getKey());
         $pin = $isPreviewVersion
             ? $preview->versionFor((string) $entry->getKey())
-            : $entry->getAttribute('published_version');
+            : $publishedPin;
 
         if ($isPreviewVersion && $pin === null) {
             return [];
@@ -285,7 +286,26 @@ class ThemeResolver
                 ? app(\Rushing\Versioning\Contracts\VersionStore::class)->version($particle, (string) $pin)?->snapshot
                 : $versions->find((string) $pin)?->snapshot;
 
-            return is_array($snapshot['payload'] ?? null) ? $snapshot['payload'] : [];
+            if (! is_array($snapshot['payload'] ?? null)) {
+                return [];
+            }
+
+            if (! $isPreviewVersion) {
+                return $snapshot['payload'];
+            }
+
+            $published = $publishedPin === null
+                ? []
+                : app(\Rushing\Versioning\Contracts\VersionStore::class)
+                    ->version($particle, (string) $publishedPin)?->snapshot['payload'] ?? [];
+            if (! is_array($published)) {
+                $published = [];
+            }
+
+            return [
+                ...$published,
+                'site' => is_array($snapshot['payload']['site'] ?? null) ? $snapshot['payload']['site'] : [],
+            ];
         }
 
         $hasHistory = $versions

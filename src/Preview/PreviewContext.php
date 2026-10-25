@@ -2,14 +2,30 @@
 
 namespace Splicewire\Beam\Ux\Preview;
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Http\Request;
 use Rushing\Versioning\Contracts\VersionStore;
+use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxPreviewGrant;
 
 /** Request-local authority for a Preview. It is constructed only after the grant is revalidated. */
 final readonly class PreviewContext
 {
-    public function __construct(public BeamUxPreviewGrant $grant) {}
+    public function __construct(public BeamUxPreviewGrant $grant, public ?Authenticatable $viewer = null) {}
+
+    /** A signed-in viewer is allowed only on the central origin; a Site Host always reads as guest. */
+    public static function centralViewer(Request $request): ?Authenticatable
+    {
+        $viewer = $request->user();
+        if (! $viewer instanceof Authenticatable) {
+            return null;
+        }
+
+        $tenancy = app(TenancyContext::class);
+
+        return $tenancy->isActive() ? null : $viewer;
+    }
 
     /** A grant is meaningful only in the same ambient storage scope as the row it names. */
     public function sharesStorageWith(BeamUxEntry $entry): bool

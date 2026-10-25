@@ -10,11 +10,18 @@ use Splicewire\Beam\Ux\Preview\PreviewContext;
 /** Read declarations from the publication pin only, never an author's mutable working body. */
 class PublishedBindingDocument
 {
-    public function read(BeamUxEntry $entry, ?PreviewContext $preview = null): array
+    public function read(BeamUxEntry $entry): array
     {
-        $pin = $preview === null
-            ? $entry->getAttribute('published_version')
-            : $preview->versionFor((string) $entry->getKey());
+        return $this->readVersion($entry, $entry->getAttribute('published_version'));
+    }
+
+    public function readPreview(BeamUxEntry $entry, PreviewContext $preview): array
+    {
+        return $this->readVersion($entry, $preview->versionFor((string) $entry->getKey()));
+    }
+
+    private function readVersion(BeamUxEntry $entry, ?string $pin): array
+    {
         if ($pin === null || $entry->particle_id === null) {
             return [];
         }

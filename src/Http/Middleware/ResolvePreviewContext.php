@@ -13,6 +13,8 @@ final class ResolvePreviewContext
 {
     public const COOKIE = 'beam_ux_preview';
 
+    public const VIEWER_COOKIE = 'beam_ux_preview_viewer';
+
     public function __construct(private PreviewGrantResolver $grants) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -21,7 +23,10 @@ final class ResolvePreviewContext
         if (is_string($token) && $token !== '') {
             $grant = $this->grants->resolve($token);
             if ($grant !== null) {
-                $request->attributes->set('beam.ux.preview', new PreviewContext($grant));
+                $viewer = $request->cookie(self::VIEWER_COOKIE) === 'me'
+                    ? PreviewContext::centralViewer($request)
+                    : null;
+                $request->attributes->set('beam.ux.preview', new PreviewContext($grant, $viewer));
             }
         }
 
@@ -30,6 +35,7 @@ final class ResolvePreviewContext
         if ($request->attributes->get('beam.ux.preview') instanceof PreviewContext) {
             $response->headers->set('Cache-Control', 'no-store, private');
             $response->headers->set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+            $response->headers->set('Referrer-Policy', 'no-referrer');
         }
 
         return $response;

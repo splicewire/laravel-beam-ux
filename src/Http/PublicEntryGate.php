@@ -91,7 +91,9 @@ class PublicEntryGate
             return null;
         }
 
-        $chain = $this->paths->ancestry($entry);
+        $chain = $preview === null
+            ? $this->paths->ancestry($entry)
+            : $this->previewPaths->chainForEntry((string) $entry->getKey(), $realm, $preview);
         if ($chain === null) {
             return null;
         }
@@ -99,6 +101,14 @@ class PublicEntryGate
         if ($this->publish !== null && ! $this->publish->isPublished($entry)
             && ! $preview?->admitsDraft((string) $entry->getKey())) {
             return null;
+        }
+
+        if ($preview !== null) {
+            foreach ($chain as $node) {
+                if ($preview->contains((string) $node->getKey()) && ! $preview->admitsDraft((string) $node->getKey())) {
+                    return null;
+                }
+            }
         }
 
         return $this->access->canRender($actor, $chain) ? $chain : null;

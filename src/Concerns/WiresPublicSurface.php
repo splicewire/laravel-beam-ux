@@ -10,6 +10,7 @@ use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Http\Controllers\EntryArtifactController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewExitController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewStartController;
+use Splicewire\Beam\Ux\Http\Controllers\PreviewViewAsMeController;
 use Splicewire\Beam\Ux\Http\Controllers\PublicEntryController;
 use Splicewire\Beam\Ux\Http\EntryPageProps;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
@@ -121,6 +122,7 @@ trait WiresPublicSurface
 
             $artifactName = "{$routeName}site.artifact";
             $previewExitName = "{$routeName}site.preview.exit";
+            $previewViewerName = "{$routeName}site.preview.view-as-me";
 
             $defaults = [
                 'beamUxRealm' => $realm,
@@ -128,6 +130,7 @@ trait WiresPublicSurface
                 'beamUxNav' => $withNav,
                 'beamUxArtifactRoute' => $artifactName,
                 'beamUxPreviewExitRoute' => "{$routeName}site.preview.exit",
+                'beamUxPreviewViewerRoute' => $previewViewerName,
             ];
 
             $apply = function ($route) use ($defaults) {
@@ -143,6 +146,10 @@ trait WiresPublicSurface
             // loaded a page once never asked again and no body edit ever reached a returning reader.
             $apply($this->get('_beam/preview/exit', PreviewExitController::class)
                 ->name($previewExitName));
+
+            $apply($this->get('_beam/preview/view-as-me', PreviewViewAsMeController::class)
+                ->middleware([ResolvePreviewContext::class, 'auth'])
+                ->name($previewViewerName));
 
             $apply($this->get('_beam/preview/{token}', PreviewStartController::class)
                 ->name("{$routeName}site.preview.start"));
