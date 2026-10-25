@@ -189,18 +189,9 @@ final class RecordPages
         if (! is_array($declaration)) {
             return;
         }
-        $source = $this->profiles->require($page, $declaration['collection']);
-        $resource = app(ParticleResourceRegistry::class)->get($source->resource);
-        $records = $value === null ? null : new RecordPageRecords(app(\Splicewire\Beam\Collections\StandaloneRecordQuery::class), $declaration['field'], $value);
         try {
             for ($offset = 0; ; $offset += 100) {
-                $rows = app(BindingRequestScope::class)->run($request, $source->address,
-                    function (Request $read) use ($resource, $realm, $offset) {
-                        app(\Splicewire\Beam\Authorization\ResourceReadGuard::class)->bindReadContext($resource, $read);
-
-                        return app(ParticleFrameResourceHandler::class)->forRequest($read, $realm)
-                            ->indexWindow($resource->toResourceDefinition(), 100, $offset);
-                    }, $records);
+                $rows = $this->readWindow($page, $request, $realm, 100, $offset, $value);
                 foreach ($rows as $row) {
                     if (self::slug(Arr::get($row, 'fields.'.$declaration['field'])) !== null) {
                         yield $row;
@@ -212,6 +203,31 @@ final class RecordPages
             }
         } catch (AuthorizationException) {
             return;
+        }
+    }
+
+    /** A raw bounded first window: invalid URL values cannot cause an unbounded picker scan. */
+    public function choiceWindow(BeamUxEntry $page, Request $request, string $realm, int $limit): array
+    {
+        return $this->readWindow($page, $request, $realm, max(1, min(26, $limit)), 0);
+    }
+
+    private function readWindow(BeamUxEntry $page, Request $request, string $realm, int $limit, int $offset, ?string $value = null): array
+    {
+        $declaration = $page->getAttribute('record_page');
+        $source = $this->profiles->require($page, $declaration['collection']);
+        $resource = app(ParticleResourceRegistry::class)->get($source->resource);
+        $records = $value === null ? null : new RecordPageRecords(app(\Splicewire\Beam\Collections\StandaloneRecordQuery::class), $declaration['field'], $value);
+        try {
+            return app(BindingRequestScope::class)->run($request, $source->address,
+                function (Request $read) use ($resource, $realm, $limit, $offset) {
+                    app(\Splicewire\Beam\Authorization\ResourceReadGuard::class)->bindReadContext($resource, $read);
+
+                    return app(ParticleFrameResourceHandler::class)->forRequest($read, $realm)
+                        ->indexWindow($resource->toResourceDefinition(), $limit, $offset);
+                }, $records);
+        } catch (AuthorizationException) {
+            return [];
         }
     }
 

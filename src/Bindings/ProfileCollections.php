@@ -42,15 +42,28 @@ final class ProfileCollections
         $out = [];
         foreach ($this->sources($entry, $profile) as $source) {
             if ($source->parentEntryId !== null) {
-                $out[] = ['name' => $source->name, 'schema' => $this->fieldSchema($source), 'hasRecordPage' => true];
+                $out[] = ['name' => $source->name, 'schema' => $this->fieldSchema($source), 'hasRecordPage' => true, 'publicRead' => null];
 
                 continue;
             }
             $schema = $this->fieldSchema($source);
-            $out[] = ['name' => $source->name, 'schema' => $schema, 'hasRecordPage' => app(RecordPages::class)->pageFor($entry, $source) !== null];
+            $out[] = ['name' => $source->name, 'schema' => $schema, 'hasRecordPage' => app(RecordPages::class)->pageFor($entry, $source) !== null, 'publicRead' => $this->publicRead($source)];
         }
 
         return $out;
+    }
+
+    /** Declaration only; unknown child-page gates are never converted into a guest grant. */
+    public function publicRead(CollectionSource $source): ?bool
+    {
+        if ($source->parentEntryId !== null) {
+            return null;
+        }
+        if (isset($source->address['collection'])) {
+            return app(CollectionSchemaResolver::class)->resolve($source->address['collection'])->hasPublicRead();
+        }
+
+        return app(ParticleResourceRegistry::class)->get($source->resource)->declaresPublicRead();
     }
 
     /** The schema describes the actual Record envelope returned by its owner. */

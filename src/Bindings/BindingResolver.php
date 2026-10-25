@@ -198,6 +198,23 @@ final class BindingResolver
         return $out;
     }
 
+    /** Project the root Record scope; Repeat children have their own separately guarded scope. */
+    public function projectRoot(array $body, array $row, array $additionalFields = []): array
+    {
+        $fields = $this->fields(['children' => $body]);
+        $visible = [];
+        foreach (array_unique([...$fields, ...$additionalFields]) as $field) {
+            if (Arr::has($row, $field)) {
+                Arr::set($visible, $field, Arr::get($row, $field));
+            }
+        }
+        if (isset($row['url'])) {
+            $visible['url'] = $row['url'];
+        }
+
+        return $visible;
+    }
+
     /** The resolver projects only referenced fields; nested repeat scopes are resolved separately. */
     private function fields(array $node): array
     {
