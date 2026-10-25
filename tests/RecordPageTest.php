@@ -306,18 +306,49 @@ class RecordPageTest extends TestCase
         // ADR-0236 d1, d10 (EP-30 slice 2; ruling 8): a Record target is {collection, id}, reached at its URL through
         // the Collection's Record Page, and only for a reader who may read the Record. The answer depends on the reader.
         $this->page();
-        (require __DIR__.'/../database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
-        foreach (['/old-post' => 'hello', '/old-hidden' => 'hidden'] as $path => $id) {
-            \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->insert(['id' => (string) \Illuminate\Support\Str::uuid(), 'realm' => 'site',
-                'path' => $path, 'match' => 'exact', 'target_kind' => 'record', 'target_collection' => 'posts', 'target_record_id' => $id,
-                'permanent' => true, 'origin' => 'author', 'created_at' => now(), 'updated_at' => now()]);
-        }
+        $this->recordRedirect('/old-post', 'hello');
+        $this->recordRedirect('/old-hidden', 'hidden');
 
         $answer = $this->get('/old-post');
 
         $answer->assertStatus(301)->assertRedirect('/posts/hello');
         $this->assertSame('no-store, private', $answer->headers->get('Cache-Control'));
         $this->get('/old-hidden')->assertNotFound();
+    }
+
+    public function test_a_redirect_never_sends_a_reader_to_a_record_page_that_is_hidden_or_on_another_site(): void
+    {
+        // Review of f2b5b70: the first Record Page for the Collection was taken in any realm and at any marking, so a
+        // guest was sent to a URL that answers the 404 (or another site's page). Now the Record Page must be one this
+        // realm shows the reader.
+        $page = $this->page();
+        $this->recordRedirect('/old-post', 'hello');
+        $this->app->bind(\Splicewire\Beam\Ux\Sitemap\EntryPublishGate::class, fn () => new class implements \Splicewire\Beam\Ux\Sitemap\EntryPublishGate
+        {
+            public function isPublished(BeamUxEntry $entry): bool
+            {
+                return $entry->workflow_marking !== 'review';
+            }
+        });
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Http\PublicEntryGate::class);
+
+        BeamUxEntry::query()->whereKey($page->parent_id)->update(['workflow_marking' => 'review']);
+        $this->get('/old-post')->assertNotFound();
+
+        BeamUxEntry::query()->whereKey($page->parent_id)->update(['workflow_marking' => null]);
+        $this->get('/old-post')->assertStatus(301)->assertRedirect('/posts/hello');
+        BeamUxEntry::query()->whereKey([$page->id, $page->parent_id])->update(['realm' => 'docs', 'realms' => json_encode(['docs'])]);
+        $this->get('/old-post')->assertNotFound();
+    }
+
+    private function recordRedirect(string $path, string $id): void
+    {
+        if (! Schema::hasTable('beam_ux_redirects')) {
+            (require __DIR__.'/../database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
+        }
+        \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->insert(['id' => (string) \Illuminate\Support\Str::uuid(), 'realm' => 'site',
+            'path' => $path, 'match' => 'exact', 'target_kind' => 'record', 'target_collection' => 'posts', 'target_record_id' => $id,
+            'permanent' => true, 'origin' => 'author', 'created_at' => now(), 'updated_at' => now()]);
     }
 
     public function test_the_preview_bar_offers_the_records_its_viewer_may_read_to_open_a_record_page_on(): void

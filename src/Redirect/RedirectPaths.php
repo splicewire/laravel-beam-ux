@@ -50,4 +50,23 @@ final class RedirectPaths
     {
         return $rest === '' || $rest === '/' ? $base : rtrim($base, '/').$rest;
     }
+
+    /** An address with the rest of a path carried into its path, ahead of any query or fragment it names. */
+    public static function joinAddress(string $url, string $rest): string
+    {
+        preg_match('/\A([^?#]*)(.*)\z/s', $url, $parts);
+
+        return self::join($parts[1], $rest).$parts[2];
+    }
+
+    /** The guest's query string carried onto a target, ahead of any fragment the target names. */
+    public static function withQuery(string $to, ?string $query): string
+    {
+        if ($query === null || $query === '') {
+            return $to;
+        }
+        [$head, $fragment] = array_pad(explode('#', $to, 2), 2, null);
+
+        return $head.(str_contains($head, '?') ? '&' : '?').$query.($fragment === null ? '' : '#'.$fragment);
+    }
 }

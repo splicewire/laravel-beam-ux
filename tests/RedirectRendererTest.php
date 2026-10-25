@@ -65,6 +65,18 @@ class RedirectRendererTest extends AuthoredComponentNativeTestCase
         $visit = $this->withHeader('X-Inertia', 'true')->get('/out');
         $visit->assertStatus(409);
         $this->assertSame('https://example.com/landing', $visit->headers->get('X-Inertia-Location'));
+        // Review of f2b5b70: the visit's answer is the visit's alone, so no cache keeps it for the URL.
+        $this->assertSame('no-store, private', $visit->headers->get('Cache-Control'));
+        $this->assertContains('X-Inertia', $visit->headers->all('vary'));
+    }
+
+    public function test_an_address_keeps_its_own_query_and_fragment_after_the_carried_path(): void
+    {
+        // Review of f2b5b70: the rest of the path was appended after the address's own query (…?fixed=1/x).
+        $this->redirect('/old-shop', 'address', ['target_url' => 'https://example.com/shop?ref=old#top', 'match' => 'prefix']);
+
+        $this->withoutHeader('X-Inertia')->get('/old-shop/hats?size=m')->assertStatus(301)
+            ->assertRedirect('https://example.com/shop/hats?ref=old&size=m#top');
     }
 
     public function test_a_chain_is_followed_in_one_response_and_a_loop_or_dead_end_is_the_uniform_404(): void
