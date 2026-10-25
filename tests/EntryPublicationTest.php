@@ -1590,6 +1590,48 @@ class EntryPublicationTest extends TestCase
         $this->assertContains('beam-ux-entries/{id}/create-release', $routes);
     }
 
+    public function test_every_member_edit_returns_a_reviewed_release_to_draft_and_revokes_its_approval(): void
+    {
+        // review-r1 (06:02Z): a member edit on an in-review or approved Release must not keep its review. ADR-0226 d6:
+        // a changed member returns the Release to review; every member mutation goes through the `revise` transition.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $other = $this->publishedPage(self::BODY_ONE);
+        $added = $this->publishedPage(self::BODY_ONE);
+        $publication = app(EntryPublication::class);
+        $draft = $publication->recordDraft($entry, self::BODY_TWO);
+        $otherDraft = $publication->recordDraft($other, self::BODY_TWO);
+        $addedDraft = $publication->recordDraft($added, self::BODY_TWO);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $edits = [
+            'add a member' => fn ($release) => $service->putMember($release, $added->id, $addedDraft->headVersion, $author),
+            'change a member\'s version' => fn ($release) => $service->putMember($release, $other->id, $publication->state($other->fresh())->publishedVersion, $author),
+            'drop a member' => fn ($release) => $service->dropMember($release, $other->id, $author),
+            'rebase' => fn ($release) => $service->rebase($release, $entry->id, $author),
+            'use the latest draft' => fn ($release) => $service->rebase($release, $entry->id, $author, true),
+        ];
+        foreach ($edits as $edit => $apply) {
+            foreach (['in_review', 'approved'] as $status) {
+                $release = $service->create($entry, "{$edit} while {$status}", $author);
+                $service->putMember($release, $entry->id, $draft->headVersion, $author);
+                $service->putMember($release, $other->id, $otherDraft->headVersion, $author);
+                $service->transition($release, 'submit', $author);
+                if ($status === 'approved') {
+                    $service->transition($release, 'approve', $reviewer);
+                }
+                $before = $release->fresh();
+                $this->assertSame($status, $before->status);
+
+                $apply($before);
+
+                $after = $release->fresh();
+                $this->assertSame('draft', $after->status, "{$edit} while {$status}");
+                $this->assertNull($after->reviewed_by, "{$edit} while {$status}");
+                $this->assertSame((int) $before->revision + 1, (int) $after->revision, "{$edit} while {$status}");
+                $this->assertStringContainsString('author', (string) $after->edited_by, 'the edit names its author');
+            }
+        }
+    }
+
     public function test_release_schedule_uses_the_existing_calendar_runner_and_rejects_a_revised_intent(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
