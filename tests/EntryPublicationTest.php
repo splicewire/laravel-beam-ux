@@ -569,6 +569,26 @@ class EntryPublicationTest extends TestCase
         \Splicewire\Beam\Ux\Containment\PageFields::check(Fixtures\CollidingFields::class, []);
     }
 
+    public function test_unknown_header_keys_named_like_storage_fields_are_kept_and_round_trip(): void
+    {
+        // review-r1 (EP-26 E, #2): parent_id, fields and unclaimed are this package's storage names, not frontmatter, so
+        // a file that carries them keeps them as unclaimed keys like any other (ADR-0233 d3).
+        [$entry, $member, $author, , $target, $publication] = $this->blocksMdxFileFixture();
+        $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
+        $bytes = "---\ntitle: Help\nnavOrder: 2\npublishedDate: 2026-10-01\nfields: legacy\nparent_id: docs\nunclaimed: yes\n---\n\nEdited MDX\n";
+        file_put_contents($target['absolute'], $bytes);
+
+        $result = $service->take($member, $author, $this->fileInput($service->inspect($member, $author)));
+        $head = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($entry->fresh()->versionable(), $result->headVersion)->snapshot;
+        $this->assertSame(['fields' => 'legacy', 'parent_id' => 'docs', 'unclaimed' => 'yes'], $head['meta']['pageSettings']['unclaimed']);
+        $this->assertNull($head['meta']['pageSettings']['parentId'], 'a header key never sets the parent');
+        $publication->publishVersion($entry->fresh(), $result->headVersion);
+
+        $this->assertSame($bytes, file_get_contents($target['absolute']));
+        $this->assertTrue(\Illuminate\Support\Facades\Validator::make(['unclaimed' => ['parent_id' => 'docs', 'fields' => 'legacy']],
+            ['unclaimed' => \Splicewire\Beam\Ux\Data\EntryPageSettingsData::rules()['unclaimed']])->passes());
+    }
+
     public function test_page_fields_answer_to_the_parent_the_draft_names_not_the_row(): void
     {
         // review-r1 (EP-26 E): a draft that moves a page to the root, or under another parent, is checked against where

@@ -76,21 +76,18 @@ final class EntryPageSettingsData extends BeamData
     }
 
     /**
-     * The frontmatter keys a page declares, in their canonical snake_case spelling: every page setting, and the keys
-     * registration from disk reads onto the row (ADR-0212's rights, the realm, the workflow marking). An unclaimed
-     * key may name none of them.
+     * The frontmatter keys a page declares, in their canonical snake_case spelling: the page settings a file's header
+     * carries ({@see \Splicewire\Beam\Ux\Files\MdxPageFile::KEYS}), and the keys registration from disk reads onto
+     * the row (ADR-0212's rights, the realm, the workflow marking). An unclaimed key may name none of them, nor one of
+     * its parent's Page Fields ({@see \Splicewire\Beam\Ux\Containment\PageFields::assertUnclaimed()}). Names that
+     * only this class's storage uses (`parentId`, `fields`, `unclaimed`) are not frontmatter, so a file may keep them.
      *
      * @return list<string>
      */
     public static function reservedFrontmatterKeys(): array
     {
-        $keys = [];
-        foreach ((new \ReflectionClass(self::class))->getConstructor()?->getParameters() ?? [] as $parameter) {
-            $keys[] = \Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser::canonicalize($parameter->getName());
-        }
-
         return array_values(array_unique([
-            ...$keys,
+            ...array_map(\Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser::canonicalize(...), \Splicewire\Beam\Ux\Files\MdxPageFile::KEYS),
             ...EntryFrontmatterData::fieldNames(),
             ...array_map(fn (\Splicewire\Beam\Ux\Access\Right $right) => $right->value, \Splicewire\Beam\Ux\Access\Right::cases()),
         ]));
