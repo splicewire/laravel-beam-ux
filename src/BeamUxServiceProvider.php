@@ -40,6 +40,7 @@ use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxIntakeFormAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxManifestRegistryAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMdxPagesAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
@@ -213,6 +214,12 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxManifestRegistryAudit::class,
+            );
+
+            // EP-07d: page forms post to the public intake door; its honeypot and the honeypot's field name are host facts.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxIntakeFormAudit::class,
             );
 
             // theme-entries-and-authoring ticket 07: `ThemeResolver::resolve()` never throws, so a query
