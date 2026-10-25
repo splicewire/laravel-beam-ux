@@ -22,5 +22,7 @@ final class EntryCanvasBindingsOutputData extends BeamData
         public bool $hasMore,
         public bool $recordPage,
         public ?string $selectedValue,
+        /** Guest access intent, not a claim that this Working Head is published. Null means unknown. */
+        public ?bool $pagePublic = null,
     ) {}
 }

@@ -12,7 +12,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 /** Generated read scaffold, with addressed author admission before any body or Record read. */
 #[ParticleOp(
     resource: 'beam-ux-entry', name: 'canvas-bindings', kind: OperationKind::Read,
-    ability: 'ux.author', abilityModel: false, affordance: false,
+    ability: 'update', abilityModel: null, affordance: false,
     input: EntryCanvasBindingsInputData::class, output: EntryCanvasBindingsOutputData::class,
     method: \Splicewire\Beam\Routing\HttpMethod::Post,
 )]

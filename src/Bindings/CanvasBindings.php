@@ -17,6 +17,35 @@ final class CanvasBindings
 {
     public const CHOICE_LIMIT = 25;
 
+    /** Bounded, read-only guest access walk; malformed containment never implies public access. */
+    private function pagePublic(BeamUxEntry $entry): ?bool
+    {
+        if ($entry->type !== \Splicewire\Beam\Ux\Type\UxType::Page) {
+            return null;
+        }
+        $chain = [];
+        $seen = [];
+        $current = $entry;
+        for ($depth = 0; $depth < 64; $depth++) {
+            $id = (string) $current->getKey();
+            if ($id === '' || isset($seen[$id])) {
+                return null;
+            }
+            $seen[$id] = true;
+            $chain[] = $current;
+            if ($current->parent_id === null) {
+                return app(\Splicewire\Beam\Ux\Access\EntryAccessResolver::class)->canRender(null, array_reverse($chain));
+            }
+            $parent = $current->parent()->first();
+            if (! $parent instanceof BeamUxEntry) {
+                return null;
+            }
+            $current = $parent;
+        }
+
+        return null;
+    }
+
     public function authorize(BeamUxEntry $entry, mixed $actor): void
     {
         abort_unless($actor instanceof Authenticatable
@@ -27,6 +56,7 @@ final class CanvasBindings
     public function resolve(BeamUxEntry $entry, Request $request, array $body, ?string $recordValue): EntryCanvasBindingsOutputData
     {
         $this->authorize($entry, $request->user());
+        \Splicewire\Beam\Ux\Data\EntryCanvasBindingsInputData::assertBounds(['body' => $body]);
         \Splicewire\Beam\Ux\Data\CanvasBodyInputData::validateAndCreate(['body' => $body]);
         $page = app(RecordPages::class)->validationEntry($entry);
         $profile = app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve($page);
@@ -39,7 +69,7 @@ final class CanvasBindings
                 throw ValidationException::withMessages(['recordValue' => 'Save a Record Page declaration before choosing a Record.']);
             }
 
-            return new EntryCanvasBindingsOutputData($bindings, null, [], false, false, null);
+            return new EntryCanvasBindingsOutputData($bindings, null, [], false, false, null, $this->pagePublic($entry));
         }
         $records = app(RecordPages::class);
         $rows = $records->choiceWindow($page, $request, (string) $page->realm, self::CHOICE_LIMIT + 1);
@@ -66,6 +96,6 @@ final class CanvasBindings
         }
         $record = $row === null ? null : $resolver->projectRoot($body, $row, $extra);
 
-        return new EntryCanvasBindingsOutputData($bindings, $record, $choices, $hasMore, true, $record === null ? null : $selected);
+        return new EntryCanvasBindingsOutputData($bindings, $record, $choices, $hasMore, true, $record === null ? null : $selected, $this->pagePublic($entry));
     }
 }
