@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Spatie\TypeScriptTransformer\Attributes\Optional;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -88,12 +89,19 @@ class BeamUxEntryBodyData extends BeamData
         public ?string $source = null,
         public ?string $compileError = null,
         /** @var array<string, mixed>|null The same Manifest Profile used by the save guard. */
+        #[Optional]
         public ?array $profile = null,
+        #[Optional]
         public ?array $styleRegistry = null,
+        #[Optional]
         public ?EntryPageSettingsData $pageSettings = null,
+        #[Optional]
         public array $bindings = [],
+        #[Optional]
         public ?array $pageFields = null,
+        #[Optional]
         public ?array $fileLanguages = null,
+        #[Optional]
         public array $intakeForms = [],
     ) {}
 }
