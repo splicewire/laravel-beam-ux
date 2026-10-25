@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Bindings;
 
+use Spatie\TypeScriptTransformer\Attributes\Optional;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 
@@ -9,9 +10,13 @@ use Splicewire\Beam\Data\BeamData;
 final class RepeatQueryData extends BeamData
 {
     public function __construct(
+        #[Optional]
         public ?array $filter = null,
+        #[Optional]
         public ?string $sort = null,
+        #[Optional]
         public int $limit = 25,
+        #[Optional]
         public ?string $filterVariant = null,
     ) {
         if ($limit < 1 || $limit > 100) {

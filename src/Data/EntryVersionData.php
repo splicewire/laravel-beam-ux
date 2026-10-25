@@ -6,6 +6,7 @@ use Rushing\Versioning\Models\Version;
 use Schemastud\DataSchemas\Attributes\Description;
 use Schemastud\DataSchemas\Attributes\Example;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
+use Spatie\TypeScriptTransformer\Attributes\Optional;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -59,6 +60,7 @@ class EntryVersionData extends BeamData
         #[Description('Whether this version is the PUBLISHED body — the one a guest reader is served.')]
         public bool $isPublished = false,
         #[DataCollectionOf(ReleaseRecordingData::class)]
+        #[Optional]
         public array $recordings = [],
     ) {}
 

@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Bindings;
 
 use Spatie\LaravelData\Attributes\DataCollectionOf;
+use Spatie\TypeScriptTransformer\Attributes\Optional;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\JsonDoc\JsonNode;
@@ -13,10 +14,14 @@ final class RepeatData extends BeamData
 {
     /** @param list<JsonNode> $empty */
     public function __construct(
+        #[Optional]
         public ?string $collection = null,
+        #[Optional]
         public ?string $relation = null,
+        #[Optional]
         public ?RepeatQueryData $query = null,
         #[DataCollectionOf(JsonNode::class)]
+        #[Optional]
         public array $empty = [],
     ) {
         if (($collection === null) === ($relation === null)) {

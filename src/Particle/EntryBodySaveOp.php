@@ -98,9 +98,20 @@ class EntryBodySaveOp
         /** @var BeamUxEntry $model */
         $input = BeamUxEntryBodyInputData::validateAndCreate($request->all());
 
+        return self::persistBody($model, $input->body);
+    }
+
+    /**
+     * The shared baseline → write → publish path for generic and typed canvas saves.
+     *
+     * @param  array<int|string, mixed>  $body
+     * @return array{key: string, compileError: string|null}
+     */
+    protected static function persistBody(BeamUxEntry $model, array $body): array
+    {
         $publication = app(EntryPublication::class);
 
-        $publication->assertStorable($model, $input->body);
+        $publication->assertStorable($model, $body);
 
         // ADR-0228 d2/d8 / ux-0227 d1: the canvas body's well-formedness AND its Manifest Profile check
         // (shape, containment, attrs + the code boundary) run at the publication CHOKE,
@@ -117,7 +128,7 @@ class EntryBodySaveOp
         // have nothing to roll back to. It is a no-op for an entry that already has history.
         $publication->baseline($model, mirror: true);
 
-        $written = $publication->write($model, $input->body);
+        $written = $publication->write($model, $body);
 
         return [
             'key' => $written['key'],

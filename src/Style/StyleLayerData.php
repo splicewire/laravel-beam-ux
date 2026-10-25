@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Style;
 
+use Spatie\TypeScriptTransformer\Attributes\Optional;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 
@@ -10,5 +11,11 @@ use Splicewire\Beam\Data\BeamData;
 class StyleLayerData extends BeamData
 {
     /** @param array<string,string> $declarations */
-    public function __construct(public array $declarations, public ?string $breakpoint = null, public ?string $state = null) {}
+    public function __construct(
+        public array $declarations,
+        #[Optional]
+        public ?string $breakpoint = null,
+        #[Optional]
+        public ?string $state = null,
+    ) {}
 }

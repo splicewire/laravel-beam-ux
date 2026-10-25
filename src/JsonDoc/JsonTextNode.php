@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\JsonDoc;
 
 use Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType;
+use Spatie\TypeScriptTransformer\Attributes\Optional;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 
 /** ADR-0228 d2 — a text node: a run of literal text. The twin of `json.ts`'s `JsonText`. */
@@ -15,7 +16,9 @@ class JsonTextNode extends JsonNode
         // discriminator stays the base's #[PropertyForMorph] `kind`.
         #[LiteralTypeScriptType("'text'")]
         public string $kind = 'text',
+        #[Optional]
         public ?string $field = null,
+        #[Optional]
         public ?string $prop = null,
     ) {
         parent::__construct($kind);

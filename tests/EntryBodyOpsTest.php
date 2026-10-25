@@ -604,6 +604,60 @@ class EntryBodyOpsTest extends TestCase
         ]), actor: null);
     }
 
+    public function test_save_blocks_declares_the_typed_canvas_input_and_no_frame_action(): void
+    {
+        $attribute = (new ReflectionClass(\Splicewire\Beam\Ux\Particle\EntryBlocksSaveOp::class))
+            ->getAttributes(ParticleOp::class)[0]->newInstance();
+        $this->assertSame('save-blocks', $attribute->name);
+        $this->assertSame(\Splicewire\Beam\Ux\Data\CanvasBodyInputData::class, $attribute->input);
+        $this->assertSame(BeamUxEntryBodyData::class, $attribute->output);
+        $this->assertSame('ux.author', $attribute->ability);
+        $this->assertFalse($attribute->affordance);
+    }
+
+    public function test_canvas_input_hydrates_its_declared_json_node_collection(): void
+    {
+        $input = \Splicewire\Beam\Ux\Data\CanvasBodyInputData::validateAndCreate([
+            'body' => [['kind' => 'text', 'value' => 'Declared text']],
+        ]);
+        $this->assertInstanceOf(\Splicewire\Beam\Ux\JsonDoc\JsonTextNode::class, $input->body[0]);
+        $this->assertSame('Declared text', $input->body[0]->value);
+        $empty = \Splicewire\Beam\Ux\Data\CanvasBodyInputData::validateAndCreate(['body' => []]);
+        $this->assertSame([], $empty->body);
+    }
+
+    public function test_save_blocks_uses_the_publication_path_and_refuses_non_block_kinds(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'typed-blocks', 'type' => 'page', 'format' => 'tsx']);
+        $body = [['kind' => 'text', 'value' => 'Typed canvas']];
+        $result = \Splicewire\Beam\Ux\Particle\EntryBlocksSaveOp::handle($entry, $this->saveRequest($entry, $body), null);
+        $this->assertSame((string) $entry->fresh()->particle_id, $result['key']);
+        foreach ([['theme', 'css'], ['component', 'tsx']] as [$type, $format]) {
+            $other = BeamUxEntry::create(['slug' => 'typed-'.$type, 'type' => $type, 'format' => $format]);
+            try {
+                \Splicewire\Beam\Ux\Particle\EntryBlocksSaveOp::handle($other, $this->saveRequest($other, $body), null);
+                $this->fail('save-blocks admitted '.$type);
+            } catch (ValidationException $error) {
+                $this->assertArrayHasKey('body', $error->errors());
+            }
+            $this->assertNull($other->fresh()->particle_id);
+        }
+    }
+
+    public function test_save_blocks_refuses_unknown_nodes_and_dictionary_payloads_without_a_write(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'typed-bad', 'type' => 'page', 'format' => 'tsx']);
+        foreach ([[['kind' => 'unknown', 'value' => 'x']], ['source' => '<p>Legacy source</p>']] as $body) {
+            try {
+                \Splicewire\Beam\Ux\Particle\EntryBlocksSaveOp::handle($entry, $this->saveRequest($entry, $body), null);
+                $this->fail('save-blocks admitted an undeclared body');
+            } catch (ValidationException $error) {
+                $this->assertArrayHasKey('body', $error->errors());
+            }
+            $this->assertNull($entry->fresh()->particle_id);
+        }
+    }
+
     public function test_a_mixed_block_text_opaque_json_doc_hydrates_through_the_declared_union(): void
     {
         // ADR-0228 d2: save-body hydrates the canvas body through the JsonNode union, so a well-formed

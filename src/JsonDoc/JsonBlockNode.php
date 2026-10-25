@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\JsonDoc;
 
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType;
+use Spatie\TypeScriptTransformer\Attributes\Optional;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 
 /**
@@ -32,6 +33,7 @@ class JsonBlockNode extends JsonNode
         // by content (NodeIdRematcher, d9). Nullable with a null default so a body authored before this
         // slice, and the canvas's own pre-id nodes, still hydrate — the rematch is what makes the invariant
         // ("every block has an id") hold in practice, not the shape.
+        #[Optional]
         public ?string $id = null,
         // Pin the generated TS discriminant to the literal `'block'` (the arm's `kind` is always that),
         // not the base's `string`: otherwise a bare JsonBlockNode is not assignable to the JsonNode
@@ -39,11 +41,15 @@ class JsonBlockNode extends JsonNode
         // the base's #[PropertyForMorph] `kind`; this only narrows the GENERATED type of the arm.
         #[LiteralTypeScriptType("'block'")]
         public string $kind = 'block',
+        #[Optional]
         public ?\Splicewire\Beam\Ux\Style\BlockStyleData $style = null,
+        #[Optional]
         public ?\Splicewire\Beam\Ux\Bindings\RepeatData $repeat = null,
+        #[Optional]
         public ?\Splicewire\Beam\Ux\Bindings\ConditionData $when = null,
         /** @var array<string, list<JsonNode>> */
         #[LiteralTypeScriptType('Record<string, JsonNode[]>')]
+        #[Optional]
         public array $slots = [],
     ) {
         parent::__construct($kind);
