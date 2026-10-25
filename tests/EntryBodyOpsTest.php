@@ -186,6 +186,23 @@ class EntryBodyOpsTest extends TestCase
         $this->assertFalse($tenantEnvelope->profile['x-admits-code']);
     }
 
+    public function test_the_envelope_and_the_save_read_the_profile_of_the_entrys_realm(): void
+    {
+        // EP-07: each realm serves one profile, and the palette and inspector (the envelope) and the save read the same one.
+        config(['beam.ux.manifest.realms' => ['operator' => \Splicewire\Beam\Ux\Tests\Manifest\Fixtures\OperatorNodeSource::class]]);
+        $banner = [['kind' => 'block', 'name' => 'Banner', 'isComponent' => true, 'props' => [], 'children' => [], 'dynamic' => false]];
+        $operator = BeamUxEntry::create(['slug' => 'operator-page', 'type' => 'page', 'format' => 'tsx', 'realm' => 'operator']);
+        $site = BeamUxEntry::create(['slug' => 'site-page', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+
+        $envelope = EntryBodyShowOp::handle($operator, new Request, actor: null);
+        $this->assertContains('Banner', array_column($envelope->profile['nodes'], 'name'));
+        $this->assertNotContains('Banner', array_column(EntryBodyShowOp::handle($site, new Request, actor: null)->profile['nodes'], 'name'));
+        $guard = app(\Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard::class);
+        $guard->assertAdmitted($operator, $banner);
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $guard->assertAdmitted($site, $banner);
+    }
+
     public function test_a_theme_entry_falls_back_to_the_theme_schemas_when_it_declares_no_schema_ref(): void
     {
         // The one non-trivial branch of the schema resolution the controller carried: a `theme` entry's

@@ -184,4 +184,55 @@ class ManifestProfileResolverTest extends TestCase
         );
         $this->addToAssertionCount(1);
     }
+
+    public function test_each_realm_serves_its_own_host_vocabulary_and_an_unbound_realm_keeps_the_app_wide_source(): void
+    {
+        // EP-07: each realm serves one profile. A realm the host binds gets its own components; one it does not keeps the
+        // app-wide ManifestNodeSource, so a host that has not bound its realms is unchanged.
+        $this->app->instance(ManifestNodeSource::class, new Fixtures\FixtureNodeSource);
+        config(['beam.ux.manifest.realms' => ['operator' => Fixtures\OperatorNodeSource::class]]);
+        $names = function (string $realm): array {
+            $entry = $this->entry('central');
+            $entry->realm = $realm;
+
+            return array_column($this->resolver('central_db')->resolve($entry)['nodes'], 'name');
+        };
+
+        $this->assertContains('Banner', $names('operator'));
+        $this->assertNotContains('Callout', $names('operator'), 'a bound realm does not also take the app-wide source');
+        $this->assertContains('Callout', $names('site'));
+        $this->assertNotContains('Banner', $names('site'));
+        $this->assertContains('div', $names('operator'), 'every realm keeps the HTML base');
+
+        config(['beam.ux.manifest.realms' => ['operator' => \stdClass::class]]);
+        $this->expectException(\InvalidArgumentException::class);
+        $names('operator');
+    }
+
+    public function test_the_shipped_auth_islands_are_sealed_nodes_gated_like_the_js_registry(): void
+    {
+        // N3447: beam's default auth trees place these and beam-inertia registers them; the profile now declares them.
+        config(['fortify.features' => []]);
+        $names = fn () => array_column($this->resolver('central_db')->resolve($this->entry('central'))['nodes'], 'name');
+        $always = ['AuthLogin', 'AuthForgotPassword', 'AuthResetPassword', 'AuthConfirmPassword'];
+        foreach ($always as $name) {
+            $this->assertContains($name, $names());
+        }
+        foreach (['AuthRegister', 'AuthTwoFactorChallenge', 'AuthVerifyEmail'] as $name) {
+            $this->assertNotContains($name, $names(), "{$name} is offered only where its Fortify feature is on");
+        }
+
+        config(['fortify.features' => [\Laravel\Fortify\Features::registration(), \Laravel\Fortify\Features::twoFactorAuthentication(), \Laravel\Fortify\Features::emailVerification()]]);
+        $profile = $this->resolver('central_db')->resolve($this->entry('central'));
+        foreach (['AuthRegister', 'AuthTwoFactorChallenge', 'AuthVerifyEmail', ...$always] as $name) {
+            $node = collect($profile['nodes'])->firstWhere('name', $name);
+            $this->assertSame(['type' => 'object', 'additionalProperties' => false], $node['attrsSchema'] ?? null, "{$name} is sealed");
+            $this->assertSame([], $node['admitsChildCategories'] ?? null);
+        }
+        (new ProfileLegality)->assert(
+            [['kind' => 'block', 'name' => 'AuthLogin', 'isComponent' => true, 'props' => [], 'children' => [], 'dynamic' => false, 'id' => 'a1']],
+            $profile,
+        );
+        $this->addToAssertionCount(1);
+    }
 }

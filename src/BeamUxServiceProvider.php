@@ -40,6 +40,7 @@ use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxArtifactAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
+use Splicewire\Beam\Ux\Doctor\BeamUxManifestRegistryAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMdxPagesAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxReachabilityAudit;
@@ -128,6 +129,10 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // DOCS-06b: the templates the provenance backfill may match an unstamped row against; packages register theirs.
         $this->app->singleton(Provenance\ProvenanceTemplates::class);
 
+        // EP-07 (N3447): the shipped auth-page islands, composed into every realm's Manifest Profile. Packages tag their
+        // own ManifestNodeSource the same way.
+        $this->app->tag([Manifest\AuthIslandNodeSource::class], Manifest\ManifestProfileResolver::PACKAGE_SOURCES);
+
         // Merge `config('beam.ux.*')`. Both keys OUTLIVED the retired `Route::beamUxEntries()` macro
         // they were introduced for (ADR-0214 §6, as amended): `api_root` positions beam core's Scribe
         // OpenAPI extraction window, `route_name` names the public-entry artifact route
@@ -201,6 +206,13 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxMdxPagesAudit::class,
+            );
+
+            // EP-07 (ADR-0228 d6): each realm's Manifest Profile against the host's JS registry snapshot, both ways.
+            // Without a snapshot it is INCONCLUSIVE, reported as a warning and never as a pass (WP-EP07 ruling).
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                BeamUxManifestRegistryAudit::class,
             );
 
             // theme-entries-and-authoring ticket 07: `ThemeResolver::resolve()` never throws, so a query

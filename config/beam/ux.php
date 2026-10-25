@@ -290,6 +290,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Manifest Profiles per realm (ADR-0228 d6/d7, EP-07)
+    |--------------------------------------------------------------------------
+    |
+    | `realms` — realm => a ManifestNodeSource class: the host's placeable
+    |            `#[NodeType]` components for that realm's profile. A realm
+    |            without an entry uses the app-wide bound ManifestNodeSource.
+    | `js_registry` — the path of a JSON snapshot of the host's JS component
+    |            registry (a list of names, or realm => list), written by the
+    |            host's build (`@splicewire/beam-inertia`'s registry snapshot).
+    |            `beam:doctor` compares it with each realm's profile; without
+    |            one the comparison is reported INCONCLUSIVE, never a pass.
+    |
+    */
+    'manifest' => [
+        'realms' => [],
+        'js_registry' => env('BEAM_UX_JS_REGISTRY'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Page Fields (ADR-0233 d4)
     |--------------------------------------------------------------------------
     |
