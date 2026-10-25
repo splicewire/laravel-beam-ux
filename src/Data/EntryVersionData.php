@@ -8,6 +8,7 @@ use Schemastud\DataSchemas\Attributes\Example;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 
 /**
@@ -91,6 +92,15 @@ class EntryVersionData extends BeamData
         }
         $ids = \Splicewire\Beam\Ux\Models\BeamUxReleaseMember::on($version->getConnectionName())
             ->where('version_id', $version->id)->pluck('release_id');
+        if ($version->getConnection()->getSchemaBuilder()->hasTable('beam_ux_release_recordings')) {
+            $entryId = BeamUxEntry::on($version->getConnectionName())->where('particle_id', $version->versionable_id)->value('id');
+            $takedownIds = \Splicewire\Beam\Ux\Models\BeamUxReleaseRecording::on($version->getConnectionName())
+                ->get(['release_id', 'manifest'])->filter(function ($receipt) use ($version, $entryId) {
+                    return collect($receipt->manifest ?? [])->contains(fn (array $file) => ($file['action'] ?? null) === 'delete'
+                        && $file['entryId'] === (string) ($entryId ?? '') && $file['versionId'] === (string) $version->id);
+                })->pluck('release_id');
+            $ids = $ids->merge($takedownIds)->unique()->values();
+        }
         $result = [];
         foreach (\Splicewire\Beam\Ux\Models\BeamUxRelease::on($version->getConnectionName())->whereKey($ids)->where('status', 'published')->get() as $release) {
             try {

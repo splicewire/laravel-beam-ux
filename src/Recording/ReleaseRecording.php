@@ -26,7 +26,7 @@ class ReleaseRecording
     }
 
     /** Called inside publication; optional projection failure is contained in its own savepoint. */
-    public function prepare(BeamUxRelease $release, array $prepared, Authenticatable $actor): void
+    public function prepare(BeamUxRelease $release, array $prepared, Authenticatable $actor, array $takedowns = []): void
     {
         $manifest = [];
         $failure = null;
@@ -49,8 +49,21 @@ class ReleaseRecording
                     'mode' => is_file($absolute) && is_executable($absolute) ? '100755' : '100644',
                     'bytes' => base64_encode($bytes), 'sha256' => hash('sha256', $bytes)];
             }
-            if ($release->members()->whereNull('version_id')->exists()) {
-                throw new RecordingFailure('unsupported-member', 'Take-down and deletion Releases cannot be recorded locally yet.');
+            foreach ($takedowns as [$entry, $version, $body]) {
+                $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
+                $bytes = $entry->codec()->decode($body);
+                $absolute = $disk->path($path);
+                $this->contained($disk->path(''), $path);
+                $size += strlen($bytes);
+                if ($size > 4194304 || isset($seen[strtolower($absolute)]) || ! is_file($absolute)
+                    || hash_file('sha256', $absolute) !== hash('sha256', $bytes)) {
+                    throw new RecordingFailure('mirror-drift', 'A Take-down mirror differs from the currently published bytes.');
+                }
+                $seen[strtolower($absolute)] = true;
+                $manifest[] = ['action' => 'delete', 'entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
+                    'codec' => $entry->codec()::class, 'path' => $path, 'absolute' => $absolute,
+                    'mode' => is_executable($absolute) ? '100755' : '100644',
+                    'bytes' => base64_encode($bytes), 'sha256' => hash('sha256', $bytes)];
             }
         } catch (\Throwable $error) {
             $failure = $error instanceof RecordingFailure ? $error->reason : 'preparation';
@@ -65,14 +78,14 @@ class ReleaseRecording
             // Without a durable receipt, completion may mirror but MUST NOT run Git.
         }
         $snapshot = clone $release;
-        $release->getConnection()->afterCommit(function () use ($snapshot, $prepared, $actor) {
+        $release->getConnection()->afterCommit(function () use ($snapshot, $prepared, $takedowns, $actor) {
             try {
-                $this->complete($snapshot->fresh(), $prepared, $actor);
+                $this->complete($snapshot->fresh(), $prepared, $takedowns, $actor);
             } catch (\Throwable) {
                 // A post-commit optional side effect cannot become a failed-publication HTTP result.
                 $this->failure($snapshot, 'completion');
             }
-            foreach ($prepared as [$entry]) {
+            foreach (array_merge($prepared, $takedowns) as [$entry]) {
                 try {
                     app(\Splicewire\Beam\Ux\Compile\CompileEntryBody::class)->artifacts()->prune($entry->fresh());
                 } catch (\Throwable) {
@@ -82,14 +95,15 @@ class ReleaseRecording
         });
     }
 
-    private function complete(BeamUxRelease $release, array $prepared, Authenticatable $actor): void
+    private function complete(BeamUxRelease $release, array $prepared, array $takedowns, Authenticatable $actor): void
     {
         $git = null;
         $lock = null;
         $reason = 'git-failed';
         $diagnostic = null;
         // Match publication's global entry-ID lock order before SQLite reservation or row reads.
-        usort($prepared, fn (array $left, array $right): int => strcmp((string) $left[0]->getKey(), (string) $right[0]->getKey()));
+        $allMembers = array_merge($prepared, $takedowns);
+        usort($allMembers, fn (array $left, array $right): int => strcmp((string) $left[0]->getKey(), (string) $right[0]->getKey()));
         try {
             try {
                 $this->authorize($release, $actor);
@@ -111,10 +125,10 @@ class ReleaseRecording
             }
             // Keep entry rows locked while completing mirrors; a concurrent publication cannot move
             // their pins between this stale check and the writes. Git does not hold a DB transaction.
-            $release->getConnection()->transaction(function () use ($prepared, $release) {
+            $release->getConnection()->transaction(function () use ($prepared, $takedowns, $allMembers, $release) {
                 // Reserve SQLite before pin reads; other drivers retain the existing sorted row locks.
-                if ($prepared !== [] && $release->getConnection()->getDriverName() === 'sqlite') {
-                    $first = reset($prepared)[0];
+                if ($allMembers !== [] && $release->getConnection()->getDriverName() === 'sqlite') {
+                    $first = reset($allMembers)[0];
                     $first->newQuery()->whereKey($first->getKey())->toBase()->update(['id' => $first->getKey()]);
                 }
                 foreach ($prepared as [$entry, $version]) {
@@ -124,19 +138,21 @@ class ReleaseRecording
                         throw new RecordingFailure('superseded', 'A newer publication superseded this mirror completion.');
                     }
                 }
+                foreach ($takedowns as [$entry, $version]) {
+                    $current = $entry->newQuery()->lockForUpdate()->find($entry->id);
+                    if ($current === null || $current->published_version !== (string) $version->id
+                        || $current->workflow_marking === BeamUxEntry::MARKING_PUBLISHED) {
+                        throw new RecordingFailure('superseded', 'A newer publication superseded this Take-down completion.');
+                    }
+                }
+                $diskName = config('beam.ux.storage.mirror_disk');
+                $disk = is_string($diskName) && $diskName !== '' ? Storage::disk($diskName) : null;
+                if ($disk === null || config('filesystems.disks.'.$diskName.'.driver') !== 'local') {
+                    throw new RecordingFailure('mirror-disabled', 'No local mirror disk is enabled.');
+                }
                 foreach ($prepared as [$entry, $version, $body]) {
                     $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
-                    $diskName = config('beam.ux.storage.mirror_disk');
-                    $disk = is_string($diskName) && $diskName !== '' ? Storage::disk($diskName) : null;
-                    if ($disk === null) {
-                        throw new RecordingFailure('mirror-disabled', 'No mirror disk is enabled.');
-                    }
-                    if (config('filesystems.disks.'.$diskName.'.driver') === 'local') {
-                        $this->mirrorContained($disk->path(''), $path);
-                    } else {
-                        // Existing remote mirrors still publish; only local Git recording is unavailable.
-                        $this->relativeParts($path);
-                    }
+                    $this->mirrorContained($disk->path(''), $path);
                     if (! app(PlacedDiskMirror::class)->mirror($entry, $path, $body)) {
                         throw new RecordingFailure('mirror', 'A Release mirror could not be completed.');
                     }
@@ -144,6 +160,29 @@ class ReleaseRecording
                     if ($actual !== $entry->codec()->decode($body)) {
                         throw new RecordingFailure('mirror', 'A Release mirror did not match its published snapshot.');
                     }
+                }
+                if ($takedowns !== []) {
+                    $receipt = $this->receipt($release);
+                    if ($receipt === null || $receipt->state === 'unavailable') {
+                        return;
+                    }
+                    foreach ($takedowns as [$entry]) {
+                        $file = collect($receipt?->manifest ?? [])->first(fn (array $item) => ($item['action'] ?? null) === 'delete'
+                            && $item['entryId'] === (string) $entry->id);
+                        if ($file === null) {
+                            throw new RecordingFailure('manifest', 'The Take-down is missing its frozen mirror receipt.');
+                        }
+                        $path = $file['path'];
+                        $this->mirrorContained($disk->path(''), $path);
+                        if (! is_file($disk->path($path)) || hash_file('sha256', $disk->path($path)) !== $file['sha256']
+                            || (is_executable($disk->path($path)) ? '100755' : '100644') !== $file['mode']) {
+                            throw new RecordingFailure('mirror-drift', 'A Take-down mirror differs from the frozen published bytes.');
+                        }
+                        if (! $disk->delete($path) || $disk->exists($path)) {
+                            throw new RecordingFailure('mirror', 'A Take-down mirror could not be removed.');
+                        }
+                    }
+                    $receipt?->forceFill(['state' => 'mirror-deleted'])->save();
                 }
             });
             if ($git === null) {
@@ -221,8 +260,7 @@ class ReleaseRecording
         $row = $this->receipt($release);
         if ($row === null || $row->state === 'unavailable' || $row->manifest === []
             || count($row->manifest) !== $release->members()->count()
-            || count(array_unique(array_column($row->manifest, 'entryId'))) !== count($row->manifest)
-            || $release->members()->whereNull('version_id')->exists()) {
+            || count(array_unique(array_column($row->manifest, 'entryId'))) !== count($row->manifest)) {
             throw new RecordingFailure('unavailable', 'This Release has no supported frozen recording receipt.');
         }
         $git->assertSupported();
@@ -235,10 +273,19 @@ class ReleaseRecording
             $entry = BeamUxEntry::on($release->getConnectionName())->findOrFail($file['entryId']);
             $member = $release->members()->where('entry_id', $entry->id)->first();
             $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
-            if ($member === null || $member->version_id !== $file['versionId'] || $this->disk()->path($path) !== $file['absolute']) {
+            $deleting = ($file['action'] ?? null) === 'delete';
+            if ($member === null || ($deleting ? $member->version_id !== null : $member->version_id !== $file['versionId'])
+                || $this->disk()->path($path) !== $file['absolute']) {
                 throw new RecordingFailure('manifest', 'Release membership or mirror placement no longer matches its frozen receipt.');
             }
             $file['path'] = $git->relative($file['absolute']);
+            if ($deleting) {
+                $old = base64_decode($file['bytes'] ?? '', true);
+                if ($old === false || hash('sha256', $old) !== $file['sha256']
+                    || ! $git->baseFileMatches($row->base ?? $git->head(), $file['path'], $file['sha256'], $file['mode'])) {
+                    throw new RecordingFailure('mirror-drift', 'The Git worktree file differs from the published Take-down bytes.');
+                }
+            }
             $manifest[] = $file;
         }
         if ($row->sha !== null) {
@@ -264,6 +311,16 @@ class ReleaseRecording
         }
         foreach ($manifest as $file) {
             $path = $git->path($file['path']);
+            if (($file['action'] ?? null) === 'delete') {
+                if (file_exists($path)) {
+                    throw new RecordingFailure('mirror-drift', 'A Take-down path reappeared after its frozen deletion.');
+                }
+                if ($row->state === 'failed' && ! str_starts_with((string) $row->error, 'mirror-deleted:')) {
+                    throw new RecordingFailure('mirror-drift', 'An absent Take-down path is not proven to have been removed by this Release.');
+                }
+
+                continue;
+            }
             if (! is_file($path) || hash_file('sha256', $path) !== $file['sha256']
                 || (is_executable($path) ? '100755' : '100644') !== $file['mode']) {
                 throw new RecordingFailure('mirror-drift', 'A file differs from this Release. Resolve the file explicitly before recording.');
@@ -280,8 +337,10 @@ class ReleaseRecording
         // A saved candidate takes the recovery-only branch above and never gets a new parent.
         $base = $git->head();
         $work = storage_path('framework/beam-ux-recordings/'.$row->id.'/attempt-'.($row->attempt + 1));
+        $deletionApplied = collect($manifest)->contains(fn (array $file) => ($file['action'] ?? null) === 'delete');
         $row->forceFill(['repository' => $identity, 'branch' => $git->branch, 'base' => $base,
-            'preparation' => $work, 'state' => 'pending', 'error' => null, 'attempt' => $row->attempt + 1])->save();
+            'preparation' => $work, 'state' => $deletionApplied ? 'mirror-deleted' : 'pending', 'error' => null,
+            'attempt' => $row->attempt + 1])->save();
         $tree = $git->tree($work, $base, $manifest);
         $row->forceFill(['tree' => $tree])->save();
         if ($tree === $git->baseTree($base)) {
@@ -323,9 +382,12 @@ class ReleaseRecording
         try {
             $row = $this->receipt($release);
             if ($row !== null) {
-                $row->forceFill(['state' => $row->state === 'unavailable' ? 'unavailable'
-                    : ($row->candidate !== null || $reason === 'recovery-required' ? 'recovery-required' : 'failed'),
-                    'error' => $diagnostic === null ? $reason : $reason.':'.$diagnostic])->save();
+                if ($row->state === 'unavailable') {
+                    return;
+                }
+                $afterDelete = $row->state === 'mirror-deleted';
+                $row->forceFill(['state' => $row->candidate !== null || $reason === 'recovery-required' ? 'recovery-required' : 'failed',
+                    'error' => ($afterDelete ? 'mirror-deleted:' : '').($diagnostic === null ? $reason : $reason.':'.$diagnostic)])->save();
             }
         } catch (\Throwable) {
             // Durable pending identity/candidate remains available when the receipt store recovers.

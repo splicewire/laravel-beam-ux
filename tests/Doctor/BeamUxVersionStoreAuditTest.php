@@ -6,6 +6,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Rushing\Doctor\DoctorStatus;
+use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Http\Particle\ParticleOperationController;
 use Splicewire\Beam\Ux\Doctor\BeamUxVersionStoreAudit;
@@ -104,10 +105,27 @@ class BeamUxVersionStoreAuditTest extends TestCase
 
     public function test_mounted_ops_with_the_store_and_every_entry_pinned_pass(): void
     {
+        $this->app->instance(VersionStore::class, \Mockery::mock(VersionStore::class));
         $this->tables(column: true, versions: true);
         $this->mount('versions');
         BeamUxEntry::create(['slug' => 'pinned', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site', 'particle_id' => (string) \Illuminate\Support\Str::uuid(), 'published_version' => (string) \Illuminate\Support\Str::uuid()]);
 
         $this->assertSame(DoctorStatus::Pass, $this->auditStatus());
+    }
+
+    public function test_mounted_entries_refuse_git_version_store(): void
+    {
+        $this->tables(column: true, versions: true);
+        $this->mount('versions');
+        if (class_exists('Rushing\\Versioning\\Git\\GitVersionStore')) {
+            $store = new \Rushing\Versioning\Git\GitVersionStore(sys_get_temp_dir());
+        } else {
+            $store = \Mockery::mock(VersionStore::class);
+            class_alias($store::class, 'Rushing\\Versioning\\Git\\GitVersionStore');
+        }
+        $this->app->instance(VersionStore::class, $store);
+
+        $this->assertSame(DoctorStatus::Fail, $this->auditStatus());
+        $this->assertStringContainsString('cannot use GitVersionStore', $this->auditDetail());
     }
 }

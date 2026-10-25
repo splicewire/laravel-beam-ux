@@ -797,6 +797,117 @@ class EntryPublicationTest extends TestCase
         $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
     }
 
+    public function test_release_records_a_take_down_as_one_private_index_deletion(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $takenDown = $this->publishedPage(self::BODY_ONE);
+        $updated = $this->publishedPage(self::BODY_TWO);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $this->enableReleaseTakeDown($takenDown);
+        $draft = app(EntryPublication::class)->recordDraft($updated, self::BODY_ONE);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $takenDownPath = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($takenDown)->pathFor($takenDown);
+        $updatedPath = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($updated)->pathFor($updated);
+        $git(['add', '--', $takenDownPath, $updatedPath]);
+        $git(['commit', '-m', 'published member fixtures']);
+        $base = $git(['rev-parse', 'HEAD']);
+        $release = $service->create($takenDown, 'Mixed publish and take-down', $author);
+        $service->putMember($release, $takenDown->id, null, $author);
+        $service->putMember($release, $updated->id, $draft->headVersion, $author);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $service->transition($release, 'publish', $reviewer);
+
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release->fresh());
+        $this->assertSame('recorded', $receipt?->state, $receipt?->error ?? '');
+        $this->assertSame($base, $git(['rev-parse', 'HEAD^']));
+        $expectedPaths = [$takenDownPath, $updatedPath];
+        sort($expectedPaths);
+        $this->assertSame($expectedPaths, (function () use ($git) {
+            $paths = explode("\n", $git(['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD']));
+            sort($paths);
+
+            return $paths;
+        })());
+        $this->assertFileDoesNotExist($repo.'/'.$takenDownPath);
+        $this->assertFileExists($repo.'/'.$updatedPath);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+        \Illuminate\Support\Facades\Auth::shouldReceive('userResolver')->andReturn(fn () => $author);
+        request()->setUserResolver(fn () => $author);
+        $this->assertSame($author, request()->user());
+        $publishedVersion = app(\Rushing\Versioning\Contracts\VersionStore::class)
+            ->version($takenDown->particle, $takenDown->published_version);
+        $history = \Splicewire\Beam\Ux\Data\EntryVersionData::fromVersion($publishedVersion, false, false);
+        $this->assertContains($release->id, array_map(fn ($recording) => $recording->releaseId, $history->recordings));
+    }
+
+    public function test_take_down_refuses_drift_without_deleting_unknown_mirror_content(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $this->enableReleaseTakeDown($entry);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $release = $service->create($entry, 'Take down drifted file', $author);
+        $service->putMember($release, $entry->id, null, $author);
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        $git(['add', '--', $path]);
+        $git(['commit', '-m', 'published member fixture']);
+        file_put_contents($repo.'/'.$path, "unknown local content\n");
+        $base = $git(['rev-parse', 'HEAD']);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $service->transition($release, 'publish', $reviewer);
+
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release->fresh());
+        $this->assertSame('unavailable', $receipt?->state);
+        $this->assertSame('mirror-drift', $receipt?->error);
+        $this->assertSame("unknown local content\n", file_get_contents($repo.'/'.$path));
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+    }
+
+    public function test_failed_take_down_commit_retries_the_same_deletion_once(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        $this->enableReleaseTakeDown($entry);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        $git(['add', '--', $path]);
+        $git(['commit', '-m', 'published member fixture']);
+        $base = $git(['rev-parse', 'HEAD']);
+        file_put_contents($repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 1\n");
+        chmod($repo.'/.git/hooks/pre-commit', 0755);
+        $release = $service->create($entry, 'Take down with retry', $author);
+        $service->putMember($release, $entry->id, null, $author);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $service->transition($release, 'publish', $reviewer);
+        $recorder = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class);
+        $failed = $recorder->receipt($release->fresh());
+        $this->assertSame('failed', $failed?->state);
+        $this->assertStringStartsWith('mirror-deleted:git-failed:', $failed?->error ?? '');
+        $this->assertFileDoesNotExist($repo.'/'.$path);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+
+        file_put_contents($repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 0\n");
+        $recorder->retry($release->fresh(), $author);
+        $recorded = $recorder->receipt($release->fresh());
+        $this->assertSame('recorded', $recorded?->state, $recorded?->error ?? '');
+        $this->assertSame($base, $git(['rev-parse', 'HEAD^']));
+        $recorder->retry($release->fresh(), $author);
+        $this->assertSame($recorded->sha, $recorder->receipt($release->fresh())->sha);
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+    }
+
+    private function enableReleaseTakeDown(BeamUxEntry $entry): void
+    {
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)
+            ->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => BeamUxEntry::MARKING_PUBLISHED])->save();
+    }
+
     public function test_real_result_database_failure_after_git_install_recovers_same_commit(): void
     {
         [$repo, $git] = $this->recordingRepository();
