@@ -51,6 +51,9 @@ class RedirectResourceTest extends AuthoredComponentNativeTestCase
         $this->assertSame('/pricing', $saved->json('data.target'), 'the list shows the target page at its current URL');
         $activity = DB::table('activity_log')->where('log_name', 'beam-redirect')->get();
         $this->assertSame([['created', 'author']], $activity->map(fn ($row) => [$row->event, $row->causer_id])->all());
+        // The doctor of the EP-30 receipt: a stored row names the Redirect by its alias, never its class (ADR-0118), as
+        // the activity of an entry and a Release already does.
+        $this->assertSame('beam_ux_redirect', $activity[0]->subject_type);
 
         $this->deleteJson("/beam-ux-redirects/{$row->id}")->assertSuccessful();
         $this->assertSame(0, BeamUxRedirect::query()->count());

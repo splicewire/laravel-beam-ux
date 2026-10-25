@@ -172,6 +172,8 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // ADDITIVE (`Relation::morphMap`), NEVER `enforceMorphMap`: a beam-composing host has many
         // models on class-string morphs. Mirrors {@see \Splicewire\Beam\BeamServiceProvider}.
         Relation::morphMap(['beam_ux_entry' => BeamUxEntry::class]);
+        // A Redirect is the subject of its own activity rows (ADR-0236 Consequences), stored for good: by alias.
+        Relation::morphMap(['beam_ux_redirect' => Models\BeamUxRedirect::class]);
 
         // UX-08c: the read ability the Developer-zone diagnostics declare (who may update entries; Root passes).
         DiagnosticsAbility::define();
