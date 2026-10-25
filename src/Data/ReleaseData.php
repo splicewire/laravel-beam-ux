@@ -88,17 +88,23 @@ final class ReleaseData extends BeamData
 
     private static function filesHref(?string $member): ?string
     {
-        if ($member === null) {
-            return null;
-        }
+        return $member === null ? null : self::frameHref('beam-ux-release-files.edit', $member);
+    }
+
+    /**
+     * A record's page on this host's Frame console, by its leaf's route name, or null where no realm mounts it. The
+     * Preview bar links a Release's fixes to its page (`beam-ux-release.edit`) the same way.
+     */
+    public static function frameHref(string $leaf, string $id): ?string
+    {
         foreach (array_keys(config('frame.realms', [])) as $realm) {
             try {
-                $href = app(\Splicewire\Beam\Ux\Frame\RouteContextProjector::class)->hrefs($realm)['beam-ux-release-files.edit'] ?? null;
+                $href = app(\Splicewire\Beam\Ux\Frame\RouteContextProjector::class)->hrefs($realm)[$leaf] ?? null;
                 if (is_string($href)) {
-                    return str_replace(':id', rawurlencode($member), $href);
+                    return str_replace(':id', rawurlencode($id), $href);
                 }
             } catch (\Throwable) {
-                // A host without this optional Files seat gets a status without a broken link.
+                // A host without this optional seat gets no link rather than a broken one.
             }
         }
 

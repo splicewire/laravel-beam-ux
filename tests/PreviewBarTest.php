@@ -194,6 +194,23 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
         $this->actingAs($this->user('author'))->get("/_beam/preview/open/{$release->id}")->assertNotFound();
     }
 
+    public function test_the_bar_links_a_blockers_fix_to_the_releases_page(): void
+    {
+        // ADR-0232 d11: every reason Publish would refuse is linked to the action that fixes it; the Release's actions
+        // are on its page, which on the operator console is its Frame record page.
+        $release = $this->release([$this->livePage('about')->id => null]);
+        $request = \Illuminate\Http\Request::create('/');
+        $request->attributes->set('beam.ux.preview', new \Splicewire\Beam\Ux\Preview\PreviewContext(
+            tap(new \Splicewire\Beam\Ux\Models\BeamUxPreviewGrant)->forceFill(['release_id' => $release->id])->setRelation('release', $release)));
+        $this->assertNull(app(\Splicewire\Beam\Ux\Preview\PreviewBar::class)->for($request)['releaseHref'], 'no Frame console here');
+
+        config(['frame.realms' => ['operator' => []]]);
+        $this->app->instance(\Splicewire\Beam\Ux\Frame\RouteContextProjector::class, \Mockery::mock(\Splicewire\Beam\Ux\Frame\RouteContextProjector::class)
+            ->shouldReceive('hrefs')->with('operator')->andReturn(['beam-ux-release.edit' => '/operator/releases/:id'])->getMock());
+
+        $this->assertSame("/operator/releases/{$release->id}", app(\Splicewire\Beam\Ux\Preview\PreviewBar::class)->for($request)['releaseHref']);
+    }
+
     public function test_the_switch_needs_a_preview_and_returns_only_to_this_site(): void
     {
         $credential = $this->openLink($this->release([$this->livePage('about')->id => null]));

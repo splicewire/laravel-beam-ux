@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Splicewire\Beam\Ux\Bindings\RecordPages;
 use Splicewire\Beam\Ux\Data\ReleaseChangesData;
+use Splicewire\Beam\Ux\Data\ReleaseData;
 use Splicewire\Beam\Ux\Http\Middleware\ResolvePreviewContext;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Release\ReleaseChanges;
@@ -54,6 +55,8 @@ final class PreviewBar
             'changes' => $changes?->toArray(),
             'recordChoices' => $changes === null ? [] : $this->recordChoicesFor($changes, $preview, $request, (string) $release->realm),
             'readiness' => $release === null ? null : $this->readiness->report($release)->toArray(),
+            // Where the Release's own fixes are pressed (ADR-0232 d11): its page on the operator console, if mounted.
+            'releaseHref' => $release === null ? null : ReleaseData::frameHref('beam-ux-release.edit', (string) $release->getKey()),
         ];
     }
 
