@@ -94,6 +94,9 @@ final class RecordPages
         }
         // Same native schema anchor as Collection unique writes; serialize this Collection, never the whole entries table.
         $connection = $entry->getConnection();
+        if (! $connection->getSchemaBuilder()->hasTable(\Splicewire\Beam\Facades\Beam::table('schemas'))) {
+            $this->refuse('Record Pages require a registered database schema anchor.');
+        }
         $anchor = $connection->table(\Splicewire\Beam\Facades\Beam::table('schemas'))
             ->where('schema_name', $definition->stem())->orderBy('version')->orderBy('id')->lockForUpdate()->first();
         if ($anchor === null) {

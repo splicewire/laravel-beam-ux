@@ -1,8 +1,8 @@
 # Record Pages
 
-A Record Page is an ordinary page with a parameter segment and a versioned Collection declaration. Its Collection must be explicitly offered by the page's Manifest Profile. The URL field must be a declared unique string property (`x-beam-unique: true`); values used as URL pieces contain letters, numbers, underscores or hyphens and begin with a letter or number.
+A Record Page is an ordinary page with a parameter segment and a versioned Collection declaration. Its Collection must be explicitly offered by the page's Manifest Profile. The URL field must be a declared unique string property (`x-beam-unique: true`) included in the Collection Public Read projection; values used as URL pieces contain letters, numbers, underscores or hyphens and begin with a letter or number.
 
-Run the published beam-ux migration `add_record_page_to_beam_ux_entries_table` in the same central or tenant connection as the entries. Existing pages stay unchanged. The published column holds the served declaration; draft settings stay in the entry's existing version history.
+Run the published beam-ux migration `add_record_page_to_beam_ux_entries_table` in the same central or tenant connection as the entries. Like unique Collection writes, saving a Record Page requires a registered database schema anchor for that Collection on the entry connection, so concurrent declarations can serialize against one row. Existing pages stay unchanged. The published column holds the served declaration; draft settings stay in the entry's existing version history.
 
 Send these settings through the normal entry save-draft operation, with the current base version and canvas body:
 
