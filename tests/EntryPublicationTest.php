@@ -496,7 +496,7 @@ class EntryPublicationTest extends TestCase
 
     public function test_a_blocks_mdx_file_with_page_fields_and_unclaimed_keys_round_trips_byte_stable_through_mirror_and_take(): void
     {
-        // ADR-0233 d3/d4, review-r1's E1 finding: the mirror prints every key a file carries — page settings, the Page
+        // ADR-0233 d3/d4: the mirror prints every key a file carries — page settings, the Page
         // Fields its parent declares, and the keys nothing declares — so mirror, Take, publish, mirror is byte-stable.
         [$entry, $member, $author, , $target, $publication] = $this->blocksMdxFileFixture();
         $parent = $this->recipesParent();
@@ -548,8 +548,8 @@ class EntryPublicationTest extends TestCase
 
     public function test_an_unclaimed_key_that_names_a_declared_key_is_refused_and_never_overrides_the_file(): void
     {
-        // review-r1 (EP-26 E): unclaimed['title'] would have printed over the page's own title while the version held
-        // another, and a registration-only key (realm) would have been read back onto the row by the next import.
+        // Unchecked, unclaimed['title'] would print over the page's own title while the version held
+        // another, and a registration-only key (realm) would be read back onto the row by the next import.
         [$entry, , , , , $publication] = $this->blocksMdxFileFixture();
         $parent = $this->recipesParent();
         $draft = fn (array $unclaimed, ?string $parentId = null) => $publication->recordDraft($entry->fresh(), self::BODY_ONE, null,
@@ -571,7 +571,7 @@ class EntryPublicationTest extends TestCase
 
     public function test_unknown_header_keys_named_like_storage_fields_are_kept_and_round_trip(): void
     {
-        // review-r1 (EP-26 E, #2): parent_id, fields and unclaimed are this package's storage names, not frontmatter, so
+        // parent_id, fields and unclaimed are this package's storage names, not frontmatter, so
         // a file that carries them keeps them as unclaimed keys like any other (ADR-0233 d3).
         [$entry, $member, $author, , $target, $publication] = $this->blocksMdxFileFixture();
         $service = app(\Splicewire\Beam\Ux\Files\ThemeReconciliation::class);
@@ -591,7 +591,7 @@ class EntryPublicationTest extends TestCase
 
     public function test_page_fields_answer_to_the_parent_the_draft_names_not_the_row(): void
     {
-        // review-r1 (EP-26 E): a draft that moves a page to the root, or under another parent, is checked against where
+        // A draft that moves a page to the root, or under another parent, is checked against where
         // it is going, not the parent its row still names.
         [$entry, , , , , $publication] = $this->blocksMdxFileFixture();
         $recipes = $this->recipesParent();
@@ -667,7 +667,7 @@ class EntryPublicationTest extends TestCase
 
     public function test_a_release_records_a_file_language_move_as_one_commit_and_refuses_an_edited_old_file(): void
     {
-        // orch-lead (EP-26 F): the move is ONE private-index commit, the old path deleted and the new one added, and the
+        // ADR-0233 d5 with ADR-0226 d3: the move is ONE private-index commit, the old path deleted and the new one added, and the
         // frozen delete keeps the mirror-drift refusal for an old file someone edited.
         [$repo, $git] = $this->recordingRepository();
         $this->holdMdxAsBlocksWithParagraphLens();
@@ -728,7 +728,7 @@ class EntryPublicationTest extends TestCase
 
     public function test_a_new_hosted_page_has_no_file_language_keeps_the_tsx_codec_and_is_never_mirrored(): void
     {
-        // review-r1 (EP-26 F), ADR-0233 d6: a Hosted site's page has no File Language and no file. Its format stays the
+        // ADR-0233 d6: a Hosted site's page has no File Language and no file. Its format stays the
         // tsx codec it had before File Languages existed (the column is NOT NULL); nothing offers it a language or
         // mirrors it, whether the field is omitted or named.
         $directory = $this->ownedFileFixtureRoot().'/hosted';
@@ -760,7 +760,7 @@ class EntryPublicationTest extends TestCase
         $this->assertNotNull($entry->fresh()->published_version);
         $this->assertSame([], array_values(array_diff(scandir($directory), ['.', '..'])), 'nothing is mirrored for a Hosted page');
 
-        // review-r1 (EP-26 F, #2): its page settings name no File Language either, not even the tsx codec it has.
+        // Its page settings name no File Language either, not even the tsx codec it has.
         foreach (['tsx', 'mdx'] as $named) {
             try {
                 $publication->recordDraft($entry->fresh(), self::BODY_ONE, null, \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'Tenant page', 'fileLanguage' => $named]));

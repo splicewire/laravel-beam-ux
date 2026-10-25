@@ -223,7 +223,7 @@ class ManifestProfileResolverTest extends TestCase
         }
 
         config(['fortify.features' => [\Laravel\Fortify\Features::registration(), \Laravel\Fortify\Features::twoFactorAuthentication(), \Laravel\Fortify\Features::emailVerification()]]);
-        // review-r1 (WP-EP07): confirm-password follows the host's own switch, the confirm view it registers.
+        // Confirm-password follows the host's own switch: the confirm view it registers, as its JS lists the feature.
         \Laravel\Fortify\Fortify::confirmPasswordView('auth.confirm-password');
         $profile = $this->resolver('central_db')->resolve($this->entry('central'));
         foreach (['AuthRegister', 'AuthTwoFactorChallenge', 'AuthVerifyEmail', 'AuthConfirmPassword', ...$always] as $name) {
