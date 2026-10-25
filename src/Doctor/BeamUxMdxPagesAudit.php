@@ -21,6 +21,9 @@ use Splicewire\Beam\Ux\Type\UxType;
  * that is off passes: the host keeps MDX as source, as before. The files on disk are not checked; the stored pages are
  * what every reader serves, and the conversion command reports its files itself.
  *
+ * **A retired command still scheduled** (EP-26 G1): where the gate is on, a scheduled `enrich-page-schemas` (which
+ * refuses there) warns.
+ *
  * **Unclaimed frontmatter keys** (d3). A key nothing declares is kept in the page's version (the page settings'
  * `unclaimed`) and printed back by the mirror; this reports which published pages keep any. It warns and never fails:
  * which keys a host's authors write is a fact about the host. A zero says how many pages it counted.
@@ -39,7 +42,29 @@ class BeamUxMdxPagesAudit implements DoctorAudit
 
         $pages = BeamUxEntry::query()->where('type', UxType::Page->value)->get();
 
-        return [$this->gate($pages), $this->unclaimed($pages)];
+        return [$this->gate($pages), $this->unclaimed($pages), ...$this->retiredSchedule()];
+    }
+
+    /**
+     * EP-26 G1: `splicewire:beam:ux:enrich-page-schemas` retires (d3) and refuses to run where MDX pages hold blocks,
+     * so a host that still schedules it there fails every run. Warns, naming the command; nothing when it is not
+     * scheduled or the gate is off.
+     *
+     * @return list<Finding>
+     */
+    private function retiredSchedule(): array
+    {
+        if (! config('beam.ux.mdx.holds_blocks') || ! app()->bound(\Illuminate\Console\Scheduling\Schedule::class)) {
+            return [];
+        }
+        foreach (app(\Illuminate\Console\Scheduling\Schedule::class)->events() as $event) {
+            if (str_contains((string) $event->command, 'splicewire:beam:ux:enrich-page-schemas')) {
+                return [Finding::warn('Retired MDX commands', 'splicewire:beam:ux:enrich-page-schemas is still scheduled, but MDX pages hold blocks here, '
+                    .'so it refuses every run. Remove it from the schedule (ADR-0233 d3).')];
+            }
+        }
+
+        return [];
     }
 
     /** @param  iterable<BeamUxEntry>  $pages */
@@ -57,7 +82,10 @@ class BeamUxMdxPagesAudit implements DoctorAudit
                 continue;
             }
             $mdx++;
-            $bodies = [$page->particle?->payload, $this->published($page)['payload'] ?? null];
+            // The working copy through the entry's own storage driver, which is what every editor reads.
+            $working = $page->particle_id === null ? null
+                : app(\Splicewire\Beam\Ux\Storage\StorageDriverResolver::class)->resolve($page)->read((string) $page->particle_id)?->body;
+            $bodies = [$working, $this->published($page)['payload'] ?? null];
             foreach ($bodies as $body) {
                 if (is_array($body) && $body !== [] && ! JsonDocShape::is($body)) {
                     $source[] = (string) $page->slug;

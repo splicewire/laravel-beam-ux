@@ -30,6 +30,10 @@ use Splicewire\Beam\Ux\Type\UxType;
  *
  * The command name mirrors the package tree (ADR-0167): vendor `splicewire` · tier `beam` ·
  * package-path `ux` · verb `enrich-page-schemas`.
+ *
+ * @deprecated ADR-0233 d3: an MDX page holds blocks and its frontmatter is its page settings, so this batch retires
+ * as each host converts (EP-42). Where `beam.ux.mdx.holds_blocks` is on it refuses to run: it would write a
+ * `{frontmatter, content}` source body over every MDX page that holds blocks.
  */
 class EnrichPageSchemasCommand extends Command
 {
@@ -53,6 +57,13 @@ class EnrichPageSchemasCommand extends Command
 
     public function handle(StorageDriverResolver $drivers, PlacementResolver $placements): int
     {
+        if (config('beam.ux.mdx.holds_blocks')) {
+            $this->error('MDX pages hold blocks on this host (ADR-0233 d1), and their frontmatter is page settings (d3). '
+                .'This command would overwrite them with source, so it does not run here; it retires (EP-26).');
+
+            return self::FAILURE;
+        }
+        $this->warn('Deprecated (ADR-0233 d3): this batch retires once this host converts its MDX pages to blocks (EP-42).');
         $namespace = $this->namespace();
         $schema = $this->schema();
         if ($schema === null) {
