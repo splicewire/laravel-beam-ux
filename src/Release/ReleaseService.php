@@ -289,6 +289,10 @@ final class ReleaseService
             if (config('beam.ux.releases.review_required', false) && (! in_array($release->status, ['approved', 'scheduled'], true) || $release->reviewed_by === null)) {
                 $this->refuse('This Release requires approval before publication.');
             }
+            // ADR-0232 d8: Publish ends the Preview Links; the secret goes with them (saved with the transition).
+            if ($release->getAttribute('preview_links_enabled') || $release->getAttribute('preview_link_secret') !== null) {
+                $release->forceFill(['preview_links_enabled' => false, 'preview_link_secret' => null]);
+            }
             $refs = $pins = [];
             foreach ($members as $member) {
                 if ($member->version_id !== null) {
@@ -401,7 +405,6 @@ final class ReleaseService
         }
     }
 
-    /** A direct Release's single check: `ux.author`, then the publish ladder alone. */
     /** Whether the actor may manage the Release's Preview Links: the check the link actions make, without refusing. */
     public function mayManageLinks(BeamUxRelease $release, ?Authenticatable $actor): bool
     {
@@ -426,6 +429,7 @@ final class ReleaseService
         }
     }
 
+    /** A direct Release's single check: `ux.author`, then the publish ladder alone. */
     private function authorizeDirect(BeamUxEntry $entry, Authenticatable $actor): void
     {
         $gate = Gate::forUser($actor);

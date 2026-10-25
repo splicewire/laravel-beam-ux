@@ -2099,6 +2099,28 @@ class EntryPublicationTest extends TestCase
         $this->assertSame('published', $release->fresh()->status);
     }
 
+    public function test_publishing_a_release_turns_its_preview_links_off_and_drops_their_secret(): void
+    {
+        // ADR-0232 d8 (EP-18): links end on Publish. A published Release never reopens, but its panel must not still
+        // read "links on", and no secret should outlive the links it signed.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+        (require __DIR__.'/../database/migrations/shared/add_preview_links_to_beam_ux_releases_table.php.stub')->up();
+        $release = $service->create($entry, 'Previewed', $author);
+        $service->putMember($release, $entry->id, $entry->published_version, $author);
+        $service->previewLinks($release, true, $author);
+        $service->transition($release, 'submit', $author);
+        $service->transition($release, 'approve', $reviewer);
+        $this->assertTrue($release->fresh()->preview_links_enabled);
+
+        $service->transition($release, 'publish', $reviewer);
+
+        $published = $release->fresh();
+        $this->assertSame('published', $published->status);
+        $this->assertFalse($published->preview_links_enabled);
+        $this->assertNull($published->getAttribute('preview_link_secret'));
+    }
+
     public function test_release_resource_and_commands_mount_through_the_existing_particle_surface(): void
     {
         $discovery = app(\Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery::class);
