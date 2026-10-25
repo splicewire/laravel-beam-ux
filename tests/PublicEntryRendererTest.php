@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -21,6 +22,8 @@ use Splicewire\Beam\Ux\Http\EntryPageProps;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Models\BeamUxPreviewGrant;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -508,6 +511,41 @@ class PublicEntryRendererTest extends TestCase
             $this->get('/docs/api')->assertNotFound();
             $this->get($artifact)->assertNotFound();
         }
+    }
+
+    public function test_a_take_down_hides_descendant_artifacts_in_a_preview(): void
+    {
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_releases_table.php.stub')->up();
+
+        $root = BeamUxEntry::rootFor();
+        $parent = $this->page('hidden-parent', [
+            'segment' => 'parent',
+            'parent_id' => $root->getKey(),
+            'realms' => ['site'],
+        ]);
+        $child = $this->page('hidden-child', [
+            'segment' => 'child',
+            'parent_id' => $parent->getKey(),
+            'realms' => ['site'],
+        ]);
+        DB::table('beam_ux_releases')->insert([
+            'id' => 'release-take-down', 'title' => 'Take down', 'realm' => 'site', 'created_by' => 'author',
+            'edited_by' => 'author', 'status' => 'draft', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('beam_ux_release_members')->insert([
+            'id' => Str::uuid(), 'release_id' => 'release-take-down', 'entry_id' => $parent->getKey(),
+            'version_id' => null, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $grant = new BeamUxPreviewGrant;
+        $grant->forceFill([
+            'entry_id' => (string) $parent->getKey(),
+            'version_id' => null,
+            'release_id' => 'release-take-down',
+        ]);
+
+        $chain = app(PublicEntryGate::class)->chainForEntry($child, 'site', null, new PreviewContext($grant));
+
+        $this->assertNull($chain, 'a live child must not keep an artifact door beneath a preview take-down');
     }
 
     /** @param array<string, mixed> $attributes */

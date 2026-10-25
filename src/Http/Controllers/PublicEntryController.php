@@ -13,6 +13,7 @@ use Splicewire\Beam\Ux\Http\EntryPageProps;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -110,8 +111,10 @@ class PublicEntryController
         $page = (string) ($defaults['beamUxPage'] ?? '');
         $withNav = (bool) ($defaults['beamUxNav'] ?? true);
 
-        $actor = $request->user();
-        $chain = $this->gate->chainFor($path, $realm, $actor);
+        $preview = $request->attributes->get('beam.ux.preview');
+        $preview = $preview instanceof PreviewContext ? $preview : null;
+        $actor = $preview === null ? $request->user() : $preview->viewer;
+        $chain = $this->gate->chainFor($path, $realm, $actor, $preview);
 
         // The uniform 404: unresolvable, unpublished and denied are one answer (§5).
         abort_if($chain === null, Response::HTTP_NOT_FOUND);
@@ -125,6 +128,7 @@ class PublicEntryController
         $chrome = $this->chrome->resolve($chain);
 
         $bindings = app(\Splicewire\Beam\Ux\Bindings\BindingResolver::class)->resolve($entry, $request, $realm);
+        $theme = app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve($realm, $preview);
 
         $response = $this->renderer->render($page, [
             ...($bindings === [] ? [] : ['bindings' => array_map(fn ($binding) => $binding->toArray(), $bindings)]),
@@ -142,10 +146,10 @@ class PublicEntryController
             // it out of the Inertia payload is what lets a public one be cached by its version while
             // the page shell itself stays per-request.
             'artifact' => [
-                'url' => $this->artifactUrl($request, $entry),
-                'version' => $this->artifacts->version($entry),
-                'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
-                'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
+                'url' => $this->artifactUrl($request, $entry, $preview?->versionFor((string) $entry->getKey())),
+                'version' => $this->artifactVersion($entry, $preview),
+                'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme($theme),
+                'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss($theme),
             ],
             // The SECOND half of §7's resolution order, addressed the same way: when a chrome name is
             // another entry's slug, the client "imports the page artifact and its layout artifact and
@@ -153,14 +157,23 @@ class PublicEntryController
             // not a nestable entry (`ChromeEntryResolver`); the client prefers a registered component
             // of the same name on its own, so this never overrides a host registration.
             'chrome' => [
-                'layout' => $this->chromeArtifact($request, $chrome['layout'], $entry),
-                'template' => $this->chromeArtifact($request, $chrome['template'], $entry),
+                'layout' => $this->chromeArtifact($request, $chrome['layout'], $entry, $preview, $theme),
+                'template' => $this->chromeArtifact($request, $chrome['template'], $entry, $preview, $theme),
             ],
             // The already-gated nav for the whole realm, so a shell renders `<SiteNav rootPath>` — the
             // site nav and the docs sidebar out of ONE payload (ADR-0210 §5) — without a second
             // round trip. `withNav: false` at mount time is the escape hatch for a host that caches
             // and injects its own.
-            'nav' => $withNav ? $this->nav->project($realm, $actor)->toArray() : null,
+            'nav' => $withNav ? $this->nav->project($realm, $actor, $preview)->toArray() : null,
+            ...($preview === null ? [] : ['preview' => [
+                'label' => $preview->grant->release?->title ?? 'saved version',
+                'exitUrl' => route((string) ($defaults['beamUxPreviewExitRoute'] ?? '')),
+                'viewAsMeUrl' => PreviewContext::centralViewer($request) === null ? null : route(
+                    (string) ($defaults['beamUxPreviewViewerRoute'] ?? ''),
+                    ['path' => $request->getRequestUri()],
+                    false,
+                ),
+            ]]),
             // Props the package owning this page's layout contributes (DOCS-12): none unless one is registered.
             ...$this->pageProps->for($chrome['layout'], $entry, $chain, $actor),
         ], );
@@ -193,7 +206,7 @@ class PublicEntryController
      *
      * @return array{url: string, version: string}|null
      */
-    private function chromeArtifact(Request $request, ?string $name, BeamUxEntry $for): ?array
+    private function chromeArtifact(Request $request, ?string $name, BeamUxEntry $for, ?PreviewContext $preview = null, ?array $theme = null): ?array
     {
         if ($name === null || $name === '') {
             return null;
@@ -206,10 +219,10 @@ class PublicEntryController
         }
 
         return [
-            'url' => $this->artifactUrl($request, $chrome),
-            'version' => $this->artifacts->version($chrome),
-            'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
-            'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
+            'url' => $this->artifactUrl($request, $chrome, $preview?->versionFor((string) $chrome->getKey())),
+            'version' => $this->artifactVersion($chrome, $preview),
+            'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme($theme ?? app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
+            'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss($theme ?? app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
         ];
     }
 
@@ -230,9 +243,12 @@ class PublicEntryController
      * EXISTING is the stronger evidence, and a stale `particle_id` must never hide content that is
      * actually there.
      */
-    private function artifactUrl(Request $request, BeamUxEntry $entry): string
+    private function artifactUrl(Request $request, BeamUxEntry $entry, ?string $previewVersion = null): string
     {
-        if ($entry->particle_id === null && ! $this->artifacts->has($entry)) {
+        $hasArtifact = $previewVersion === null
+            ? $this->artifacts->has($entry)
+            : $this->artifacts->hasVersion($entry, $previewVersion);
+        if ($entry->particle_id === null && ! $hasArtifact) {
             return '';
         }
 
@@ -240,7 +256,7 @@ class PublicEntryController
         // nothing authored, nothing to address. Read only when no artifact exists, so a page that has
         // a body pays nothing here; a particle that cannot be read keeps its address (the compile
         // advice is true there, and the artifact audit names the row).
-        if (! $this->artifacts->has($entry) && app(CompileEntryBody::class)->holdsEmptyDocument($entry)) {
+        if (! $hasArtifact && $previewVersion === null && app(CompileEntryBody::class)->holdsEmptyDocument($entry)) {
             return '';
         }
 
@@ -252,9 +268,16 @@ class PublicEntryController
 
         return route($name, array_filter([
             'entry' => $entry->getKey(),
-            'version' => $this->artifacts->version($entry),
+            'version' => $previewVersion === null ? $this->artifacts->version($entry) : $this->artifacts->versionKey($previewVersion),
             'styleRegistry' => \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
             'responsiveCss' => \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
         ]));
+    }
+
+    private function artifactVersion(BeamUxEntry $entry, ?PreviewContext $preview): string
+    {
+        $versionId = $preview?->versionFor((string) $entry->getKey());
+
+        return $versionId === null ? $this->artifacts->version($entry) : $this->artifacts->versionKey($versionId);
     }
 }

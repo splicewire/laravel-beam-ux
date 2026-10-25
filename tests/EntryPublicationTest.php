@@ -4,6 +4,8 @@ namespace Splicewire\Beam\Ux\Tests;
 
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -22,6 +24,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
 use Splicewire\Beam\Ux\Particle\EntryDraftSaveOp;
 use Splicewire\Beam\Ux\Particle\EntryPublishOp;
+use Splicewire\Beam\Ux\Particle\EntryPreviewOp;
 use Splicewire\Beam\Ux\Particle\EntryVersionRestoreOp;
 use Splicewire\Beam\Ux\Particle\EntryVersionsShowOp;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
@@ -1759,6 +1762,41 @@ class EntryPublicationTest extends TestCase
 
         $this->assertSame('published', $state->release->status);
         $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+    }
+
+    public function test_entry_preview_link_requires_edit_and_names_an_existing_version(): void
+    {
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_preview_grants_table.php.stub')->up();
+        Route::beamUxSite('site/entry');
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $otherEntry = $this->publishedPage(self::BODY_ONE);
+        [, $author, $reviewer] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => $user?->getAuthIdentifier() === 'author');
+        \Illuminate\Support\Facades\Gate::define('update', fn ($user = null, $subject = null) =>
+            $user?->getAuthIdentifier() === 'author' && $subject instanceof BeamUxEntry && $subject->is($entry));
+
+        $link = EntryPreviewOp::handle($entry, Request::create('/', 'POST', ['versionId' => $entry->published_version]), $author);
+        $token = basename((string) parse_url($link->url, PHP_URL_PATH));
+
+        $this->assertSame(1, DB::table('beam_ux_preview_grants')->count());
+        $grant = app(\Splicewire\Beam\Ux\Preview\PreviewGrantService::class)->resolve($token);
+        $this->assertSame((string) $entry->getKey(), $grant?->entry_id);
+        $this->assertSame((string) $entry->published_version, $grant?->version_id);
+        $this->assertNotNull(parse_url($link->url, PHP_URL_QUERY), 'the entry preview link must be signed');
+
+        try {
+            EntryPreviewOp::handle($entry, Request::create('/', 'POST', ['versionId' => $otherEntry->published_version]), $author);
+            $this->fail('a version belonging to a different entry must not mint a preview link');
+        } catch (ValidationException) {
+            $this->assertSame(1, DB::table('beam_ux_preview_grants')->count());
+        }
+
+        try {
+            EntryPreviewOp::handle($entry, Request::create('/', 'POST', ['versionId' => $entry->published_version]), $reviewer);
+            $this->fail('a non-editor must not mint a preview link');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertSame(1, DB::table('beam_ux_preview_grants')->count());
+        }
     }
 
     public function test_a_release_resolves_its_author_from_the_default_guards_provider(): void

@@ -33,6 +33,13 @@ class EditorKitTest extends TestCase
         EditorRoutes::mount();
     }
 
+    public function test_editor_routes_mount_the_version_preview_operation(): void
+    {
+        $routes = collect(app('router')->getRoutes()->getRoutes())->map(fn ($route) => $route->uri())->all();
+
+        $this->assertContains('beam-ux-entries/{id}/preview', $routes);
+    }
+
     public function test_creation_requires_author_and_creates_the_default_body_once(): void
     {
         $body = [['kind' => 'block', 'name' => 'h1', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Default page']]]];

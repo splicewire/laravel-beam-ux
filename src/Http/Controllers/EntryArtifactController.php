@@ -7,6 +7,7 @@ use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -40,14 +41,34 @@ class EntryArtifactController
     {
         $defaults = $request->route()?->defaults ?? [];
         $realm = (string) ($defaults['beamUxRealm'] ?? BeamUxEntry::REALM_SITE);
+        $preview = $request->attributes->get('beam.ux.preview');
+        $preview = $preview instanceof PreviewContext ? $preview : null;
+        $actor = $preview === null ? $request->user() : null;
 
         $model = BeamUxEntry::query()->whereKey($entry)->first();
 
         abort_if($model === null, Response::HTTP_NOT_FOUND);
 
-        $chain = $this->gate->chainForEntry($model, $realm, $request->user());
+        $chain = $this->gate->chainForEntry($model, $realm, $actor, $preview);
 
         abort_if($chain === null, Response::HTTP_NOT_FOUND);
+
+        if ($preview !== null) {
+            $versionId = $preview->versionFor((string) $model->getKey());
+            abort_if($versionId === null, Response::HTTP_NOT_FOUND);
+            $versionKey = $this->artifacts->versionKey($versionId);
+            abort_unless($version === $versionKey, Response::HTTP_NOT_FOUND);
+            $code = $this->artifacts->readVersion($model, $versionId);
+            abort_if($code === null, Response::HTTP_NOT_FOUND);
+
+            return response($code, Response::HTTP_OK, [
+                'Content-Type' => 'text/javascript; charset=utf-8',
+                'ETag' => '"'.$versionKey.'"',
+                'Cache-Control' => 'no-store, private',
+                'X-Robots-Tag' => 'noindex, nofollow, noarchive',
+            ]);
+        }
+
         abort_unless($this->compile->compilable($model), Response::HTTP_NOT_FOUND);
 
         $code = $this->artifacts->read($model);

@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Schema;
 use Rushing\Versioning\Models\Version;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Splicewire\Beam\Ux\Schema\ThemeSchemas;
 use Throwable;
 
@@ -95,7 +96,7 @@ class ThemeResolver
      *                              with no argument at all.
      * @return array{canvas: array<string, mixed>, shell: array<string, mixed>, site: array<string, mixed>}
      */
-    public function resolve(?string $realm = null): array
+    public function resolve(?string $realm = null, ?PreviewContext $preview = null): array
     {
         $this->lastFailure = null;
 
@@ -108,17 +109,17 @@ class ThemeResolver
             $theme = $this->defaults();
 
             [$entry, $connection] = ['central:'.self::SLUG, self::CENTRAL_CONNECTION];
-            $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry(self::SLUG), self::CENTRAL_CONNECTION));
+            $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry(self::SLUG), self::CENTRAL_CONNECTION, $preview));
 
             [$entry, $connection] = ['tenant:'.self::SLUG, null];
-            $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry(self::SLUG), null));
+            $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry(self::SLUG), null, $preview));
 
             if ($realm !== null && $realm !== self::SLUG) {
                 [$entry, $connection] = ['central:'.$realm, self::CENTRAL_CONNECTION];
-                $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry($realm), self::CENTRAL_CONNECTION));
+                $theme = array_replace_recursive($theme, $this->bodyFor($this->centralEntry($realm), self::CENTRAL_CONNECTION, $preview));
 
                 [$entry, $connection] = ['tenant:'.$realm, null];
-                $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry($realm), null));
+                $theme = array_replace_recursive($theme, $this->bodyFor($this->tenantEntry($realm), null, $preview));
             }
 
             return $theme;
@@ -247,7 +248,7 @@ class ThemeResolver
      *
      * @return array<string, mixed>
      */
-    private function bodyFor(?BeamUxEntry $entry, ?string $connection): array
+    private function bodyFor(?BeamUxEntry $entry, ?string $connection, ?PreviewContext $preview = null): array
     {
         if ($entry === null || $entry->particle_id === null) {
             return [];
@@ -268,12 +269,43 @@ class ThemeResolver
         }
 
         $versions = $connection !== null ? Version::on($connection) : Version::query();
-        $pin = $entry->getAttribute('published_version');
+        $publishedPin = $entry->getAttribute('published_version');
+        $isPreviewVersion = $preview !== null
+            && $preview->sharesStorageWith($entry)
+            && $preview->contains((string) $entry->getKey());
+        $pin = $isPreviewVersion
+            ? $preview->versionFor((string) $entry->getKey())
+            : $publishedPin;
+
+        if ($isPreviewVersion && $pin === null) {
+            return [];
+        }
 
         if ($pin !== null && $pin !== '') {
-            $snapshot = $versions->find((string) $pin)?->snapshot;
+            $snapshot = $isPreviewVersion
+                ? app(\Rushing\Versioning\Contracts\VersionStore::class)->version($particle, (string) $pin)?->snapshot
+                : $versions->find((string) $pin)?->snapshot;
 
-            return is_array($snapshot['payload'] ?? null) ? $snapshot['payload'] : [];
+            if (! is_array($snapshot['payload'] ?? null)) {
+                return [];
+            }
+
+            if (! $isPreviewVersion) {
+                return $snapshot['payload'];
+            }
+
+            $published = $publishedPin === null
+                ? []
+                : app(\Rushing\Versioning\Contracts\VersionStore::class)
+                    ->version($particle, (string) $publishedPin)?->snapshot['payload'] ?? [];
+            if (! is_array($published)) {
+                $published = [];
+            }
+
+            return [
+                ...$published,
+                'site' => is_array($snapshot['payload']['site'] ?? null) ? $snapshot['payload']['site'] : [],
+            ];
         }
 
         $hasHistory = $versions

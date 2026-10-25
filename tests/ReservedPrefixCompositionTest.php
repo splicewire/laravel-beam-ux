@@ -56,7 +56,8 @@ class ReservedPrefixCompositionTest extends TestCase
 
         // One constraint carrying all three sources, baseline first, de-duplicated.
         $this->assertSame(
-            PublicEntryController::pathConstraint(['api', 'reports', 'mcp']),
+            // The package's own control routes live under _beam and must not be swallowed by this catch-all.
+            PublicEntryController::pathConstraint(['api', '_beam', 'reports', 'mcp']),
             $show->wheres['path'],
         );
     }
