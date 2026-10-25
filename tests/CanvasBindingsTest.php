@@ -96,6 +96,59 @@ class CanvasBindingsTest extends AuthoredComponentNativeTestCase
         $this->assertSame(0, \Rushing\Versioning\Models\Version::count());
     }
 
+    public function test_http_component_definition_with_empty_text_and_choices_is_read_only(): void
+    {
+        \Splicewire\Beam\Facades\Particle::ops('canvas-entries', 'beam-ux-entry', ['canvas-bindings']);
+        $entry = $this->entry();
+        $this->actingAs(new GenericUser(['id' => 'author', 'author' => true]));
+        $body = [['kind' => 'block', 'name' => 'section', 'isComponent' => false, 'dynamic' => false,
+            'props' => [], 'children' => [['kind' => 'text', 'value' => '', 'prop' => 'title']],
+            'component' => ['name' => 'Card', 'props' => [['name' => 'title', 'type' => 'text', 'required' => false,
+                'default' => 'Default title', 'choices' => []]]]]];
+        $before = $entry->fresh()->getAttributes();
+        $db = $entry->getConnection();
+        $db->enableQueryLog();
+        $db->flushQueryLog();
+        $this->postJson('/canvas-entries/'.$entry->id.'/canvas-bindings', ['body' => $body])->assertOk();
+        $queries = $db->getQueryLog();
+        $db->disableQueryLog();
+        foreach ($queries as $query) {
+            $this->assertDoesNotMatchRegularExpression('/^\s*(insert|update|delete|replace|create|alter|drop)\b/i', $query['query']);
+        }
+        $this->assertSame($before, $entry->fresh()->getAttributes());
+        $this->assertSame(0, \Splicewire\Beam\Models\BeamParticle::count());
+        $this->assertSame(0, \Rushing\Versioning\Models\Version::count());
+    }
+
+    public function test_non_beam_and_unmatched_routes_keep_native_empty_string_conversion(): void
+    {
+        \Illuminate\Support\Facades\Route::post('/ordinary-input', fn (Request $request) => $request->all());
+        $this->postJson('/ordinary-input', ['value' => '', '_particle_op_resource' => 'beam-ux-entry', '_particle_op_name' => 'canvas-bindings'])
+            ->assertOk()->assertJsonPath('value', null);
+        foreach (['/not-a-route', '/ordinary-input'] as $path) {
+            $request = Request::create($path, 'PUT', ['value' => '']);
+            $result = (new \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull)->handle($request, fn ($request) => $request->input('value'));
+            $this->assertNull($result);
+        }
+    }
+
+    public function test_ordinary_save_draft_keeps_empty_text_and_does_not_publish(): void
+    {
+        \Splicewire\Beam\Facades\Particle::ops('canvas-entries', 'beam-ux-entry', ['save-draft']);
+        $entry = $this->entry();
+        $this->actingAs(new CanvasBindingsActor(['id' => 'author', 'author' => true]));
+        $body = [['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false,
+            'props' => [['name' => 'title', 'kind' => 'string', 'value' => 'Valid title']],
+            'children' => [['kind' => 'text', 'value' => '']]]];
+        $this->postJson('/canvas-entries/'.$entry->id.'/save-draft', ['body' => $body, 'baseVersion' => null])
+            ->assertOk()->assertJsonPath('data.draftPending', true);
+        $state = app(\Splicewire\Beam\Ux\Publish\EntryPublication::class)->state($entry->fresh());
+        $this->assertNotNull($state->publishedVersion);
+        $this->assertNotSame($state->headVersion, $state->publishedVersion);
+        $this->assertSame($body, app(\Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard::class)->workingHead($entry->fresh()));
+        $this->assertSame(2, \Rushing\Versioning\Models\Version::count());
+    }
+
     public function test_page_public_uses_guest_ancestor_guards_and_reports_unknown_chains(): void
     {
         $page = $this->entry();
@@ -182,4 +235,9 @@ class CanvasBindingsEntryPolicy
     {
         return $entry->slug === 'editable';
     }
+}
+
+class CanvasBindingsActor extends \Illuminate\Foundation\Auth\User
+{
+    protected $guarded = [];
 }

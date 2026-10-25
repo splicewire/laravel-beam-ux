@@ -16,6 +16,12 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 #[TypeScript]
 class JsonBlockNode extends JsonNode
 {
+    /** @return array<string, mixed> */
+    public static function rules(): array
+    {
+        return ['slots' => ['sometimes', 'array']];
+    }
+
     /**
      * @param  array<int, JsonProp>  $props
      * @param  array<int, JsonNode>  $children

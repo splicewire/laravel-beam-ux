@@ -161,6 +161,10 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
     public function packageBooted(): void
     {
+        \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::skipWhen(
+            JsonDoc\PreservesJsonDocStrings::matches(...),
+        );
+
         // BeamUxEntry implements WorkflowManaged, so EloquentAwaitingStore writes
         // `beam_workflow_awaiting.subject_type = $subject->getMorphClass()`. Unaliased it was
         // storing the raw FQCN in that column, and the alias is also the permission-token prefix

@@ -13,6 +13,12 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 #[TypeScript]
 class JsonOpaqueNode extends JsonNode
 {
+    /** @return array<string, mixed> */
+    public static function rules(): array
+    {
+        return ['source' => ['present', 'string']];
+    }
+
     public function __construct(
         public OpaqueReason $reason,
         public string $source,
