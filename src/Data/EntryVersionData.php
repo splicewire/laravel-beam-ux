@@ -40,6 +40,7 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
 #[Description('One recorded version of an entry body: a frozen snapshot with a monotonic number, a readable handle, and whether it is the working HEAD or the published body.')]
 class EntryVersionData extends BeamData
 {
+    /** @param list<ReleaseRecordingData> $recordings */
     public function __construct(
         #[Example('9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d')]
         public string $id,

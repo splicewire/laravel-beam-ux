@@ -626,6 +626,12 @@ class EntryBodyOpsTest extends TestCase
         $this->assertSame([], $empty->body);
     }
 
+    public function test_canvas_input_validation_rejects_a_dictionary_before_morph_traversal(): void
+    {
+        $this->expectException(ValidationException::class);
+        \Splicewire\Beam\Ux\Data\CanvasBodyInputData::validate(['body' => ['source' => '<p>legacy</p>']]);
+    }
+
     public function test_save_blocks_uses_the_publication_path_and_refuses_non_block_kinds(): void
     {
         $entry = BeamUxEntry::create(['slug' => 'typed-blocks', 'type' => 'page', 'format' => 'tsx']);

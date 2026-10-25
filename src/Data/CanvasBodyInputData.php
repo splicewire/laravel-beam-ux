@@ -2,6 +2,9 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Illuminate\Contracts\Support\Arrayable;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 use Schemastud\DataSchemas\Attributes\Description;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
@@ -21,6 +24,37 @@ class CanvasBodyInputData extends BeamData
         #[DataCollectionOf(JsonNode::class)]
         public array $body,
     ) {}
+
+    /** Validate the outer collection before Spatie traverses abstract/morph items. */
+    public static function validate(Arrayable|array $payload): Arrayable|array
+    {
+        self::assertDocument($payload);
+
+        return parent::validate($payload);
+    }
+
+    public static function validateAndCreate(Arrayable|array $payload): static
+    {
+        self::assertDocument($payload);
+
+        return parent::validateAndCreate($payload);
+    }
+
+    private static function assertDocument(Arrayable|array $payload): void
+    {
+        $values = $payload instanceof Arrayable ? $payload->toArray() : $payload;
+        Validator::make($values, self::rules())->validate();
+        try {
+            foreach ($values['body'] as $node) {
+                JsonNode::from($node);
+            }
+        } catch (ValidationException $error) {
+            throw $error;
+        } catch (\Throwable) {
+            // Use the declared union's constructors, including nested arms; no parallel node schema.
+            throw ValidationException::withMessages(['body' => 'This document has a node the canvas editor cannot read.']);
+        }
+    }
 
     /** @return array<string, mixed> */
     public static function rules(): array

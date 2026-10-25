@@ -9,6 +9,7 @@ use Splicewire\Beam\Data\BeamData;
 #[TypeScript]
 final class RepeatQueryData extends BeamData
 {
+    /** @param array<string, mixed>|null $filter */
     public function __construct(
         #[Optional]
         public ?array $filter = null,
