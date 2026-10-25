@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Data;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Schemastud\DataSchemas\Attributes\Title;
+use Schemastud\Frame\Attributes\Column;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
@@ -21,8 +22,11 @@ final class ReleaseData extends BeamData
 {
     public function __construct(
         public string $id,
+        #[Column(label: 'Title', sort: 0)]
         public string $title,
+        #[Column(label: 'Realm', sort: 2)]
         public string $realm,
+        #[Column(label: 'Status', sort: 1)]
         public string $status,
         public ?string $reviewedBy,
         #[DataCollectionOf(ReleaseMemberData::class)] public array $members,
