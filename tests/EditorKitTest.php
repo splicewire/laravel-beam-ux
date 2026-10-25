@@ -72,10 +72,10 @@ class EditorKitTest extends TestCase
     {
         EditorRoutes::mount('tenant/beam-ux-entries', 'tenant/beam-ux-releases', [
             'realm' => 'tenant',
-            'includeReleaseFiles' => false,
         ]);
 
-        $names = collect(app('router')->getRoutes()->getRoutes())
+        $allRoutes = collect(app('router')->getRoutes()->getRoutes());
+        $names = $allRoutes
             ->map(fn ($route) => $route->getName())
             ->filter()
             ->all();
@@ -84,6 +84,9 @@ class EditorKitTest extends TestCase
         $this->assertContains('tenant.beam-ux-release.command', $names);
         $this->assertNotContains('tenant.beam-ux-release-files.index', $names);
         $this->assertNotContains('tenant.beam-ux-release-files.commit-now', $names);
+        $centralFiles = $allRoutes->first(fn ($route) => $route->getName() === 'beam-ux-release-files.index');
+        $this->assertNotNull($centralFiles, 'A tenant realm mount must not replace the central recording route.');
+        $this->assertArrayNotHasKey(\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM, $centralFiles->defaults);
     }
 
     public function test_creation_requires_author_and_creates_the_default_body_once(): void

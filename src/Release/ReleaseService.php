@@ -18,6 +18,7 @@ use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Preview\ReleasePreviewLinks;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Type\UxType;
+use Splicewire\Beam\Ux\Support\EditorAuthorizer;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Control\TransitionResult;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
@@ -262,7 +263,7 @@ final class ReleaseService
         }
         if ($transition === 'revise') {
             // An empty Release still has an identified author, never an anonymous transition.
-            Gate::forUser($actor)->authorize('ux.author');
+            app(EditorAuthorizer::class)->authorize($actor);
             $release->reviewed_by = null;
             $release->edited_by = $context->actor;
             $release->revision = ((int) $release->revision) + 1;
@@ -451,7 +452,7 @@ final class ReleaseService
     private function authorizeEntry(BeamUxEntry $entry, Authenticatable $actor, bool $publish): void
     {
         $gate = Gate::forUser($actor);
-        $gate->authorize('ux.author');
+        app(EditorAuthorizer::class)->authorize($actor);
 
         foreach ($publish ? ['edit', 'publish'] : ['edit'] as $kind) {
             $ability = $this->entryAbility($entry, $kind);
@@ -480,7 +481,7 @@ final class ReleaseService
     /** Whoever can edit every member of the Release may manage its Preview Links (ADR-0232 d8). */
     private function authorizeLinks(BeamUxRelease $release, Authenticatable $actor): void
     {
-        Gate::forUser($actor)->authorize('ux.author');
+        app(EditorAuthorizer::class)->authorize($actor);
         foreach ($release->members()->pluck('entry_id') as $entryId) {
             $this->authorizeEntry($this->entry($release, (string) $entryId), $actor, false);
         }
@@ -490,7 +491,7 @@ final class ReleaseService
     private function authorizeDirect(BeamUxEntry $entry, Authenticatable $actor): void
     {
         $gate = Gate::forUser($actor);
-        $gate->authorize('ux.author');
+        app(EditorAuthorizer::class)->authorize($actor);
         $ability = $this->entryAbility($entry, 'publish');
         if ($ability !== null) {
             $gate->authorize($ability, $entry);

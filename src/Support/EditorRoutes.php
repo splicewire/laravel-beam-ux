@@ -15,6 +15,8 @@ final class EditorRoutes
         array $mountOptions = [],
     ): void {
         $realmPrefix = is_string($mountOptions['realm'] ?? null) ? $mountOptions['realm'].'.' : '';
+        $includeReleaseFiles = $mountOptions['includeReleaseFiles']
+            ?? ! is_string($mountOptions['realm'] ?? null);
         $entryOptions = array_replace($mountOptions, ['names' => $realmPrefix.'beam-ux-entry']);
 
         // NoSubject must precede any {id} route; no hidden package route registration.
@@ -27,7 +29,7 @@ final class EditorRoutes
             ->names($realmPrefix.'beam-ux-release')
             ->only(['index', 'show']);
         $releaseFilesMount = null;
-        if (($mountOptions['includeReleaseFiles'] ?? true) !== false) {
+        if ($includeReleaseFiles !== false) {
             $releaseFilesMount = Particle::mount('beam-ux-release-files', 'beam-ux-release-files')
                 ->names($realmPrefix.'beam-ux-release-files')
                 ->only(['index', 'show']);

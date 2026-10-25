@@ -3,7 +3,6 @@
 namespace Splicewire\Beam\Ux\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Gate;
 use Splicewire\Beam\Ux\Containment\PreviewEntryPathResolver;
 use Splicewire\Beam\Ux\Http\Middleware\ResolvePreviewContext;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -11,6 +10,7 @@ use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Splicewire\Beam\Ux\Preview\PreviewGrantService;
 use Splicewire\Beam\Ux\Release\ReleaseLifecycle;
+use Splicewire\Beam\Ux\Support\EditorAuthorizer;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -24,7 +24,7 @@ final class PreviewReleaseController
 
     public function __invoke(Request $request, string $release): Response
     {
-        abort_unless(Gate::forUser($request->user())->allows('ux.author'), Response::HTTP_FORBIDDEN);
+        abort_unless(app(EditorAuthorizer::class)->allows($request->user(), $request), Response::HTTP_FORBIDDEN);
         $found = BeamUxRelease::query()->find($release);
         abort_if($found === null || ! in_array($found->status, ReleaseLifecycle::OPEN, true), Response::HTTP_NOT_FOUND);
         $members = $found->members()->whereNotNull('version_id')->orderBy('entry_id')->get();

@@ -37,6 +37,7 @@ class ReleaseReadTest extends TestCase
         app(AttributedParticleDiscovery::class)->registerClass(ReleaseData::class);
         Particle::mount('beam-ux-releases', 'beam-ux-release')->only(['index', 'show']);
         Gate::define('ux.author', fn ($user = null) => $user?->getAuthIdentifier() === 'author');
+        Gate::define('entitlement:ux.author', fn ($user = null) => $user?->getAuthIdentifier() === 'author');
 
         // The row ReleaseService::create() writes, without the entry tables its authorization reads.
         app(\Splicewire\Beam\Workflows\Definition\DefinitionStore::class)
@@ -136,6 +137,7 @@ class ReleaseReadTest extends TestCase
             'release_id' => $this->release->id, 'entry_id' => $entry, 'version_id' => (string) \Illuminate\Support\Str::uuid()]);
         config(['beam.ux.releases.edit_ability' => 'update']);
         Gate::define('ux.author', fn ($user = null) => in_array($user?->getAuthIdentifier(), ['author', 'helper'], true));
+        Gate::define('entitlement:ux.author', fn ($user = null) => in_array($user?->getAuthIdentifier(), ['author', 'helper'], true));
         // An entry's ability is answered by its policy; this one lets the author edit and no one else.
         Gate::policy(\Splicewire\Beam\Ux\Models\BeamUxEntry::class, ReleaseReadEntryPolicy::class);
 

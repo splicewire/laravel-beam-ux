@@ -6,10 +6,10 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
-use Splicewire\Beam\Authorization\AbilityResolver;
 use Splicewire\Beam\Ux\Media\Data\EntryImageData;
 use Splicewire\Beam\Ux\Media\Data\EntryImageLibraryData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Support\EditorAuthorizer;
 
 /** Optional composition: no media classes load on hosts without the media provider. */
 final class EntryMedia
@@ -34,7 +34,7 @@ final class EntryMedia
     public function allowed(BeamUxEntry $entry, mixed $actor): bool
     {
         return self::available() && $actor instanceof Authenticatable
-            && app(AbilityResolver::class)->allows($actor, 'ux.author')
+            && app(EditorAuthorizer::class)->allows($actor)
             && Gate::forUser($actor)->allows('update', $entry);
     }
 

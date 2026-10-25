@@ -3,8 +3,8 @@
 namespace Splicewire\Beam\Ux\Release;
 
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Support\Facades\Gate;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
+use Splicewire\Beam\Ux\Support\EditorAuthorizer;
 
 /**
  * Who may read Releases: anyone who can author, the rule the Releases resource declares (`ux.author`) and ADR-0226 d7's
@@ -17,11 +17,11 @@ final class ReleasePolicy
 {
     public function viewAny(?Authenticatable $user): bool
     {
-        return Gate::forUser($user)->allows('ux.author');
+        return app(EditorAuthorizer::class)->allows($user);
     }
 
     public function view(?Authenticatable $user, BeamUxRelease $release): bool
     {
-        return Gate::forUser($user)->allows('ux.author');
+        return app(EditorAuthorizer::class)->allows($user);
     }
 }

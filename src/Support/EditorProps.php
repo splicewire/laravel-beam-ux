@@ -10,7 +10,7 @@ final class EditorProps
 {
     public static function canAuthor(Request $request): bool
     {
-        return $request->user()?->can('ux.author') ?? false;
+        return app(EditorAuthorizer::class)->allows($request->user(), $request);
     }
 
     /** @return array<string, mixed> */
