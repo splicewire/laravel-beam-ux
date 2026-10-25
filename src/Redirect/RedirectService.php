@@ -104,6 +104,29 @@ final class RedirectService
         return $removed;
     }
 
+    /**
+     * The Redirects that lead to a page (ADR-0236 d14): those holding it by identity, and those naming a path at its
+     * current URL, in its realms. Its settings list them, so an author sees what moving or deleting it would strand.
+     *
+     * @return list<array{path: string, match: string, permanent: bool, origin: string}>
+     */
+    public function leadingTo(BeamUxEntry $page): array
+    {
+        if (! Schema::connection($page->getConnectionName())->hasTable('beam_ux_redirects')) {
+            return [];
+        }
+        $url = $page->url();
+
+        return BeamUxRedirect::on($page->getConnectionName())
+            ->whereIn('realm', (array) ($page->realms ?? [$page->realm]))
+            ->where(fn ($q) => $q->where(fn ($q) => $q->where('target_kind', 'page')->where('target_entry_id', (string) $page->getKey()))
+                ->when($url !== null, fn ($q) => $q->orWhere(fn ($q) => $q->where('target_kind', 'path')->where('target_path', $url))))
+            ->orderBy('path')->orderBy('match')->get()
+            ->map(fn (BeamUxRedirect $redirect) => ['path' => $redirect->path, 'match' => $redirect->match,
+                'permanent' => (bool) $redirect->permanent, 'origin' => $redirect->origin])
+            ->values()->all();
+    }
+
     /** Whether a page, or a Record through its Record Page, answers the path for a guest: then a Redirect there never would. */
     public function answers(string $path, string $realm): bool
     {

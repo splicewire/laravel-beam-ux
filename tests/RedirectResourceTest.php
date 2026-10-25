@@ -120,6 +120,27 @@ class RedirectResourceTest extends AuthoredComponentNativeTestCase
         $this->assertSame('/launch', json_decode($pruned[0]->properties, true)['path']);
     }
 
+    public function test_a_pages_settings_list_the_redirects_that_lead_to_it(): void
+    {
+        // ADR-0236 d14 (EP-30 ruling 7): the editor's read of a page carries the Redirects leading to it, by identity
+        // or by a path at its URL, so an author sees what moving or deleting the page would strand.
+        $this->actingAs($this->user('author'));
+        $about = $this->livePage('about');
+        $save = fn (array $input) => $this->postJson('/beam-ux-redirects', $input + ['match' => 'exact'])->assertCreated();
+        $save(['path' => '/plans', 'targetKind' => 'page', 'target' => '/pricing']);
+        $save(['path' => '/old-pricing', 'match' => 'prefix', 'targetKind' => 'path', 'target' => '/pricing', 'permanent' => false]);
+        $save(['path' => '/team', 'targetKind' => 'page', 'target' => '/about']);
+
+        $redirects = app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->read($this->pricing->fresh())->redirects;
+
+        $this->assertSame([
+            ['path' => '/old-pricing', 'match' => 'prefix', 'permanent' => false, 'origin' => 'author'],
+            ['path' => '/plans', 'match' => 'exact', 'permanent' => true, 'origin' => 'author'],
+        ], $redirects);
+        $this->assertSame([['path' => '/team', 'match' => 'exact', 'permanent' => true, 'origin' => 'author']],
+            app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->read($about->fresh())->redirects);
+    }
+
     private function livePage(string $segment): BeamUxEntry
     {
         $page = BeamUxEntry::create(['slug' => $segment, 'type' => 'page', 'format' => 'tsx', 'realm' => 'site',
