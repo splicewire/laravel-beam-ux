@@ -11,6 +11,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 /**
  * ADR-0232 d1/d2 and ADR-0234 d6: the guest-visible fields in the particle's versioned meta.
  *
+ * `fileLanguage` (ADR-0233 d5) is the page's File Language, published to the row's `format` (null: unchanged).
  * `childFields` (ADR-0233 d4) names the Page Fields this page declares for its child pages, from the host's
  * `beam.ux.page_fields`; `fields` holds this page's own values for the Page Fields its parent declares, checked on save
  * ({@see \Splicewire\Beam\Ux\Containment\PageFields}). `unclaimed` (d3) holds the frontmatter keys nothing declares,
@@ -35,6 +36,7 @@ final class EntryPageSettingsData extends BeamData
         public ?string $socialImage = null,
         public string $pageType = 'WebPage',
         public ?string $publishedDate = null,
+        public ?string $fileLanguage = null,
         public ?string $childFields = null,
         /** @var array<string, string|int|float|bool> */
         public array $fields = [],
@@ -56,6 +58,7 @@ final class EntryPageSettingsData extends BeamData
             'socialImage' => ['nullable', 'string', 'max:2048'],
             'pageType' => ['in:WebPage,Article,CollectionPage,ProfilePage'],
             'publishedDate' => ['nullable', 'date_format:Y-m-d'],
+            'fileLanguage' => ['nullable', 'string', 'in:tsx,mdx'],
             'childFields' => ['nullable', 'string', static function (string $attribute, mixed $value, \Closure $fail): void {
                 if ($value !== null && \Splicewire\Beam\Ux\Containment\PageFields::classNamed((string) $value) === null) {
                     $fail('The host registers no Page Fields by this name (beam.ux.page_fields).');
@@ -100,7 +103,9 @@ final class EntryPageSettingsData extends BeamData
             navOrder: $entry->nav_order, navGroup: $entry->nav_group, layout: $entry->layout,
             template: $entry->template, description: $entry->seo_description,
             socialImage: $entry->seo_social_image, pageType: $entry->seo_page_type ?? 'WebPage',
-            publishedDate: $entry->seo_published_date, childFields: $entry->getAttribute('child_fields'),
+            publishedDate: $entry->seo_published_date,
+            fileLanguage: $entry->format instanceof \Splicewire\Beam\Ux\Format\UxFormat ? $entry->format->value : $entry->getAttribute('format'),
+            childFields: $entry->getAttribute('child_fields'),
         );
     }
 }

@@ -11,6 +11,7 @@ export interface EntryPageSettings {
   socialImage: string | null;
   pageType: string;
   publishedDate: string | null;
+  fileLanguage: string | null;
   childFields: string | null;
   fields: Record<string, string | number | boolean>;
   unclaimed: Record<string, string>;

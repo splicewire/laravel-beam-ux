@@ -80,6 +80,7 @@ class EntryBodyEnvelope
                 'schema' => ($class = \Splicewire\Beam\Ux\Containment\PageFields::forParent($entry, $pageSettings->parentId)) === null
                     ? null : \Splicewire\Beam\Ux\Containment\PageFields::schema($class),
             ] : null,
+            fileLanguages: $pageSettings !== null ? \Splicewire\Beam\Ux\Format\FileLanguage::choices($entry) : null,
         );
     }
 

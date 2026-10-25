@@ -639,6 +639,106 @@ class EntryPublicationTest extends TestCase
         $this->assertSame(file_get_contents($repo.'/'.$path), $git(['show', 'HEAD:'.$path])."\n");
     }
 
+    public function test_publishing_a_new_file_language_moves_the_mirror_and_keeps_an_edited_old_file(): void
+    {
+        // ADR-0233 d5: Publish moves the mirror file. The old file goes only while it holds the published bytes.
+        $directory = $this->ownedFileFixtureRoot().'/moves';
+        mkdir($directory, 0700);
+        config(['filesystems.disks.moves' => ['driver' => 'local', 'root' => $directory], 'beam.ux.storage.mirror_disk' => 'moves']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+        $this->holdMdxAsBlocksWithParagraphLens();
+        [$moved, $oldPath, $publication] = $this->publishedTsxPage('moved');
+        [$edited, $editedPath] = $this->publishedTsxPage('edited');
+        file_put_contents($directory.'/'.$editedPath, "// edited by hand\n");
+
+        foreach ([$moved, $edited] as $entry) {
+            $draft = $publication->recordDraft($entry->fresh(), self::PARAGRAPH, null,
+                \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'Help', 'navOrder' => 2, 'publishedDate' => '2026-10-01', 'fileLanguage' => 'mdx']));
+            $publication->publishVersion($entry->fresh(), $draft->headVersion);
+        }
+
+        $this->assertSame('mdx', $moved->fresh()->format->value);
+        $this->assertFileDoesNotExist($directory.'/'.$oldPath);
+        $this->assertSame("---\ntitle: Help\nnavOrder: 2\npublishedDate: 2026-10-01\n---\n\nMoved\n", file_get_contents($directory.'/help/page/moved.mdx'));
+        $this->assertSame("// edited by hand\n", file_get_contents($directory.'/'.$editedPath), 'an edited old file is never destroyed');
+        $this->assertFileExists($directory.'/help/page/edited.mdx');
+    }
+
+    public function test_a_release_records_a_file_language_move_as_one_commit_and_refuses_an_edited_old_file(): void
+    {
+        // orch-lead (EP-26 F): the move is ONE private-index commit, the old path deleted and the new one added, and the
+        // frozen delete keeps the mirror-drift refusal for an old file someone edited.
+        [$repo, $git] = $this->recordingRepository();
+        $this->holdMdxAsBlocksWithParagraphLens();
+        [$moved, $oldPath, $publication] = $this->publishedTsxPage('moved');
+        [$edited, $editedPath] = $this->publishedTsxPage('edited');
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $git(['add', '--', $oldPath, $editedPath]);
+        $git(['commit', '-m', 'published tsx pages']);
+        $base = $git(['rev-parse', 'HEAD']);
+        $toMdx = fn (BeamUxEntry $entry) => EntryPublishOp::handle($entry->fresh(), Request::create('/', 'POST', ['ref' => $publication->recordDraft($entry->fresh(), self::PARAGRAPH, null,
+            \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'Help', 'navOrder' => 2, 'publishedDate' => '2026-10-01', 'fileLanguage' => 'mdx']))->headVersion]), $author);
+        $receipt = fn ($state) => app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt(\Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id));
+
+        $recorded = $receipt($toMdx($moved));
+
+        $this->assertSame('recorded', $recorded?->state, $recorded?->error ?? '');
+        $this->assertSame('1', $git(['rev-list', '--count', $base.'..HEAD']));
+        $this->assertSame(['help/page/moved.mdx', $oldPath], (function () use ($git) {
+            $paths = explode("\n", $git(['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD']));
+            sort($paths);
+
+            return $paths;
+        })());
+        $this->assertFileDoesNotExist($repo.'/'.$oldPath);
+        $this->assertSame(file_get_contents($repo.'/help/page/moved.mdx'), $git(['show', 'HEAD:help/page/moved.mdx'])."\n");
+        $this->assertSame('', $git(['ls-tree', 'HEAD', '--', $oldPath]));
+
+        $head = $git(['rev-parse', 'HEAD']);
+        file_put_contents($repo.'/'.$editedPath, "// edited by hand\n");
+        $refused = $receipt($toMdx($edited));
+        $this->assertNotSame('recorded', $refused?->state);
+        $this->assertStringContainsString('mirror-drift', (string) $refused?->error);
+        $this->assertSame($head, $git(['rev-parse', 'HEAD']), 'no commit');
+        $this->assertSame("// edited by hand\n", file_get_contents($repo.'/'.$editedPath));
+    }
+
+    public function test_a_page_offers_and_takes_only_the_file_languages_its_host_writes(): void
+    {
+        // ADR-0233 d5/d6: tsx always, mdx where MDX holds blocks, none for a Hosted site's page.
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $publication = app(EntryPublication::class);
+        $envelope = fn () => app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->of($entry->fresh(), self::BODY_ONE);
+        $this->assertSame(['tsx'], $envelope()->fileLanguages);
+        try {
+            $publication->recordDraft($entry->fresh(), self::BODY_ONE, null, \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from(['title' => 'One', 'fileLanguage' => 'mdx']));
+            $this->fail('A page took mdx on a host that keeps MDX as source');
+        } catch (ValidationException $failure) {
+            $this->assertArrayHasKey('pageSettings.fileLanguage', $failure->errors());
+        }
+
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->assertSame(['tsx', 'mdx'], $envelope()->fileLanguages);
+        $this->bindSplitTenancy();
+        $this->assertSame([], $envelope()->fileLanguages);
+    }
+
+    /** @return array{0: BeamUxEntry, 1: string, 2: EntryPublication} a published tsx page and its mirror path */
+    private function publishedTsxPage(string $slug): array
+    {
+        $entry = BeamUxEntry::create(['slug' => $slug, 'type' => 'page', 'format' => 'tsx', 'realm' => 'site', 'namespace' => 'help', 'title' => 'Help', 'nav_order' => 2]);
+        $publication = app(EntryPublication::class);
+        $publication->write($entry, [['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'First']]]]);
+        $publication->publishAuthoredBody($entry->fresh());
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry->fresh())->pathFor($entry->fresh());
+        $this->assertSame("help/page/{$slug}.tsx", $path);
+
+        return [$entry->fresh(), $path, $publication];
+    }
+
     /** A published parent page whose children carry the host's `recipe` Page Fields (ADR-0233 d4). */
     private function recipesParent(): BeamUxEntry
     {
@@ -1696,6 +1796,11 @@ class EntryPublicationTest extends TestCase
     }
 
     /** A JsonDoc body with one heading — the canvas shape a tsx entry stores. */
+    private const PARAGRAPH = [[
+        'kind' => 'block', 'name' => 'p', 'isComponent' => false, 'dynamic' => false,
+        'props' => [], 'children' => [['kind' => 'text', 'value' => 'Moved']],
+    ]];
+
     private const BODY_ONE = [[
         'kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false,
         'props' => [], 'children' => [['kind' => 'text', 'value' => 'One']],

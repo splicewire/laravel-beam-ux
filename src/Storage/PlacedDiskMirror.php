@@ -76,6 +76,20 @@ class PlacedDiskMirror
     }
 
     /**
+     * Remove the file a publish moved an entry away from (ADR-0233 d5: its File Language changed), only while it still
+     * holds the bytes that were published there. A file someone edited since is left in place, never destroyed. Returns
+     * whether it was removed.
+     */
+    public function removeIfUnchanged(string $path, string $bytes): bool
+    {
+        if ($this->disk === null || $path === '' || ! $this->disk->exists($path) || $this->disk->get($path) !== $bytes) {
+            return false;
+        }
+
+        return $this->remove($path);
+    }
+
+    /**
      * Delete the entry's mirror file at `$path` — the projection of a CLEARED entry, which has no body
      * at all. Distinct from {@see mirror()} with an empty body on purpose: an author may save an empty
      * document, and that writes an empty file they chose to have; only

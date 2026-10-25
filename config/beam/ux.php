@@ -306,6 +306,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | File Language (ADR-0233 d5)
+    |--------------------------------------------------------------------------
+    |
+    | The language a new page's file is written in when its parent's is not
+    | one it may take: `tsx`, or `mdx` where `mdx.holds_blocks` is on. A page
+    | changes it in page settings, and Publish moves its mirror file.
+    |
+    */
+    'file_language' => env('BEAM_UX_FILE_LANGUAGE', 'tsx'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Access (ADR-0212 — the two conjunctive rights)
     |--------------------------------------------------------------------------
     |

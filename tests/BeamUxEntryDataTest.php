@@ -111,7 +111,8 @@ class BeamUxEntryDataTest extends TestCase
         $this->actingAs((new User)->forceFill(['id' => 1]));
         Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
         $schema = $this->getJson('/frame/resources/beam-ux-entry/schema')->assertOk()->json();
-        $this->assertSame(['type', 'title', 'slug', 'realm', 'parentId', 'segment', 'navOrder'], array_keys($schema['properties']));
+        $this->assertSame(['type', 'title', 'slug', 'realm', 'parentId', 'segment', 'navOrder', 'fileLanguage'], array_keys($schema['properties']));
+        $this->assertSame(['tsx', 'mdx', null], $schema['properties']['fileLanguage']['enum'], 'optional: unset takes the parent\'s, then the host\'s');
         $this->assertNotContains('id', $schema['required']);
         $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $schema['properties']['type']['enum']);
         $this->assertSame('combobox', $schema['properties']['realm']['x-stud-widget']);
@@ -128,6 +129,27 @@ class BeamUxEntryDataTest extends TestCase
         $entry = BeamUxEntry::findOrFail($data['id']);
         $this->assertNull($entry->segment);
         $this->assertSame('/new-page', $entry->particle->meta['pageSettings']['segment']);
+    }
+
+    public function test_a_new_page_takes_its_parents_file_language_then_the_hosts_and_mdx_only_where_mdx_holds_blocks(): void
+    {
+        // ADR-0233 d5: the File Language is chosen at creation, defaulting to the parent's, then the host's.
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+        $create = fn (array $input) => $this->postJson('/frame/resources/beam-ux-entry', ['type' => 'page', 'realm' => 'site', ...$input]);
+        $create(['title' => 'Notes', 'slug' => 'notes', 'fileLanguage' => 'mdx'])->assertUnprocessable()->assertJsonValidationErrors('fileLanguage');
+        $create(['type' => 'component', 'title' => 'Card', 'slug' => 'card', 'fileLanguage' => 'tsx'])->assertUnprocessable()->assertJsonValidationErrors('fileLanguage');
+
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        $guide = BeamUxEntry::findOrFail($create(['title' => 'Guide', 'slug' => 'guide', 'fileLanguage' => 'mdx'])->assertSuccessful()->json('data.id'));
+        $this->assertSame('mdx', $guide->format->value);
+        $this->assertSame('mdx', $guide->particle->meta['pageSettings']['fileLanguage']);
+        $child = BeamUxEntry::findOrFail($create(['title' => 'Step', 'slug' => 'step', 'parentId' => $guide->id])->assertSuccessful()->json('data.id'));
+        $this->assertSame('mdx', $child->format->value, "a new page takes its parent's File Language");
+        config(['beam.ux.file_language' => 'mdx']);
+        $root = BeamUxEntry::findOrFail($create(['title' => 'Root', 'slug' => 'root'])->assertSuccessful()->json('data.id'));
+        $this->assertSame('mdx', $root->format->value, "then the host's");
     }
 
     public function test_mounted_create_generates_identity_and_body_and_edit_preserves_them(): void

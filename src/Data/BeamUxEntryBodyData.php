@@ -73,6 +73,8 @@ class BeamUxEntryBodyData extends BeamData
      * @param  array<string, mixed>|null  $pageFields  a page's Page Fields (ADR-0233 d4): `names`, the names its
      *                                                 `childFields` may take, and `schema`, the schema of the fields
      *                                                 its own parent declares (null when it declares none).
+     * @param  list<string>|null  $fileLanguages  the File Languages a page may take (ADR-0233 d5): empty for a Hosted
+     *                                            site's page, which has none (d6); null for an entry that is no page.
      */
     public function __construct(
         public string $slug,
@@ -89,5 +91,6 @@ class BeamUxEntryBodyData extends BeamData
         public ?EntryPageSettingsData $pageSettings = null,
         public array $bindings = [],
         public ?array $pageFields = null,
+        public ?array $fileLanguages = null,
     ) {}
 }

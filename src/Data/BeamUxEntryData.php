@@ -152,7 +152,7 @@ class BeamUxEntryData extends BeamData
         if ($model->type === UxType::Page && $input instanceof BeamUxEntryInputData) {
             $settings = new EntryPageSettingsData(
                 title: $input->title, parentId: $input->parentId, segment: $input->segment,
-                navOrder: $input->navOrder,
+                navOrder: $input->navOrder, fileLanguage: $model->format?->value,
             );
             $particle = $model->fresh()->particle;
             $meta = $particle->meta ?? [];
