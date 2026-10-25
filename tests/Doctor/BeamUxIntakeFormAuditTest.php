@@ -35,7 +35,8 @@ class BeamUxIntakeFormAuditTest extends TestCase
 
     public function test_it_warns_while_forms_are_offered_with_the_honeypot_off_and_when_a_schema_declares_its_field(): void
     {
-        config(['beam.core.intake.enabled' => true, 'beam.core.intake.public_schemas' => ['contact']]);
+        // Explicit: laravel-beam's publishable config ships the honeypot on, and this case is a host that turned it off.
+        config(['beam.core.intake.enabled' => true, 'beam.core.intake.public_schemas' => ['contact'], 'beam.core.intake.honeypot.enabled' => false]);
         [$honeypot, $field] = $this->audit()->run();
         $this->assertSame(DoctorStatus::Warn, $honeypot->status);
         $this->assertStringContainsString('beam.core.intake.honeypot.enabled', $honeypot->detail);
