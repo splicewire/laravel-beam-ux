@@ -126,6 +126,22 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
         $this->assertSame([], $bar['recordChoices']);
     }
 
+    public function test_a_host_page_the_preview_takes_down_is_gone_there_and_shown_live(): void
+    {
+        // Review of 0a56758d: a member Take-down is not admitted as a draft, and the ref fell back to the live body.
+        $home = $this->livePage('home-page');
+        $home->forceFill(['namespace' => config('beam.ux.namespace', 'starter')])->save();
+        $release = $this->release([$home->id => null]);
+        $grant = tap(new \Splicewire\Beam\Ux\Models\BeamUxPreviewGrant)->forceFill(['release_id' => $release->id])->setRelation('release', $release);
+        $context = new \Splicewire\Beam\Ux\Preview\PreviewContext($grant);
+
+        $this->assertNotNull(\Splicewire\Beam\Ux\Support\PageEntryRef::for('home-page')['artifact']);
+        $this->assertFalse(\Splicewire\Beam\Ux\Support\PageEntryRef::hiddenByPreview('home-page'));
+
+        $this->assertNull(\Splicewire\Beam\Ux\Support\PageEntryRef::for('home-page', $context)['artifact'], 'never the live body');
+        $this->assertTrue(\Splicewire\Beam\Ux\Support\PageEntryRef::hiddenByPreview('home-page', $context), 'the host route answers 404, as the renderer does');
+    }
+
     public function test_the_switch_needs_a_preview_and_returns_only_to_this_site(): void
     {
         $credential = $this->openLink($this->release([$this->livePage('about')->id => null]));

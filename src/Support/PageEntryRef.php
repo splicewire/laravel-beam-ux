@@ -62,7 +62,8 @@ class PageEntryRef
         if ($entry === null) {
             return null;
         }
-        // Inside a Preview (the route runs ResolvePreviewContext), the body is the Preview's version (ADR-0232 d15).
+        // Inside a Preview (the route runs ResolvePreviewContext), the body is the Preview's version (ADR-0232 d15), and
+        // a page the Preview takes down has none: never the live one.
         $preview ??= self::currentPreview();
         $id = (string) $entry->getKey();
 
@@ -70,8 +71,25 @@ class PageEntryRef
             'id' => $id,
             'slug' => $slug,
             'format' => self::formatValue($entry),
-            'artifact' => self::artifactFor($entry, $preview?->admitsDraft($id) ? $preview->versionFor($id) : null),
+            'artifact' => self::hidden($preview, $id) ? null
+                : self::artifactFor($entry, $preview?->admitsDraft($id) ? $preview->versionFor($id) : null),
         ];
+    }
+
+    /**
+     * Whether the Preview takes this host page down (a Take-down in its Release). Its route then answers the uniform
+     * 404, as the renderer does for one (ADR-0232 d1, d10).
+     */
+    public static function hiddenByPreview(string $slug, ?PreviewContext $preview = null): bool
+    {
+        $entry = self::row($slug);
+
+        return $entry !== null && self::hidden($preview ?? self::currentPreview(), (string) $entry->getKey());
+    }
+
+    private static function hidden(?PreviewContext $preview, string $id): bool
+    {
+        return $preview !== null && $preview->contains($id) && ! $preview->admitsDraft($id);
     }
 
     private static function currentPreview(): ?PreviewContext
