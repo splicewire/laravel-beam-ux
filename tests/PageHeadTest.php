@@ -290,6 +290,57 @@ class PageHeadTest extends TestCase
         ], $this->get('/members-guide')->json('props.head'));
     }
 
+    public function test_a_public_pages_breadcrumbs_never_name_an_ancestor_a_guest_cannot_read(): void
+    {
+        // Security review 01, finding 1: a guest renders a page through ancestors it may only TRAVERSE, so an ancestor
+        // whose own page is access-restricted is passed through, never named or linked, in the public child's @graph.
+        $members = $this->page('members', ['title' => 'Members lounge', 'access' => ['auth']]);
+        $this->page('pricing', ['title' => 'Pricing', 'parent_id' => $members->getKey()]);
+
+        $head = $this->get('/members/pricing')->assertOk()->json('props.head');
+
+        $graph = end($head);
+        $this->assertStringStartsWith('<script data-inertia="structured-data" type="application/ld+json">', $graph);
+        $this->assertStringNotContainsString('Members lounge', $graph);
+        $this->assertStringNotContainsString('"item":"https://site.test/members"', $graph);
+        $this->assertStringContainsString('"item":"https://site.test/members/pricing"', $graph, 'the page itself is still the last step');
+    }
+
+    public function test_a_page_behind_an_ancestor_a_guest_cannot_traverse_gets_its_title_and_noindex_only(): void
+    {
+        $vault = $this->page('vault', ['title' => 'Vault', 'traverse' => ['auth']]);
+        $this->page('ledger', ['title' => 'Ledger', 'seo_description' => 'Accounts.', 'parent_id' => $vault->getKey()]);
+        $this->actingAs($this->reader());
+
+        $this->assertSame([
+            '<title data-inertia="title">Ledger - Acme</title>',
+            '<meta data-inertia="robots" name="robots" content="noindex">',
+        ], $this->get('/vault/ledger')->json('props.head'));
+    }
+
+    public function test_a_host_coded_page_whose_requirement_a_guest_meets_composes_its_full_head(): void
+    {
+        $this->app->instance('beam.ux.requirement.installed', $this->requirement(fn (?\Illuminate\Contracts\Auth\Authenticatable $actor) => true));
+        config(['beam.ux.namespace' => 'starter']);
+        $this->page('home', ['format' => UxFormat::Tsx, 'namespace' => 'starter', 'segment' => null, 'title' => 'Home',
+            'seo_description' => 'The front door.', 'requirements' => ['installed']]);
+
+        $head = PageHead::forPage('home', Request::create('https://whatever.test/'));
+
+        $this->assertContains('<meta data-inertia="description" name="description" content="The front door.">', $head);
+        $this->assertContains('<link data-inertia="canonical" rel="canonical" href="https://site.test/">', $head);
+        $this->assertNotContains('<meta data-inertia="robots" name="robots" content="noindex">', $head);
+    }
+
+    public function test_a_page_whose_requirement_a_guest_meets_is_still_never_cached(): void
+    {
+        // The head reads guestCanRead; caching still reads isRestricted, so any declaration keeps a body out of shared caches.
+        $this->app->instance('beam.ux.requirement.installed', $this->requirement(fn (?\Illuminate\Contracts\Auth\Authenticatable $actor) => true));
+        $this->page('guide', ['title' => 'Guide', 'requirements' => ['installed']]);
+
+        $this->assertSame('no-store, private', $this->get('/guide')->assertOk()->headers->get('Cache-Control'));
+    }
+
     public function test_the_head_is_a_core_prop_a_layout_contributor_cannot_replace(): void
     {
         $this->page('docs', ['layout' => 'DocsLayout']);

@@ -73,6 +73,29 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
         $this->assertTrue($back->getCookie(ResolvePreviewContext::MODE_COOKIE, false)?->isCleared());
     }
 
+    public function test_a_preview_of_a_page_a_guest_cannot_read_carries_its_title_and_noindex_only(): void
+    {
+        // Security review 01, item 4: a Preview grant is not guest access. The head of a token-gated page stays title +
+        // noindex for the author previewing it as themselves (the viewer cookie: the Preview's viewer may render it), with
+        // no description, canonical URL or @graph. (Read as a guest, the Preview's default, the same page 404s: nothing to
+        // leak.)
+        $pub = app(EntryPublication::class);
+        $members = $this->livePage('members');
+        $members->forceFill(['title' => 'Members', 'seo_description' => 'Members only.', 'access' => ['auth']])->save();
+        $release = $this->release([$members->id => $pub->recordDraft($members->fresh(), [$this->node('section')])->headVersion]);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => $user?->getAuthIdentifier() === 'author');
+        $credential = (string) $this->actingAs($this->user('author'))->get("/_beam/preview/open/{$release->id}")
+            ->getCookie(ResolvePreviewContext::COOKIE, false)?->getValue();
+
+        $head = $this->actingAs($this->user('author'))->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)
+            ->withUnencryptedCookie(ResolvePreviewContext::VIEWER_COOKIE, 'me')
+            ->get('/members')->assertOk()->json('props.head');
+
+        $this->assertCount(2, $head);
+        $this->assertStringStartsWith('<title data-inertia="title">Members', $head[0]);
+        $this->assertSame('<meta data-inertia="robots" name="robots" content="noindex">', $head[1]);
+    }
+
     public function test_a_page_the_release_adds_has_no_live_page_to_switch_to(): void
     {
         $pub = app(EntryPublication::class);
