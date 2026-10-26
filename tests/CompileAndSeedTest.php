@@ -134,6 +134,42 @@ class CompileAndSeedTest extends TestCase
         $this->assertCount(1, Storage::disk('artifacts')->files('beam-ux/artifacts/'.$entry->getKey()));
     }
 
+    /**
+     * EP-42 GO 43b: a compiler-generation bump re-addresses every artifact, so every host linking the package recompiles
+     * at the landing that brings it (rigs/launch/bin/land runs this). `--missing` compiles only pages with no artifact at
+     * the current address and never prunes, so the step deletes nothing: a page's older-generation file stays, and a
+     * current page is left as it is.
+     */
+    public function test_compile_missing_compiles_only_pages_without_a_current_artifact_and_keeps_older_files(): void
+    {
+        $stale = $this->page('stale');
+        $current = $this->page('current');
+        $compile = $this->app->make(CompileEntryBody::class);
+        $compile->forEntry($current);
+        $kept = $compile->artifacts()->path($current);
+        // What a page compiled before a generation bump holds: one file at an address the store no longer reads.
+        $older = 'beam-ux/artifacts/'.$stale->getKey().'/0000000000000000.js';
+        Storage::disk('artifacts')->put($older, '// an older generation');
+        $this->assertFalse($compile->artifacts()->has($stale));
+
+        $this->artisan('splicewire:beam:ux:compile', ['--missing' => true])
+            ->expectsOutputToContain('compiled 1, already current 1, failed 0')
+            ->assertSuccessful();
+
+        $this->assertTrue($compile->artifacts()->has($stale->fresh()));
+        $this->assertTrue(Storage::disk('artifacts')->exists($older), '--missing never prunes');
+        $this->assertTrue(Storage::disk('artifacts')->exists($kept));
+    }
+
+    public function test_compile_missing_and_force_together_is_refused(): void
+    {
+        $this->page('guide');
+
+        $this->artisan('splicewire:beam:ux:compile', ['--missing' => true, '--force' => true])
+            ->expectsOutputToContain('--missing compiles only what has no current artifact; --force recompiles all')
+            ->assertFailed();
+    }
+
     public function test_the_backfill_command_compiles_pending_pages_and_fails_on_a_broken_body(): void
     {
         $this->page('guide');
