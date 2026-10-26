@@ -427,6 +427,86 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->assertSame('Our words.', $this->publishedOf($page)[0]['children'][0]['value']);
     }
 
+    /**
+     * EP-42 GO 46 follow-up: a page converted before the carry-through (the flagship's docs.build.capabilities) still
+     * hashes to the source form it held, so it reads as edited and a re-assert can never bring its file. `--restamp`
+     * re-stamps such a page over its converted body when both hold: the version before its conversion is exactly what its
+     * origin asserted, and every version since is the conversion's own. Anything else is an edit, and stays.
+     */
+    public function test_restamp_restamps_a_page_a_conversion_left_unstamped_and_the_next_reassert_brings_the_file(): void
+    {
+        $page = $this->unstampedConversion('Old words.', 'New words.');
+        $reasserter = app(\Splicewire\Beam\Ux\Provenance\Reasserter::class);
+        $this->assertFalse($reasserter->isPristine($page->fresh()), 'as a conversion before the carry-through left it');
+        $stamp = (string) $page->fresh()->asserted_hash;
+
+        $this->artisan('splicewire:beam:ux:convert-mdx', ['--restamp' => true, '--dry-run' => true])
+            ->expectsOutputToContain('Would re-stamp 1 page(s)')
+            ->expectsOutputToContain('page guide')
+            ->assertExitCode(0);
+        $this->assertSame($stamp, (string) $page->fresh()->asserted_hash, 'a dry run writes nothing');
+
+        $this->artisan('splicewire:beam:ux:convert-mdx', ['--restamp' => true])
+            ->expectsOutputToContain('Re-stamped 1 page(s)')
+            ->assertExitCode(0);
+        $this->assertTrue($reasserter->isPristine($page->fresh()));
+        $this->assertTrue($reasserter->reassert($page->fresh(), 'Guide', (string) file_get_contents($this->root.'/docs/guide.mdx'), 'disk:docs/guide.mdx', [$this->p('New words.')]));
+        $this->assertSame('New words.', $this->publishedOf($page)[0]['children'][0]['value'], 'the next re-assert brings the file');
+    }
+
+    public function test_restamp_leaves_a_page_edited_after_its_conversion(): void
+    {
+        $page = $this->unstampedConversion('Old words.', 'New words.');
+        $this->lens->register('Our words.', [$this->p('Our words.')]);
+        $pub = app(EntryPublication::class);
+        $pub->publishVersion($page->fresh(), $pub->recordDraft($page->fresh(), [$this->p('Our words.')])->headVersion);
+        $stamp = (string) $page->fresh()->asserted_hash;
+
+        $this->artisan('splicewire:beam:ux:convert-mdx', ['--restamp' => true])
+            ->expectsOutputToContain('Re-stamped 0 page(s)')
+            ->expectsOutputToContain('left as it is: guide: edited since its conversion')
+            ->assertExitCode(0);
+        $this->assertSame($stamp, (string) $page->fresh()->asserted_hash);
+        $this->assertSame('Our words.', $this->publishedOf($page)[0]['children'][0]['value']);
+    }
+
+    public function test_restamp_leaves_a_page_that_was_not_what_its_origin_asserted_before_its_conversion(): void
+    {
+        $page = $this->diskPage('Disk words.');
+        $this->lens->register('Our words.', [$this->p('Our words.')]);
+        $pub = app(EntryPublication::class);
+        $pub->publishVersion($page->fresh(), $pub->recordDraft($page->fresh(), MdxBody::encode("---\ntitle: Guide\n---\n\nOur words.\n"))->headVersion);
+        $this->holdBlocks();
+        $report = $this->convertSignedOut();
+        app(ReleaseService::class)->transition(BeamUxRelease::query()->findOrFail($report['release']), 'publish', $this->author);
+        $stamp = (string) $page->fresh()->asserted_hash;
+
+        $this->artisan('splicewire:beam:ux:convert-mdx', ['--restamp' => true])
+            ->expectsOutputToContain('Re-stamped 0 page(s)')
+            ->expectsOutputToContain('left as it is: guide: before its conversion it was not what its origin asserted')
+            ->assertExitCode(0);
+        $this->assertSame($stamp, (string) $page->fresh()->asserted_hash);
+        $this->assertFalse(app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->isPristine($page->fresh()));
+    }
+
+    /**
+     * A disk page holding `$held`, whose file has since moved on to `$file`, converted and published the way a conversion
+     * before the carry-through left it: its hash still names the source it held.
+     */
+    private function unstampedConversion(string $held, string $file): BeamUxEntry
+    {
+        $page = $this->diskPage($held);
+        $asserted = (string) $page->fresh()->asserted_hash;
+        $this->lens->register($file, [$this->p($file)]);
+        file_put_contents($this->root.'/docs/guide.mdx', "---\ntitle: Guide\n---\n\n{$file}\n");
+        $this->holdBlocks();
+        $report = $this->convertSignedOut();
+        app(ReleaseService::class)->transition(BeamUxRelease::query()->findOrFail($report['release']), 'publish', $this->author);
+        $page->fresh()->forceFill(['asserted_hash' => $asserted])->save();
+
+        return $page->fresh();
+    }
+
     /** A host's page registered from `docs/guide.mdx`, and that file as the files half leaves it: its header, then the body. */
     private function diskPage(string $words): BeamUxEntry
     {
