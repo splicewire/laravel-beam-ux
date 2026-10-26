@@ -48,5 +48,29 @@ final class EditorRoutes
         if (is_string($mountOptions['realm'] ?? null)) {
             $redirectMount->names($realmPrefix.'beam-ux-redirect')->inRealm($mountOptions['realm']);
         }
+
+        if (is_string($mountOptions['realm'] ?? null)
+            && is_array($mountOptions['abilityOverrides'] ?? null)) {
+            // Particle::mount() stamps the realm onto CRUD routes, while the override map
+            // is normally carried only by ->ops(). Apply the same server-owned map to all
+            // resource routes this helper mounted in that realm (entry ops already carry it).
+            $releaseMount->register();
+            $releaseFilesMount?->register();
+
+            $resourceKeys = ['beam-ux-entry', 'beam-ux-release', 'beam-ux-redirect'];
+            if ($includeReleaseFiles !== false) {
+                $resourceKeys[] = 'beam-ux-release-files';
+            }
+
+            foreach (app('router')->getRoutes()->getRoutes() as $route) {
+                if (in_array($route->defaults[\Splicewire\Beam\Http\Particle\ParticleController::RESOURCE] ?? null, $resourceKeys, true)
+                    && ($route->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM] ?? null) === $mountOptions['realm']) {
+                    $route->defaults(
+                        \Splicewire\Beam\Http\Particle\ParticleOperationController::ABILITY_OVERRIDES,
+                        $mountOptions['abilityOverrides'],
+                    );
+                }
+            }
+        }
     }
 }

@@ -51,11 +51,16 @@ class EditorKitTest extends TestCase
         $allRoutes = collect($routes->getRoutes());
         $central = $allRoutes->first(fn ($route) => $route->getName() === 'beam-ux-entry.body');
         $tenant = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-entry.body');
+        $centralReleaseIndex = $allRoutes->first(fn ($route) => $route->getName() === 'beam-ux-release.index');
+        $tenantReleaseIndex = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.index');
+        $tenantReleaseShow = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.show');
         $tenantRelease = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.command');
         $names = $allRoutes->map(fn ($route) => $route->getName())->filter()->values()->all();
 
         $this->assertNotNull($central, 'Registered route names: '.implode(', ', $names));
         $this->assertNotNull($tenant, 'Registered route names: '.implode(', ', $names));
+        $this->assertNotNull($tenantReleaseIndex, 'Registered route names: '.implode(', ', $names));
+        $this->assertNotNull($tenantReleaseShow, 'Registered route names: '.implode(', ', $names));
         $this->assertNotNull($tenantRelease, 'Registered route names: '.implode(', ', $names));
         $this->assertSame('beam-ux-entries/{id}/body', $central->uri());
         $this->assertSame('tenant/beam-ux-entries/{id}/body', $tenant->uri());
@@ -66,6 +71,18 @@ class EditorKitTest extends TestCase
         );
         $this->assertArrayNotHasKey(\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM, $central->defaults);
         $this->assertSame('tenant', $tenantRelease->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM]);
+        $this->assertSame('tenant', $tenantReleaseIndex->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM]);
+        $this->assertSame(
+            ['ux.author' => 'site.edit'],
+            $tenantReleaseIndex->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::ABILITY_OVERRIDES],
+        );
+        $this->assertSame(
+            ['ux.author' => 'site.edit'],
+            $tenantReleaseShow->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::ABILITY_OVERRIDES],
+        );
+        $this->assertNotNull($centralReleaseIndex, 'Central routes remain mounted beside the tenant copy.');
+        $this->assertArrayNotHasKey(\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM, $centralReleaseIndex->defaults);
+        $this->assertArrayNotHasKey(\Splicewire\Beam\Http\Particle\ParticleOperationController::ABILITY_OVERRIDES, $centralReleaseIndex->defaults);
     }
 
     public function test_a_realm_mount_can_leave_the_release_files_recording_unmounted(): void
