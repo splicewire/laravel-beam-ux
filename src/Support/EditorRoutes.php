@@ -40,7 +40,11 @@ final class EditorRoutes
             $releaseFilesMount?->inRealm($mountOptions['realm']);
         }
 
-        $releaseMount->ops(['command', 'readiness', 'changes'], $mountOptions);
+        $releaseOps = ['command', 'readiness', 'changes'];
+        if (($mountOptions['realm'] ?? null) === 'tenant') {
+            $releaseOps[] = 'preview-open';
+        }
+        $releaseMount->ops($releaseOps, $mountOptions);
         $releaseFilesMount?->ops(['commit-now', 'inspect-file', 'take-file-draft', 'take-all-drafts', 'restore-missing-file', 'remirror-file'], $mountOptions);
 
         // ADR-0236 d14: the Redirects seat's resource; the service checks the rights publishing takes.

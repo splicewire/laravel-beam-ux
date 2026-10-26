@@ -15,6 +15,7 @@ use Splicewire\Beam\Ux\Http\Controllers\PreviewLinkController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewReleaseController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewStartController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewSwitchController;
+use Splicewire\Beam\Ux\Http\Controllers\TenantPreviewReleaseController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewViewAsMeController;
 use Splicewire\Beam\Ux\Http\Controllers\PublicEntryController;
 use Splicewire\Beam\Ux\Http\EntryPageProps;
@@ -109,6 +110,7 @@ trait WiresPublicSurface
             ?string $artifactRoot = null,
             ?string $routeName = null,
             ?array $reservedPrefixes = null,
+            bool $withTenantPreviewOpen = false,
         ): void {
             /** @var Router $this */
             $artifactRoot ??= config('beam.ux.site.artifact_root', 'beam/ux/artifacts');
@@ -167,6 +169,16 @@ trait WiresPublicSurface
             $apply($this->get('_beam/preview/open/{release}', PreviewReleaseController::class)
                 ->middleware('auth')
                 ->name("{$routeName}site.preview.open"));
+
+            if ($withTenantPreviewOpen) {
+                $tenantPreview = $this->get('_beam/preview/tenant-open/{release}', TenantPreviewReleaseController::class)
+                    ->middleware('signed')
+                    ->name("{$routeName}site.preview.tenant-open");
+                $tenantPreview->defaults('beamUxRealm', BeamUxEntry::REALM_SITE);
+                $tenantPreview->defaults(\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM, 'tenant');
+                $tenantPreview->defaults(\Splicewire\Beam\Http\Particle\ParticleOperationController::ABILITY_OVERRIDES, ['ux.author' => 'site.edit']);
+                $apply($tenantPreview);
+            }
 
             // A Release's Preview Link (ADR-0232 d8): two segments, so the one-segment token route below never takes it.
             $apply($this->get('_beam/preview/release/{release}', PreviewLinkController::class)

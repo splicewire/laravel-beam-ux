@@ -40,8 +40,62 @@ class EditorKitTest extends TestCase
         $this->assertContains('beam-ux-entries/{id}/preview', $routes);
     }
 
+    public function test_signed_tenant_preview_opener_is_opt_in_and_site_host_scoped(): void
+    {
+        \Illuminate\Support\Facades\Route::domain('{tenant}.site.example.test')->group(function (): void {
+            \Illuminate\Support\Facades\Route::beamUxSite(
+                'site/entry',
+                routeName: 'beam.ux.test.',
+                withTenantPreviewOpen: true,
+            );
+        });
+        \Illuminate\Support\Facades\Route::beamUxSite('site/entry', routeName: 'beam.ux.central-test.');
+
+        $routes = collect(app('router')->getRoutes()->getRoutes());
+        $tenant = $routes->first(fn ($route) => $route->getName() === 'beam.ux.test.site.preview.tenant-open');
+
+        $this->assertNotNull($tenant);
+        $this->assertSame('{tenant}.site.example.test', $tenant->getDomain());
+        $this->assertContains('signed', $tenant->gatherMiddleware());
+        $this->assertNull($routes->first(fn ($route) => $route->getName() === 'beam.ux.central-test.site.preview.tenant-open'));
+        $this->assertNotNull($routes->first(fn ($route) => $route->getName() === 'beam.ux.central-test.site.preview.open'));
+    }
+
+    public function test_tenant_preview_open_signature_expires_and_binds_the_release_path(): void
+    {
+        \Illuminate\Support\Facades\Route::domain('{tenant}.site.example.test')->group(function (): void {
+            \Illuminate\Support\Facades\Route::beamUxSite(
+                'site/entry',
+                routeName: 'beam.ux.signed-test.',
+                withTenantPreviewOpen: true,
+            );
+        });
+
+        $release = 'release-123';
+        $url = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+            'beam.ux.signed-test.site.preview.tenant-open',
+            now()->addSeconds(60),
+            [
+                'tenant' => 'acme',
+                'release' => $release,
+                'actor' => 'tenant-model:tenant-a:actor-class:tenant-connection:42',
+                'nonce' => str_repeat('a', 64),
+            ],
+        );
+
+        $this->assertTrue(\Illuminate\Support\Facades\URL::hasValidSignature(\Illuminate\Http\Request::create($url)));
+        $tampered = str_replace($release, 'release-456', $url);
+        $this->assertFalse(\Illuminate\Support\Facades\URL::hasValidSignature(\Illuminate\Http\Request::create($tampered)));
+
+        $this->travel(61)->seconds();
+        $this->assertFalse(\Illuminate\Support\Facades\URL::hasValidSignature(\Illuminate\Http\Request::create($url)));
+        $this->travelBack();
+    }
+
     public function test_editor_routes_can_be_mounted_for_a_second_realm_with_distinct_route_names(): void
     {
+        app(\Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery::class)
+            ->registerClass(\Splicewire\Beam\Ux\Particle\ReleasePreviewOpenOp::class);
         EditorRoutes::mount('tenant/beam-ux-entries', 'tenant/beam-ux-releases', [
             'realm' => 'tenant',
             'abilityOverrides' => ['ux.author' => 'site.edit'],
@@ -55,13 +109,23 @@ class EditorKitTest extends TestCase
         $tenantReleaseIndex = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.index');
         $tenantReleaseShow = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.show');
         $tenantRelease = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.command');
+        $tenantPreviewOpen = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.preview-open');
+        $centralPreviewOpen = $allRoutes->first(fn ($route) => $route->getName() === 'beam-ux-release.preview-open');
         $names = $allRoutes->map(fn ($route) => $route->getName())->filter()->values()->all();
-
         $this->assertNotNull($central, 'Registered route names: '.implode(', ', $names));
         $this->assertNotNull($tenant, 'Registered route names: '.implode(', ', $names));
         $this->assertNotNull($tenantReleaseIndex, 'Registered route names: '.implode(', ', $names));
         $this->assertNotNull($tenantReleaseShow, 'Registered route names: '.implode(', ', $names));
         $this->assertNotNull($tenantRelease, 'Registered route names: '.implode(', ', $names));
+        $this->assertNotNull($tenantPreviewOpen, 'The tenant mount alone exposes the short-lived Preview handoff.');
+        $this->assertSame('tenant/beam-ux-releases/{id}/preview-open', $tenantPreviewOpen->uri());
+        $this->assertNotNull($tenantPreviewOpen->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM] ?? null);
+        $this->assertSame('tenant', $tenantPreviewOpen->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM]);
+        $this->assertSame(
+            ['ux.author' => 'site.edit'],
+            $tenantPreviewOpen->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::ABILITY_OVERRIDES],
+        );
+        $this->assertNull($centralPreviewOpen, 'Central continues to use its existing signed-in Preview route.');
         $this->assertSame('beam-ux-entries/{id}/body', $central->uri());
         $this->assertSame('tenant/beam-ux-entries/{id}/body', $tenant->uri());
         $this->assertSame('tenant', $tenant->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM]);

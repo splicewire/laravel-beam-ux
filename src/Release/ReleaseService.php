@@ -539,17 +539,31 @@ final class ReleaseService
 
     private function actor(?string $token): Authenticatable
     {
+        $actor = $this->resolveActorToken($token);
+        if (! $actor instanceof Authenticatable) {
+            throw new AuthorizationException('A Release requires a currently resolvable author.');
+        }
+
+        return $actor;
+    }
+
+    /** The signed, tenant Preview handoff reuses the Release workflow's actor identity encoding. */
+    public function actorTokenFor(Authenticatable $actor): string
+    {
+        return $this->token($actor);
+    }
+
+    /** Resolve a workflow actor token, returning null when its identity cannot be proven in this context. */
+    public function resolveActorToken(?string $token): ?Authenticatable
+    {
         $actor = match (true) {
             $token !== null && str_starts_with($token, 'user:') => $this->userProvider()?->retrieveById(substr($token, 5)),
             $token !== null && str_starts_with($token, 'tenant-model:') => $this->tenantModelActor($token),
             $token !== null && str_starts_with($token, 'model:') => $this->modelActor($token),
             default => null,
         };
-        if (! $actor instanceof Authenticatable) {
-            throw new AuthorizationException('A Release requires a currently resolvable author.');
-        }
 
-        return $actor;
+        return $actor instanceof Authenticatable ? $actor : null;
     }
 
     /** Resolve a tenant actor only while that exact tenant is initialized in this process. */
