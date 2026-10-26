@@ -20,17 +20,30 @@ use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Compile\EntryArtifactStore;
 use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
 use Splicewire\Beam\Ux\Data\EntryPublicationData;
-use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\JsonDoc\SourceToBlocks;
 use Splicewire\Beam\Ux\JsonDoc\TsxLens;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Particle\EntryBodySaveOp;
 use Splicewire\Beam\Ux\Particle\EntryDraftSaveOp;
-use Splicewire\Beam\Ux\Particle\EntryPublishOp;
 use Splicewire\Beam\Ux\Particle\EntryPreviewOp;
+use Splicewire\Beam\Ux\Particle\EntryPublishOp;
 use Splicewire\Beam\Ux\Particle\EntryVersionRestoreOp;
 use Splicewire\Beam\Ux\Particle\EntryVersionsShowOp;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Type\UxType;
+
+final class TenantReleaseActorFixture extends \Illuminate\Foundation\Auth\User
+{
+    protected $connection = 'release_tenant';
+
+    protected $table = 'users';
+
+    protected $keyType = 'string';
+
+    public $incrementing = false;
+
+    public $timestamps = false;
+}
 
 /**
  * **Draft, publish, and restore as two pins into one version history** (G2-BEAM-DRAFT-PUBLISH).
@@ -1450,11 +1463,11 @@ class EntryPublicationTest extends TestCase
         $this->assertSame($author, request()->user());
         $publishedVersion = app(\Rushing\Versioning\Contracts\VersionStore::class)
             ->version($takenDown->particle, $takenDown->published_version);
-        \Illuminate\Support\Facades\DB::connection()->flushQueryLog();
-        \Illuminate\Support\Facades\DB::connection()->enableQueryLog();
+        DB::connection()->flushQueryLog();
+        DB::connection()->enableQueryLog();
         $history = \Splicewire\Beam\Ux\Data\EntryVersionData::fromVersion($publishedVersion, false, false);
-        $queries = \Illuminate\Support\Facades\DB::connection()->getQueryLog();
-        \Illuminate\Support\Facades\DB::connection()->disableQueryLog();
+        $queries = DB::connection()->getQueryLog();
+        DB::connection()->disableQueryLog();
         $receiptQueries = array_values(array_filter($queries, fn (array $query) => str_contains($query['query'], 'beam_ux_release_recordings')));
         $this->assertNotEmpty($receiptQueries);
         $this->assertTrue(collect($receiptQueries)->contains(fn (array $query) => str_contains($query['query'], 'json_each')));
@@ -1702,7 +1715,7 @@ class EntryPublicationTest extends TestCase
         // Exercise model connection residency on a shared disposable SQLite PDO, without
         // pretending this is a physical multi-database/PostgreSQL tenancy proof.
         $pdo = $entry->getConnection()->getPdo();
-        \Illuminate\Support\Facades\DB::extend('recording-shared', fn ($config, $name) => new \Illuminate\Database\SQLiteConnection($pdo, ':memory:', '', ['name' => $name, 'driver' => 'sqlite']));
+        DB::extend('recording-shared', fn ($config, $name) => new \Illuminate\Database\SQLiteConnection($pdo, ':memory:', '', ['name' => $name, 'driver' => 'sqlite']));
         config(['database.connections.tenant_probe' => ['driver' => 'recording-shared'],
             'database.connections.central_db' => ['driver' => 'recording-shared']]);
         foreach ([null, 'central_db'] as $central) {
@@ -2385,7 +2398,7 @@ class EntryPublicationTest extends TestCase
         }
     }
 
-    private function releaseFixture(?\Closure $authorize = null, bool $reviewedAndMapped = true, bool $standardGuardProvider = false): array
+    private function releaseFixture(?\Closure $authorize = null, bool $reviewedAndMapped = true, bool $standardGuardProvider = false, bool $realUserProvider = false): array
     {
         // Most cases here are about REVIEWED Releases and the abilities a host maps: opt in to review, and map
         // `update` and `publish` so they are checked strictly through the Gate. The owner-ruled defaults (review off,
@@ -2410,6 +2423,18 @@ class EntryPublicationTest extends TestCase
         $reviewer->forceFill(['id' => 'reviewer']);
         if ($reviewedAndMapped) {
             \Illuminate\Support\Facades\Gate::before($authorize ?? fn () => true);
+        }
+        config(['auth.providers.users.model' => \Illuminate\Foundation\Auth\User::class]);
+        if ($realUserProvider) {
+            config([
+                'auth.defaults.guard' => 'web',
+                'auth.guards.web.provider' => 'users',
+                'auth.providers.users.driver' => 'eloquent',
+                'auth.providers.users.model' => \Illuminate\Foundation\Auth\User::class,
+            ]);
+            \Illuminate\Support\Facades\Auth::forgetGuards();
+
+            return [app(\Splicewire\Beam\Ux\Release\ReleaseService::class), $author, $reviewer];
         }
         $provider = \Mockery::mock(\Illuminate\Contracts\Auth\UserProvider::class);
         $provider->shouldReceive('retrieveById')->andReturnUsing(fn ($id) => $id === 'author' ? $author : ($id === 'reviewer' ? $reviewer : null));
@@ -2463,8 +2488,7 @@ class EntryPublicationTest extends TestCase
         $otherEntry = $this->publishedPage(self::BODY_ONE);
         [, $author, $reviewer] = $this->releaseFixture(reviewedAndMapped: false);
         \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => $user?->getAuthIdentifier() === 'author');
-        \Illuminate\Support\Facades\Gate::define('update', fn ($user = null, $subject = null) =>
-            $user?->getAuthIdentifier() === 'author' && $subject instanceof BeamUxEntry && $subject->is($entry));
+        \Illuminate\Support\Facades\Gate::define('update', fn ($user = null, $subject = null) => $user?->getAuthIdentifier() === 'author' && $subject instanceof BeamUxEntry && $subject->is($entry));
 
         $link = EntryPreviewOp::handle($entry, Request::create('/', 'POST', ['versionId' => $entry->published_version]), $author);
         $token = basename((string) parse_url($link->url, PHP_URL_PATH));
@@ -2498,8 +2522,7 @@ class EntryPublicationTest extends TestCase
         $oldVersion = (string) $entry->published_version;
         [, $author] = $this->releaseFixture(reviewedAndMapped: false);
         \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
-        \Illuminate\Support\Facades\Gate::define('update', fn ($user = null, $subject = null) =>
-            $user?->getAuthIdentifier() === 'author' && $subject instanceof BeamUxEntry && $subject->is($entry));
+        \Illuminate\Support\Facades\Gate::define('update', fn ($user = null, $subject = null) => $user?->getAuthIdentifier() === 'author' && $subject instanceof BeamUxEntry && $subject->is($entry));
 
         $this->assertTrue($this->artifacts()->hasVersion($entry, $oldVersion));
         $this->publishDraftAs($entry, $author);
@@ -2530,12 +2553,91 @@ class EntryPublicationTest extends TestCase
     {
         $entry = $this->publishedPage(self::BODY_ONE);
         [, $author] = $this->releaseFixture(reviewedAndMapped: false, standardGuardProvider: true);
-        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($user = null) => true);
 
         $state = $this->publishDraftAs($entry, $author);
 
         $this->assertSame('published', $state->release->status);
         $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+    }
+
+    public function test_a_tenant_release_member_is_resolved_from_the_tenant_actor_model(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $member = $this->publishedPage(self::BODY_TWO);
+        $memberVersion = app(EntryPublication::class)->recordDraft($member, self::BODY_ONE)->headVersion;
+        [$service, $centralAuthor] = $this->releaseFixture(reviewedAndMapped: false, realUserProvider: true);
+        $centralAuthor->forceFill(['id' => 'tenant-author']);
+        $this->centralReleaseActorTable();
+        $centralAuthor->save();
+        $this->tenantReleaseActorTable();
+        $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'tenant-author']);
+        $tenantActor->save();
+        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
+
+        $release = $service->create($entry, 'Tenant author', $tenantActor);
+        $service->putMember($release, $member->id, $memberVersion, $tenantActor);
+
+        $this->assertTrue($release->members()->where('entry_id', $member->id)->exists());
+    }
+
+    public function test_a_tenant_actor_does_not_fall_back_to_a_central_user_with_the_same_id(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $member = $this->publishedPage(self::BODY_TWO);
+        $memberVersion = app(EntryPublication::class)->recordDraft($member, self::BODY_ONE)->headVersion;
+        [$service, $centralAuthor] = $this->releaseFixture(reviewedAndMapped: false, realUserProvider: true);
+        $this->centralReleaseActorTable();
+        $centralAuthor->save();
+        $this->tenantReleaseActorTable();
+        $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'author']);
+        $this->assertFalse(DB::connection('release_tenant')->table('users')->where('id', 'author')->exists());
+        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture || $actor === $centralAuthor);
+        try {
+            $release = $service->create($entry, 'No central fallback', $tenantActor);
+            $service->putMember($release, $member->id, $memberVersion, $tenantActor);
+            $this->fail('A central user with the same identifier must not resolve a missing tenant actor.');
+        } catch (\Illuminate\Auth\Access\AuthorizationException $exception) {
+            $this->assertSame('A Release requires a currently resolvable author.', $exception->getMessage());
+        }
+    }
+
+    public function test_a_central_author_still_places_release_members_through_the_default_provider(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $member = $this->publishedPage(self::BODY_TWO);
+        $memberVersion = app(EntryPublication::class)->recordDraft($member, self::BODY_ONE)->headVersion;
+        [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor === $author);
+
+        $release = $service->create($entry, 'Central author', $author);
+        $service->putMember($release, $member->id, $memberVersion, $author);
+
+        $this->assertTrue($release->members()->where('entry_id', $member->id)->exists());
+    }
+
+    private function tenantReleaseActorTable(): void
+    {
+        config(['database.connections.release_tenant' => [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'prefix' => '',
+            'foreign_key_constraints' => true,
+        ]]);
+        DB::purge('release_tenant');
+        Schema::connection('release_tenant')->create('users', function (Blueprint $table): void {
+            $table->string('id')->primary();
+        });
+    }
+
+    private function centralReleaseActorTable(): void
+    {
+        if (! Schema::hasTable('users')) {
+            Schema::create('users', function (Blueprint $table): void {
+                $table->string('id')->primary();
+                $table->timestamps();
+            });
+        }
     }
 
     public function test_a_host_that_opts_into_review_holds_a_publish_for_a_second_author(): void
@@ -2725,7 +2827,7 @@ class EntryPublicationTest extends TestCase
         Schema::dropIfExists('beam_ux_releases');
         (require __DIR__.'/../database/migrations/shared/create_beam_ux_releases_table.php.stub')->up();
         $this->assertFalse(Schema::hasColumn('beam_ux_releases', 'origin'));
-        \Illuminate\Support\Facades\DB::table('beam_ux_releases')->insert([
+        DB::table('beam_ux_releases')->insert([
             'id' => '00000000-0000-0000-0000-000000000001', 'title' => 'Earlier', 'realm' => 'site',
             'created_by' => 'user:1', 'edited_by' => 'user:1', 'status' => 'draft',
         ]);
@@ -2755,7 +2857,7 @@ class EntryPublicationTest extends TestCase
         $built = $service->create($entry, 'By hand', $author);
         $this->assertSame(\Splicewire\Beam\Ux\Release\ReleaseOrigin::Built, $built->fresh()->origin);
 
-        \Illuminate\Support\Facades\DB::table('beam_ux_releases')->where('id', $built->id)->update(['origin' => 'direct-ish']);
+        DB::table('beam_ux_releases')->where('id', $built->id)->update(['origin' => 'direct-ish']);
         $this->expectException(\ValueError::class);
         $built->fresh()->origin;
     }

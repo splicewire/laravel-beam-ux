@@ -17,8 +17,8 @@ use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Preview\ReleasePreviewLinks;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
-use Splicewire\Beam\Ux\Type\UxType;
 use Splicewire\Beam\Ux\Support\EditorAuthorizer;
+use Splicewire\Beam\Ux\Type\UxType;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Control\TransitionResult;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
@@ -538,8 +538,11 @@ final class ReleaseService
 
     private function actor(?string $token): Authenticatable
     {
-        $actor = $token !== null && str_starts_with($token, 'user:')
-            ? $this->userProvider()?->retrieveById(substr($token, 5)) : null;
+        $actor = match (true) {
+            $token !== null && str_starts_with($token, 'user:') => $this->userProvider()?->retrieveById(substr($token, 5)),
+            $token !== null && str_starts_with($token, 'model:') => $this->modelActor($token),
+            default => null,
+        };
         if (! $actor instanceof Authenticatable) {
             throw new AuthorizationException('A Release requires a currently resolvable author.');
         }
@@ -575,9 +578,63 @@ final class ReleaseService
         }
     }
 
+    /** Resolve an explicitly typed non-default auth model without falling back across user stores. */
+    private function modelActor(string $token): ?Authenticatable
+    {
+        $parts = explode(':', $token, 4);
+        if (count($parts) !== 4) {
+            return null;
+        }
+
+        [, $encodedClass, $encodedConnection, $encodedId] = $parts;
+        $class = base64_decode($encodedClass, true);
+        $connection = base64_decode($encodedConnection, true);
+        $id = base64_decode($encodedId, true);
+        if (! is_string($class) || ! class_exists($class)
+            || ! is_subclass_of($class, Model::class)
+            || ! is_subclass_of($class, Authenticatable::class)
+            || ! is_string($connection) || $connection === '' || ! is_string($id)) {
+            return null;
+        }
+
+        $model = new $class;
+        $model->setConnection($connection);
+        $actor = $model->newQuery()->where($model->getAuthIdentifierName(), $id)->first();
+
+        return $actor instanceof Authenticatable ? $actor : null;
+    }
+
     private function token(Authenticatable $actor): string
     {
+        $defaultModel = $this->defaultAuthModel();
+        if ($actor instanceof Model && ($defaultModel === null || $actor::class !== $defaultModel)) {
+            return 'model:'.base64_encode($actor::class)
+                .':'.base64_encode($actor->getConnection()->getName())
+                .':'.base64_encode((string) $actor->getAuthIdentifier());
+        }
+
         return 'user:'.$actor->getAuthIdentifier();
+    }
+
+    private function defaultAuthModel(): ?string
+    {
+        $guardName = config('auth.defaults.guard');
+        $providerName = is_string($guardName) && $guardName !== ''
+            ? config("auth.guards.{$guardName}.provider")
+            : null;
+        $model = is_string($providerName) && $providerName !== ''
+            ? config("auth.providers.{$providerName}.model")
+            : null;
+
+        if (is_string($model) && $model !== '') {
+            return $model;
+        }
+
+        $provider = $this->userProvider();
+
+        return $provider !== null && method_exists($provider, 'getModel') && is_string($provider->getModel())
+            ? $provider->getModel()
+            : null;
     }
 
     private function assertEditable(BeamUxRelease $release): void
