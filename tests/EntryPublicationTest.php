@@ -2602,6 +2602,93 @@ class EntryPublicationTest extends TestCase
         }
     }
 
+    public function test_a_tenant_release_actor_resolves_only_for_the_tenant_that_created_the_transition(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service] = $this->releaseFixture(reviewedAndMapped: false, realUserProvider: true);
+        $this->tenantReleaseActorTable();
+        $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'tenant-author']);
+        $tenantActor->save();
+        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
+        $this->releaseActorTenancy('tenant-a');
+
+        $release = $service->create($entry, 'Tenant-bound actor', $tenantActor);
+        $context = new \Splicewire\Beam\Workflows\Control\TransitionContext(actor: $release->created_by);
+
+        $service->participate($release, 'revise', $context);
+
+        $this->assertSame('tenant-a', app(TenancyContext::class)->currentTenantId());
+    }
+
+    public function test_a_tenant_release_actor_is_not_resolved_for_another_tenant_with_the_same_user_id(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service] = $this->releaseFixture(reviewedAndMapped: false, realUserProvider: true);
+        $this->tenantReleaseActorTable();
+        $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'tenant-author']);
+        $tenantActor->save();
+        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
+        $this->releaseActorTenancy('tenant-a');
+        $release = $service->create($entry, 'Tenant-bound actor', $tenantActor);
+        $context = new \Splicewire\Beam\Workflows\Control\TransitionContext(actor: $release->created_by);
+        $this->releaseActorTenancy('tenant-b');
+
+        $this->expectException(\Illuminate\Auth\Access\AuthorizationException::class);
+        $this->expectExceptionMessage('A Release requires a currently resolvable author.');
+        $service->participate($release, 'revise', $context);
+    }
+
+    public function test_a_tenant_release_actor_is_not_resolved_without_initialized_tenancy(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service] = $this->releaseFixture(reviewedAndMapped: false, realUserProvider: true);
+        $this->tenantReleaseActorTable();
+        $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'tenant-author']);
+        $tenantActor->save();
+        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
+        $this->releaseActorTenancy('tenant-a');
+        $release = $service->create($entry, 'Tenant-bound actor', $tenantActor);
+        $context = new \Splicewire\Beam\Workflows\Control\TransitionContext(actor: $release->created_by);
+        $this->releaseActorTenancy(null);
+
+        $this->expectException(\Illuminate\Auth\Access\AuthorizationException::class);
+        $this->expectExceptionMessage('A Release requires a currently resolvable author.');
+        $service->participate($release, 'revise', $context);
+    }
+
+    private function releaseActorTenancy(?string $tenantId): void
+    {
+        $this->app->instance(TenancyContext::class, new class($tenantId, config('database.default')) implements TenancyContext
+        {
+            public function __construct(private ?string $tenantId, private ?string $centralConnection) {}
+
+            public function isMultiTenant(): bool
+            {
+                return true;
+            }
+
+            public function isActive(): bool
+            {
+                return $this->tenantId !== null;
+            }
+
+            public function currentTenant(): ?object
+            {
+                return $this->tenantId === null ? null : (object) ['id' => $this->tenantId];
+            }
+
+            public function currentTenantId(): int|string|null
+            {
+                return $this->tenantId;
+            }
+
+            public function centralConnection(): ?string
+            {
+                return $this->centralConnection;
+            }
+        });
+    }
+
     public function test_a_central_author_still_places_release_members_through_the_default_provider(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);

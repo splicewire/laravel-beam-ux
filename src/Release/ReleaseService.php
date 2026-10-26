@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use Rushing\PermissionCascade\Policies\ConfiguredModelPolicy;
 use Rushing\Versioning\Contracts\VersionStore;
+use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
@@ -540,6 +541,7 @@ final class ReleaseService
     {
         $actor = match (true) {
             $token !== null && str_starts_with($token, 'user:') => $this->userProvider()?->retrieveById(substr($token, 5)),
+            $token !== null && str_starts_with($token, 'tenant-model:') => $this->tenantModelActor($token),
             $token !== null && str_starts_with($token, 'model:') => $this->modelActor($token),
             default => null,
         };
@@ -548,6 +550,28 @@ final class ReleaseService
         }
 
         return $actor;
+    }
+
+    /** Resolve a tenant actor only while that exact tenant is initialized in this process. */
+    private function tenantModelActor(string $token): ?Authenticatable
+    {
+        $parts = explode(':', $token, 5);
+        if (count($parts) !== 5) {
+            return null;
+        }
+
+        [, $encodedTenantId, $encodedModel] = $parts;
+        $tenantId = base64_decode($encodedTenantId, true);
+        if (! is_string($tenantId)) {
+            return null;
+        }
+
+        $tenancy = app(TenancyContext::class);
+        if (! $tenancy->isActive() || (string) $tenancy->currentTenantId() !== $tenantId) {
+            return null;
+        }
+
+        return $this->modelActor('model:'.$encodedModel.':'.$parts[3].':'.$parts[4]);
     }
 
     private function userProvider(): ?UserProvider
@@ -608,8 +632,26 @@ final class ReleaseService
     {
         $defaultModel = $this->defaultAuthModel();
         if ($actor instanceof Model && ($defaultModel === null || $actor::class !== $defaultModel)) {
+            $connection = $actor->getConnection()->getName();
+            $tenancy = app(TenancyContext::class);
+            if ($tenancy->isMultiTenant() && $connection !== $tenancy->centralConnection()) {
+                if (! $tenancy->isActive()) {
+                    throw new AuthorizationException('A tenant actor requires an initialized tenant identity.');
+                }
+
+                $tenantId = $tenancy->currentTenantId();
+                if ($tenantId === null) {
+                    throw new AuthorizationException('A tenant actor requires an initialized tenant identity.');
+                }
+
+                return 'tenant-model:'.base64_encode((string) $tenantId)
+                    .':'.base64_encode($actor::class)
+                    .':'.base64_encode($connection)
+                    .':'.base64_encode((string) $actor->getAuthIdentifier());
+            }
+
             return 'model:'.base64_encode($actor::class)
-                .':'.base64_encode($actor->getConnection()->getName())
+                .':'.base64_encode($connection)
                 .':'.base64_encode((string) $actor->getAuthIdentifier());
         }
 
