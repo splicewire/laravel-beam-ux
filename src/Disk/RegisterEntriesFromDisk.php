@@ -237,6 +237,16 @@ class RegisterEntriesFromDisk
                 } else {
                     $skipped[] = $relative;
                 }
+                // A page registered before its file's settings were read gains them here, but only into columns
+                // that are still empty: a value already there (an author's, or an earlier scan's) is never replaced.
+                $empty = array_filter(
+                    $this->settingColumnsFor($src, $relative, $envelope),
+                    fn (mixed $value, string $column): bool => $existing->getAttribute($column) === null || $existing->getAttribute($column) === '',
+                    ARRAY_FILTER_USE_BOTH,
+                );
+                if ($empty !== []) {
+                    $existing->forceFill($empty)->save();
+                }
                 // Born published (ADR-0225 decision 2; launch row qitem-20261016215906-483ede25): a row registered before
                 // entries were pinned is repaired here. baseline() pins only a body with NO history, so an unpublished
                 // draft is never published, and it snapshots + pins atomically, so a failure surfaces and a rerun retries.
@@ -614,6 +624,10 @@ class RegisterEntriesFromDisk
             return [];
         }
         $fm = $this->frontmatter($source);
+        // This estate authors a page's summary as `excerpt`; a declared `description` wins over it.
+        if ((! isset($fm['description']) || $fm['description'] === '') && isset($fm['excerpt'])) {
+            $fm['description'] = $fm['excerpt'];
+        }
         $rules = EntryPageSettingsData::rules();
         $out = [];
         foreach (['description' => 'seo_description', 'social_image' => 'seo_social_image', 'page_type' => 'seo_page_type', 'published_date' => 'seo_published_date', 'child_fields' => 'child_fields'] as $field => $column) {
