@@ -18,8 +18,8 @@ class EditorAuthorizerTest extends TestCase
         parent::setUp();
         // A central or route-less request must stay on the raw legacy Gate ability,
         // not the entitlement-prefixed ability used for a tenant override.
-        Gate::define('ux.author', fn ($user): bool => $user instanceof EditorCentralAuthor);
-        Gate::define('entitlement:ux.author', fn ($user): bool => false);
+        Gate::define('ux.author', fn ($user): bool => $user instanceof EditorCentralAuthor || $user instanceof EditorRawGateOnlyAuthor);
+        Gate::define('entitlement:ux.author', fn ($user): bool => $user instanceof EditorCentralAuthor || $user instanceof EditorEntitlementOnlyAuthor);
         Gate::define('entitlement:site.edit', fn ($user): bool => $user instanceof EditorTenantAuthor);
     }
 
@@ -73,10 +73,12 @@ class EditorAuthorizerTest extends TestCase
         $authorizer = app(EditorAuthorizer::class);
         $centralRoute = $this->route(null, ['ux.author' => 'site.edit']);
 
-        $authorizer->authorize(new EditorCentralAuthor, $this->request($centralRoute));
+        $authorizer->authorize(new EditorRawGateOnlyAuthor, $this->request($centralRoute));
+        $this->assertTrue($authorizer->allows(new EditorEntitlementOnlyAuthor, $this->request($centralRoute)),
+            'Central allows() retains its previous AbilityResolver call.');
 
         $this->expectException(AuthorizationException::class);
-        $authorizer->authorize(new User, $this->request($centralRoute));
+        $authorizer->authorize(new EditorEntitlementOnlyAuthor, $this->request($centralRoute));
     }
 
     private function route(?string $realm, array $overrides): Route
@@ -102,3 +104,7 @@ class EditorAuthorizerTest extends TestCase
 class EditorCentralAuthor extends User {}
 
 class EditorTenantAuthor extends User {}
+
+class EditorRawGateOnlyAuthor extends User {}
+
+class EditorEntitlementOnlyAuthor extends User {}
