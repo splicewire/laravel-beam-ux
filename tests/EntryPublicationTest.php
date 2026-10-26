@@ -3518,7 +3518,8 @@ class EntryPublicationTest extends TestCase
 
         $this->assertNull($entry->fresh()->getAttribute('published_version'));
 
-        $expected = substr(hash('xxh128', '3:'.$entry->fresh()->particle->getAttribute('updated_at')->format('U.u')), 0, 16);
+        // The compiler generation prefixes the key: 4 since MDX compiles GFM tables (EP-42 H2, 2026-10-26).
+        $expected = substr(hash('xxh128', '4:'.$entry->fresh()->particle->getAttribute('updated_at')->format('U.u')), 0, 16);
         $this->assertSame($expected, $this->artifacts()->version($entry->fresh()));
     }
 

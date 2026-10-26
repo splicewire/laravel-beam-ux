@@ -200,6 +200,84 @@ class ArtifactModuleContractTest extends TestCase
         $this->assertSame([], $compiler->lastWarnings(), 'A nested list under its item is ordinary Markdown, not hard-wrapped.');
     }
 
+    /**
+     * Always runs. MDX compiles in the dialect the MDX Lens reads (ADR-0233 d1): MDX plus GFM tables, with the lens's own
+     * two packages. The lens reads a table into table blocks and prints it back as a GFM table; compiled without them, every
+     * table on a published page rendered as a paragraph of raw pipes (EP-42 H2 receipt, 2026-10-26).
+     */
+    public function test_the_compile_script_compiles_gfm_tables_as_the_lens_reads_them(): void
+    {
+        $script = file_get_contents(__DIR__.'/../resources/compile/compile.mjs');
+
+        $this->assertStringContainsString("'micromark-extension-gfm-table'", $script);
+        $this->assertStringContainsString("'mdast-util-gfm-table'", $script);
+        $this->assertMatchesRegularExpression('/remarkPlugins: \[await gfmTables\(root\)/', $script);
+    }
+
+    public function test_a_gfm_table_compiles_to_a_table(): void
+    {
+        $this->requireToolchain();
+
+        $code = $this->compile("| Kind | Holds |\n| --- | --- |\n| page | blocks |\n");
+
+        $this->assertStringContainsString('_components.table', $code);
+        $this->assertStringContainsString('_components.td', $code);
+        $this->assertStringNotContainsString('| --- |', $code, 'The table compiled as a paragraph of pipes.');
+    }
+
+    /**
+     * A pnpm host carries the table packages only under `@splicewire/beam-mdx`, which declares them; the compiler finds
+     * them there when the host root does not (the flagship, measured 2026-10-26).
+     */
+    public function test_the_table_packages_resolve_through_beam_mdx_when_the_host_root_lacks_them(): void
+    {
+        $this->requireToolchain();
+        $beamMdx = realpath($this->toolchainRoot.'/node_modules/@splicewire/beam-mdx');
+        if ($beamMdx === false) {
+            $this->markTestSkipped('The borrowed toolchain has no @splicewire/beam-mdx to resolve through.');
+        }
+        $root = $this->bareRoot(['@mdx-js/mdx' => realpath($this->toolchainRoot.'/node_modules/@mdx-js/mdx'), '@splicewire/beam-mdx' => $beamMdx]);
+        $this->assertDirectoryDoesNotExist($root.'/node_modules/micromark-extension-gfm-table', 'the host root lacks them');
+
+        $code = $this->compileFrom($root, "| Kind | Holds |\n| --- | --- |\n| page | blocks |\n");
+
+        $this->assertStringContainsString('_components.table', $code);
+    }
+
+    /** Neither the host nor beam-mdx carries them: a refusal naming them, never tables compiled as pipes. */
+    public function test_without_the_table_packages_the_compile_refuses_naming_them(): void
+    {
+        $this->requireToolchain();
+        $root = $this->bareRoot(['@mdx-js/mdx' => realpath($this->toolchainRoot.'/node_modules/@mdx-js/mdx')]);
+
+        $this->expectException(\Splicewire\Beam\Ux\Compile\CompilationFailed::class);
+        $this->expectExceptionMessageMatches('/micromark-extension-gfm-table/');
+
+        $this->compileFrom($root, "# Hi\n");
+    }
+
+    /** @param  array<string, string|false>  $packages  name → real directory, linked into a fresh root's node_modules */
+    private function bareRoot(array $packages): string
+    {
+        $root = sys_get_temp_dir().'/beam-ux-compile-'.bin2hex(random_bytes(4));
+        mkdir($root.'/node_modules/@splicewire', 0777, true);
+        mkdir($root.'/node_modules/@mdx-js', 0777, true);
+        file_put_contents($root.'/package.json', "{}\n");
+        foreach ($packages as $name => $dir) {
+            $this->assertIsString($dir, "{$name} in the borrowed toolchain");
+            symlink($dir, $root.'/node_modules/'.$name);
+        }
+
+        return $root;
+    }
+
+    private function compileFrom(string $root, string $source): string
+    {
+        $entry = new BeamUxEntry(['slug' => 'artifact-contract', 'type' => UxType::Page, 'format' => UxFormat::Mdx]);
+
+        return (new NodeEntryBodyCompiler(workingDirectory: $root))->compile($entry, $source);
+    }
+
     private function compile(string $source): string
     {
         $entry = new BeamUxEntry([

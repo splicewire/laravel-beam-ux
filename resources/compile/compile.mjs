@@ -13,6 +13,7 @@
  * exactly the silent regression ADR-0209 §7 rules out.
  */
 
+import { existsSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -153,11 +154,55 @@ const warnHardWrappedLists = (warnings) => () => (tree) => {
   walk(tree)
 }
 
+/**
+ * The two packages that teach MDX the GFM table, resolved from the host first, then through `@splicewire/beam-mdx`.
+ *
+ * MDX compiles in the dialect the MDX Lens reads (ADR-0233 d1): MDX plus GFM tables, through these same two packages
+ * (beam-mdx `lens/read.ts`, `lens/print.ts`). The lens reads a table into table blocks and prints it back as a GFM table,
+ * and a host's own MDX build compiles tables too, but this compiler did not: every table on a published page, holding
+ * source or blocks, rendered as a paragraph of raw pipes (EP-42 H2 receipt, 2026-10-26). Full `remark-gfm` is not the
+ * lens's dialect, so it is not used here.
+ *
+ * A pnpm host carries these only under beam-mdx, which declares them, so beam-mdx's REAL directory is the second place
+ * looked (its `exports` publish no `package.json`, so it is found on the host's module paths, not resolved). Neither
+ * resolving is a failure by name, never tables quietly compiled as text.
+ */
+const gfmTables = async (root) => {
+  const hostRequire = createRequire(join(root, 'package.json'))
+  const bases = [join(root, 'package.json')]
+  const beamMdx = (hostRequire.resolve.paths('@splicewire/beam-mdx') ?? [])
+    .map((dir) => join(dir, '@splicewire', 'beam-mdx', 'package.json'))
+    .find((path) => existsSync(path))
+  if (beamMdx) bases.push(realpathSync(beamMdx))
+
+  const resolve = async (specifier) => {
+    for (const base of bases) {
+      try {
+        return await import(pathToFileURL(createRequire(base).resolve(specifier)).href)
+      } catch {
+        // Not from this base; the next one, then the failure below.
+      }
+    }
+    fail(
+      `beam-ux compile: cannot resolve [${specifier}] from the host at ${root} or through @splicewire/beam-mdx. ` +
+        `MDX compiles with GFM tables, as the MDX Lens reads it; install @splicewire/beam-mdx (which declares it) or ${specifier}.`,
+    )
+  }
+  const { gfmTable } = await resolve('micromark-extension-gfm-table')
+  const { gfmTableFromMarkdown } = await resolve('mdast-util-gfm-table')
+
+  return function () {
+    const data = this.data()
+    ;(data.micromarkExtensions ??= []).push(gfmTable())
+    ;(data.fromMarkdownExtensions ??= []).push(gfmTableFromMarkdown())
+  }
+}
+
 const compileMdx = async (source, slug, root, warnings) => {
   const { compile } = await load('@mdx-js/mdx', root)
 
   const compiled = await compile(stripFrontmatter(source), {
-    remarkPlugins: [stripCommentExpressions, warnHardWrappedLists(warnings)],
+    remarkPlugins: [await gfmTables(root), stripCommentExpressions, warnHardWrappedLists(warnings)],
     jsx: false,
     jsxRuntime: 'automatic',
     jsxImportSource: 'react',

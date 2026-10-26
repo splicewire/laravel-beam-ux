@@ -66,8 +66,11 @@ class EntryArtifactStore
      * no row, so it moves nothing a write-keyed address can see.
      *
      * Bump this on any change to the emitted shape. It costs one recompile and nothing else.
+     *
+     * 4: MDX compiles GFM tables, as the MDX Lens reads them (EP-42 H2, 2026-10-26). Every artifact compiled before it
+     * holds a table as a paragraph of raw pipes, and keeping its address would keep serving that.
      */
-    private const GENERATION = '3';
+    private const GENERATION = '4';
 
     /**
      * The version key an artifact is stamped with. Short, opaque, and stable for an UNWRITTEN row
