@@ -2,11 +2,28 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use Illuminate\Broadcasting\BroadcastEvent;
+use Illuminate\Broadcasting\Channel;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Auth\User;
+use Illuminate\Mail\Mailable;
+use Illuminate\Notifications\Notification as BaseNotification;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Splicewire\Beam\Ux\Compile\CompilationFailed;
+use Splicewire\Beam\Ux\Compile\CompileEntryBody;
+use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
+use Splicewire\Beam\Ux\Compile\NodeEntryBodyCompiler;
+use Splicewire\Beam\Ux\Models\BeamUxEntry as Entry;
 use Splicewire\Beam\Mdx\Legal\LegalComponentsSeeder;
 use Splicewire\Beam\Mdx\Legal\LegalTexts;
 use Splicewire\Beam\Mdx\Lens\MdxLens;
@@ -391,12 +408,164 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         Auth::forgetUser();
         $this->artisan('splicewire:beam:ux:convert-mdx', ['--path' => $this->root, '--dry-run' => true])->assertExitCode(1);
         $this->holdBlocks();
+        // A dry run rehearses the writes, and a Release records who made it, so it names its author as the real run does.
         $this->artisan('splicewire:beam:ux:convert-mdx', ['--path' => $this->root, '--dry-run' => true])
+            ->expectsOutputToContain('Name the author')
+            ->assertExitCode(1);
+        $this->artisan('splicewire:beam:ux:convert-mdx', ['--path' => $this->root, '--dry-run' => true, '--author' => 7])
             ->expectsOutputToContain('Would convert 1 stored MDX page(s)')
             ->expectsOutputToContain('page about')
             ->assertExitCode(0);
 
         $this->assertSame(0, BeamUxRelease::query()->count());
+    }
+
+    /**
+     * EP-42 (ticket 00, 2026-10-26 07:10Z; orch-lead 15:07Z): the owner decides an adoption on the dry run's report (R2),
+     * so it must say what the real run will do. On the flagship it reported 32 pages and the write then refused one: the
+     * dry run stopped before the writes, and only the write checks a body against the page's profile.
+     */
+    public function test_a_dry_run_reports_the_page_the_write_would_refuse(): void
+    {
+        $nav = $this->sourcePage('nav', 'Nav', "<HostWidget />\n", [$this->hostWidget()]);
+        $head = app(EntryPublication::class)->state($nav)->headVersion;
+        $this->sourcePage('notes', 'Notes', "Published words.\n", [$this->p('Published words.')]);
+        $this->holdBlocks();
+
+        $report = $this->convertDry();
+
+        $this->assertSame(['notes'], $report['pages']);
+        $this->assertStringContainsString('the write would refuse it', $report['leftOut']['nav'] ?? '');
+        $this->assertStringContainsString('unavailable in this realm', $report['leftOut']['nav'] ?? '');
+        $this->assertNull($report['release']);
+        $this->assertSame(0, BeamUxRelease::query()->count(), 'a dry run writes nothing');
+        $this->assertSame($head, app(EntryPublication::class)->state($nav->fresh())->headVersion);
+    }
+
+    public function test_a_dry_run_reports_what_the_real_run_then_does(): void
+    {
+        $this->sourcePage('nav', 'Nav', "<HostWidget />\n", [$this->hostWidget()]);
+        $this->sourcePage('about', 'About', "Intro.\n\n<Content name=\"fragments/reading-disclaimer\" />\n",
+            [$this->p('Intro.'), $this->content('fragments/reading-disclaimer')]);
+        $this->sourcePage('notes', 'Notes', "Published words.\n", [$this->p('Published words.')]);
+        $this->holdBlocks();
+
+        $dry = $this->convertDry();
+        $real = $this->convertSignedOut();
+
+        $this->assertSame($real['pages'], $dry['pages']);
+        $this->assertSame($real['components'], $dry['components']);
+        $this->assertSame(array_keys($real['leftOut']), array_keys($dry['leftOut']));
+        $this->assertSame(str_replace('the write refused it', 'the write would refuse it', $real['leftOut']['nav']), $dry['leftOut']['nav']);
+    }
+
+    /**
+     * The real run makes a host fragment's component in the same transaction, before the page that places it is written,
+     * so that page's profile already holds the component. A dry run that only called the write's checks would refuse it.
+     */
+    public function test_a_dry_run_does_not_refuse_a_page_for_the_component_it_would_make(): void
+    {
+        $this->sourcePage('about', 'About', "Intro.\n\n<Content name=\"fragments/reading-disclaimer\" />\n",
+            [$this->p('Intro.'), $this->content('fragments/reading-disclaimer')]);
+        $this->holdBlocks();
+
+        $report = $this->convertDry();
+
+        $this->assertSame(['about'], $report['pages']);
+        $this->assertSame(['ReadingDisclaimer' => 'fragments/reading-disclaimer'], $report['components']);
+        $this->assertSame(0, Entry::query()->where('slug', 'reading-disclaimer')->count(), 'made in the rehearsal, rolled back');
+    }
+
+    /**
+     * A member's artifact is compiled as it joins the Release, and a compile failure isn't a ValidationException: it
+     * stopped the whole real run half way (after the files half had written). It leaves that page out, like a refusal.
+     */
+    public function test_a_page_whose_body_will_not_compile_is_left_out_and_a_dry_run_says_so(): void
+    {
+        $this->sourcePage('broken', 'Broken', "Uncompilable.\n", [$this->p('Uncompilable.')]);
+        $this->sourcePage('notes', 'Notes', "Published words.\n", [$this->p('Published words.')]);
+        $this->holdBlocks();
+        $this->app->singleton(EntryBodyCompiler::class, fn () => new RefusingCompiler(
+            new NodeEntryBodyCompiler(workingDirectory: __DIR__.'/Fixtures/entry-body-host'), 'Uncompilable.'));
+        $this->app->forgetInstance(CompileEntryBody::class);
+
+        $dry = $this->convertDry();
+        $real = $this->convertSignedOut();
+
+        foreach (['dry' => $dry, 'real' => $real] as $run => $report) {
+            $this->assertSame(['notes'], $report['pages'], $run);
+            $this->assertStringContainsString("doesn't compile", $report['leftOut']['broken'] ?? '', $run);
+        }
+    }
+
+    /**
+     * orch-lead 15:07Z: the rehearsal contains every effect outside the database. A host's own reactions to an entry write
+     * (a queued job, a mail, a notification, a cache write, a broadcast) and beam-ux's mirror and artifact files never
+     * happen on a dry run. The real run below proves each probe is live.
+     */
+    public function test_a_dry_run_fires_nothing_outside_the_database(): void
+    {
+        $this->sourcePage('about', 'About', "Intro.\n\n<Content name=\"fragments/reading-disclaimer\" />\n",
+            [$this->p('Intro.'), $this->content('fragments/reading-disclaimer')]);
+        $this->holdBlocks();
+        Bus::fake();
+        Queue::fake();
+        Mail::fake();
+        Notification::fake();
+        Entry::saved(function (): void {
+            dispatch(new RehearsalProbeJob);
+            Mail::to('probe@example.test')->send(new RehearsalProbeMail);
+            Notification::route('mail', 'probe@example.test')->notify(new RehearsalProbeNotification);
+            Cache::put('rehearsal-probe', true);
+            broadcast(new RehearsalProbeBroadcast);
+        });
+        $versions = (new \Rushing\Versioning\Models\Version)->getTable();
+        $rows = fn () => [Entry::query()->count(), BeamUxRelease::query()->count(), DB::table($versions)->count()];
+        $files = fn () => [Storage::disk('component-mirror')->allFiles(), Storage::disk('component-artifacts')->allFiles()];
+        [$rowsBefore, $filesBefore] = [$rows(), $files()];
+
+        $report = $this->convertDry();
+
+        $this->assertSame(['about'], $report['pages'], 'the rehearsal ran the writes');
+        Bus::assertNothingDispatched();
+        Queue::assertNothingPushed();
+        Mail::assertNothingSent();
+        Notification::assertNothingSent();
+        $this->assertFalse(Cache::has('rehearsal-probe'));
+        $this->assertSame($rowsBefore, $rows(), 'no row survives the rehearsal');
+        $this->assertSame($filesBefore, $files(), 'no mirror or artifact file is written');
+
+        $this->convertSignedOut();
+
+        Bus::assertDispatched(RehearsalProbeJob::class);
+        Bus::assertDispatched(BroadcastEvent::class);
+        Mail::assertSent(RehearsalProbeMail::class);
+        Notification::assertSentOnDemand(RehearsalProbeNotification::class);
+        $this->assertTrue(Cache::has('rehearsal-probe'));
+        $this->assertNotSame($filesBefore[1], $files()[1], 'the real run compiles its artifacts');
+    }
+
+    /**
+     * orch-lead 15:07Z: a page's file is written only once its stored page has converted. The files half ran first, so
+     * a page the stored write refused kept a reprinted file over a row still holding source. The converted page is still
+     * re-stamped against its file: the text the file is about to be written as.
+     */
+    public function test_the_command_writes_a_page_s_file_only_once_its_stored_page_converts(): void
+    {
+        $guide = $this->diskSource('guide', 'Guide', 'docs/guide.mdx', 'Disk words.', [$this->p('Disk words.')]);
+        $this->diskSource('nav', 'Nav', 'docs/nav.mdx', '<HostWidget />', [$this->hostWidget()]);
+        $navBefore = file_get_contents($this->root.'/docs/nav.mdx');
+        $this->holdBlocks();
+
+        Auth::forgetUser();
+        $this->artisan('splicewire:beam:ux:convert-mdx', ['--path' => $this->root, '--author' => 7])
+            ->expectsOutputToContain('left as it is: docs/nav.mdx: its stored page was left out')
+            ->assertExitCode(0);
+        $this->actingAs($this->author);
+
+        $this->assertSame($navBefore, file_get_contents($this->root.'/docs/nav.mdx'), 'a refused page keeps its file');
+        $this->assertSame("---\ntitle: Guide\n---\n\nDisk words.\n", file_get_contents($this->root.'/docs/guide.mdx'));
+        $this->assertTrue(app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->isPristine($guide->fresh()), 're-stamped against the file it is written as');
     }
 
     private function engine(): string
@@ -413,6 +582,33 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         } finally {
             $this->actingAs($this->author);
         }
+    }
+
+    /** The dry run as the command runs it: nobody signed in, rehearsing as the author it is handed. */
+    private function convertDry(): array
+    {
+        Auth::forgetUser();
+        try {
+            return app(StoredMdxConversion::class)->convert($this->root, $this->author, write: false);
+        } finally {
+            $this->actingAs($this->author);
+        }
+    }
+
+    /** A code component declared nowhere, so the write refuses a body that places it (the fresh starter's <SiteNav />). */
+    private function hostWidget(): array
+    {
+        return ['kind' => 'block', 'name' => 'HostWidget', 'isComponent' => true, 'props' => [], 'children' => [], 'dynamic' => false];
+    }
+
+    /** A host's page registered from `$relative`, whose file is not yet canonical (one blank line too many), so the files half rewrites it. */
+    private function diskSource(string $slug, string $title, string $relative, string $words, array $doc): Entry
+    {
+        $page = $this->sourcePage($slug, $title, "{$words}\n", $doc, origin: "disk:{$relative}");
+        @mkdir(dirname($this->root.'/'.$relative), 0777, true);
+        file_put_contents($this->root.'/'.$relative, "---\ntitle: {$title}\n---\n\n\n{$words}\n");
+
+        return $page;
     }
 
     /** The host turns `holds_blocks` on before it converts: the codecs are chosen afresh, as in the command's own process. */
@@ -451,6 +647,56 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
     private function p(string $text): array
     {
         return ['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => $text]], 'dynamic' => false];
+    }
+}
+
+/** A compiler that refuses any body holding `$marker`, as a real one refuses a body it can't build, and compiles the rest. */
+final class RefusingCompiler implements EntryBodyCompiler
+{
+    public function __construct(private EntryBodyCompiler $compiler, private string $marker) {}
+
+    public function compile(BeamUxEntry $entry, string $source): string
+    {
+        if (str_contains($source, $this->marker)) {
+            throw CompilationFailed::for($entry, "it holds {$this->marker}");
+        }
+
+        return $this->compiler->compile($entry, $source);
+    }
+
+    public function handles(BeamUxEntry $entry): bool
+    {
+        return $this->compiler->handles($entry);
+    }
+}
+
+/** A host's queued reaction to an entry write. */
+final class RehearsalProbeJob implements ShouldQueue
+{
+    public function handle(): void {}
+}
+
+final class RehearsalProbeMail extends Mailable
+{
+    public function build(): self
+    {
+        return $this->subject('probe')->html('probe');
+    }
+}
+
+final class RehearsalProbeNotification extends BaseNotification
+{
+    public function via(mixed $notifiable): array
+    {
+        return ['mail'];
+    }
+}
+
+final class RehearsalProbeBroadcast implements ShouldBroadcastNow
+{
+    public function broadcastOn(): array
+    {
+        return [new Channel('probe')];
     }
 }
 
