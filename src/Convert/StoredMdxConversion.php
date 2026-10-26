@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Convert;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Mdx\Convert\MdxFileConverter;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
@@ -13,6 +14,9 @@ use Splicewire\Beam\Ux\Components\ComponentKind;
 use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
 use Splicewire\Beam\Ux\Files\MdxPageFile;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Models\BeamUxRelease;
+use Splicewire\Beam\Ux\Provenance\Provenance;
+use Splicewire\Beam\Ux\Provenance\Reasserter;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Release\ReleaseService;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -37,6 +41,7 @@ final class StoredMdxConversion
         private EntryPublication $publication,
         private ReleaseService $releases,
         private VersionStore $versions,
+        private Reasserter $reasserter,
     ) {}
 
     /**
@@ -55,6 +60,13 @@ final class StoredMdxConversion
         foreach ($pages as $page) {
             $published = $this->payload($page, $page->published_version);
             if ($published === null || array_is_list($published)) {
+                continue;
+            }
+            // A page its package still asserts, unedited, is the package's to convert: converting it here would make it a
+            // site edit and stop re-assertion (EP-27 ruling). One the site already edited is the site's, and converts.
+            if (str_starts_with((string) ($page->origin ?? ''), Provenance::PACKAGE_PREFIX) && $this->reasserter->isPristine($page)) {
+                $report['leftOut'][$page->slug] = "the package owns it ({$page->origin}, unedited): the package converts it";
+
                 continue;
             }
             $converted = $this->page($page, $published, $fragments);
@@ -122,23 +134,54 @@ final class StoredMdxConversion
             throw new \InvalidArgumentException('Name the author the conversion\'s Release is made by.');
         }
 
-        $release = $this->releases->create($plans[0][0], 'MDX conversion', $author);
-        foreach ($components as $component => $made) {
-            $entry = BeamUxEntry::create(['slug' => Str::kebab($component), 'title' => $made['title'], 'type' => UxType::Component,
-                'format' => 'tsx', 'component_kind' => 'authored', 'realm' => $realm]);
-            $version = $this->publication->recordDraft($entry, $made['doc'], 'converted from MDX fragment')->headVersion;
-            $this->releases->putMember($release, (string) $entry->getKey(), (string) $version, $author);
-        }
-        foreach ($plans as [$page, $converted, $draft]) {
-            $version = $this->publication->recordDraft($page->fresh(), $converted['doc'], 'converted from MDX source', $converted['settings'])->headVersion;
-            if ($draft !== null) {
-                $this->publication->recordDraft($page->fresh(), $draft['doc'], 'draft converted from MDX source', $draft['settings']);
+        // Each page is written in one transaction with what it needs first: the Release, then any component made from its
+        // fragments. A page the write refuses (a tag a blocks body can't place here, as a package's own MDX page may have)
+        // rolls all of that back and is left out; the rest go on.
+        $release = null;
+        $made = [];
+        $report['pages'] = [];
+        foreach ($plans as [$page, $converted, $draft, $placed]) {
+            try {
+                $page->getConnection()->transaction(function () use ($page, $converted, $draft, $placed, $components, $realm, $author, &$release, &$made): void {
+                    $target = $release ?? $this->releases->create($page, 'MDX conversion', $author);
+                    $new = [];
+                    foreach ($placed as $component) {
+                        if (isset($components[$component]) && ! isset($made[$component]) && ! isset($new[$component])) {
+                            $new[$component] = $this->make($components[$component], $component, $realm, $target, $author);
+                        }
+                    }
+                    $version = $this->publication->recordDraft($page->fresh(), $converted['doc'], 'converted from MDX source', $converted['settings'])->headVersion;
+                    if ($draft !== null) {
+                        $this->publication->recordDraft($page->fresh(), $draft['doc'], 'draft converted from MDX source', $draft['settings']);
+                    }
+                    $this->releases->putMember($target, (string) $page->getKey(), (string) $version, $author);
+                    $release = $target;
+                    $made += $new;
+                });
+                $report['pages'][] = (string) $page->slug;
+            } catch (ValidationException $refused) {
+                $report['leftOut'][(string) $page->slug] = 'the write refused it: '.collect($refused->errors())->flatten()->first();
             }
-            $this->releases->putMember($release, (string) $page->getKey(), (string) $version, $author);
+        }
+        $report['components'] = array_intersect_key($report['components'], $made);
+        ksort($report['leftOut']);
+        if ($release === null) {
+            return $report;
         }
         $report['release'] = (string) $release->getKey();
 
         return $report;
+    }
+
+    /** One fragment's Authored Component, in the realm, as a member of the Release. */
+    private function make(array $made, string $component, string $realm, BeamUxRelease $release, Authenticatable $author): string
+    {
+        $entry = BeamUxEntry::create(['slug' => Str::kebab($component), 'title' => $made['title'], 'type' => UxType::Component,
+            'format' => 'tsx', 'component_kind' => 'authored', 'realm' => $realm]);
+        $version = $this->publication->recordDraft($entry, $made['doc'], 'converted from MDX fragment')->headVersion;
+        $this->releases->putMember($release, (string) $entry->getKey(), (string) $version, $author);
+
+        return (string) $entry->getKey();
     }
 
     /** @return array{doc: array, settings: ?EntryPageSettingsData, placed: array<string, string>, problem: ?string} */
@@ -171,7 +214,7 @@ final class StoredMdxConversion
                     'unclaimed' => [...$served->unclaimed, ...$named->unclaimed],
                 ]);
             }
-        } catch (\Illuminate\Validation\ValidationException $refused) {
+        } catch (ValidationException $refused) {
             $out['problem'] = 'its page settings aren\'t valid: '.collect($refused->errors())->flatten()->first();
         }
 

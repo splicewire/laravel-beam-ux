@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Tests;
 
 use Illuminate\Foundation\Auth\User;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
@@ -41,9 +42,11 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         foreach (['create_beam_ux_releases_table', 'add_origin_to_beam_ux_releases_table'] as $stub) {
             (require dirname(__DIR__)."/database/migrations/shared/{$stub}.php.stub")->up();
         }
-        Gate::before(fn ($user = null) => true);
-        Gate::define('create', fn ($user = null) => true);
-        Gate::define('update', fn ($user = null) => true);
+        // An authenticated author may do anything here; nobody signed in may do nothing beyond what the package's own
+        // rules allow. The command runs with no one signed in, so each conversion runs that way too ({@see convertSignedOut()}).
+        Gate::before(fn ($user = null) => $user !== null ? true : null);
+        Gate::define('create', fn ($user = null) => $user !== null);
+        Gate::define('update', fn ($user = null) => $user !== null);
         \Illuminate\Support\Facades\Schema::create('users', function (\Illuminate\Database\Schema\Blueprint $table) {
             $table->id();
             $table->string('name')->nullable();
@@ -54,6 +57,8 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         });
         DB::table('users')->insert(['id' => 7, 'name' => 'Author']);
         $this->author = User::query()->findOrFail(7);
+        // The fixture is written as the author; each conversion then runs with nobody signed in ({@see convertSignedOut()}).
+        $this->actingAs($this->author);
         $this->lens = new ConversionLens;
         $this->app->instance(MdxLens::class, $this->lens);
         $this->root = sys_get_temp_dir().'/mdx-stored-'.Str::random(8);
@@ -85,7 +90,7 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $about->forceFill(['seo_description' => 'Who we are, briefly.'])->save();
         $this->holdBlocks();
 
-        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+        $report = $this->convertSignedOut();
 
         $this->assertSame(['about'], $report['pages']);
         $this->assertSame(['ReadingDisclaimer' => 'fragments/reading-disclaimer'], $report['components']);
@@ -118,7 +123,7 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $pub->recordDraft($canvas->fresh(), [$this->p('Canvas words.')]);
         $canvasHead = $pub->state($canvas->fresh())->headVersion;
 
-        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+        $report = $this->convertSignedOut();
 
         $this->assertSame(['notes'], $report['pages']);
         $this->assertStringContainsString('would change', $report['leftOut']['lossy']);
@@ -147,7 +152,7 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $about = $this->sourcePage('about', 'About', "<Content name=\"fragments/reading-disclaimer\" />\n", [$this->content('fragments/reading-disclaimer')]);
         $this->holdBlocks();
 
-        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+        $report = $this->convertSignedOut();
 
         $this->assertSame(['ReadingDisclaimer' => 'fragments/reading-disclaimer'], $report['components'], 'made in the page\'s realm');
         $made = BeamUxEntry::query()->where('realm', 'site')->where('slug', 'reading-disclaimer')->firstOrFail();
@@ -165,7 +170,7 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->sourcePage('notes', 'Notes', "<Content name=\"fragments/notice\" />\n", [$this->content('fragments/notice')]);
         $this->holdBlocks();
 
-        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+        $report = $this->convertSignedOut();
 
         $this->assertSame([], $report['pages']);
         $this->assertStringContainsString("isn't published", $report['leftOut']['notes']);
@@ -185,7 +190,7 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->sourcePage('second', 'Second', "<Content name=\"partials/legal_note\" />\n", [$this->content('partials/legal_note')]);
         $this->holdBlocks();
 
-        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+        $report = $this->convertSignedOut();
 
         $this->assertSame([], $report['pages']);
         $this->assertSame([], $report['components']);
@@ -203,7 +208,7 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->sourcePage('terms', 'Terms', "<Content name=\"fragments/legal-engine\" />\n", [$this->content('fragments/legal-engine')]);
         $this->holdBlocks();
 
-        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+        $report = $this->convertSignedOut();
 
         $this->assertStringContainsString('seed laravel-beam-mdx', $report['leftOut']['terms']);
         $this->assertSame(0, BeamUxEntry::query()->where('realm', 'site')->where('component_name', 'LegalEngine')->count());
@@ -219,7 +224,7 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->sourcePage('drifted', 'Drifted', "<Content name=\"partials/legal-engine\" />\n", [$this->content('partials/legal-engine')]);
         $this->holdBlocks();
 
-        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+        $report = $this->convertSignedOut();
 
         $this->assertSame(['same'], $report['pages'], 'the copy that says what the shipped component says converts');
         $this->assertStringContainsString("doesn't render what partials/legal-engine renders", $report['leftOut']['drifted']);
@@ -247,16 +252,55 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->sourcePage('notes', 'Notes', "<Content name=\"fragments/reading-disclaimer\" />\n", [$this->content('fragments/reading-disclaimer')]);
         $this->holdBlocks();
 
-        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+        $report = $this->convertSignedOut();
 
         $this->assertSame([], $report['pages']);
         $this->assertStringContainsString("doesn't render what fragments/reading-disclaimer renders", $report['leftOut']['notes']);
+    }
+
+    public function test_a_page_the_write_refuses_is_left_out_and_the_rest_convert(): void
+    {
+        // Found on a fresh starter: laravel-beam-docs' stored page places <SiteNav />, a code component a blocks body can't
+        // place there. The write refused it and the whole conversion stopped halfway, with a component already made.
+        $nav = $this->sourcePage('nav', 'Nav', "<SiteNav />\n\n<Content name=\"fragments/reading-disclaimer\" />\n",
+            [['kind' => 'block', 'name' => 'SiteNav', 'isComponent' => true, 'props' => [], 'children' => [], 'dynamic' => false], $this->content('fragments/reading-disclaimer')]);
+        $head = app(EntryPublication::class)->state($nav)->headVersion;
+        $this->sourcePage('notes', 'Notes', "Published words.\n", [$this->p('Published words.')]);
+        $this->holdBlocks();
+
+        $report = $this->convertSignedOut();
+
+        $this->assertSame(['notes'], $report['pages']);
+        $this->assertStringContainsString('unavailable in this realm', $report['leftOut']['nav'] ?? '');
+        $this->assertSame($head, app(EntryPublication::class)->state($nav->fresh())->headVersion, 'nothing is written for a page the write refuses');
+        $this->assertSame([], $report['components'], 'its only page was refused, so its component is not made');
+        $this->assertSame(0, BeamUxEntry::query()->where('slug', 'reading-disclaimer')->count());
+        $this->assertSame([BeamUxEntry::query()->where('slug', 'notes')->value('id')],
+            BeamUxRelease::query()->findOrFail($report['release'])->members()->pluck('entry_id')->all());
+    }
+
+    public function test_a_pristine_package_page_is_the_package_s_to_convert_and_an_edited_one_converts(): void
+    {
+        // orch-lead's ruling (EP-27 receipt): converting a page its package still asserts would make it a site edit and stop
+        // re-assertion, so it is left out; one the site already edited is the site's, and converts.
+        $this->sourcePage('shipped', 'Shipped', "Shipped words.\n", [$this->p('Shipped words.')], origin: 'package:acme/docs');
+        $edited = $this->sourcePage('edited', 'Edited', "Shipped too.\n", [$this->p('Shipped too.')], origin: 'package:acme/docs');
+        $this->lens->register('Our words.', [$this->p('Our words.')]);
+        $pub = app(EntryPublication::class);
+        $pub->publishVersion($edited->fresh(), $pub->recordDraft($edited->fresh(), MdxBody::encode("---\ntitle: Edited\n---\n\nOur words.\n"))->headVersion);
+        $this->holdBlocks();
+
+        $report = $this->convertSignedOut();
+
+        $this->assertSame(['edited'], $report['pages']);
+        $this->assertStringContainsString('the package owns it', $report['leftOut']['shipped']);
     }
 
     public function test_the_command_needs_blocks_on_and_a_dry_run_writes_nothing(): void
     {
         $this->sourcePage('about', 'About', "<Content name=\"fragments/legal-engine\" />\n", [$this->content('fragments/legal-engine')]);
 
+        Auth::forgetUser();
         $this->artisan('splicewire:beam:ux:convert-mdx', ['--path' => $this->root, '--dry-run' => true])->assertExitCode(1);
         $this->holdBlocks();
         $this->artisan('splicewire:beam:ux:convert-mdx', ['--path' => $this->root, '--dry-run' => true])
@@ -272,6 +316,17 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         return LegalTexts::all()['legal-engine']['text'];
     }
 
+    /** The conversion as the command runs it: nobody signed in, so its writes must act as the author it is handed. */
+    private function convertSignedOut(): array
+    {
+        Auth::forgetUser();
+        try {
+            return app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+        } finally {
+            $this->actingAs($this->author);
+        }
+    }
+
     /** The host turns `holds_blocks` on before it converts: the codecs are chosen afresh, as in the command's own process. */
     private function holdBlocks(): void
     {
@@ -279,7 +334,7 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
     }
 
-    private function sourcePage(string $slug, string $title, string $body, array $doc, string $frontmatter = '', array $meta = []): BeamUxEntry
+    private function sourcePage(string $slug, string $title, string $body, array $doc, string $frontmatter = '', array $meta = [], string $origin = 'cms'): BeamUxEntry
     {
         $this->lens->register($body, $doc, $meta);
         $seeder = new class
@@ -289,9 +344,13 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
             public function run(string $slug, string $source, string $title): ?BeamUxEntry
             {
                 return $this->seedPage($slug, $source, ['title' => $title, 'realm' => 'site', 'parent_id' => BeamUxEntry::rootFor()->id,
-                    'segment' => $slug], UxFormat::Mdx, origin: 'package:acme/site');
+                    'segment' => $slug], UxFormat::Mdx, origin: $this->origin);
             }
+
+            public string $origin = 'cms';
         };
+        // A host's own page unless the test names a package: a pristine package page is the package's to convert.
+        $seeder->origin = $origin;
 
         return $seeder->run($slug, "---\ntitle: {$title}\n{$frontmatter}---\n\n{$body}", $title)->fresh();
     }

@@ -86,13 +86,8 @@ final class Reasserter
             return false; // DOC-5: a weaker origin yields to the stronger incumbent.
         }
 
-        $current = $this->currentBody($existing);
-        if ($current === null) {
-            return false;
-        }
-
-        if (Provenance::hash($existing->title, $current) !== (string) $existing->asserted_hash) {
-            return false; // Edited: kept and reported by docs.diverged, never overwritten.
+        if (! $this->isPristine($existing)) {
+            return false; // Edited (or unreadable): kept and reported by docs.diverged, never overwritten.
         }
 
         $newTitle = $title ?? $existing->title;
@@ -145,6 +140,20 @@ final class Reasserter
         }
         // Every caller is a seed or a re-import (seeded / reasserted), never an author save: no mirror write.
         $publication->publishWritten($entry->refresh(), $label, mirror: false);
+    }
+
+    /**
+     * Whether a row still holds exactly what its origin last asserted: its title and stored body hash to `asserted_hash`.
+     * A row without provenance, an edited one, or one whose body can't be read is not.
+     */
+    public function isPristine(BeamUxEntry $entry): bool
+    {
+        if (! Schema::hasColumn($entry->getTable(), 'asserted_hash') || (string) ($entry->asserted_hash ?? '') === '') {
+            return false;
+        }
+        $current = $this->currentBody($entry);
+
+        return $current !== null && Provenance::hash($entry->title, $current) === (string) $entry->asserted_hash;
     }
 
     private function asserts(string $origin): bool
