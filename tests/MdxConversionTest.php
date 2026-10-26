@@ -165,6 +165,42 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->assertSame(1, BeamUxEntry::query()->where('component_name', 'Notice')->count(), 'no second Notice is made');
     }
 
+    public function test_two_fragments_that_would_become_one_tag_leave_their_pages_out(): void
+    {
+        // Review of 5e36ce2a: both paths become <LegalNote />, and only one could be made, so a page would place the wrong one.
+        @mkdir($this->root.'/partials', 0777, true);
+        file_put_contents($this->root.'/fragments/legal-note.mdx', "One note.\n");
+        file_put_contents($this->root.'/partials/legal_note.mdx', "Another note.\n");
+        $this->lens->register('One note.', [$this->p('One note.')]);
+        $this->lens->register('Another note.', [$this->p('Another note.')]);
+        $this->sourcePage('first', 'First', "<Content name=\"fragments/legal-note\" />\n", [$this->content('fragments/legal-note')]);
+        $this->sourcePage('second', 'Second', "<Content name=\"partials/legal_note\" />\n", [$this->content('partials/legal_note')]);
+        $this->holdBlocks();
+
+        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+
+        $this->assertSame([], $report['pages']);
+        $this->assertSame([], $report['components']);
+        $this->assertStringContainsString('would also become <LegalNote />', $report['leftOut']['first']);
+        $this->assertStringContainsString('would also become <LegalNote />', $report['leftOut']['second']);
+        $this->assertSame(0, BeamUxEntry::query()->where('component_name', 'LegalNote')->count());
+    }
+
+    public function test_a_legal_text_is_never_made_from_the_host_s_own_copy(): void
+    {
+        // d8: the four ship once from laravel-beam-mdx. Without them installed, the page waits; no host LegalEngine is made.
+        BeamUxEntry::query()->where('namespace', 'beam-mdx')->update(['realm' => 'elsewhere']);
+        file_put_contents($this->root.'/fragments/legal-engine.mdx', "This site runs on the Splicewire platform.\n");
+        $this->lens->register('This site runs on the Splicewire platform.', [$this->p('This site runs on the Splicewire platform.')]);
+        $this->sourcePage('terms', 'Terms', "<Content name=\"fragments/legal-engine\" />\n", [$this->content('fragments/legal-engine')]);
+        $this->holdBlocks();
+
+        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+
+        $this->assertStringContainsString('seed laravel-beam-mdx', $report['leftOut']['terms']);
+        $this->assertSame(0, BeamUxEntry::query()->where('realm', 'site')->where('component_name', 'LegalEngine')->count());
+    }
+
     public function test_the_command_needs_blocks_on_and_a_dry_run_writes_nothing(): void
     {
         $this->sourcePage('about', 'About', "<Content name=\"fragments/legal-engine\" />\n", [$this->content('fragments/legal-engine')]);

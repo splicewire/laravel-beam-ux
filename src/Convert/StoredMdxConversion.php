@@ -205,6 +205,10 @@ final class StoredMdxConversion
                 ? "more than one component in realm {$realm} answers to that name"
                 : "the component of that name in realm {$realm} isn't published: publish it first";
         }
+        if (MdxFileConverter::isLegal($fragment)) {
+            // A legal text ships once, from laravel-beam-mdx (d8): never a host's own copy made from its fragment file.
+            return "the shipped legal component isn't published in realm {$realm}: seed laravel-beam-mdx's legal components first";
+        }
         if (! isset($fragments[$fragment])) {
             return "no published component in realm {$realm} has that name";
         }
