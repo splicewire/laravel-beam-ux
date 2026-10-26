@@ -168,13 +168,15 @@ final class StoredMdxConversion
                             $new[$component] = $this->make($components[$component], $component, $realm, $target, $author);
                         }
                     }
+                    // Whether the row still holds what its origin last asserted, read before the converted version moves its head.
+                    $wasPristine = $draft === null && app(Reasserter::class)->isPristine($page->fresh());
                     $version = $this->publication->recordDraft($page->fresh(), $converted['doc'], 'converted from MDX source', $converted['settings'])->headVersion;
                     if ($draft !== null) {
                         $this->publication->recordDraft($page->fresh(), $draft['doc'], 'draft converted from MDX source', $draft['settings']);
                     }
                     $this->releases->putMember($target, (string) $page->getKey(), (string) $version, $author);
                     if ($draft === null) {
-                        $this->restamp($page->fresh(), $converted['doc'], $converted['settings']?->title, $root, $planned);
+                        $this->restamp($page->fresh(), $converted['doc'], $converted['settings']?->title, $root, $planned, $wasPristine);
                     }
                     $release = $target;
                     $made += $new;
@@ -237,8 +239,13 @@ final class StoredMdxConversion
      * when that body prints byte-equal to the file's body (the separator line after its header aside). Otherwise the doctor
      * reported every converted page diverged, and a later edit to its file never flowed. The caller stamps only a page with
      * no pending draft: a draft converted on top is the working body, and an author's edit is real.
+     *
+     * A row that was pristine before the conversion is stamped over its converted body even when that differs from its
+     * file (EP-42 GO 46, the flagship's docs.build.capabilities): its file moved on and no re-assert had run, so the
+     * conversion converted the older words it held. Converting changes a body's form, not its words, so the row stays
+     * what its origin last asserted, and the next re-assert brings the file. A row an author edited stays diverged.
      */
-    private function restamp(BeamUxEntry $page, array $doc, ?string $title, string $root, array $planned = []): void
+    private function restamp(BeamUxEntry $page, array $doc, ?string $title, string $root, array $planned = [], bool $wasPristine = false): void
     {
         $origin = (string) ($page->origin ?? '');
         if (! str_starts_with($origin, Provenance::DISK_PREFIX) || ! Schema::hasColumn($page->getTable(), 'asserted_hash')) {
@@ -254,7 +261,7 @@ final class StoredMdxConversion
         }
         $printed = $page->codec()->decode($doc);
         $body = MdxBody::encode($text)[MdxBody::CONTENT_KEY];
-        if ($printed !== (str_starts_with($body, "\n") ? substr($body, 1) : $body)) {
+        if ($printed !== (str_starts_with($body, "\n") ? substr($body, 1) : $body) && ! $wasPristine) {
             return;
         }
         $page->forceFill(['asserted_hash' => Provenance::hash($title ?? $page->title, $printed)])->save();
