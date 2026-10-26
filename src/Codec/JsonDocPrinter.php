@@ -27,6 +27,9 @@ class JsonDocPrinter
 {
     private const INDENT = '  ';
 
+    /** A space a reader sees, where a line break would otherwise drop it (JSX trims whitespace that touches one). */
+    private const SPACE = '{" "}';
+
     /**
      * Print a JSON document (the doc-root array) to indented JSX source. Each root prints as its own
      * top-level JSX expression STATEMENT (a trailing `;`) — bare adjacent JSX elements/fragments with
@@ -196,7 +199,13 @@ class JsonDocPrinter
                 return $pad.'{bdText('.json_encode($node->field, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).', '.json_encode($node->value, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).')}';
             }
 
-            return $pad.self::escapeText(trim($node->value));
+            [$lead, $run, $trail] = self::textRun($node->value);
+
+            return implode("\n", array_filter([
+                $lead ? $pad.self::SPACE : '',
+                $run !== '' ? $pad.self::escapeText($run) : '',
+                $trail ? $pad.self::SPACE : '',
+            ], fn (string $line) => $line !== ''));
         }
 
         if ($node instanceof JsonOpaqueNode) {
@@ -315,10 +324,11 @@ class JsonDocPrinter
 
         // A leaf (text-only children) prints inline for readability + stable round-trip.
         if (self::isLeafText($children)) {
-            $inner = implode('', array_map(
-                fn (JsonNode $c) => self::escapeText(trim($c instanceof JsonTextNode ? $c->value : '')),
+            [$lead, $run, $trail] = self::textRun(implode('', array_map(
+                fn (JsonNode $c) => $c instanceof JsonTextNode ? $c->value : '',
                 $children,
-            ));
+            )));
+            $inner = ($lead ? self::SPACE : '').self::escapeText($run).($trail ? self::SPACE : '');
 
             return "{$pad}{$open}{$inner}{$close}";
         }
@@ -327,7 +337,8 @@ class JsonDocPrinter
         foreach ($children as $child) {
             $childParts[] = self::printNode($child, $depth + 1, $module, $styles, $record, $bindings, $componentBody);
         }
-        $kids = implode("\n", $childParts);
+        // A run of layout whitespace prints nothing, and takes no line.
+        $kids = implode("\n", array_filter($childParts, fn (string $part) => $part !== ''));
 
         return "{$pad}{$open}\n{$kids}\n{$pad}{$close}";
     }
@@ -421,6 +432,23 @@ class JsonDocPrinter
     }
 
     /** Escape a text leaf for JSX body content (only `{`, `}`, `<`, `>` are special). */
+    /**
+     * A text run as JSX reads it back: whitespace that touches a line break is layout, and drops; a leading or trailing
+     * space on the line of its neighbour is one the reader sees, and must survive the run printing on its own line. The
+     * TSX lens reads the `{" "}` that carries it back as a text node " ", so print, parse and print again agree.
+     *
+     * @return array{0: bool, 1: string, 2: bool} a visible leading space, the run without its edges, a visible trailing space
+     */
+    private static function textRun(string $value): array
+    {
+        preg_match('/^(\s*)(.*?)(\s*)$/s', $value, $m);
+        $lead = $m[1] !== '' && ! str_contains($m[1], "\n");
+        $trail = $m[3] !== '' && ! str_contains($m[3], "\n");
+
+        // Whitespace only: one space if a reader sees it, nothing if it is layout.
+        return $m[2] === '' ? [$lead, '', false] : [$lead, $m[2], $trail];
+    }
+
     private static function escapeText(string $s): string
     {
         return (string) preg_replace_callback('/[{}<>]/', fn (array $m) => "{'{$m[0]}'}", $s);
@@ -436,7 +464,7 @@ class JsonDocPrinter
             $parts[] = self::printNode($node, $depth + 1, $module, $styles, $record, $bindings, $componentBody);
         }
 
-        return '<>'.implode("\n", $parts).'</>';
+        return '<>'.implode("\n", array_filter($parts, fn (string $part) => $part !== '')).'</>';
     }
 
     private static function hasComponentReferences(array $nodes): bool
