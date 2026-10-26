@@ -159,6 +159,70 @@ class DiskEntriesPublicationTest extends TestCase
         @unlink($this->root.'/page/guide.mdx');
     }
 
+    /**
+     * ADR-0233 d9, the disk half of EP-42 S1: a package that ships its pages as a docs source (tower's `docs-bundle`,
+     * `package: splicewire/tower`) has them registered from disk. Once the host turns the gate on, the next registration
+     * re-asserts a pristine page AS BLOCKS. It used to encode the file through the codec, which does not lower, so it stayed
+     * source; and because the hash compares printed text, an already-canonical file (this one) read as unchanged. Found by
+     * the EP-42 H2 receipt: the flagship's 8 tower pages kept source after the re-seed.
+     */
+    public function test_a_pristine_package_page_registered_from_disk_holds_blocks_once_the_host_holds_blocks(): void
+    {
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\n---\n\n## From MDX\n");
+        app(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
+        $this->assertFalse(array_is_list($this->publishedBody($this->guide())), 'source, while the host keeps MDX as source');
+
+        $this->holdBlocks();
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
+
+        $this->assertSame('h2', $this->publishedBody($this->guide())[0]['name'], 'pristine: re-asserted, as blocks');
+        $this->assertContains('page/guide.mdx', $result['reasserted']);
+        $this->assertSame('package:acme/docs', $this->guide()->origin);
+    }
+
+    public function test_a_site_edited_package_page_keeps_the_site_s_words_when_the_host_holds_blocks(): void
+    {
+        // A site's edit is published as an author's write, which records activity.
+        $core = dirname((new \ReflectionClass(\Splicewire\Beam\BeamServiceProvider::class))->getFileName(), 2);
+        (require $core.'/database/migrations/shared/create_activity_log_table.php.stub')->up();
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\n---\n\n## From MDX\n");
+        app(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
+        $pub = app(EntryPublication::class);
+        $edited = \Splicewire\Beam\Mdx\MdxBody::encode("---\ntitle: Guide\n---\n\nOur words.\n");
+        $pub->publishVersion($this->guide(), $pub->recordDraft($this->guide(), $edited)->headVersion);
+
+        $this->holdBlocks();
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
+
+        $this->assertStringContainsString('Our words.', \Splicewire\Beam\Mdx\MdxBody::decode($this->publishedBody($this->guide())), 'edited: kept');
+        $this->assertNotContains('page/guide.mdx', $result['reasserted']);
+    }
+
+    /** The host turns `holds_blocks` on: the codecs are chosen afresh, and a lens reads `## From MDX` as one heading. */
+    private function holdBlocks(): void
+    {
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        $this->app->forgetInstance(RegisterEntriesFromDisk::class);
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, new class implements \Splicewire\Beam\Mdx\Lens\MdxLens
+        {
+            public function read(string $body, array $context = []): array
+            {
+                return ['doc' => [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'From MDX']], 'dynamic' => false]], 'meta' => null];
+            }
+
+            public function print(array $doc): string
+            {
+                return "## From MDX\n";
+            }
+        });
+    }
+
+    private function publishedBody(BeamUxEntry $entry): array
+    {
+        return (array) app(VersionStore::class)->version($entry->particle, $entry->published_version)->snapshot['payload'];
+    }
+
     public function test_a_blocks_mdx_page_takes_its_seo_fields_from_frontmatter_and_refuses_an_invalid_one(): void
     {
         // ADR-0233 d3: on a host that holds MDX as blocks, frontmatter is the page's settings, SEO fields included.

@@ -34,9 +34,11 @@ final class Reasserter
      * Returns true when the row was rewritten, false when it was left as-is (edited, cms/unknown,
      * out-ranked, source unchanged, or the schema predates DOCS-06).
      */
-    public function reassert(BeamUxEntry $existing, ?string $title, string $source, string $incomingOrigin): bool
+    public function reassert(BeamUxEntry $existing, ?string $title, string $source, string $incomingOrigin, ?array $body = null): bool
     {
-        return $this->reassertBody($existing, $title, $existing->codec()->encode($source), $incomingOrigin);
+        // `$body`: the source already lowered to blocks by a caller that lowers as it registers (an MDX file on a host that
+        // holds MDX as blocks); the codec's encode does not lower.
+        return $this->reassertBody($existing, $title, $body ?? $existing->codec()->encode($source), $incomingOrigin);
     }
 
     /** Seed shipped structured content without passing it through the author profile guard. */
@@ -71,6 +73,16 @@ final class Reasserter
         });
     }
 
+    /**
+     * A pristine row holding source that now arrives as blocks: a change even where the printed text is the same. Once a
+     * host holds MDX as blocks (ADR-0233 d9), a shipped file that is already canonical prints back to itself, so the hash
+     * alone left it holding source on every later seed (EP-42 H2 receipt, 2026-10-26: tower's 8 docs pages).
+     */
+    private function changesKind(BeamUxEntry $existing, array $body): bool
+    {
+        return $body !== [] && array_is_list($body) && ! array_is_list((array) ($existing->particle?->payload ?? []));
+    }
+
     private function reassertBody(BeamUxEntry $existing, ?string $title, array $body, string $incomingOrigin): bool
     {
         if (! Schema::hasColumn($existing->getTable(), 'asserted_hash')) {
@@ -93,7 +105,7 @@ final class Reasserter
         $newTitle = $title ?? $existing->title;
         // Like with like: the new source as it WOULD be stored, the form the asserted hash was taken over.
         $newHash = Provenance::hash($newTitle, $existing->codec()->decode($body));
-        if ($newHash === (string) $existing->asserted_hash) {
+        if ($newHash === (string) $existing->asserted_hash && ! $this->changesKind($existing, $body)) {
             return false; // Pristine and the origin is unchanged: nothing to re-assert.
         }
 

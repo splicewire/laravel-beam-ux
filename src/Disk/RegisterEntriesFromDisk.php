@@ -232,7 +232,7 @@ class RegisterEntriesFromDisk
                 // An edited row is left for docs.diverged; cms is untouched. No-op pre-migration.
                 $src = (string) file_get_contents($absolute);
                 $title = $this->containmentFor($src, $relative, $envelope)['title'] ?? null;
-                if (app(Reasserter::class)->reassert($existing, $title, $src, $this->originFor($relative))) {
+                if (app(Reasserter::class)->reassert($existing, $title, $src, $this->originFor($relative), $this->loweredForReassert($existing, $src))) {
                     $reasserted[] = $relative;
                 } else {
                     $skipped[] = $relative;
@@ -425,6 +425,25 @@ class RegisterEntriesFromDisk
         }
 
         return $hydrated;
+    }
+
+    /**
+     * ADR-0233 d9, EP-42 H2: an MDX file re-asserted on a host that holds MDX as blocks is lowered as a new row's is
+     * ({@see writeBody()}), not encoded as source, so a pristine package page converts on the next registration. A lens
+     * that cannot read it leaves today's encoding: the page keeps its source, and the MDX pages audit reports it. It is
+     * not recorded as a failure, since a docs source seeder throws on one and a package page must not break a seed.
+     */
+    private function loweredForReassert(BeamUxEntry $entry, string $source): ?array
+    {
+        if ($entry->bodyKind() !== BodyKind::Blocks || $entry->format !== UxFormat::Mdx) {
+            return null;
+        }
+
+        try {
+            return app(SourceToBlocks::class)->convert(self::lowerable($entry, $source), [], app(ManifestProfileResolver::class)->resolve($entry), $entry->format);
+        } catch (ValidationException) {
+            return null;
+        }
     }
 
     /** Both new registration and explicit empty-entry hydration use the same codec and storage seam. */
