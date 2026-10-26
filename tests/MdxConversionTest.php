@@ -123,6 +123,48 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->assertSame('Draft words.', app(AuthoredComponents::class)->working($notes->fresh())[0]['children'][0]['value'] ?? null);
     }
 
+    public function test_a_same_named_component_in_another_realm_never_stands_in_for_the_fragment(): void
+    {
+        // Review of 31d62e3d: delivery resolves a tag only within the page's realm, so another realm's component can't serve it.
+        $elsewhere = new class
+        {
+            use SeedsEntries;
+
+            public function run(array $body): ?BeamUxEntry
+            {
+                return $this->seedComponent('app-reading-disclaimer', $body, ['realm' => 'app'], origin: 'package:acme/app');
+            }
+        };
+        $elsewhere->run([$this->p('Another realm.') + ['component' => ['name' => 'ReadingDisclaimer', 'props' => []]]]);
+        $about = $this->sourcePage('about', 'About', "<Content name=\"fragments/reading-disclaimer\" />\n", [$this->content('fragments/reading-disclaimer')]);
+        $this->holdBlocks();
+
+        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+
+        $this->assertSame(['ReadingDisclaimer' => 'fragments/reading-disclaimer'], $report['components'], 'made in the page\'s realm');
+        $made = BeamUxEntry::query()->where('realm', 'site')->where('slug', 'reading-disclaimer')->firstOrFail();
+        $this->assertEqualsCanonicalizing([$about->id, $made->id], BeamUxRelease::query()->findOrFail($report['release'])->members()->pluck('entry_id')->all());
+    }
+
+    public function test_an_unpublished_component_of_that_name_leaves_the_page_out(): void
+    {
+        // Review of 31d62e3d: a draft resolves only in a Preview that holds it, so it can't silently answer for the fragment.
+        file_put_contents($this->root.'/fragments/notice.mdx', "Notice text.\n");
+        $this->lens->register('Notice text.', [$this->p('Notice text.')]);
+        $draft = BeamUxEntry::create(['slug' => 'notice-draft', 'title' => 'Notice', 'type' => 'component', 'format' => 'tsx',
+            'component_kind' => 'authored', 'realm' => 'site']);
+        app(EntryPublication::class)->recordDraft($draft, [$this->p('Unfinished.') + ['component' => ['name' => 'Notice', 'props' => []]]]);
+        $this->sourcePage('notes', 'Notes', "<Content name=\"fragments/notice\" />\n", [$this->content('fragments/notice')]);
+        $this->holdBlocks();
+
+        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+
+        $this->assertSame([], $report['pages']);
+        $this->assertStringContainsString("isn't published", $report['leftOut']['notes']);
+        $this->assertNull($report['release']);
+        $this->assertSame(1, BeamUxEntry::query()->where('component_name', 'Notice')->count(), 'no second Notice is made');
+    }
+
     public function test_the_command_needs_blocks_on_and_a_dry_run_writes_nothing(): void
     {
         $this->sourcePage('about', 'About', "<Content name=\"fragments/legal-engine\" />\n", [$this->content('fragments/legal-engine')]);

@@ -9,6 +9,7 @@ use Splicewire\Beam\Mdx\Convert\MdxFileConverter;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
 use Splicewire\Beam\Mdx\Lens\MdxLens;
 use Splicewire\Beam\Mdx\MdxBody;
+use Splicewire\Beam\Ux\Components\ComponentKind;
 use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
 use Splicewire\Beam\Ux\Files\MdxPageFile;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -40,17 +41,18 @@ final class StoredMdxConversion
 
     /**
      * The pages converted, those left out and why, the components made (name => the fragment each came from), and the
-     * open Release that holds them (null on a dry run, or when there was nothing to convert).
+     * open Release that holds them (null on a dry run, or when there was nothing to convert). One realm's pages: a Release
+     * holds one realm's entries, and delivery resolves a page's tags within its realm.
      *
      * @return array{pages: list<string>, leftOut: array<string, string>, components: array<string, string>, release: ?string}
      */
-    public function convert(string $root, ?Authenticatable $author, bool $write): array
+    public function convert(string $root, ?Authenticatable $author, bool $write, string $realm = BeamUxEntry::REALM_SITE): array
     {
         $report = ['pages' => [], 'leftOut' => [], 'components' => [], 'release' => null];
         $fragments = MdxFileConverter::fragmentsUnder($root);
         $plans = [];
-        $needed = [];
-        foreach (BeamUxEntry::query()->where('type', UxType::Page->value)->where('format', 'mdx')->orderBy('slug')->get() as $page) {
+        $pages = BeamUxEntry::query()->where('realm', $realm)->where('type', UxType::Page->value)->where('format', 'mdx')->orderBy('slug')->get();
+        foreach ($pages as $page) {
             $published = $this->payload($page, $page->published_version);
             if ($published === null || array_is_list($published)) {
                 continue;
@@ -72,41 +74,42 @@ final class StoredMdxConversion
 
                 continue;
             }
-            $plans[] = [$page, $converted, $draft];
-            foreach ([...$converted['placed'], ...($draft['placed'] ?? [])] as $fragment => $component) {
-                if (isset($fragments[$fragment])) {
-                    $needed[$component] = $fragment;
+            $plans[] = [$page, $converted, $draft, [...$converted['placed'], ...($draft['placed'] ?? [])]];
+        }
+
+        // Each tag a converted page places must resolve as delivery resolves it, in this realm: one published Authored
+        // Component of that name, or one this conversion makes from the host's fragment and puts in the Release.
+        $components = [];
+        $broken = [];
+        $resolved = [];
+        foreach ($plans as $plan) {
+            foreach ($plan[3] as $fragment => $component) {
+                if (isset($resolved[$component])) {
+                    continue;
+                }
+                $resolved[$component] = true;
+                $made = $this->resolve($root, $realm, $fragment, $component, $fragments);
+                if (is_string($made)) {
+                    $broken[$component] = $made;
+                } elseif ($made !== null) {
+                    $components[$component] = $made + ['fragment' => $fragment];
                 }
             }
         }
-
-        $components = [];
-        foreach ($needed as $component => $fragment) {
-            if ($this->componentNamed($component) !== null) {
-                continue;
-            }
-            $made = $this->component($root, $fragments[$fragment], $component, $fragments);
-            if (is_string($made)) {
-                $report['leftOut']["fragment {$fragment}"] = $made;
-                $plans = array_values(array_filter($plans, function (array $plan) use ($fragment, &$report): bool {
-                    if (! array_key_exists($fragment, [...$plan[1]['placed'], ...($plan[2]['placed'] ?? [])])) {
-                        return true;
-                    }
-                    $report['leftOut'][$plan[0]->slug] = "it places the fragment {$fragment}, which can't become a component";
+        $plans = array_values(array_filter($plans, function (array $plan) use ($broken, &$report): bool {
+            foreach ($plan[3] as $component) {
+                if (isset($broken[$component])) {
+                    $report['leftOut'][$plan[0]->slug] = "it places <{$component} />: ".$broken[$component];
 
                     return false;
-                }));
-
-                continue;
+                }
             }
-            $components[$component] = $made + ['fragment' => $fragment];
-        }
 
-        // A component whose only pages were left out (each placed another fragment that failed) is not made either.
-        $placing = [];
-        foreach ($plans as [, $converted, $draft]) {
-            $placing += [...$converted['placed'], ...($draft['placed'] ?? [])];
-        }
+            return true;
+        }));
+
+        // A component whose only pages were left out (each placed another tag that can't resolve) is not made either.
+        $placing = array_merge([], ...array_map(fn (array $plan) => $plan[3], $plans));
         $components = array_filter($components, fn (array $made) => array_key_exists($made['fragment'], $placing));
         $report['pages'] = array_map(fn (array $plan) => (string) $plan[0]->slug, $plans);
         $report['components'] = array_map(fn (array $made) => $made['fragment'], $components);
@@ -121,7 +124,7 @@ final class StoredMdxConversion
         $release = $this->releases->create($plans[0][0], 'MDX conversion', $author);
         foreach ($components as $component => $made) {
             $entry = BeamUxEntry::create(['slug' => Str::kebab($component), 'title' => $made['title'], 'type' => UxType::Component,
-                'format' => 'tsx', 'component_kind' => 'authored', 'realm' => BeamUxEntry::REALM_SITE]);
+                'format' => 'tsx', 'component_kind' => 'authored', 'realm' => $realm]);
             $version = $this->publication->recordDraft($entry, $made['doc'], 'converted from MDX fragment')->headVersion;
             $this->releases->putMember($release, (string) $entry->getKey(), (string) $version, $author);
         }
@@ -182,10 +185,36 @@ final class StoredMdxConversion
             'title' => (string) ($parsed->fields['title'] ?? Str::headline($component))];
     }
 
-    private function componentNamed(string $name): ?BeamUxEntry
+    /**
+     * How a placed tag resolves in the realm: null when one published Authored Component already answers to it (delivery
+     * finds exactly one, ComponentDelivery::candidates), the component to make from the host's fragment when nothing in
+     * the realm has the name, or why the page can't place it. A same-named component that isn't that one published
+     * answer (a draft, a renamed working copy, two of them) is never shadowed or reused.
+     *
+     * @return array{doc: array, title: string}|string|null
+     */
+    private function resolve(string $root, string $realm, string $fragment, string $component, array $fragments): array|string|null
     {
-        return BeamUxEntry::query()->where('type', UxType::Component->value)
-            ->where(fn ($q) => $q->where('published_component_name', $name)->orWhere('component_name', $name))->first();
+        $named = BeamUxEntry::query()->where('realm', $realm)->where('component_kind', ComponentKind::Authored->value)
+            ->where(fn ($q) => $q->where('published_component_name', $component)->orWhere('component_name', $component))->get();
+        if ($named->count() === 1 && $named->first()->getAttribute('published_component_name') === $component && $named->first()->published_version !== null) {
+            return null;
+        }
+        if ($named->isNotEmpty()) {
+            return $named->count() > 1
+                ? "more than one component in realm {$realm} answers to that name"
+                : "the component of that name in realm {$realm} isn't published: publish it first";
+        }
+        if (! isset($fragments[$fragment])) {
+            return "no published component in realm {$realm} has that name";
+        }
+        if (BeamUxEntry::query()->whereNull('namespace')->where('slug', Str::kebab($component))->exists()) {
+            return 'an entry already has the slug '.Str::kebab($component).', so the fragment can\'t become a component';
+        }
+
+        $made = $this->component($root, $fragments[$fragment], $component, $fragments);
+
+        return is_string($made) ? "the fragment {$fragment} can't become one: {$made}" : $made;
     }
 
     private function payload(BeamUxEntry $page, ?string $version): ?array

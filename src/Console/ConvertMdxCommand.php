@@ -18,6 +18,7 @@ class ConvertMdxCommand extends Command
     protected $signature = 'splicewire:beam:ux:convert-mdx
         {--path= : The MDX content root (default: beam.mdx.content_path)}
         {--author= : The user id the conversion\'s Release is made by (not needed for a dry run)}
+        {--realm=site : The realm whose stored MDX pages convert (a Release holds one realm\'s entries)}
         {--dry-run : List what would change, and write nothing}';
 
     protected $description = 'Convert a host\'s MDX once: its files for one reviewed commit, its stored pages into one open Release (ADR-0233 d9).';
@@ -54,7 +55,7 @@ class ConvertMdxCommand extends Command
             $this->warn("  no page includes {$fragment}: reported, not converted");
         }
 
-        $report = $stored->convert($root, $author, write: ! $dry);
+        $report = $stored->convert($root, $author, write: ! $dry, realm: (string) $this->option('realm'));
 
         $this->info(($dry ? 'Would convert ' : 'Converted ').count($report['pages']).' stored MDX page(s) and make '.count($report['components']).' component(s).');
         foreach ($report['pages'] as $slug) {
