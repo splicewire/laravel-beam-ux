@@ -211,7 +211,8 @@ class ArtifactModuleContractTest extends TestCase
 
         $this->assertStringContainsString("'micromark-extension-gfm-table'", $script);
         $this->assertStringContainsString("'mdast-util-gfm-table'", $script);
-        $this->assertMatchesRegularExpression('/remarkPlugins: \[await gfmTables\(root\)/', $script);
+        $this->assertMatchesRegularExpression('/const tables = await gfmTables\(root, source, warnings\)/', $script);
+        $this->assertMatchesRegularExpression('/remarkPlugins: \[\.\.\.\(tables \? \[tables\] : \[\]\)/', $script);
     }
 
     public function test_a_gfm_table_compiles_to_a_table(): void
@@ -244,16 +245,28 @@ class ArtifactModuleContractTest extends TestCase
         $this->assertStringContainsString('_components.table', $code);
     }
 
-    /** Neither the host nor beam-mdx carries them: a refusal naming them, never tables compiled as pipes. */
-    public function test_without_the_table_packages_the_compile_refuses_naming_them(): void
+    /**
+     * Neither the host nor beam-mdx carries them, as on numero and schemastud (measured 2026-10-26: `@mdx-js/mdx` resolves
+     * there, the table packages do not). A refusal would stop every MDX publish on those hosts, so the compile is today's:
+     * a body without a table compiles exactly as before, and one with a table compiles as before with a warning naming them.
+     */
+    public function test_without_the_table_packages_a_body_compiles_as_before_and_a_table_is_warned_of(): void
     {
         $this->requireToolchain();
         $root = $this->bareRoot(['@mdx-js/mdx' => realpath($this->toolchainRoot.'/node_modules/@mdx-js/mdx')]);
+        $compiler = new NodeEntryBodyCompiler(workingDirectory: $root);
+        $entry = new BeamUxEntry(['slug' => 'artifact-contract', 'type' => UxType::Page, 'format' => UxFormat::Mdx]);
 
-        $this->expectException(\Splicewire\Beam\Ux\Compile\CompilationFailed::class);
-        $this->expectExceptionMessageMatches('/micromark-extension-gfm-table/');
+        $this->assertStringContainsString('Plain words.', $compiler->compile($entry, "# Hi\n\nPlain words.\n"));
+        $this->assertSame([], $compiler->lastWarnings(), 'no table, nothing to warn of');
 
-        $this->compileFrom($root, "# Hi\n");
+        $compiler->compile($entry, "Fenced:\n\n```text\n| a | b |\n| --- | --- |\n```\n");
+        $this->assertSame([], $compiler->lastWarnings(), 'a delimiter row inside a code fence is code, not a table');
+
+        $code = $compiler->compile($entry, "| Kind | Holds |\n| --- | --- |\n| page | blocks |\n");
+        $this->assertStringNotContainsString('_components.table', $code);
+        $this->assertSame(['gfm-table-unsupported'], array_column($compiler->lastWarnings(), 'rule'));
+        $this->assertStringContainsString('micromark-extension-gfm-table', $compiler->lastWarnings()[0]['message']);
     }
 
     /** @param  array<string, string|false>  $packages  name → real directory, linked into a fresh root's node_modules */

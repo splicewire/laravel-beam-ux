@@ -164,10 +164,14 @@ const warnHardWrappedLists = (warnings) => () => (tree) => {
  * lens's dialect, so it is not used here.
  *
  * A pnpm host carries these only under beam-mdx, which declares them, so beam-mdx's REAL directory is the second place
- * looked (its `exports` publish no `package.json`, so it is found on the host's module paths, not resolved). Neither
- * resolving is a failure by name, never tables quietly compiled as text.
+ * looked (its `exports` publish no `package.json`, so it is found on the host's module paths, not resolved).
+ *
+ * A host with neither still compiles as it always has. numero and schemastud resolve `@mdx-js/mdx` but not these
+ * (measured 2026-10-26), and refusing there would stop every MDX publish. So a body that holds a table compiles as before
+ * with a warning naming them (the same reported-never-refused channel as a hard-wrapped list), and one without compiles
+ * exactly as before.
  */
-const gfmTables = async (root) => {
+const gfmTables = async (root, source, warnings) => {
   const hostRequire = createRequire(join(root, 'package.json'))
   const bases = [join(root, 'package.json')]
   const beamMdx = (hostRequire.resolve.paths('@splicewire/beam-mdx') ?? [])
@@ -180,29 +184,55 @@ const gfmTables = async (root) => {
       try {
         return await import(pathToFileURL(createRequire(base).resolve(specifier)).href)
       } catch {
-        // Not from this base; the next one, then the failure below.
+        // Not from this base; the next one, then null.
       }
     }
-    fail(
-      `beam-ux compile: cannot resolve [${specifier}] from the host at ${root} or through @splicewire/beam-mdx. ` +
-        `MDX compiles with GFM tables, as the MDX Lens reads it; install @splicewire/beam-mdx (which declares it) or ${specifier}.`,
-    )
+
+    return null
   }
-  const { gfmTable } = await resolve('micromark-extension-gfm-table')
-  const { gfmTableFromMarkdown } = await resolve('mdast-util-gfm-table')
+  const micromark = await resolve('micromark-extension-gfm-table')
+  const mdast = await resolve('mdast-util-gfm-table')
+  if (micromark === null || mdast === null) {
+    if (holdsTable(source)) {
+      warnings.push({
+        rule: 'gfm-table-unsupported',
+        message:
+          'this body holds a GFM table, and neither the host nor @splicewire/beam-mdx provides [micromark-extension-gfm-table] ' +
+          'and [mdast-util-gfm-table], so it renders as text, as before. Install @splicewire/beam-mdx (which declares them) or both.',
+      })
+    }
+
+    return null
+  }
 
   return function () {
     const data = this.data()
-    ;(data.micromarkExtensions ??= []).push(gfmTable())
-    ;(data.fromMarkdownExtensions ??= []).push(gfmTableFromMarkdown())
+    ;(data.micromarkExtensions ??= []).push(micromark.gfmTable())
+    ;(data.fromMarkdownExtensions ??= []).push(mdast.gfmTableFromMarkdown())
   }
+}
+
+/** A GFM delimiter row (`| --- | :-: |`) outside a code fence: what tells a body holds a table. */
+const holdsTable = (source) => {
+  let fenced = false
+  for (const line of source.split('\n')) {
+    if (/^\s{0,3}(```|~~~)/.test(line)) {
+      fenced = !fenced
+      continue
+    }
+    if (!fenced && line.includes('|') && /^\s{0,3}\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)) return true
+  }
+
+  return false
 }
 
 const compileMdx = async (source, slug, root, warnings) => {
   const { compile } = await load('@mdx-js/mdx', root)
 
+  const tables = await gfmTables(root, source, warnings)
+
   const compiled = await compile(stripFrontmatter(source), {
-    remarkPlugins: [await gfmTables(root), stripCommentExpressions, warnHardWrappedLists(warnings)],
+    remarkPlugins: [...(tables ? [tables] : []), stripCommentExpressions, warnHardWrappedLists(warnings)],
     jsx: false,
     jsxRuntime: 'automatic',
     jsxImportSource: 'react',
