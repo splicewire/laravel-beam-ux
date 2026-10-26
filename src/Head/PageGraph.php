@@ -9,6 +9,7 @@ use Schemastud\DataSchemaOrg\SchemaOrgRegistry;
 use Spatie\SchemaOrg\Type;
 use Splicewire\Beam\Brand\BrandData;
 use Splicewire\Beam\Collections\PublicRecordData;
+use Splicewire\Beam\Ux\Access\EntryAccessResolver;
 use Splicewire\Beam\Ux\Containment\UrlResolver;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
@@ -130,9 +131,15 @@ final class PageGraph
         $home = ['name' => $brand->name, 'item' => $base.'/'];
         $steps = [$home];
         $page = array_pop($chain);
+        $access = app(EntryAccessResolver::class);
         foreach ($chain as $i => $node) {
             if (str_starts_with((string) $node->segment, '/')) {
                 $steps = [$home];
+            }
+            // A guest renders this page through ancestors it may only TRAVERSE, so one whose own page a guest can't read
+            // is passed through, never named or linked (security review 01): the renderer's own question, for no actor.
+            if (! $access->canRender(null, array_slice($chain, 0, $i + 1))) {
+                continue;
             }
             $url = $base.$this->urls->resolveChain(array_slice($chain, 0, $i + 1));
             $name = $node->namespace === 'realms' ? null : (((string) $node->title) ?: null);
