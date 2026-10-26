@@ -630,12 +630,13 @@ final class ReleaseService
 
     private function token(Authenticatable $actor): string
     {
-        $defaultModel = $this->defaultAuthModel();
-        if ($actor instanceof Model && $defaultModel !== null && $actor::class !== $defaultModel) {
+        if ($actor instanceof Model) {
             $connection = $actor->getConnection()->getName();
             $tenancy = app(TenancyContext::class);
-            if ($tenancy->isMultiTenant() && $connection !== $tenancy->centralConnection()) {
-                if (! $tenancy->isActive()) {
+            $centralConnection = $tenancy->centralConnection() ?? config('database.default');
+
+            if ($tenancy->isActive() || ($tenancy->isMultiTenant() && $connection !== $centralConnection)) {
+                if (! $tenancy->isMultiTenant() || ! $tenancy->isActive()) {
                     throw new AuthorizationException('A tenant actor requires an initialized tenant identity.');
                 }
 
@@ -650,9 +651,18 @@ final class ReleaseService
                     .':'.base64_encode((string) $actor->getAuthIdentifier());
             }
 
-            return 'model:'.base64_encode($actor::class)
-                .':'.base64_encode($connection)
-                .':'.base64_encode((string) $actor->getAuthIdentifier());
+            $defaultModel = $this->defaultAuthModel();
+            if ($defaultModel !== null && $actor::class !== $defaultModel) {
+                return 'model:'.base64_encode($actor::class)
+                    .':'.base64_encode($connection)
+                    .':'.base64_encode((string) $actor->getAuthIdentifier());
+            }
+
+            return 'user:'.$actor->getAuthIdentifier();
+        }
+
+        if (app(TenancyContext::class)->isActive()) {
+            throw new AuthorizationException('A tenant actor requires an initialized tenant identity.');
         }
 
         return 'user:'.$actor->getAuthIdentifier();

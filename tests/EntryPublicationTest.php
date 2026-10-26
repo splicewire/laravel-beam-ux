@@ -2581,6 +2581,42 @@ class EntryPublicationTest extends TestCase
         $this->assertTrue($release->members()->where('entry_id', $member->id)->exists());
     }
 
+    public function test_a_tenant_release_actor_is_resolved_when_sanctum_has_no_provider(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $member = $this->publishedPage(self::BODY_TWO);
+        $memberVersion = app(EntryPublication::class)->recordDraft($member, self::BODY_ONE)->headVersion;
+        [$service] = $this->releaseFixture(reviewedAndMapped: false, realUserProvider: true);
+        $this->tenantReleaseActorTable();
+        $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'tenant-author']);
+        $tenantActor->save();
+        $this->releaseActorTenancy('tenant-a');
+
+        $authConfig = [
+            'auth.defaults.guard' => config('auth.defaults.guard'),
+            'auth.guards.sanctum' => config('auth.guards.sanctum'),
+            'auth.providers.users.model' => config('auth.providers.users.model'),
+        ];
+
+        try {
+            config([
+                'auth.defaults.guard' => 'sanctum',
+                'auth.guards.sanctum' => ['driver' => 'sanctum', 'provider' => null],
+                'auth.providers.users.model' => null,
+            ]);
+            \Illuminate\Support\Facades\Auth::forgetGuards();
+            \Illuminate\Support\Facades\Gate::define('ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
+
+            $release = $service->create($entry, 'Sanctum tenant author', $tenantActor);
+            $service->putMember($release, $member->id, $memberVersion, $tenantActor);
+
+            $this->assertTrue($release->members()->where('entry_id', $member->id)->exists());
+        } finally {
+            config($authConfig);
+            \Illuminate\Support\Facades\Auth::forgetGuards();
+        }
+    }
+
     public function test_a_tenant_actor_does_not_fall_back_to_a_central_user_with_the_same_id(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
