@@ -259,6 +259,37 @@ class PageHeadTest extends TestCase
         ], $this->get('/members')->json('props.head'));
     }
 
+    public function test_a_page_whose_chain_declares_a_requirement_a_guest_meets_gets_its_full_head(): void
+    {
+        // d3 hides the head of a page a guest can't READ, decided as the renderer decides it for no actor. A declaration a
+        // guest meets (the flagship's docs entry requires `beam-docs`, a package that is installed) restricts nothing: the
+        // page is public, so it carries its description, canonical URL and @graph.
+        $this->app->instance('beam.ux.requirement.installed', $this->requirement(fn (?\Illuminate\Contracts\Auth\Authenticatable $actor) => true));
+        $this->page('guide', ['title' => 'Guide', 'seo_description' => 'How it works.', 'requirements' => ['installed']]);
+
+        $head = $this->get('/guide')->json('props.head');
+
+        $this->assertSame('<title data-inertia="title">Guide - Acme</title>', $head[0]);
+        $this->assertContains('<meta data-inertia="description" name="description" content="How it works.">', $head);
+        $this->assertContains('<link data-inertia="canonical" rel="canonical" href="https://site.test/guide">', $head);
+        $this->assertStringStartsWith('<script data-inertia="structured-data" type="application/ld+json">', end($head));
+        $this->assertNotContains('<meta data-inertia="robots" name="robots" content="noindex">', $head);
+    }
+
+    public function test_a_page_whose_chain_requires_an_entitlement_a_guest_lacks_gets_its_title_and_noindex_only(): void
+    {
+        // The other way: a requirement only a signed-in principal meets (an entitlement) keeps the chain restricted, so
+        // its description, canonical URL and @graph are never composed, even for the reader who may render it.
+        $this->app->instance('beam.ux.requirement.entitled', $this->requirement(fn (?\Illuminate\Contracts\Auth\Authenticatable $actor) => $actor !== null));
+        $this->page('members-guide', ['title' => 'Members guide', 'seo_description' => 'Members only.', 'requirements' => ['entitled']]);
+        $this->actingAs($this->reader());
+
+        $this->assertSame([
+            '<title data-inertia="title">Members guide - Acme</title>',
+            '<meta data-inertia="robots" name="robots" content="noindex">',
+        ], $this->get('/members-guide')->json('props.head'));
+    }
+
     public function test_the_head_is_a_core_prop_a_layout_contributor_cannot_replace(): void
     {
         $this->page('docs', ['layout' => 'DocsLayout']);
@@ -331,6 +362,20 @@ class PageHeadTest extends TestCase
             'slug' => $slug, 'type' => UxType::Page, 'format' => UxFormat::Mdx,
             'segment' => $slug, 'parent_id' => BeamUxEntry::rootFor()->getKey(),
         ], $attributes)))->save();
+    }
+
+    /** @param  \Closure(?\Illuminate\Contracts\Auth\Authenticatable): bool  $allows */
+    private function requirement(\Closure $allows): \Splicewire\Beam\Ux\Access\EntryRequirement
+    {
+        return new class($allows) implements \Splicewire\Beam\Ux\Access\EntryRequirement
+        {
+            public function __construct(private \Closure $allows) {}
+
+            public function allows(?\Illuminate\Contracts\Auth\Authenticatable $actor, BeamUxEntry $entry): bool
+            {
+                return ($this->allows)($actor);
+            }
+        };
     }
 
     private function reader(): User
