@@ -293,6 +293,36 @@ class DiskEntriesPublicationTest extends TestCase
         @unlink($this->root.'/page/kept.mdx');
     }
 
+    public function test_a_dry_run_names_the_empty_settings_a_rescan_would_fill_and_the_rescan_reports_them(): void
+    {
+        // A host fills its pages' settings in a GO, dry run first, with counts (orch-lead 22:06Z): the plan names each
+        // page and the settings it would gain, writes nothing, and the scan reports what it filled.
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        $this->holdMdxAsBlocks();
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: What the guide covers\npage_type: Article\n---\n\n## From MDX\n");
+        file_put_contents($this->root.'/page/kept.mdx', "---\ntitle: Kept\nexcerpt: From the file\n---\n\n## From MDX\n");
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+        BeamUxEntry::query()->where('slug', 'guide')->update(['seo_description' => null, 'seo_page_type' => null]);
+        $this->app->forgetInstance(RegisterEntriesFromDisk::class);
+
+        $fills = $this->app->make(RegisterEntriesFromDisk::class)->plannedFills($this->root);
+
+        $this->assertSame(['page/guide.mdx' => ['seo_description', 'seo_page_type']], $fills);
+        $this->assertNull(BeamUxEntry::query()->where('slug', 'guide')->firstOrFail()->seo_description, 'a plan writes nothing');
+        $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root, '--dry-run' => true])
+            ->expectsOutputToContain('would fill: description, page_type')
+            ->expectsOutputToContain('1 would fill page settings')
+            ->assertSuccessful();
+
+        $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root])
+            ->expectsOutputToContain('1 filled page settings')
+            ->assertSuccessful();
+        $this->assertSame('What the guide covers', BeamUxEntry::query()->where('slug', 'guide')->firstOrFail()->seo_description);
+
+        @unlink($this->root.'/page/guide.mdx');
+        @unlink($this->root.'/page/kept.mdx');
+    }
+
     public function test_a_blocks_mdx_page_keeps_the_frontmatter_keys_nothing_declares_in_its_registered_version(): void
     {
         (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
