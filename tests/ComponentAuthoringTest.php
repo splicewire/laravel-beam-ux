@@ -15,8 +15,6 @@ class ComponentAuthoringTest extends AuthoredComponentNativeTestCase
         Gate::define('ux.site.author', fn ($actor) => $actor->author ?? false);
         Gate::define('entitlement:ux.author', fn ($actor) => $actor->author ?? false);
         Gate::policy(BeamUxEntry::class, ComponentAuthoringFixturePolicy::class);
-        // Native duplicator also checks create on its has-a particle; this fixture declares that permission.
-        Gate::policy(\Splicewire\Beam\Models\BeamParticle::class, ComponentAuthoringFixturePolicy::class);
     }
 
     public function test_capability_uses_addressed_update_and_returns_no_reach_for_read_only_author(): void
@@ -65,6 +63,99 @@ class ComponentAuthoringTest extends AuthoredComponentNativeTestCase
         $this->assertNull($copy->published_version);
         $this->assertSame('Card', $entry->fresh()->component_name);
         $this->assertNull($context->fresh()->particle_id);
+    }
+
+    private function duplicateFixture(): array
+    {
+        $actor = new ComponentAuthoringFixtureUser(['id' => (string) \Illuminate\Support\Str::uuid(), 'author' => true, 'edit' => true, 'create' => true]);
+        $this->actingAs($actor);
+        $root = BeamUxEntry::rootFor('site');
+        $entry = BeamUxEntry::create(['slug' => 'copy-source', 'type' => 'component', 'component_kind' => 'authored',
+            'realm' => 'site', 'parent_id' => $root->id, 'format' => 'tsx']);
+        $body = [['kind' => 'block', 'name' => 'section', 'isComponent' => false, 'dynamic' => false, 'props' => [],
+            'children' => [['kind' => 'text', 'value' => 'Copy content']], 'component' => ['name' => 'Card', 'props' => []]]];
+        $publication = app(\Splicewire\Beam\Ux\Publish\EntryPublication::class);
+        $publication->write($entry, $body);
+        $publication->baseline($entry);
+
+        return [$actor, $entry->fresh(), $body];
+    }
+
+    public function test_http_duplicate_authorizes_the_new_entry_without_beam_particle_create(): void
+    {
+        [$actor, $entry, $body] = $this->duplicateFixture();
+        Gate::policy(\Splicewire\Beam\Models\BeamParticle::class, ComponentAuthoringDenyParticlePolicy::class);
+        $this->assertFalse(Gate::forUser($actor)->allows('create', \Splicewire\Beam\Models\BeamParticle::class));
+        $this->assertTrue(Gate::forUser($actor)->allows('create', BeamUxEntry::class));
+        $before = $entry->getAttributes();
+        $versionCount = \Rushing\Versioning\Models\Version::count();
+        $questions = [];
+        Gate::after(function ($user, $ability, $result, $arguments) use (&$questions): void {
+            if ($ability === 'create' && ($arguments[0] ?? null) instanceof BeamUxEntry) {
+                $questions[] = ['class' => $arguments[0]::class, 'exists' => $arguments[0]->exists];
+            }
+        });
+        \Splicewire\Beam\Facades\Particle::ops('component-entries', 'beam-ux-entry', ['duplicate-component']);
+        $response = $this->postJson('/component-entries/'.$entry->id.'/duplicate-component', [])->assertOk();
+        $copy = BeamUxEntry::findOrFail($response->json('data.id'));
+        $this->assertContains(['class' => BeamUxEntry::class, 'exists' => false], $questions);
+        $this->assertSame('CardCopy', $copy->component_name);
+        $expected = $body;
+        $expected[0]['component']['name'] = 'CardCopy';
+        $this->assertSame($expected, app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->working($copy));
+        $this->assertNull($copy->published_version);
+        $this->assertSame([], app(\Splicewire\Beam\Ux\Publish\EntryPublication::class)->state($copy)->versions);
+        $this->assertSame($versionCount, \Rushing\Versioning\Models\Version::count());
+        $this->assertNotSame($entry->particle_id, $copy->particle_id);
+        $this->assertSame($before, $entry->fresh()->getAttributes());
+        $this->assertSame($body, app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->working($entry->fresh()));
+        $this->assertFalse(Gate::forUser($actor)->allows('create', \Splicewire\Beam\Models\BeamParticle::class));
+    }
+
+    public function test_duplicate_without_entry_create_is_refused_without_writes(): void
+    {
+        [$actor, $entry] = $this->duplicateFixture();
+        $actor->setAttribute('create', false);
+        $before = [BeamUxEntry::count(), \Splicewire\Beam\Models\BeamParticle::count(), \Rushing\Versioning\Models\Version::count()];
+        \Splicewire\Beam\Facades\Particle::ops('component-entries', 'beam-ux-entry', ['duplicate-component']);
+        $db = $entry->getConnection();
+        $db->enableQueryLog();
+        $db->flushQueryLog();
+        $this->postJson('/component-entries/'.$entry->id.'/duplicate-component', [])->assertForbidden();
+        $queries = $db->getQueryLog();
+        $db->disableQueryLog();
+        foreach ($queries as $query) {
+            $this->assertDoesNotMatchRegularExpression('/^\s*(insert|update|delete|replace|create|alter|drop)\b/i', $query['query']);
+        }
+        $this->assertSame($before, [BeamUxEntry::count(), \Splicewire\Beam\Models\BeamParticle::count(), \Rushing\Versioning\Models\Version::count()]);
+    }
+
+    public function test_duplicate_keeps_the_outer_concrete_entry_writer_gate(): void
+    {
+        [$actor, $entry] = $this->duplicateFixture();
+        Gate::policy(BeamUxEntry::class, ComponentAuthoringDenyConcretePolicy::class);
+        $this->assertTrue(Gate::forUser($actor)->allows('create', BeamUxEntry::class));
+        $before = [BeamUxEntry::count(), \Splicewire\Beam\Models\BeamParticle::count(), \Rushing\Versioning\Models\Version::count()];
+        \Splicewire\Beam\Facades\Particle::ops('component-entries', 'beam-ux-entry', ['duplicate-component']);
+        $this->postJson('/component-entries/'.$entry->id.'/duplicate-component', [])->assertForbidden();
+        $this->assertSame($before, [BeamUxEntry::count(), \Splicewire\Beam\Models\BeamParticle::count(), \Rushing\Versioning\Models\Version::count()]);
+    }
+
+    public function test_duplicate_inner_body_refusal_rolls_back_the_envelope_and_particle(): void
+    {
+        [, $entry, $body] = $this->duplicateFixture();
+        $body[0]['props'] = [['name' => 'bad name', 'kind' => 'string', 'value' => 'invalid fixture']];
+        // A retained historical body can be unreadable under today's admission rules.
+        $entry->particle->update(['payload' => $body]);
+        $before = [BeamUxEntry::count(), \Splicewire\Beam\Models\BeamParticle::count(), \Rushing\Versioning\Models\Version::count()];
+        try {
+            app(ComponentAuthoring::class)->duplicate($entry->fresh(), auth()->user());
+            $this->fail('Malformed historical body was copied');
+        } catch (\Illuminate\Validation\ValidationException $error) {
+            $this->assertArrayHasKey('body', $error->errors());
+        }
+        $this->assertSame($before, [BeamUxEntry::count(), \Splicewire\Beam\Models\BeamParticle::count(), \Rushing\Versioning\Models\Version::count()]);
+        $this->assertSame(0, BeamUxEntry::where('slug', 'copy-source-copy')->count());
     }
 
     public function test_denied_actor_gets_no_capability_or_creation_side_effects(): void
@@ -159,7 +250,15 @@ class ComponentAuthoringFixturePolicy
 
     public function create($actor): bool
     {
-        return $actor->edit ?? false;
+        return $actor->create ?? $actor->edit ?? false;
+    }
+}
+
+class ComponentAuthoringDenyParticlePolicy
+{
+    public function create($actor): bool
+    {
+        return false;
     }
 }
 
@@ -170,4 +269,12 @@ class ComponentAuthoringFixtureUser extends \Illuminate\Foundation\Auth\User
     public $incrementing = false;
 
     protected $keyType = 'string';
+}
+
+class ComponentAuthoringDenyConcretePolicy extends ComponentAuthoringFixturePolicy
+{
+    public function create($actor, ?BeamUxEntry $entry = null): bool
+    {
+        return $entry === null;
+    }
 }

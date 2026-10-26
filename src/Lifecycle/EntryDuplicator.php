@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\Lifecycle;
 
-use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Write\ParticleWriter;
 
@@ -27,12 +26,14 @@ class EntryDuplicator
 {
     public function __construct(private ParticleWriter $writer) {}
 
-    public function duplicate(BeamUxEntry $source): BeamUxEntry
+    public function duplicate(BeamUxEntry $source, mixed $actor = null): BeamUxEntry
     {
-        return $source->getConnection()->transaction(fn () => $this->duplicateAfterLocks($source));
+        $actor ??= auth()->user();
+
+        return $source->getConnection()->transaction(fn () => $this->duplicateAfterLocks($source, $actor));
     }
 
-    private function duplicateAfterLocks(BeamUxEntry $source): BeamUxEntry
+    private function duplicateAfterLocks(BeamUxEntry $source, mixed $actor): BeamUxEntry
     {
         $body = $source->particle?->payload ?? [];
         $components = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class);
@@ -46,9 +47,7 @@ class EntryDuplicator
             }
             $body[0]['component']['name'] = $name;
         }
-        $particle = $this->writer->write(new BeamParticle, $body);
-
-        $copy = BeamUxEntry::create([
+        $attributes = [
             'slug' => $this->uniqueSlug($source),
             'title' => $source->title,
             'schema_ref' => $source->schema_ref,
@@ -62,15 +61,21 @@ class EntryDuplicator
             'placement_ref' => $source->placement_ref,
             'driver_ref' => $source->driver_ref,
             'residency_mode' => $source->residency_mode,
-            'particle_id' => $particle->id,
             'realm' => $source->realm,
             'realms' => $source->realms,
             'parent_id' => $source->parent_id,
             'segment' => null,
-        ]);
-        $components->reserveName($copy, $body);
+        ];
+        // The author creates an entry, not an independently writable generic particle.
+        // Keep the injected writer's gate/pipeline and let it admit that concrete model
+        // before either row is persisted. The native body path owns the has-a relation.
+        /** @var BeamUxEntry $copy */
+        $copy = $this->writer->write(new BeamUxEntry($attributes), $attributes, $actor,
+            function (BeamUxEntry $copy) use ($body): void {
+                app(\Splicewire\Beam\Ux\Publish\EntryPublication::class)->write($copy, $body);
+            });
 
-        return $copy;
+        return $copy->refresh();
     }
 
     /**

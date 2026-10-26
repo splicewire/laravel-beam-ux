@@ -79,6 +79,6 @@ final class ComponentAuthoring
         Gate::forUser($actor)->authorize('create', BeamUxEntry::class);
         abort_unless(app(AuthoredComponents::class)->authored($entry) && app(AuthoredComponents::class)->canRead($entry, $actor), 403);
 
-        return app(EntryDuplicator::class)->duplicate($entry);
+        return app(EntryDuplicator::class)->duplicate($entry, $actor);
     }
 }
