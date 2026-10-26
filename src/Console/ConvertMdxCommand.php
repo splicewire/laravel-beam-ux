@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Auth;
+use Splicewire\Beam\Mdx\Convert\MdxConversion;
 use Splicewire\Beam\Mdx\Convert\MdxFileConverter;
 use Splicewire\Beam\Ux\Convert\StoredMdxConversion;
 
@@ -17,9 +18,9 @@ class ConvertMdxCommand extends Command
 {
     protected $signature = 'splicewire:beam:ux:convert-mdx
         {--path= : The MDX content root (default: beam.mdx.content_path)}
-        {--author= : The user id the conversion\'s Release is made by (not needed for a dry run)}
+        {--author= : The user id the conversion\'s Release is made by (a dry run rehearses as that author)}
         {--realm=site : The realm whose stored MDX pages convert (a Release holds one realm\'s entries)}
-        {--dry-run : List what would change, and write nothing}';
+        {--dry-run : Rehearse the conversion and report what it would do, then roll it all back}';
 
     protected $description = 'Convert a host\'s MDX once: its files for one reviewed commit, its stored pages into one open Release (ADR-0233 d9).';
 
@@ -31,18 +32,22 @@ class ConvertMdxCommand extends Command
             return self::FAILURE;
         }
         $dry = (bool) $this->option('dry-run');
-        $author = null;
-        if (! $dry) {
-            $author = $this->option('author') === null ? null : Auth::getProvider()->retrieveById($this->option('author'));
-            if ($author === null) {
-                $this->error('Name the author the Release is made by: --author=<user id>.');
+        // A dry run rehearses the writes ({@see \Splicewire\Beam\Ux\Convert\Rehearsal}), and a Release records who made it.
+        $author = $this->option('author') === null ? null : Auth::getProvider()->retrieveById($this->option('author'));
+        if ($author === null) {
+            $this->error('Name the author the Release is made by: --author=<user id>.');
 
-                return self::FAILURE;
-            }
+            return self::FAILURE;
         }
         $root = (string) ($this->option('path') ?: config('beam.mdx.content_path', resource_path('js/content')));
 
-        $files = $files->convert($root, write: ! $dry);
+        // The stored pages convert first, and a page's file is written only once its stored page has (EP-42, orch-lead
+        // 2026-10-26): a page the stored write refuses keeps its file, rather than a reprint over a row holding source.
+        $plan = $files->convert($root, write: false);
+        $report = $stored->convert($root, $author, write: ! $dry, realm: (string) $this->option('realm'), planned: $plan->printed);
+        $held = array_intersect_key($report['files'], array_flip($plan->converted));
+        $files = $dry ? $this->heldBack($plan, $held) : $files->write($root, $plan, $held);
+
         $this->info(($dry ? 'Would convert ' : 'Converted ').count($files->converted).' MDX file(s) under '.$root.' for one reviewed commit; '
             .count($files->unchanged).' already canonical.');
         foreach ($files->converted as $file) {
@@ -54,8 +59,6 @@ class ConvertMdxCommand extends Command
         foreach ($files->unusedFragments as $fragment) {
             $this->warn("  no page includes {$fragment}: reported, not converted");
         }
-
-        $report = $stored->convert($root, $author, write: ! $dry, realm: (string) $this->option('realm'));
 
         $this->info(($dry ? 'Would convert ' : 'Converted ').count($report['pages']).' stored MDX page(s) and make '.count($report['components']).' component(s).');
         foreach ($report['pages'] as $slug) {
@@ -72,5 +75,20 @@ class ConvertMdxCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * A dry run's files report: the plan less the files the real run would hold back.
+     *
+     * @param  array<string, string>  $held  path => why
+     */
+    private function heldBack(MdxConversion $plan, array $held): MdxConversion
+    {
+        $report = clone $plan;
+        $report->converted = array_values(array_diff($plan->converted, array_keys($held)));
+        $report->leftOut = [...$plan->leftOut, ...$held];
+        ksort($report->leftOut);
+
+        return $report;
     }
 }

@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Rushing\Versioning\Contracts\VersionStore;
+use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Mdx\Convert\MdxFileConverter;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
 use Splicewire\Beam\Mdx\Lens\MdxLens;
@@ -46,15 +47,31 @@ final class StoredMdxConversion
     ) {}
 
     /**
-     * The pages converted, those left out and why, the components made (name => the fragment each came from), and the
-     * open Release that holds them (null on a dry run, or when there was nothing to convert). One realm's pages: a Release
-     * holds one realm's entries, and delivery resolves a page's tags within its realm.
+     * The pages converted, those left out and why, the components made (name => the fragment each came from), the files of
+     * the host's disk pages that were left out (path => why), and the open Release that holds them (null on a dry run, or
+     * when there was nothing to convert). One realm's pages: a Release holds one realm's entries, and delivery resolves a
+     * page's tags within its realm.
      *
-     * @return array{pages: list<string>, leftOut: array<string, string>, components: array<string, string>, release: ?string}
+     * A dry run rehearses the real run ({@see Rehearsal}): every write happens and is rolled back, so the report is the real
+     * run's, a page the write would refuse included (EP-42; on the flagship the old dry run counted one the write refused).
+     * `$planned` is each file as the files half will write it, path => text: a disk page is written only once it has
+     * converted, so it is re-stamped against that text rather than the file still on disk.
+     *
+     * @param  array<string, string>  $planned
+     * @return array{pages: list<string>, leftOut: array<string, string>, components: array<string, string>, files: array<string, string>, release: ?string}
      */
-    public function convert(string $root, ?Authenticatable $author, bool $write, string $realm = BeamUxEntry::REALM_SITE): array
+    public function convert(string $root, ?Authenticatable $author, bool $write, string $realm = BeamUxEntry::REALM_SITE, array $planned = []): array
     {
-        $report = ['pages' => [], 'leftOut' => [], 'components' => [], 'release' => null];
+        if (! $write) {
+            if ($author === null) {
+                throw new \InvalidArgumentException('Name the author the conversion\'s Release is made by.');
+            }
+            $report = app(Rehearsal::class)->run(fn () => app(self::class)->convert($root, $author, write: true, realm: $realm, planned: $planned));
+            $would = fn (string $why) => str_replace('the write refused it', 'the write would refuse it', $why);
+
+            return ['leftOut' => array_map($would, $report['leftOut']), 'files' => array_map($would, $report['files']), 'release' => null] + $report;
+        }
+        $report = ['pages' => [], 'leftOut' => [], 'components' => [], 'files' => [], 'release' => null];
         $fragments = MdxFileConverter::fragmentsUnder($root);
         $plans = [];
         $pages = BeamUxEntry::query()->where('realm', $realm)->where('type', UxType::Page->value)->where('format', 'mdx')->orderBy('slug')->get();
@@ -128,8 +145,8 @@ final class StoredMdxConversion
         $report['pages'] = array_map(fn (array $plan) => (string) $plan[0]->slug, $plans);
         $report['components'] = array_map(fn (array $made) => $made['fragment'], $components);
         ksort($report['leftOut']);
-        if (! $write || $plans === []) {
-            return $report;
+        if ($plans === []) {
+            return $this->withFiles($report, $pages);
         }
         if ($author === null) {
             throw new \InvalidArgumentException('Name the author the conversion\'s Release is made by.');
@@ -143,7 +160,7 @@ final class StoredMdxConversion
         $report['pages'] = [];
         foreach ($plans as [$page, $converted, $draft, $placed]) {
             try {
-                $page->getConnection()->transaction(function () use ($page, $converted, $draft, $placed, $components, $realm, $author, $root, &$release, &$made): void {
+                $page->getConnection()->transaction(function () use ($page, $converted, $draft, $placed, $components, $realm, $author, $root, $planned, &$release, &$made): void {
                     $target = $release ?? $this->releases->create($page, 'MDX conversion', $author);
                     $new = [];
                     foreach ($placed as $component) {
@@ -157,7 +174,7 @@ final class StoredMdxConversion
                     }
                     $this->releases->putMember($target, (string) $page->getKey(), (string) $version, $author);
                     if ($draft === null) {
-                        $this->restamp($page->fresh(), $converted['doc'], $converted['settings']?->title, $root);
+                        $this->restamp($page->fresh(), $converted['doc'], $converted['settings']?->title, $root, $planned);
                     }
                     $release = $target;
                     $made += $new;
@@ -165,14 +182,39 @@ final class StoredMdxConversion
                 $report['pages'][] = (string) $page->slug;
             } catch (ValidationException $refused) {
                 $report['leftOut'][(string) $page->slug] = 'the write refused it: '.collect($refused->errors())->flatten()->first();
+            } catch (CompilationFailed $failed) {
+                // A member's artifact is compiled as it joins the Release. A body that doesn't build is left out like a
+                // refusal: it used to stop the whole run half way, after the files half had written.
+                $report['leftOut'][(string) $page->slug] = 'its body doesn\'t compile: '.$failed->getMessage();
             }
         }
         $report['components'] = array_intersect_key($report['components'], $made);
         ksort($report['leftOut']);
+        $report = $this->withFiles($report, $pages);
         if ($release === null) {
             return $report;
         }
         $report['release'] = (string) $release->getKey();
+
+        return $report;
+    }
+
+    /**
+     * The file of each host disk page left out, with why: the files half holds those back, so a page never has a reprinted
+     * file over a row still holding source.
+     *
+     * @param  \Illuminate\Support\Collection<int, BeamUxEntry>  $pages
+     */
+    private function withFiles(array $report, \Illuminate\Support\Collection $pages): array
+    {
+        foreach ($pages as $page) {
+            $origin = (string) ($page->origin ?? '');
+            $why = $report['leftOut'][(string) $page->slug] ?? null;
+            if ($why !== null && str_starts_with($origin, Provenance::DISK_PREFIX)) {
+                $report['files'][substr($origin, strlen(Provenance::DISK_PREFIX))] = "its stored page was left out: {$why}";
+            }
+        }
+        ksort($report['files']);
 
         return $report;
     }
@@ -196,15 +238,17 @@ final class StoredMdxConversion
      * reported every converted page diverged, and a later edit to its file never flowed. The caller stamps only a page with
      * no pending draft: a draft converted on top is the working body, and an author's edit is real.
      */
-    private function restamp(BeamUxEntry $page, array $doc, ?string $title, string $root): void
+    private function restamp(BeamUxEntry $page, array $doc, ?string $title, string $root, array $planned = []): void
     {
         $origin = (string) ($page->origin ?? '');
         if (! str_starts_with($origin, Provenance::DISK_PREFIX) || ! Schema::hasColumn($page->getTable(), 'asserted_hash')) {
             return;
         }
-        $file = rtrim($root, '/').'/'.substr($origin, strlen(Provenance::DISK_PREFIX));
-        // A read that fails is not an empty file (review-r1): nothing read, nothing compared, nothing stamped.
-        $text = is_file($file) && is_readable($file) ? file_get_contents($file) : false;
+        $relative = substr($origin, strlen(Provenance::DISK_PREFIX));
+        $file = rtrim($root, '/').'/'.$relative;
+        // The file as the files half is about to write it, when it plans to; otherwise the file on disk. A read that fails
+        // is not an empty file (review-r1): nothing read, nothing compared, nothing stamped.
+        $text = $planned[$relative] ?? (is_file($file) && is_readable($file) ? file_get_contents($file) : false);
         if (! is_string($text)) {
             return;
         }
