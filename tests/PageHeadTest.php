@@ -306,6 +306,24 @@ class PageHeadTest extends TestCase
         $this->assertStringContainsString('"item":"https://site.test/members/pricing"', $graph, 'the page itself is still the last step');
     }
 
+    public function test_a_deeper_trail_keeps_the_readable_ancestors_and_numbers_its_steps_without_a_gap(): void
+    {
+        // Security re-review (non-blocking): a readable grandparent, an access-restricted parent, a public child. The
+        // grandparent stays named and linked, the parent is passed through, and the positions run 1, 2, 3.
+        $handbook = $this->page('handbook', ['title' => 'Handbook']);
+        $staff = $this->page('staff', ['title' => 'Staff only', 'access' => ['auth'], 'parent_id' => $handbook->getKey()]);
+        $this->page('holidays', ['title' => 'Holidays', 'parent_id' => $staff->getKey()]);
+
+        $head = $this->get('/handbook/staff/holidays')->assertOk()->json('props.head');
+        $graph = json_decode(substr(end($head), strpos(end($head), '>') + 1, -strlen('</script>')), true);
+        $trail = collect($graph['@graph'])->firstWhere('@type', 'BreadcrumbList')['itemListElement'];
+
+        $this->assertSame(
+            [[1, 'Acme', 'https://site.test/'], [2, 'Handbook', 'https://site.test/handbook'], [3, 'Holidays', 'https://site.test/handbook/staff/holidays']],
+            array_map(fn (array $step) => [$step['position'], $step['name'], $step['item']], $trail),
+        );
+    }
+
     public function test_a_page_behind_an_ancestor_a_guest_cannot_traverse_gets_its_title_and_noindex_only(): void
     {
         $vault = $this->page('vault', ['title' => 'Vault', 'traverse' => ['auth']]);
