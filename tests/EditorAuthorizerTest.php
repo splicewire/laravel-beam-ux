@@ -52,6 +52,18 @@ class EditorAuthorizerTest extends TestCase
         $this->assertFalse($policy->viewAny(new EditorTenantAuthor));
     }
 
+    public function test_route_less_console_context_uses_the_plain_central_ux_author_gate(): void
+    {
+        $request = Request::create('/console');
+        $request->setRouteResolver(fn () => null);
+        $this->app->instance('request', $request);
+        \Illuminate\Support\Facades\Request::swap($request);
+
+        $authorizer = app(EditorAuthorizer::class);
+        $this->assertTrue($authorizer->allows(new EditorCentralAuthor));
+        $this->assertFalse($authorizer->allows(new EditorTenantAuthor));
+    }
+
     private function route(?string $realm, array $overrides): Route
     {
         $route = new Route(['GET'], '/editor', fn () => null);
