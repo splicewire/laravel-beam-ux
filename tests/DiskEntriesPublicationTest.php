@@ -251,6 +251,48 @@ class DiskEntriesPublicationTest extends TestCase
         @unlink($this->root.'/page/notes.mdx');
     }
 
+    public function test_a_blocks_mdx_page_takes_its_description_from_excerpt_when_it_declares_none(): void
+    {
+        // This estate authors a page's summary as `excerpt` (WWW 28 files, the flagship 32, `description` in none), so
+        // with `description` alone no page had a description, in its head or its Structured Data.
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        $this->holdMdxAsBlocks();
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: What the guide covers\n---\n\n## From MDX\n");
+        file_put_contents($this->root.'/page/both.mdx', "---\ntitle: Both\nexcerpt: The summary\ndescription: The description\n---\n\n## From MDX\n");
+
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $this->assertSame('What the guide covers', BeamUxEntry::query()->where('slug', 'guide')->firstOrFail()->seo_description);
+        $this->assertSame('The description', BeamUxEntry::query()->where('slug', 'both')->firstOrFail()->seo_description, 'a declared description wins');
+
+        @unlink($this->root.'/page/guide.mdx');
+        @unlink($this->root.'/page/both.mdx');
+    }
+
+    public function test_a_rescan_fills_an_existing_pages_empty_settings_from_its_file_and_overwrites_none(): void
+    {
+        // A page registered before its file's settings were read has none. The next scan (a host's seed) fills the
+        // columns that are still empty, from the file, and never one that holds a value: an author's own stays.
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        $this->holdMdxAsBlocks();
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: What the guide covers\npage_type: Article\n---\n\n## From MDX\n");
+        file_put_contents($this->root.'/page/kept.mdx', "---\ntitle: Kept\nexcerpt: From the file\n---\n\n## From MDX\n");
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+        BeamUxEntry::query()->where('slug', 'guide')->update(['seo_description' => null, 'seo_page_type' => null]);
+        BeamUxEntry::query()->where('slug', 'kept')->update(['seo_description' => 'The author\'s own']);
+
+        $this->app->forgetInstance(RegisterEntriesFromDisk::class);
+        $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
+
+        $guide = BeamUxEntry::query()->where('slug', 'guide')->firstOrFail();
+        $this->assertSame('What the guide covers', $guide->seo_description);
+        $this->assertSame('Article', $guide->seo_page_type);
+        $this->assertSame('The author\'s own', BeamUxEntry::query()->where('slug', 'kept')->firstOrFail()->seo_description);
+
+        @unlink($this->root.'/page/guide.mdx');
+        @unlink($this->root.'/page/kept.mdx');
+    }
+
     public function test_a_blocks_mdx_page_keeps_the_frontmatter_keys_nothing_declares_in_its_registered_version(): void
     {
         (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
