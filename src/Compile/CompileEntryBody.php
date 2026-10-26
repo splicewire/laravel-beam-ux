@@ -94,8 +94,11 @@ class CompileEntryBody
             // page whose honest state is "nothing authored yet" — measured 2026-09-12 on beam.test,
             // satellite.test and a fresh tower after the G2 authoring probe restored `/` to `[]`. Any
             // artifact left from an earlier body is retired so the reader sees the unauthored state
-            // (and the host's own default page) rather than a stale module.
-            $this->artifacts->forget($entry);
+            // (and the host's own default page) rather than a stale module. Not under `--missing` ($prune false), which
+            // deletes nothing: with no current artifact, an older file is served at no address (review-r1).
+            if ($prune) {
+                $this->artifacts->forget($entry);
+            }
 
             return null;
         }
