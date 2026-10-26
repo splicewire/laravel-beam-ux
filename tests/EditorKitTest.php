@@ -70,6 +70,7 @@ class EditorKitTest extends TestCase
             $tenant->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::ABILITY_OVERRIDES],
         );
         $this->assertArrayNotHasKey(\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM, $central->defaults);
+        $this->assertArrayNotHasKey(\Splicewire\Beam\Http\Particle\ParticleOperationController::ABILITY_OVERRIDES, $central->defaults);
         $this->assertSame('tenant', $tenantRelease->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM]);
         $this->assertSame('tenant', $tenantReleaseIndex->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM]);
         $this->assertSame(
