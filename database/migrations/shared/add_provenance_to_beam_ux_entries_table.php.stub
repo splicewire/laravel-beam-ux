@@ -36,6 +36,9 @@ return new class extends Migration
         }
 
         if (Schema::hasColumn('beam_ux_entries', 'origin')) {
+            if (Schema::hasIndex('beam_ux_entries', 'beam_ux_entries_origin_index')) {
+                Schema::table('beam_ux_entries', fn (Blueprint $table) => $table->dropIndex('beam_ux_entries_origin_index'));
+            }
             Schema::table('beam_ux_entries', function (Blueprint $table) {
                 $table->dropColumn('origin');
             });
