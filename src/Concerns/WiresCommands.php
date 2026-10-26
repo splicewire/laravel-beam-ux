@@ -44,6 +44,7 @@ trait WiresCommands
             PnpmOverridesCommand::class,
             PinNodeCommand::class,
             ReapArtifactsCommand::class,
+            \Splicewire\Beam\Ux\Console\ConvertMdxCommand::class,
         ]);
     }
 }

@@ -40,6 +40,35 @@ trait SeedsEntries
     }
 
     /**
+     * Ship an Authored Component as a seeded entry (ADR-0233 d8, with ADR-0213 and ADR-0215): its blocks body, whose
+     * root declares the component and its props (ADR-0231 d8), born published under its component name so a page places
+     * it by its tag. Like a seeded page, it re-asserts from the package while pristine, and a site's own edit to its copy
+     * is kept. It lives in its realm without a URL segment (ADR-0231 d4).
+     *
+     * @param  list<array<string, mixed>>  $body
+     * @param  array<string, mixed>  $attributes  extra columns (title, realm, …)
+     */
+    protected function seedComponent(
+        string $slug,
+        array $body,
+        array $attributes = [],
+        ?string $namespace = null,
+        ?string $origin = null,
+    ): ?BeamUxEntry {
+        if (! $this->canSeed()) {
+            return null;
+        }
+
+        return app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->seedBody(
+            ['namespace' => $namespace, 'slug' => $slug],
+            array_merge(['type' => UxType::Component, 'format' => UxFormat::Tsx, 'component_kind' => 'authored',
+                'realm' => BeamUxEntry::REALM_SITE], $attributes),
+            $body,
+            $origin ?? \Splicewire\Beam\Ux\Provenance\Provenance::package('splicewire/laravel-beam-ux'),
+        );
+    }
+
+    /**
      * Create a `page` entry with a body if nothing is registered at `(namespace, slug)` yet, and return
      * it (or the untouched existing row).
      *
@@ -61,6 +90,19 @@ trait SeedsEntries
     ): ?BeamUxEntry {
         if (! $this->canSeed()) {
             return null;
+        }
+
+        // ADR-0233 d9, "a package runs it over the pages it ships" (EP-42 S1): on a host whose MDX pages hold blocks, the
+        // shipped MDX is seeded converted, so a pristine package page re-asserts as blocks (an edited one is kept, as for
+        // any seed). One that can't be converted here is seeded as source below, as before, and the doctor reports it.
+        $blocks = $format === UxFormat::Mdx ? ShippedMdx::asBlocks($source) : null;
+        if ($blocks !== null) {
+            return app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->seedBody(
+                ['namespace' => $namespace, 'slug' => $slug],
+                array_merge(['type' => UxType::Page, 'format' => $format], $attributes),
+                $blocks,
+                $origin ?? \Splicewire\Beam\Ux\Provenance\Provenance::package('splicewire/laravel-beam-ux'),
+            );
         }
 
         $existing = BeamUxEntry::query()

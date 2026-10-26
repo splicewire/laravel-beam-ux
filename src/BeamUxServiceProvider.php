@@ -147,6 +147,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // EP-07 (N3447): the shipped auth-page islands, composed into every realm's Manifest Profile. Packages tag their
         // own ManifestNodeSource the same way.
         $this->app->tag([Manifest\AuthIslandNodeSource::class, Manifest\IntakeFormNodeSource::class], Manifest\ManifestProfileResolver::PACKAGE_SOURCES);
+        $this->app->tag([Manifest\SiteNodeSource::class], Manifest\ManifestProfileResolver::MDX_SOURCES);
 
         // Merge `config('beam.ux.*')`. Both keys OUTLIVED the retired `Route::beamUxEntries()` macro
         // they were introduced for (ADR-0214 §6, as amended): `api_root` positions beam core's Scribe
