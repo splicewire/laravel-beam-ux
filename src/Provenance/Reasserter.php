@@ -174,7 +174,8 @@ final class Reasserter
             || str_starts_with($origin, Provenance::PACKAGE_PREFIX);
     }
 
-    private function currentBody(BeamUxEntry $entry): ?string
+    /** The row's stored body as {@see isPristine()} reads it, so a re-stamp hashes exactly what pristine-ness compares. */
+    public function currentBody(BeamUxEntry $entry): ?string
     {
         if ($entry->particle_id === null) {
             return null;

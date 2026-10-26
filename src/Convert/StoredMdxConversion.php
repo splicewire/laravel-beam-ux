@@ -37,6 +37,9 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 final class StoredMdxConversion
 {
+    /** The label a conversion records on the version it writes. A restamp recognises the conversion's own versions by it. */
+    public const CONVERTED = 'converted from MDX source';
+
     public function __construct(
         private MdxFileConverter $converter,
         private MdxLens $lens,
@@ -169,8 +172,8 @@ final class StoredMdxConversion
                         }
                     }
                     // Whether the row still holds what its origin last asserted, read before the converted version moves its head.
-                    $wasPristine = $draft === null && app(Reasserter::class)->isPristine($page->fresh());
-                    $version = $this->publication->recordDraft($page->fresh(), $converted['doc'], 'converted from MDX source', $converted['settings'])->headVersion;
+                    $wasPristine = $draft === null && $this->reasserter->isPristine($page->fresh());
+                    $version = $this->publication->recordDraft($page->fresh(), $converted['doc'], self::CONVERTED, $converted['settings'])->headVersion;
                     if ($draft !== null) {
                         $this->publication->recordDraft($page->fresh(), $draft['doc'], 'draft converted from MDX source', $draft['settings']);
                     }
@@ -230,6 +233,63 @@ final class StoredMdxConversion
         $this->releases->putMember($release, (string) $entry->getKey(), (string) $version, $author);
 
         return (string) $entry->getKey();
+    }
+
+    /**
+     * Re-stamp the disk pages a conversion before the carry-through left unstamped (EP-42 GO 46 follow-up, the flagship's
+     * docs.build.capabilities). Such a page was pristine, its file had moved on, and the conversion converted the older
+     * body it held, but its hash still names that body's source form. So it reads as edited, and a re-assert can never
+     * bring its file. A page is re-stamped over its current body only when both hold:
+     * - the version before its conversion is exactly what its origin asserted;
+     * - every version since is the conversion's own.
+     * Any other disk page that isn't pristine is an edit, and is left as it is. A pristine page isn't touched.
+     *
+     * @return array{restamped: list<string>, leftOut: array<string, string>}
+     */
+    public function restampConverted(string $realm = BeamUxEntry::REALM_SITE, bool $write = true): array
+    {
+        $report = ['restamped' => [], 'leftOut' => []];
+        $query = BeamUxEntry::query();
+        if (! Schema::hasColumn($query->getModel()->getTable(), 'asserted_hash')) {
+            return $report;
+        }
+        $pages = $query->where('realm', $realm)->where('type', UxType::Page->value)->where('format', 'mdx')
+            ->where('origin', 'like', Provenance::DISK_PREFIX.'%')->whereNotNull('asserted_hash')->orderBy('slug')->get();
+        foreach ($pages as $page) {
+            if ($page->particle === null || $this->reasserter->isPristine($page)) {
+                continue;
+            }
+            $history = $this->versions->versions($page->particle)->reverse()->values();
+            $first = $history->search(fn ($version) => $version->label === self::CONVERTED);
+            if ($first === false) {
+                $report['leftOut'][(string) $page->slug] = 'no conversion in its history';
+
+                continue;
+            }
+            if ($history->slice($first)->contains(fn ($version) => $version->label !== self::CONVERTED)) {
+                $report['leftOut'][(string) $page->slug] = 'edited since its conversion';
+
+                continue;
+            }
+            $before = $first > 0 ? $history[$first - 1] : null;
+            if ($before === null || Provenance::hash($page->title, $page->codec()->decode($before->snapshot['payload'])) !== (string) $page->asserted_hash) {
+                $report['leftOut'][(string) $page->slug] = 'before its conversion it was not what its origin asserted';
+
+                continue;
+            }
+            $current = $this->reasserter->currentBody($page);
+            if ($current === null) {
+                $report['leftOut'][(string) $page->slug] = 'its body can\'t be read';
+
+                continue;
+            }
+            if ($write) {
+                $page->forceFill(['asserted_hash' => Provenance::hash($page->title, $current)])->save();
+            }
+            $report['restamped'][] = (string) $page->slug;
+        }
+
+        return $report;
     }
 
     /**

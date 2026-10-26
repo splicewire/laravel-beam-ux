@@ -20,7 +20,8 @@ class ConvertMdxCommand extends Command
         {--path= : The MDX content root (default: beam.mdx.content_path)}
         {--author= : The user id the conversion\'s Release is made by (a dry run rehearses as that author)}
         {--realm=site : The realm whose stored MDX pages convert (a Release holds one realm\'s entries)}
-        {--dry-run : Rehearse the conversion and report what it would do, then roll it all back}';
+        {--dry-run : Rehearse the conversion and report what it would do, then roll it all back}
+        {--restamp : Re-stamp the disk pages a conversion left unstamped because their file had moved on (no Release, no author); --dry-run reports only}';
 
     protected $description = 'Convert a host\'s MDX once: its files for one reviewed commit, its stored pages into one open Release (ADR-0233 d9).';
 
@@ -32,6 +33,9 @@ class ConvertMdxCommand extends Command
             return self::FAILURE;
         }
         $dry = (bool) $this->option('dry-run');
+        if ($this->option('restamp')) {
+            return $this->restamp($stored, $dry, (string) $this->option('realm'));
+        }
         // A dry run rehearses the writes ({@see \Splicewire\Beam\Ux\Convert\Rehearsal}), and a Release records who made it.
         $author = $this->option('author') === null ? null : Auth::getProvider()->retrieveById($this->option('author'));
         if ($author === null) {
@@ -90,5 +94,20 @@ class ConvertMdxCommand extends Command
         ksort($report->leftOut);
 
         return $report;
+    }
+
+    /** `--restamp`: the disk pages a conversion left unstamped, re-stamped so the next re-assert brings their file. */
+    private function restamp(StoredMdxConversion $stored, bool $dry, string $realm): int
+    {
+        $report = $stored->restampConverted($realm, write: ! $dry);
+        $this->info(($dry ? 'Would re-stamp ' : 'Re-stamped ').count($report['restamped']).' page(s) a conversion left unstamped.');
+        foreach ($report['restamped'] as $slug) {
+            $this->line("  page {$slug}");
+        }
+        foreach ($report['leftOut'] as $slug => $why) {
+            $this->warn("  left as it is: {$slug}: {$why}");
+        }
+
+        return self::SUCCESS;
     }
 }
