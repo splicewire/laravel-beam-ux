@@ -74,6 +74,14 @@ Measured 2026-10-16:
    prop. A page that passes none keeps the root template's fallback title.
 3. **A page a guest can't read gets its title and `noindex`, nothing more.** That is ADR-0209 §8's restricted chain: its
    description, social tags and Structured Data are never composed. A Preview is `noindex` already (ADR-0232 decision 6).
+   *Amended 2026-10-26 (EP-42 follow-on; security review 01):* "can't read" is the renderer's own question for no actor,
+   `EntryAccessResolver::canRender(null, $chain)` (`PublicEntryGate::guestCanRead()`), not "declares something". A chain
+   declaring a requirement every guest meets (an installed package) is public and gets its whole head. Caching is a
+   separate question and still reads any declaration (`isRestricted()`, `no-store`). Two consequences:
+   - A guest renders through ancestors it may only traverse. So the breadcrumbs name and link an ancestor only where
+     `canRender(null, …)` holds for the chain down to it; otherwise the step is passed through.
+   - A host-coded page (`PageHead::forPage()`) with a met requirement also composes its whole head. The host's own
+     route middleware still decides who reaches that page; the head only stops withholding what a guest can read.
 4. **The canonical URL and every `@id` hang off the sitemap's base-URL port,** so they agree with the sitemap, and a Site
    Host's pages name the Site Host.
 5. **On a Site Host the brand is the Hosted site's own.** `Brand::for()` answers the name (the tenant's by default) and
