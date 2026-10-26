@@ -161,6 +161,25 @@ class CompileAndSeedTest extends TestCase
         $this->assertTrue(Storage::disk('artifacts')->exists($kept));
     }
 
+    /**
+     * review-r1 (2026-10-26 19:29Z): an empty body retires the entry's artifacts, and that retirement deleted the whole
+     * directory even under `--missing`. Under `--missing` an empty page's older-generation file stays: it is served at no
+     * address (the current one is absent), and the step deletes nothing.
+     */
+    public function test_compile_missing_keeps_an_empty_page_s_older_files(): void
+    {
+        $entry = $this->emptyPage('about');
+        $older = 'beam-ux/artifacts/'.$entry->getKey().'/0000000000000000.js';
+        Storage::disk('artifacts')->put($older, '// an older generation');
+
+        $this->artisan('splicewire:beam:ux:compile', ['--missing' => true])
+            ->expectsOutputToContain('empty document')
+            ->expectsOutputToContain('compiled 0')
+            ->assertSuccessful();
+
+        $this->assertTrue(Storage::disk('artifacts')->exists($older), '--missing deletes nothing, an empty page\'s files included');
+    }
+
     public function test_compile_missing_and_force_together_is_refused(): void
     {
         $this->page('guide');
