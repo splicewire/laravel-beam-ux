@@ -16,10 +16,10 @@ class EditorAuthorizerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        // Preserve the existing central Gate contract: the resolver receives the raw
-        // ux.author key and addresses its entitlement Gate ability.
-        Gate::define('ux.author', fn ($user): bool => false);
-        Gate::define('entitlement:ux.author', fn ($user): bool => $user instanceof EditorCentralAuthor);
+        // A central or route-less request must stay on the raw legacy Gate ability,
+        // not the entitlement-prefixed ability used for a tenant override.
+        Gate::define('ux.author', fn ($user): bool => $user instanceof EditorCentralAuthor);
+        Gate::define('entitlement:ux.author', fn ($user): bool => false);
         Gate::define('entitlement:site.edit', fn ($user): bool => $user instanceof EditorTenantAuthor);
     }
 

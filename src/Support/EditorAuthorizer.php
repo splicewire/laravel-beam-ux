@@ -19,13 +19,23 @@ final class EditorAuthorizer
             return false;
         }
 
-        return app(AbilityResolver::class)->allows($actor, $this->ability($request));
+        $ability = $this->ability($request);
+
+        return $ability === 'ux.author'
+            ? Gate::forUser($actor)->allows('ux.author')
+            : app(AbilityResolver::class)->allows($actor, $ability);
     }
 
     public function authorize(?Authenticatable $actor, ?Request $request = null): void
     {
-        $ability = app(AbilityResolver::class)->entitlementAbility($this->ability($request));
-        Gate::forUser($actor)->authorize($ability);
+        $ability = $this->ability($request);
+        if ($ability === 'ux.author') {
+            Gate::forUser($actor)->authorize('ux.author');
+
+            return;
+        }
+
+        Gate::forUser($actor)->authorize(app(AbilityResolver::class)->entitlementAbility($ability));
     }
 
     private function ability(?Request $request): string

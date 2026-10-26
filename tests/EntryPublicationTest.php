@@ -2553,7 +2553,7 @@ class EntryPublicationTest extends TestCase
     {
         $entry = $this->publishedPage(self::BODY_ONE);
         [, $author] = $this->releaseFixture(reviewedAndMapped: false, standardGuardProvider: true);
-        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
 
         $state = $this->publishDraftAs($entry, $author);
 
@@ -2573,7 +2573,7 @@ class EntryPublicationTest extends TestCase
         $this->tenantReleaseActorTable();
         $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'tenant-author']);
         $tenantActor->save();
-        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
 
         $release = $service->create($entry, 'Tenant author', $tenantActor);
         $service->putMember($release, $member->id, $memberVersion, $tenantActor);
@@ -2592,7 +2592,7 @@ class EntryPublicationTest extends TestCase
         $this->tenantReleaseActorTable();
         $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'author']);
         $this->assertFalse(DB::connection('release_tenant')->table('users')->where('id', 'author')->exists());
-        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture || $actor === $centralAuthor);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture || $actor === $centralAuthor);
         try {
             $release = $service->create($entry, 'No central fallback', $tenantActor);
             $service->putMember($release, $member->id, $memberVersion, $tenantActor);
@@ -2609,7 +2609,7 @@ class EntryPublicationTest extends TestCase
         $this->tenantReleaseActorTable();
         $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'tenant-author']);
         $tenantActor->save();
-        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
         $this->releaseActorTenancy('tenant-a');
 
         $release = $service->create($entry, 'Tenant-bound actor', $tenantActor);
@@ -2627,7 +2627,7 @@ class EntryPublicationTest extends TestCase
         $this->tenantReleaseActorTable();
         $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'tenant-author']);
         $tenantActor->save();
-        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
         $this->releaseActorTenancy('tenant-a');
         $release = $service->create($entry, 'Tenant-bound actor', $tenantActor);
         $context = new \Splicewire\Beam\Workflows\Control\TransitionContext(actor: $release->created_by);
@@ -2645,7 +2645,7 @@ class EntryPublicationTest extends TestCase
         $this->tenantReleaseActorTable();
         $tenantActor = (new TenantReleaseActorFixture)->forceFill(['id' => 'tenant-author']);
         $tenantActor->save();
-        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($actor = null) => $actor instanceof TenantReleaseActorFixture);
         $this->releaseActorTenancy('tenant-a');
         $release = $service->create($entry, 'Tenant-bound actor', $tenantActor);
         $context = new \Splicewire\Beam\Workflows\Control\TransitionContext(actor: $release->created_by);
@@ -2695,7 +2695,7 @@ class EntryPublicationTest extends TestCase
         $member = $this->publishedPage(self::BODY_TWO);
         $memberVersion = app(EntryPublication::class)->recordDraft($member, self::BODY_ONE)->headVersion;
         [$service, $author] = $this->releaseFixture(reviewedAndMapped: false);
-        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($actor = null) => $actor === $author);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($actor = null) => $actor === $author);
 
         $release = $service->create($entry, 'Central author', $author);
         $service->putMember($release, $member->id, $memberVersion, $author);
