@@ -38,7 +38,7 @@
         "splicewire/laravel-beam-sitemap": "dev-main",
         "splicewire/laravel-beam-taxonomy": "*",
         "splicewire/laravel-beam-workflows": "*",
-        "symfony/process": "^6.4|^7.0"
+        "symfony/process": "^6.4|^7.0|^8.0"
     },
     "require-dev": {
         "splicewire/laravel-beam-calendars": "*",
