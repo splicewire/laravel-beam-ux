@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Gate;
 use Splicewire\Beam\Http\Particle\ParticleOperationController;
+use Splicewire\Beam\Ux\Redirect\RedirectPolicy;
 use Splicewire\Beam\Ux\Support\EditorAuthorizer;
 
 class EditorAuthorizerTest extends TestCase
@@ -31,6 +32,24 @@ class EditorAuthorizerTest extends TestCase
         $this->assertTrue($authorizer->allows(new EditorCentralAuthor, $this->request($strictTenantRoute)));
         $this->assertFalse($authorizer->allows(new EditorTenantAuthor, $this->request($centralRoute)));
         $this->assertTrue($authorizer->allows(new EditorCentralAuthor, $this->request($centralRoute)));
+    }
+
+    public function test_redirect_list_and_create_follow_the_matched_tenant_author_map_only(): void
+    {
+        Gate::define('ux.author', fn ($user): bool => $user instanceof EditorCentralAuthor);
+        $policy = new RedirectPolicy;
+        $tenantRoute = $this->route('tenant', ['ux.author' => 'site.edit']);
+        $centralRoute = $this->route(null, []);
+
+        $this->app->instance('request', $this->request($tenantRoute));
+        $this->assertTrue($policy->viewAny(new EditorTenantAuthor));
+        $this->assertTrue($policy->create(new EditorTenantAuthor));
+        $this->assertFalse($policy->viewAny(new EditorCentralAuthor));
+        $this->assertFalse($policy->viewAny(new User));
+
+        $this->app->instance('request', $this->request($centralRoute));
+        $this->assertTrue($policy->viewAny(new EditorCentralAuthor));
+        $this->assertFalse($policy->viewAny(new EditorTenantAuthor));
     }
 
     private function route(?string $realm, array $overrides): Route

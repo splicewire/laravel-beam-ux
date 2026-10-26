@@ -29,7 +29,7 @@ final class RedirectService
         if (! $actor instanceof Authenticatable) {
             throw new AuthorizationException;
         }
-        Gate::forUser($actor)->authorize('ux.author');
+        app(\Splicewire\Beam\Ux\Support\EditorAuthorizer::class)->authorize($actor);
         $realm = $redirect->realm ?: BeamUxEntry::REALM_SITE;
         $connection = $redirect->getConnectionName();
 
@@ -71,7 +71,7 @@ final class RedirectService
     /** Whether the actor may manage this Redirect: `ux.author`, and the mapped publish ability on its page target. */
     public function mayManage(?Authenticatable $actor, BeamUxRedirect $redirect): bool
     {
-        if ($actor === null || ! Gate::forUser($actor)->allows('ux.author')) {
+        if ($actor === null || ! app(\Splicewire\Beam\Ux\Support\EditorAuthorizer::class)->allows($actor)) {
             return false;
         }
         $page = $redirect->target_kind === 'page' && $redirect->target_entry_id !== null
