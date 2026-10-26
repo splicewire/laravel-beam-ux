@@ -41,10 +41,14 @@ use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
  */
 final class Rehearsal
 {
-    /** Services a write reaches through the container, swapped for the rehearsal and put back after. */
-    private const SWAPPED = [PlacedDiskMirror::class, EntryArtifactStore::class, CompileEntryBody::class, 'cache', 'cache.store'];
+    /**
+     * Services a write reaches through the container, swapped for the rehearsal and put back after. The cache manager is
+     * not among them: it is restored through its facade, whose swap rebinds the container too, so the two stay one object.
+     */
+    private const SWAPPED = [PlacedDiskMirror::class, EntryArtifactStore::class, CompileEntryBody::class, 'cache.store'];
 
-    public function __construct(private Application $app) {}
+    /** @param  list<string>|null  $connections  the connections to hold a transaction on (default: those the entries and Releases use) */
+    public function __construct(private Application $app, private ?array $connections = null) {}
 
     /**
      * @template T
@@ -54,42 +58,46 @@ final class Rehearsal
      */
     public function run(callable $work): mixed
     {
+        // The facades first: resolving them may resolve the cache manager, and the container snapshot below must see it.
+        $facades = ['bus' => Bus::getFacadeRoot(), 'queue' => Queue::getFacadeRoot(), 'mail' => Mail::getFacadeRoot(),
+            'notification' => Notification::getFacadeRoot(), 'cache' => Cache::getFacadeRoot()];
         $saved = [];
         foreach (self::SWAPPED as $abstract) {
             $saved[$abstract] = $this->app->resolved($abstract) ? $this->app->make($abstract) : null;
         }
-        $facades = ['bus' => Bus::getFacadeRoot(), 'queue' => Queue::getFacadeRoot(), 'mail' => Mail::getFacadeRoot(),
-            'notification' => Notification::getFacadeRoot(), 'cache' => Cache::getFacadeRoot()];
         $broadcast = $this->app->bound(BroadcastManager::class) ? $this->app->make(BroadcastManager::class) : null;
         $broadcastDriver = $broadcast?->getDefaultDriver();
         $cacheDefault = config('cache.default');
         $artifacts = sys_get_temp_dir().'/beam-ux-rehearsal-'.Str::random(12);
-        $connections = array_values(array_unique([
+        $connections = $this->connections ?? array_values(array_unique([
             (new BeamUxEntry)->getConnectionName() ?? config('database.default'),
             (new BeamUxRelease)->getConnectionName() ?? config('database.default'),
         ]));
+        $begun = [];
 
-        $this->app->instance(PlacedDiskMirror::class, new PlacedDiskMirror(null));
-        $this->app->instance(EntryArtifactStore::class, new EntryArtifactStore(Storage::build(['driver' => 'local', 'root' => $artifacts]), 'artifacts'));
-        $this->app->forgetInstance(CompileEntryBody::class);
-        config(['cache.default' => 'array']);
-        $cache = new CacheManager($this->app);
-        $this->app->instance('cache', $cache);
-        $this->app->instance('cache.store', $cache->driver('array'));
-        Cache::swap($cache);
-        Bus::fake();
-        Queue::fake();
-        Mail::fake();
-        Notification::fake();
-        $broadcast?->setDefaultDriver('null');
-        foreach ($connections as $connection) {
-            DB::connection($connection)->beginTransaction();
-        }
-
+        // Everything from the first swap on is undone in `finally`, so a rehearsal that fails to start (a connection that
+        // won't begin, a disk that won't build) leaves nothing swapped and rolls back only what it began.
         try {
+            $this->app->instance(PlacedDiskMirror::class, new PlacedDiskMirror(null));
+            $this->app->instance(EntryArtifactStore::class, new EntryArtifactStore(Storage::build(['driver' => 'local', 'root' => $artifacts]), 'artifacts'));
+            $this->app->forgetInstance(CompileEntryBody::class);
+            config(['cache.default' => 'array']);
+            $cache = new CacheManager($this->app);
+            Cache::swap($cache);
+            $this->app->instance('cache.store', $cache->driver('array'));
+            Bus::fake();
+            Queue::fake();
+            Mail::fake();
+            Notification::fake();
+            $broadcast?->setDefaultDriver('null');
+            foreach ($connections as $connection) {
+                DB::connection($connection)->beginTransaction();
+                $begun[] = $connection;
+            }
+
             return $work();
         } finally {
-            foreach (array_reverse($connections) as $connection) {
+            foreach (array_reverse($begun) as $connection) {
                 DB::connection($connection)->rollBack();
             }
             Bus::swap($facades['bus']);
