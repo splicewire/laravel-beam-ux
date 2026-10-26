@@ -99,7 +99,13 @@ class ManifestProfileResolverTest extends TestCase
             $this->assertContains($name, $mdxNames);
             $this->assertNotContains($name, $tsxNames);
         }
-        $this->assertSame(array_values(array_diff($mdxNames, $kit)), $off, 'the gate adds the kit and nothing else');
+        // EP-42 S1: and the Code Components packages' shipped MDX pages place, on the MDX page alone.
+        $shipped = array_column((new \Splicewire\Beam\Ux\Manifest\SiteNodeSource)->manifest('content')['nodes'], 'name');
+        foreach ($shipped as $name) {
+            $this->assertContains($name, $mdxNames);
+            $this->assertNotContains($name, $tsxNames);
+        }
+        $this->assertSame(array_values(array_diff($mdxNames, $kit, $shipped)), $off, 'the gate adds the kit and the shipped pages\' tags, and nothing else');
         $this->assertNotContains('Content', $mdxNames, 'a fragment is an Authored Component placed by its own tag (d8)');
         $this->assertSame(count($mdxNames), count(array_unique($mdxNames)), 'the kit never redeclares a base name');
     }

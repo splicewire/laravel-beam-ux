@@ -25,6 +25,13 @@ final class ManifestProfileResolver
     /** The container tag a package registers its {@see ManifestNodeSource} under, composed into every realm's profile. */
     public const PACKAGE_SOURCES = 'beam-ux.manifest-node-sources';
 
+    /**
+     * Code Components only an MDX page holding blocks places (EP-42 S1): a package's shipped MDX pages' tags, joining that
+     * page's profile beside the beam-mdx kit (ADR-0233 d7), and nothing else's. A TSX page's profile, and the canvas
+     * registry it is checked against, are unchanged on a host that keeps MDX as source.
+     */
+    public const MDX_SOURCES = 'beam-ux.manifest-mdx-node-sources';
+
     public function __construct(private EntryResidency $residency) {}
 
     /**
@@ -45,6 +52,17 @@ final class ManifestProfileResolver
             foreach ($kit->manifest($profile)['nodes'] as $node) {
                 if (! in_array($node['name'], $have, true)) {
                     $nodes[] = $node;
+                }
+            }
+            foreach (app()->tagged(self::MDX_SOURCES) as $source) {
+                if (! in_array($profile, $source->profiles(), true)) {
+                    continue;
+                }
+                $have = array_column($nodes, 'name');
+                foreach (self::nodesOf($source, $profile) as $node) {
+                    if (! in_array($node['name'], $have, true)) {
+                        $nodes[] = $node;
+                    }
                 }
             }
         }

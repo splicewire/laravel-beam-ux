@@ -75,6 +75,33 @@ class SeededMdxPageTest extends AuthoredComponentNativeTestCase
         $this->assertSame("---\ntitle: Docs\n---\n\nShipped words.\n", MdxBody::decode($this->published($page)));
     }
 
+    public function test_a_package_page_s_site_components_are_placeable_in_its_blocks(): void
+    {
+        // laravel-beam-docs' docs page places <SiteNav rootPath="/docs" maxDepth={3} /> and laravel-beam-mcp's places
+        // <ManifestTable endpoint="…" />; both render from @splicewire/beam-ux/site, so laravel-beam-ux declares them.
+        // Undeclared, the write guard refused the page ("A referenced component is unavailable"), as on the EP-27 starter.
+        $this->holdBlocks();
+        $page = $this->seedDocs("---\ntitle: Docs\n---\n\nShipped words.\n");
+        $body = [
+            $this->codeComponent('SiteNav', [['name' => 'rootPath', 'kind' => 'string', 'value' => '/docs'], ['name' => 'maxDepth', 'kind' => 'number', 'value' => 3]]),
+            $this->codeComponent('ManifestTable', [['name' => 'endpoint', 'kind' => 'string', 'value' => '/beam/mcp/manifest.json']]),
+        ];
+
+        $state = app(EntryPublication::class)->recordDraft($page->fresh(), $body);
+
+        $this->assertSame($body, app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->working($page->fresh()));
+        $this->assertNotNull($state->headVersion);
+        // Only an MDX page's profile gains them: a TSX page's, which the canvas registry is checked against, is unchanged.
+        $tsx = array_column(app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve(new BeamUxEntry(['type' => 'page', 'realm' => 'site']))['nodes'], 'name');
+        $this->assertNotContains('SiteNav', $tsx);
+        $this->assertNotContains('ManifestTable', $tsx);
+    }
+
+    private function codeComponent(string $name, array $props): array
+    {
+        return ['kind' => 'block', 'name' => $name, 'isComponent' => true, 'props' => $props, 'children' => [], 'dynamic' => false];
+    }
+
     private function seedDocs(string $source, string $slug = 'docs'): BeamUxEntry
     {
         $seeder = new class

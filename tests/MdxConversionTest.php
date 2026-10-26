@@ -260,10 +260,11 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
 
     public function test_a_page_the_write_refuses_is_left_out_and_the_rest_convert(): void
     {
-        // Found on a fresh starter: laravel-beam-docs' stored page places <SiteNav />, a code component a blocks body can't
-        // place there. The write refused it and the whole conversion stopped halfway, with a component already made.
-        $nav = $this->sourcePage('nav', 'Nav', "<SiteNav />\n\n<Content name=\"fragments/reading-disclaimer\" />\n",
-            [['kind' => 'block', 'name' => 'SiteNav', 'isComponent' => true, 'props' => [], 'children' => [], 'dynamic' => false], $this->content('fragments/reading-disclaimer')]);
+        // Found on a fresh starter: a stored page placing a code component a blocks body can't place there (there,
+        // laravel-beam-docs' <SiteNav />, since declared by EP-42 S1). The write refused it and the whole conversion
+        // stopped halfway, with a component already made. <HostWidget /> is declared nowhere.
+        $nav = $this->sourcePage('nav', 'Nav', "<HostWidget />\n\n<Content name=\"fragments/reading-disclaimer\" />\n",
+            [['kind' => 'block', 'name' => 'HostWidget', 'isComponent' => true, 'props' => [], 'children' => [], 'dynamic' => false], $this->content('fragments/reading-disclaimer')]);
         $head = app(EntryPublication::class)->state($nav)->headVersion;
         $this->sourcePage('notes', 'Notes', "Published words.\n", [$this->p('Published words.')]);
         $this->holdBlocks();

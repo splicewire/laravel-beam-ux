@@ -73,8 +73,10 @@ class BeamUxManifestRegistryAuditTest extends TestCase
         $site = $this->components('site');
         $kit = array_column((new \Splicewire\Beam\Mdx\Kit\MdxKitNodeSource)->manifest('content')['nodes'], 'name');
         $this->assertContains('Callout', $kit);
+        // EP-42 S1: and the Code Components packages' shipped MDX pages place (SiteNav, ManifestTable).
+        $shipped = array_column((new \Splicewire\Beam\Ux\Manifest\SiteNodeSource)->manifest('content')['nodes'], 'name');
 
-        file_put_contents($this->snapshot, json_encode([...$site, ...$kit]));
+        file_put_contents($this->snapshot, json_encode([...$site, ...$kit, ...$shipped]));
         $this->assertSame(DoctorStatus::Pass, (new BeamUxManifestRegistryAudit)->run()[0]->status, 'the kit a host registers is declared');
 
         file_put_contents($this->snapshot, json_encode($site));
