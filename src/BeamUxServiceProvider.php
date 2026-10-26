@@ -155,6 +155,18 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // ({@see Concerns\WiresPublicSurface}). Neither is a mount prefix any more.
         $this->mergeConfigFrom(__DIR__.'/../config/beam/ux.php', 'beam.ux');
 
+        // The package's own prefixes reach every READER of the host's reservation list, not only this package's catch-all
+        // ({@see Concerns\WiresPublicSurface}). A published host config replaces the whole `site` array (the merge above is
+        // shallow), and a host's own catch-all reads the key directly: the flagship's SPA fallback then swallowed
+        // `/_beam/preview/*`, and a Release Preview could not be opened there (EP-42 H2, 2026-10-26). Composed, so a host
+        // adds to it and cannot subtract the package's. Composed as the app boots, after every config source has spoken and
+        // before any route file reads the key.
+        $this->app->booting(fn () => $this->app['config']->set('beam.ux.site.reserved_prefixes', array_values(array_unique(array_merge(
+            Http\Controllers\PublicEntryController::RESERVED_BY_BEAM,
+            ['_beam'],
+            (array) $this->app['config']->get('beam.ux.site.reserved_prefixes', []),
+        )))));
+
         // Every container binding this package makes, contributed by the trait that OWNS the concern
         // rather than hand-listed here. Each link declares its own `order:`, so adding a concern is
         // `use`-ing a trait — and the sequence does not rest on where a `use` statement sits, which
