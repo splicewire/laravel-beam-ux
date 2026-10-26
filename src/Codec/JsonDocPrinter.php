@@ -437,13 +437,17 @@ class JsonDocPrinter
      * space on the line of its neighbour is one the reader sees, and must survive the run printing on its own line. The
      * TSX lens reads the `{" "}` that carries it back as a text node " ", so print, parse and print again agree.
      *
+     * Whitespace here is exactly what JSX collapses at a line boundary: ASCII space, tab, CR and LF. A no-break space, an
+     * em space or any other Unicode space is content, kept as written and never a marker. The JS port
+     * (`@splicewire/beam-ux` `jsonToTsx`) uses the same set.
+     *
      * @return array{0: bool, 1: string, 2: bool} a visible leading space, the run without its edges, a visible trailing space
      */
     private static function textRun(string $value): array
     {
-        preg_match('/^(\s*)(.*?)(\s*)$/s', $value, $m);
-        $lead = $m[1] !== '' && ! str_contains($m[1], "\n");
-        $trail = $m[3] !== '' && ! str_contains($m[3], "\n");
+        preg_match('/^([ \t\r\n]*)(.*?)([ \t\r\n]*)$/sD', $value, $m);
+        $lead = $m[1] !== '' && strpbrk($m[1], "\r\n") === false;
+        $trail = $m[3] !== '' && strpbrk($m[3], "\r\n") === false;
 
         // Whitespace only: one space if a reader sees it, nothing if it is layout.
         return $m[2] === '' ? [$lead, '', false] : [$lead, $m[2], $trail];

@@ -156,6 +156,16 @@ class JsonDocPrinterTest extends TestCase
         $this->assertSame('<p>Title</p>;', JsonDocPrinter::print([$this->block('p', [$this->text("\n  Title\n")])]), 'whitespace that touches a line break is layout');
     }
 
+    public function test_only_the_whitespace_jsx_trims_is_an_edge_and_a_no_break_or_em_space_is_content(): void
+    {
+        // Review of 4a8701ef / cbc1dd74: one exact set in both printers, the one JSX trims (space, tab, line breaks). A
+        // no-break space (U+00A0) or an em space (U+2003) is text a reader sees as written, kept literally, never a marker.
+        // The JS printer's test asserts the same outputs for the same inputs.
+        $this->assertSame("<p>\u{00A0}hi\u{00A0}</p>;", JsonDocPrinter::print([$this->block('p', [$this->text("\u{00A0}hi\u{00A0}")])]));
+        $this->assertSame("<p>{\" \"}\u{00A0}hi</p>;", JsonDocPrinter::print([$this->block('p', [$this->text(" \u{00A0}hi")])]));
+        $this->assertSame("<p>\n  Read\u{2003}\n  <em>x</em>\n</p>;", JsonDocPrinter::print([$this->block('p', [$this->text("Read\u{2003}"), $this->block('em', [$this->text('x')])])]));
+    }
+
     public function test_the_spaces_render_and_the_print_is_stable_across_a_parse(): void
     {
         $root = getenv('BEAM_UX_JS_ROOT');
