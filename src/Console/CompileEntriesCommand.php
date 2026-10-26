@@ -29,12 +29,18 @@ class CompileEntriesCommand extends Command
     protected $signature = 'splicewire:beam:ux:compile
         {--realm= : Only entries reachable in this realm}
         {--slug=* : Only these slugs}
-        {--force : Recompile even when the artifact is already current}';
+        {--force : Recompile even when the artifact is already current}
+        {--missing : Compile only entries with no artifact at the current address, and prune nothing (the landing step after a compiler-generation bump)}';
 
     protected $description = 'Compile entry bodies to their ES-module artifacts (ADR-0209 §7 — no client-compile fallback).';
 
     public function handle(CompileEntryBody $compile): int
     {
+        if ($this->option('missing') && $this->option('force')) {
+            $this->error('Choose one: --missing compiles only what has no current artifact; --force recompiles all.');
+
+            return self::FAILURE;
+        }
         $compiled = 0;
         $skipped = 0;
         $failed = 0;
@@ -53,7 +59,7 @@ class CompileEntriesCommand extends Command
 
             try {
                 $before = $compile->artifacts()->has($entry);
-                $compile->forEntry($entry, force: (bool) $this->option('force'));
+                $compile->forEntry($entry, force: (bool) $this->option('force'), prune: ! $this->option('missing'));
 
                 if ($before && ! $this->option('force')) {
                     $skipped++;

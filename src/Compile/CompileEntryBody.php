@@ -54,9 +54,12 @@ class CompileEntryBody
      * "already compiled" and "compiled from this exact body" are the same question (see
      * {@see EntryArtifactStore}).
      *
+     * `$prune` false leaves the entry's other artifact files in place: `compile --missing`, the landing step after a
+     * compiler-generation bump, deletes nothing (EP-42 GO 43b).
+     *
      * @throws CompilationFailed
      */
-    public function forEntry(BeamUxEntry $entry, ?string $source = null, bool $force = false): ?string
+    public function forEntry(BeamUxEntry $entry, ?string $source = null, bool $force = false, bool $prune = true): ?string
     {
         if (! $this->compilable($entry)) {
             return null;
@@ -76,7 +79,9 @@ class CompileEntryBody
                 throw CompilationFailed::for($entry, 'The publication pin has no valid body snapshot.');
             }
             $path = $this->forVersion($entry, (string) $version->id, $body, $force);
-            $this->artifacts->prune($entry);
+            if ($prune) {
+                $this->artifacts->prune($entry);
+            }
 
             return $path;
         }
@@ -95,7 +100,7 @@ class CompileEntryBody
             return null;
         }
 
-        return $this->artifacts->put($entry, $this->compiler->compile($entry, $source));
+        return $this->artifacts->put($entry, $this->compiler->compile($entry, $source), $prune);
     }
 
     /** Compile an immutable, entry-owned snapshot without changing the entry's public address. */

@@ -195,12 +195,15 @@ class EntryArtifactStore
      * Write the current artifact and prune addresses no longer held by the pin or working head.
      * Pruning is per-entry; other entries are never in the blast radius.
      */
-    public function put(BeamUxEntry $entry, string $code): string
+    /** `$prune` false keeps the entry's other files: `compile --missing` deletes nothing (EP-42 GO 43b). */
+    public function put(BeamUxEntry $entry, string $code, bool $prune = true): string
     {
         $path = $this->path($entry);
         $this->disk->put($path, $code);
 
-        $this->prune($entry);
+        if ($prune) {
+            $this->prune($entry);
+        }
 
         return $path;
     }
