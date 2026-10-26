@@ -263,6 +263,15 @@ class ArtifactModuleContractTest extends TestCase
         $compiler->compile($entry, "Fenced:\n\n```text\n| a | b |\n| --- | --- |\n```\n");
         $this->assertSame([], $compiler->lastWarnings(), 'a delimiter row inside a code fence is code, not a table');
 
+        // review-r1: a fence closes only on its own marker at least as long. A `~~~` line inside a backtick block is code,
+        // so the delimiter row after it is code too, and the real closing fence must not reopen and hide a later table.
+        $compiler->compile($entry, "```text\n~~~\n| a | b |\n| --- | --- |\n```\n");
+        $this->assertSame([], $compiler->lastWarnings(), 'the other marker inside a fence does not close it');
+        $compiler->compile($entry, "````\n```\n| a | b |\n| --- | --- |\n````\n");
+        $this->assertSame([], $compiler->lastWarnings(), 'a shorter run of the same marker does not close it');
+        $compiler->compile($entry, "```\n~~~\n```\n\n| Kind | Holds |\n| --- | --- |\n| page | blocks |\n");
+        $this->assertSame(['gfm-table-unsupported'], array_column($compiler->lastWarnings(), 'rule'), 'a table after a closed fence is a table');
+
         $code = $compiler->compile($entry, "| Kind | Holds |\n| --- | --- |\n| page | blocks |\n");
         $this->assertStringNotContainsString('_components.table', $code);
         $this->assertSame(['gfm-table-unsupported'], array_column($compiler->lastWarnings(), 'rule'));

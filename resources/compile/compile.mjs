@@ -212,15 +212,26 @@ const gfmTables = async (root, source, warnings) => {
   }
 }
 
-/** A GFM delimiter row (`| --- | :-: |`) outside a code fence: what tells a body holds a table. */
+/**
+ * A GFM delimiter row (`| --- | :-: |`) outside a code fence: what tells a body holds a table.
+ *
+ * Fences as CommonMark reads them (review-r1): an opening run of 3+ backticks or tildes indented at most 3 spaces (a
+ * backtick fence's info string holds no backtick) closes only on a run of the SAME marker at least as long, followed
+ * by nothing but whitespace. So a `~~~` line inside a backtick block is code, and the real closing fence ends it.
+ */
 const holdsTable = (source) => {
-  let fenced = false
+  let fence = null
   for (const line of source.split('\n')) {
-    if (/^\s{0,3}(```|~~~)/.test(line)) {
-      fenced = !fenced
+    const run = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line)
+    if (fence !== null) {
+      if (run && run[1][0] === fence.marker && run[1].length >= fence.length && run[2].trim() === '') fence = null
       continue
     }
-    if (!fenced && line.includes('|') && /^\s{0,3}\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)) return true
+    if (run && !(run[1][0] === '`' && run[2].includes('`'))) {
+      fence = { marker: run[1][0], length: run[1].length }
+      continue
+    }
+    if (line.includes('|') && /^ {0,3}\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)) return true
   }
 
   return false
