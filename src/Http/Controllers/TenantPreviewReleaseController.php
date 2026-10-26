@@ -19,20 +19,23 @@ final class TenantPreviewReleaseController
 {
     public function __construct(private PreviewGrantService $grants, private PreviewEntryPathResolver $paths) {}
 
-    public function __invoke(Request $request, string $release): Response
+    public function __invoke(Request $request): Response
     {
+        $release = $request->route('release');
         $actorToken = $request->query('actor');
         $nonce = $request->query('nonce');
-        abort_unless(is_string($actorToken) && is_string($nonce), Response::HTTP_NOT_FOUND);
+        $this->redactCapabilityFromRequestLog($request);
+        abort_unless(is_string($release) && is_string($actorToken) && is_string($nonce), Response::HTTP_NOT_FOUND);
+
+        $capability = app(TenantPreviewOpenCapability::class);
+        abort_unless($capability->consume($release, $actorToken, $nonce), Response::HTTP_NOT_FOUND);
 
         $service = app(ReleaseService::class);
         $actor = $service->resolveActorToken($actorToken);
         abort_unless($actor instanceof Authenticatable, Response::HTTP_NOT_FOUND);
 
         $found = BeamUxRelease::query()->findOrFail($release);
-        $capability = app(TenantPreviewOpenCapability::class);
         $capability->authorizeActor($actor, $request, $found);
-        abort_unless($capability->consume($found, $actorToken, $nonce), Response::HTTP_NOT_FOUND);
 
         $members = $found->members()->whereNotNull('version_id')->orderBy('entry_id')->get();
         abort_if($members->isEmpty(), Response::HTTP_NOT_FOUND);
@@ -61,5 +64,16 @@ final class TenantPreviewReleaseController
             ->header('Cache-Control', 'no-store, private')
             ->header('X-Robots-Tag', 'noindex, nofollow, noarchive')
             ->header('Referrer-Policy', 'no-referrer');
+    }
+
+    private function redactCapabilityFromRequestLog(Request $request): void
+    {
+        // The signed middleware has already verified these values. Keep them available to this
+        // controller, but remove the query string from the generic request-log payload before
+        // its terminable middleware captures it.
+        $logData = $request->attributes->get('requestLogData');
+        if (is_object($logData) && property_exists($logData, 'url')) {
+            $logData->url = $request->url();
+        }
     }
 }

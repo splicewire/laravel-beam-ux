@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
 use Splicewire\Beam\Realm\Contracts\TenancyContext;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxPreviewOpenNonce;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Release\ReleaseLifecycle;
@@ -29,6 +30,7 @@ final class TenantPreviewOpenCapability
         app(EditorAuthorizer::class)->authorize($actor, $request);
         Gate::forUser($actor)->authorize('view', $release);
         $this->assertPreviewable($release);
+        $this->pruneStaleNonces($tenantId);
 
         $actorToken = app(ReleaseService::class)->actorTokenFor($actor);
         if (! str_starts_with($actorToken, 'tenant-model:')) {
@@ -56,35 +58,35 @@ final class TenantPreviewOpenCapability
         ]);
     }
 
-    public function consume(BeamUxRelease $release, string $actorToken, string $nonce): bool
+    public function consume(string $releaseId, string $actorToken, string $nonce): bool
     {
         $tenantId = $this->tenantId();
         if (preg_match('/\A[a-f0-9]{64}\z/', $nonce) !== 1 || ! str_starts_with($actorToken, 'tenant-model:')) {
             return false;
         }
 
-        $model = (new BeamUxPreviewOpenNonce)->setConnection($release->getConnectionName());
-        $connection = $model->getConnection();
+        $now = now();
+        $updated = (new BeamUxPreviewOpenNonce)->newQuery()
+            ->where('nonce_hash', hash('sha256', $nonce))
+            ->where('release_id', $releaseId)
+            ->where('actor_token_hash', hash('sha256', $actorToken))
+            ->where('tenant_id', $tenantId)
+            ->whereNull('consumed_at')
+            ->where('expires_at', '>', $now)
+            ->update(['consumed_at' => $now, 'updated_at' => $now]);
 
-        return $connection->transaction(function () use ($model, $actorToken, $nonce, $tenantId, $release): bool {
-            $record = $model->newQuery()
-                ->where('nonce_hash', hash('sha256', $nonce))
-                ->where('release_id', (string) $release->getKey())
-                ->where('actor_token_hash', hash('sha256', $actorToken))
-                ->where('tenant_id', $tenantId)
-                ->whereNull('consumed_at')
-                ->where('expires_at', '>', now())
-                ->lockForUpdate()
-                ->first();
+        return $updated === 1;
+    }
 
-            if ($record === null) {
-                return false;
-            }
-
-            $record->forceFill(['consumed_at' => now()])->save();
-
-            return true;
-        });
+    private function pruneStaleNonces(string $tenantId): void
+    {
+        $now = now();
+        (new BeamUxPreviewOpenNonce)->newQuery()
+            ->where('tenant_id', $tenantId)
+            ->where(function ($query) use ($now): void {
+                $query->whereNotNull('consumed_at')->orWhere('expires_at', '<=', $now);
+            })
+            ->delete();
     }
 
     public function authorizeActor(Authenticatable $actor, Request $request, BeamUxRelease $release): void
