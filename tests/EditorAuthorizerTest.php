@@ -74,8 +74,11 @@ class EditorAuthorizerTest extends TestCase
         $centralRoute = $this->route(null, ['ux.author' => 'site.edit']);
 
         $authorizer->authorize(new EditorRawGateOnlyAuthor, $this->request($centralRoute));
-        $this->assertTrue($authorizer->allows(new EditorEntitlementOnlyAuthor, $this->request($centralRoute)),
-            'Central allows() retains its previous AbilityResolver call.');
+        $this->assertTrue($authorizer->allows(new EditorRawGateOnlyAuthor, $this->request($centralRoute)));
+        $this->assertFalse($authorizer->allows(new EditorEntitlementOnlyAuthor, $this->request($centralRoute)),
+            'Central allows() retains the raw ux.author Gate behavior.');
+        $this->assertTrue($authorizer->allowsResolved(new EditorEntitlementOnlyAuthor, $this->request($centralRoute)),
+            'Legacy AbilityResolver callers retain their resolver behavior through the explicit method.');
 
         $this->expectException(AuthorizationException::class);
         $authorizer->authorize(new EditorEntitlementOnlyAuthor, $this->request($centralRoute));

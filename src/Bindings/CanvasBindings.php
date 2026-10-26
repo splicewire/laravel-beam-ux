@@ -49,7 +49,7 @@ final class CanvasBindings
     public function authorize(BeamUxEntry $entry, mixed $actor): void
     {
         abort_unless($actor instanceof Authenticatable
-            && app(EditorAuthorizer::class)->allows($actor)
+            && app(EditorAuthorizer::class)->allowsResolved($actor)
             && Gate::forUser($actor)->allows('update', $entry), 403);
     }
 

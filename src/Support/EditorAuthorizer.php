@@ -19,7 +19,20 @@ final class EditorAuthorizer
             return false;
         }
 
-        return app(AbilityResolver::class)->allows($actor, $this->ability($request));
+        $ability = $this->ability($request);
+
+        if ($ability === 'ux.author') {
+            return Gate::forUser($actor)->allows('ux.author');
+        }
+
+        return Gate::forUser($actor)->allows(app(AbilityResolver::class)->entitlementAbility($ability));
+    }
+
+    /** Preserve callers whose pre-realm author check used AbilityResolver rather than the raw Gate. */
+    public function allowsResolved(?Authenticatable $actor, ?Request $request = null): bool
+    {
+        return $actor instanceof Authenticatable
+            && app(AbilityResolver::class)->allows($actor, $this->ability($request));
     }
 
     public function authorize(?Authenticatable $actor, ?Request $request = null): void

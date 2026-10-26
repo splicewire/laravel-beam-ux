@@ -34,7 +34,7 @@ final class EntryMedia
     public function allowed(BeamUxEntry $entry, mixed $actor): bool
     {
         return self::available() && $actor instanceof Authenticatable
-            && app(EditorAuthorizer::class)->allows($actor)
+            && app(EditorAuthorizer::class)->allowsResolved($actor)
             && Gate::forUser($actor)->allows('update', $entry);
     }
 

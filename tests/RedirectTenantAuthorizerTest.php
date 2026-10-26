@@ -47,8 +47,8 @@ class RedirectTenantAuthorizerTest extends AuthoredComponentNativeTestCase
         try {
             app(RedirectService::class)->prepare(new BeamUxRedirect, new RedirectInputData('/denied', 'path', '/new-path'), $unprivileged);
             $this->fail('A member without site.edit must not prepare a tenant Redirect.');
-        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $exception) {
-            $this->assertSame(403, $exception->getStatusCode());
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+            $this->assertTrue(true);
         }
 
         $this->swapRequest($this->request($this->route(null)));
