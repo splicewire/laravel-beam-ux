@@ -297,6 +297,77 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->assertStringContainsString('the package owns it', $report['leftOut']['shipped']);
     }
 
+    /**
+     * orch-lead's ruling (EP-42 H2 receipt, 2026-10-26): a host's disk page converts from the same source its file is
+     * rewritten from, so the two agree by construction. Its asserted hash is re-stamped over the converted body, the value
+     * pristine-ness and re-assert compare, when that body prints byte-equal to the file's body (the separator line after
+     * its header aside) and no draft is pending. Otherwise the doctor reported all 32 of the flagship's pages diverged,
+     * and a later edit to a file never flowed.
+     */
+    public function test_a_converted_disk_page_agrees_with_its_file_so_a_later_edit_to_the_file_flows(): void
+    {
+        $page = $this->diskPage('Disk words.');
+        $this->holdBlocks();
+
+        $report = $this->convertSignedOut();
+
+        $reasserter = app(\Splicewire\Beam\Ux\Provenance\Reasserter::class);
+        $this->assertTrue($reasserter->isPristine($page->fresh()), 'converted: it agrees with its file');
+        app(ReleaseService::class)->transition(BeamUxRelease::query()->findOrFail($report['release']), 'publish', $this->author);
+        $this->assertTrue($reasserter->isPristine($page->fresh()), 'and once published');
+
+        $this->lens->register('Edited on disk.', [$this->p('Edited on disk.')]);
+        file_put_contents($this->root.'/docs/guide.mdx', "---\ntitle: Guide\n---\n\nEdited on disk.\n");
+        $this->assertTrue($reasserter->reassert($page->fresh(), 'Guide', (string) file_get_contents($this->root.'/docs/guide.mdx'), 'disk:docs/guide.mdx', [$this->p('Edited on disk.')]));
+        $this->assertSame('Edited on disk.', $this->publishedOf($page)[0]['children'][0]['value']);
+    }
+
+    public function test_an_author_edited_converted_page_stays_diverged_and_keeps_its_words(): void
+    {
+        $page = $this->diskPage('Disk words.');
+        $this->holdBlocks();
+        $report = $this->convertSignedOut();
+        app(ReleaseService::class)->transition(BeamUxRelease::query()->findOrFail($report['release']), 'publish', $this->author);
+
+        $this->lens->register('Our words.', [$this->p('Our words.')]);
+        $pub = app(EntryPublication::class);
+        $pub->publishVersion($page->fresh(), $pub->recordDraft($page->fresh(), [$this->p('Our words.')])->headVersion);
+
+        $reasserter = app(\Splicewire\Beam\Ux\Provenance\Reasserter::class);
+        $this->assertFalse($reasserter->isPristine($page->fresh()), 'an author\'s edit is real');
+        $this->assertFalse($reasserter->reassert($page->fresh(), 'Guide', (string) file_get_contents($this->root.'/docs/guide.mdx'), 'disk:docs/guide.mdx', [$this->p('Disk words.')]));
+        $this->assertSame('Our words.', $this->publishedOf($page)[0]['children'][0]['value']);
+    }
+
+    public function test_a_disk_page_with_a_pending_draft_is_not_restamped(): void
+    {
+        $page = $this->diskPage('Disk words.');
+        $this->lens->register('Draft words.', [$this->p('Draft words.')]);
+        app(EntryPublication::class)->recordDraft($page->fresh(), MdxBody::encode("---\ntitle: Guide\n---\n\nDraft words.\n"));
+        $this->holdBlocks();
+
+        $this->convertSignedOut();
+
+        $this->assertFalse(app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->isPristine($page->fresh()), 'the pending draft is the working body');
+    }
+
+    /** A host's page registered from `docs/guide.mdx`, and that file as the files half leaves it: its header, then the body. */
+    private function diskPage(string $words): BeamUxEntry
+    {
+        $page = $this->sourcePage('guide', 'Guide', "{$words}\n", [$this->p($words)], origin: 'disk:docs/guide.mdx');
+        @mkdir($this->root.'/docs', 0777, true);
+        file_put_contents($this->root.'/docs/guide.mdx', "---\ntitle: Guide\n---\n\n{$words}\n");
+
+        return $page;
+    }
+
+    private function publishedOf(BeamUxEntry $page): array
+    {
+        $fresh = $page->fresh();
+
+        return app(\Rushing\Versioning\Contracts\VersionStore::class)->version($fresh->particle, $fresh->published_version)->snapshot['payload'];
+    }
+
     public function test_the_command_needs_blocks_on_and_a_dry_run_writes_nothing(): void
     {
         $this->sourcePage('about', 'About', "<Content name=\"fragments/legal-engine\" />\n", [$this->content('fragments/legal-engine')]);

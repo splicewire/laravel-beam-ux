@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Convert;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Rushing\Versioning\Contracts\VersionStore;
@@ -142,7 +143,7 @@ final class StoredMdxConversion
         $report['pages'] = [];
         foreach ($plans as [$page, $converted, $draft, $placed]) {
             try {
-                $page->getConnection()->transaction(function () use ($page, $converted, $draft, $placed, $components, $realm, $author, &$release, &$made): void {
+                $page->getConnection()->transaction(function () use ($page, $converted, $draft, $placed, $components, $realm, $author, $root, &$release, &$made): void {
                     $target = $release ?? $this->releases->create($page, 'MDX conversion', $author);
                     $new = [];
                     foreach ($placed as $component) {
@@ -155,6 +156,9 @@ final class StoredMdxConversion
                         $this->publication->recordDraft($page->fresh(), $draft['doc'], 'draft converted from MDX source', $draft['settings']);
                     }
                     $this->releases->putMember($target, (string) $page->getKey(), (string) $version, $author);
+                    if ($draft === null) {
+                        $this->restamp($page->fresh(), $converted['doc'], $converted['settings']?->title, $root);
+                    }
                     $release = $target;
                     $made += $new;
                 });
@@ -182,6 +186,32 @@ final class StoredMdxConversion
         $this->releases->putMember($release, (string) $entry->getKey(), (string) $version, $author);
 
         return (string) $entry->getKey();
+    }
+
+    /**
+     * orch-lead's ruling (EP-42 H2 receipt, 2026-10-26): a host's disk page converts from the same source the files half
+     * rewrites its file from, so the two agree by construction. Its asserted hash is re-stamped over the converted body,
+     * EXACTLY the value pristine-ness and re-assert compare ({@see Provenance::hash()} of the title and the printed body),
+     * when that body prints byte-equal to the file's body (the separator line after its header aside). Otherwise the doctor
+     * reported every converted page diverged, and a later edit to its file never flowed. The caller stamps only a page with
+     * no pending draft: a draft converted on top is the working body, and an author's edit is real.
+     */
+    private function restamp(BeamUxEntry $page, array $doc, ?string $title, string $root): void
+    {
+        $origin = (string) ($page->origin ?? '');
+        if (! str_starts_with($origin, Provenance::DISK_PREFIX) || ! Schema::hasColumn($page->getTable(), 'asserted_hash')) {
+            return;
+        }
+        $file = rtrim($root, '/').'/'.substr($origin, strlen(Provenance::DISK_PREFIX));
+        if (! is_file($file)) {
+            return;
+        }
+        $printed = $page->codec()->decode($doc);
+        $body = MdxBody::encode((string) file_get_contents($file))[MdxBody::CONTENT_KEY];
+        if ($printed !== (str_starts_with($body, "\n") ? substr($body, 1) : $body)) {
+            return;
+        }
+        $page->forceFill(['asserted_hash' => Provenance::hash($title ?? $page->title, $printed)])->save();
     }
 
     /** @return array{doc: array, settings: ?EntryPageSettingsData, placed: array<string, string>, problem: ?string} */
