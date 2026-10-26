@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
@@ -15,6 +16,9 @@ class EditorAuthorizerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // Preserve the existing central Gate contract: the resolver receives the raw
+        // ux.author key and addresses its entitlement Gate ability.
+        Gate::define('ux.author', fn ($user): bool => false);
         Gate::define('entitlement:ux.author', fn ($user): bool => $user instanceof EditorCentralAuthor);
         Gate::define('entitlement:site.edit', fn ($user): bool => $user instanceof EditorTenantAuthor);
     }
@@ -62,6 +66,17 @@ class EditorAuthorizerTest extends TestCase
         $authorizer = app(EditorAuthorizer::class);
         $this->assertTrue($authorizer->allows(new EditorCentralAuthor));
         $this->assertFalse($authorizer->allows(new EditorTenantAuthor));
+    }
+
+    public function test_central_authorization_keeps_the_legacy_gate_and_exception(): void
+    {
+        $authorizer = app(EditorAuthorizer::class);
+        $centralRoute = $this->route(null, ['ux.author' => 'site.edit']);
+
+        $authorizer->authorize(new EditorCentralAuthor, $this->request($centralRoute));
+
+        $this->expectException(AuthorizationException::class);
+        $authorizer->authorize(new User, $this->request($centralRoute));
     }
 
     private function route(?string $realm, array $overrides): Route

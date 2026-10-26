@@ -631,7 +631,7 @@ final class ReleaseService
     private function token(Authenticatable $actor): string
     {
         $defaultModel = $this->defaultAuthModel();
-        if ($actor instanceof Model && ($defaultModel === null || $actor::class !== $defaultModel)) {
+        if ($actor instanceof Model && $defaultModel !== null && $actor::class !== $defaultModel) {
             $connection = $actor->getConnection()->getName();
             $tenancy = app(TenancyContext::class);
             if ($tenancy->isMultiTenant() && $connection !== $tenancy->centralConnection()) {

@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Support;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
+use Illuminate\Support\Facades\Gate;
 use Splicewire\Beam\Authorization\AbilityResolver;
 use Splicewire\Beam\Frame\ParticleResourceActions;
 use Splicewire\Beam\Http\Particle\ParticleOperationController;
@@ -18,6 +19,17 @@ final class EditorAuthorizer
             return false;
         }
 
+        return app(AbilityResolver::class)->allows($actor, $this->ability($request));
+    }
+
+    public function authorize(?Authenticatable $actor, ?Request $request = null): void
+    {
+        $ability = app(AbilityResolver::class)->entitlementAbility($this->ability($request));
+        Gate::forUser($actor)->authorize($ability);
+    }
+
+    private function ability(?Request $request): string
+    {
         $route = ($request ?? request())->route();
         $defaults = $route instanceof Route ? $route->defaults : [];
         $realm = $defaults[ParticleOperationController::REALM] ?? null;
@@ -27,17 +39,12 @@ final class EditorAuthorizer
             $overrides = $defaults[ParticleOperationController::ABILITY_OVERRIDES] ?? [];
             $ability = app(ParticleResourceActions::class)->effectiveResourceReadAbility(
                 'beam-ux-entry',
-                $ability,
+                'ux.author',
                 'tenant',
                 is_array($overrides) ? $overrides : [],
             );
         }
 
-        return app(AbilityResolver::class)->allows($actor, $ability);
-    }
-
-    public function authorize(?Authenticatable $actor, ?Request $request = null): void
-    {
-        abort_unless($this->allows($actor, $request), 403);
+        return $ability;
     }
 }

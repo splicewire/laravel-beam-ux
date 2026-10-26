@@ -237,6 +237,9 @@ class EntryBodyClearTest extends TestCase
         (require __DIR__.'/../database/migrations/shared/add_origin_to_beam_ux_releases_table.php.stub')->up();
         config(['beam.ux.releases.review_required' => false]);
         Gate::before(fn () => true);
+        // This feature uses a custom mocked provider without a configured model class. Such
+        // actors must retain the legacy user:<id> token instead of being guessed as a new model.
+        config(['auth.defaults.guard' => 'web', 'auth.guards.web.provider' => 'users', 'auth.providers.users.model' => null]);
         $provider = \Mockery::mock(\Illuminate\Contracts\Auth\UserProvider::class);
         $provider->shouldReceive('retrieveById')->andReturn($actor);
         $guard = \Mockery::mock(\Illuminate\Contracts\Auth\Guard::class);
