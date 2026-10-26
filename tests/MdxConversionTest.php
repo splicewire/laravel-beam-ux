@@ -430,8 +430,8 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
     /**
      * EP-42 GO 46 follow-up: a page converted before the carry-through (the flagship's docs.build.capabilities) still
      * hashes to the source form it held, so it reads as edited and a re-assert can never bring its file. `--restamp`
-     * re-stamps such a page over its converted body when both hold: the version before its conversion is exactly what its
-     * origin asserted, and every version since is the conversion's own. Anything else is an edit, and stays.
+     * re-stamps such a page over its current body only when that body is exactly the conversion of a version that is what
+     * its origin asserted, with no draft pending. Anything else is an edit, and stays.
      */
     public function test_restamp_restamps_a_page_a_conversion_left_unstamped_and_the_next_reassert_brings_the_file(): void
     {
@@ -464,10 +464,32 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
 
         $this->artisan('splicewire:beam:ux:convert-mdx', ['--restamp' => true])
             ->expectsOutputToContain('Re-stamped 0 page(s)')
-            ->expectsOutputToContain('left as it is: guide: edited since its conversion')
+            ->expectsOutputToContain('left as it is: guide: its body is not the conversion of what its origin asserted')
             ->assertExitCode(0);
         $this->assertSame($stamp, (string) $page->fresh()->asserted_hash);
         $this->assertSame('Our words.', $this->publishedOf($page)[0]['children'][0]['value']);
+    }
+
+    /**
+     * review-r1 (2026-10-26 17:53Z): a version's label is the author's to write (EntryDraftSaveOp passes it through), so it
+     * is never proof of the conversion. An edit labelled exactly as the conversion labels its own version stays an edit:
+     * the page is re-stamped only when its body IS the conversion of what its origin asserted.
+     */
+    public function test_restamp_leaves_an_edit_labelled_as_the_conversion(): void
+    {
+        $page = $this->unstampedConversion('Old words.', 'New words.');
+        $this->lens->register('Our words.', [$this->p('Our words.')]);
+        $pub = app(EntryPublication::class);
+        $pub->publishVersion($page->fresh(), $pub->recordDraft($page->fresh(), [$this->p('Our words.')], StoredMdxConversion::CONVERTED)->headVersion);
+        $stamp = (string) $page->fresh()->asserted_hash;
+
+        $this->artisan('splicewire:beam:ux:convert-mdx', ['--restamp' => true])
+            ->expectsOutputToContain('Re-stamped 0 page(s)')
+            ->expectsOutputToContain('left as it is: guide: its body is not the conversion of what its origin asserted')
+            ->assertExitCode(0);
+        $this->assertSame($stamp, (string) $page->fresh()->asserted_hash);
+        $this->assertFalse(app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->reassert($page->fresh(), 'Guide', (string) file_get_contents($this->root.'/docs/guide.mdx'), 'disk:docs/guide.mdx', [$this->p('New words.')]));
+        $this->assertSame('Our words.', $this->publishedOf($page)[0]['children'][0]['value'], 'the author\'s words stay');
     }
 
     public function test_restamp_leaves_a_page_that_was_not_what_its_origin_asserted_before_its_conversion(): void
@@ -483,7 +505,7 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
 
         $this->artisan('splicewire:beam:ux:convert-mdx', ['--restamp' => true])
             ->expectsOutputToContain('Re-stamped 0 page(s)')
-            ->expectsOutputToContain('left as it is: guide: before its conversion it was not what its origin asserted')
+            ->expectsOutputToContain('left as it is: guide: its body is not the conversion of what its origin asserted')
             ->assertExitCode(0);
         $this->assertSame($stamp, (string) $page->fresh()->asserted_hash);
         $this->assertFalse(app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->isPristine($page->fresh()));
