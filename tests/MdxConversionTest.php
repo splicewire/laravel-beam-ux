@@ -218,7 +218,35 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
 
         $this->assertSame(['same'], $report['pages'], 'the copy that says what the shipped component says converts');
-        $this->assertStringContainsString("doesn't show what partials/legal-engine shows", $report['leftOut']['drifted']);
+        $this->assertStringContainsString("doesn't render what partials/legal-engine renders", $report['leftOut']['drifted']);
+    }
+
+    public function test_a_published_component_with_the_same_words_but_other_marks_is_not_reused(): void
+    {
+        // Review of 2b8c3154 (ruling 1 is blocks-read equal): the fragment emphasizes a word the published component doesn't.
+        $published = new class
+        {
+            use SeedsEntries;
+
+            public function run(array $body): ?BeamUxEntry
+            {
+                return $this->seedComponent('reading-disclaimer', $body, [], origin: 'package:acme/site');
+            }
+        };
+        $published->run([$this->p('Read this first.') + ['component' => ['name' => 'ReadingDisclaimer', 'props' => []]]]);
+        file_put_contents($this->root.'/fragments/reading-disclaimer.mdx', "Read this *first*.\n");
+        $this->lens->register('Read this *first*.', [['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'props' => [], 'dynamic' => false, 'children' => [
+            ['kind' => 'text', 'value' => 'Read this '],
+            ['kind' => 'block', 'name' => 'em', 'isComponent' => false, 'props' => [], 'dynamic' => false, 'children' => [['kind' => 'text', 'value' => 'first']]],
+            ['kind' => 'text', 'value' => '.'],
+        ]]]);
+        $this->sourcePage('notes', 'Notes', "<Content name=\"fragments/reading-disclaimer\" />\n", [$this->content('fragments/reading-disclaimer')]);
+        $this->holdBlocks();
+
+        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+
+        $this->assertSame([], $report['pages']);
+        $this->assertStringContainsString("doesn't render what fragments/reading-disclaimer renders", $report['leftOut']['notes']);
     }
 
     public function test_the_command_needs_blocks_on_and_a_dry_run_writes_nothing(): void

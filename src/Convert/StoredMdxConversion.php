@@ -188,10 +188,10 @@ final class StoredMdxConversion
 
     /**
      * How a placed fragment's tag resolves in the realm: null when one published Authored Component already answers to it
-     * (delivery finds exactly one, ComponentDelivery::candidates) and shows the fragment's text, the component to make
+     * (delivery finds exactly one, ComponentDelivery::candidates) and renders the fragment's blocks, the component to make
      * from the host's fragment when nothing in the realm has the name, or why the page can't place it. A same-named
      * component that isn't that one published answer (a draft, a renamed working copy, two of them) is never shadowed or
-     * reused, and one that shows other text (a site's edit, a host copy that drifted) would change the page (ruling 1).
+     * reused, and one whose blocks differ (a site's edit, a host copy that drifted) would change the page (ruling 1).
      *
      * @return array{doc: array, title: string}|string|null
      */
@@ -206,9 +206,9 @@ final class StoredMdxConversion
                 return "the fragment {$fragment}: {$doc}";
             }
 
-            return MdxFileConverter::visibleText($this->payload($answer, $answer->published_version) ?? []) === MdxFileConverter::visibleText($doc)
+            return MdxFileConverter::sameBlocks($this->payload($answer, $answer->published_version) ?? [], $doc)
                 ? null
-                : "the published <{$component} /> in realm {$realm} doesn't show what {$fragment} shows, so the page would change";
+                : "the published <{$component} /> in realm {$realm} doesn't render what {$fragment} renders (its words, marks, links or code), so the page would change";
         }
         if ($named->isNotEmpty()) {
             return $named->count() > 1
