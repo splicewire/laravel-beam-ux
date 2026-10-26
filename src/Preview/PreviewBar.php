@@ -55,8 +55,27 @@ final class PreviewBar
             'changes' => $changes?->toArray(),
             'recordChoices' => $changes === null ? [] : $this->recordChoicesFor($changes, $preview, $request, (string) $release->realm),
             'readiness' => $release === null ? null : $this->readiness->report($release)->toArray(),
+            'redirects' => $this->redirects($preview),
             // Where the Release's own fixes are pressed (ADR-0232 d11): its page on the operator console, if mounted.
             'releaseHref' => $release === null ? null : ReleaseData::frameHref('beam-ux-release.edit', (string) $release->getKey()),
+        ];
+    }
+
+    /**
+     * ADR-0236 d12 (ADR-0232 d14): each URL the Preview's Release moves or takes down, and where it will go once it
+     * publishes; a Take-down with no target leaves its URLs to the uniform 404 (`to` null).
+     *
+     * `match` says whether it covers that path only (`exact`) or the path and everything under it (`prefix`).
+     *
+     * @return list<array{from: string, match: string, to: ?string, reason: string}>
+     */
+    private function redirects(PreviewContext $preview): array
+    {
+        $plan = app(\Splicewire\Beam\Ux\Redirect\ReleaseRedirects::class)->forPreview($preview);
+
+        return [
+            ...array_map(fn (array $row) => ['from' => $row['path'], 'match' => $row['match'], 'to' => $row['to'], 'reason' => $row['reason']], $plan['redirects']),
+            ...array_map(fn (array $row) => ['from' => $row['path'], 'match' => 'exact', 'to' => null, 'reason' => 'takedown'], $plan['gone']),
         ];
     }
 

@@ -122,8 +122,12 @@ class PublicEntryController
         $actor = $preview === null ? $request->user() : $preview->viewer;
         $chain = $this->gate->chainFor($path, $realm, $actor, $preview);
 
-        // The uniform 404: unresolvable, unpublished and denied are one answer (§5).
-        abort_if($chain === null, Response::HTTP_NOT_FOUND);
+        // The uniform 404: unresolvable, unpublished and denied are one answer (§5), unless a Redirect answers the URL
+        // (ADR-0236 d9). Both look it up alike, so a denied page still looks like an absent one.
+        if ($chain === null) {
+            return app(\Splicewire\Beam\Ux\Redirect\RedirectResolver::class)->answer($request, $path, $realm, $actor, $preview)
+                ?? abort(Response::HTTP_NOT_FOUND);
+        }
 
         $entry = $chain[array_key_last($chain)];
         $record = null;
@@ -133,7 +137,10 @@ class PublicEntryController
             $read->setUserResolver(fn () => $actor);
             $record = app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->resolve(
                 $entry, (string) $entry->getAttribute('_record_page_value'), $read, $realm);
-            abort_if($record === null, Response::HTTP_NOT_FOUND);
+            if ($record === null) {
+                return app(\Splicewire\Beam\Ux\Redirect\RedirectResolver::class)->answer($request, $path, $realm, $actor, $preview)
+                    ?? abort(Response::HTTP_NOT_FOUND);
+            }
             $entry = clone $entry;
             foreach (['titleField' => 'title', 'descriptionField' => 'seo_description', 'socialImageField' => 'seo_social_image'] as $field => $attribute) {
                 $name = $entry->getAttribute('record_page')[$field] ?? null;

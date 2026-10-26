@@ -121,6 +121,8 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 'shared/add_origin_to_beam_ux_releases_table',
                 // A Release's Preview Links (ADR-0232 d8): on/off and the secret they are signed with.
                 'shared/add_preview_links_to_beam_ux_releases_table',
+                // A site's Redirects (ADR-0236 d1): a row of their own, beside the entries they lead to.
+                'shared/create_beam_ux_redirects_table',
                 'shared/create_beam_ux_release_recordings_table',
                 'shared/create_beam_ux_preview_grants_table',
                 // The BASELINE (ADR-0225 decision 2; launch ticket 00, 2026-10-16): pins every already-written
@@ -174,6 +176,11 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // ADDITIVE (`Relation::morphMap`), NEVER `enforceMorphMap`: a beam-composing host has many
         // models on class-string morphs. Mirrors {@see \Splicewire\Beam\BeamServiceProvider}.
         Relation::morphMap(['beam_ux_entry' => BeamUxEntry::class]);
+        // A Redirect is the subject of its own activity rows (ADR-0236 Consequences), stored for good: by alias.
+        Relation::morphMap(['beam_ux_redirect' => Models\BeamUxRedirect::class]);
+        // ADR-0236 d3: a Record's URL change leaves a Redirect, caught on the signal every pipeline write emits.
+        $this->app->make(\Illuminate\Contracts\Events\Dispatcher::class)
+            ->listen(\Splicewire\Beam\Events\BeamParticlePersisted::class, [Redirect\RecordUrlChanges::class, 'handle']);
 
         // UX-08c: the read ability the Developer-zone diagnostics declare (who may update entries; Root passes).
         DiagnosticsAbility::define();
@@ -189,6 +196,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
         // A Release reads by the rule its resource declares, `ux.author`, whether listed or opened (EP-15 receipt).
         Gate::policy(Models\BeamUxRelease::class, Release\ReleasePolicy::class);
+        Gate::policy(Models\BeamUxRedirect::class, Redirect\RedirectPolicy::class);
 
         // The boot half of the same concerns — route macros, commands, the workflow and schema
         // handovers. `WiresSitemap` and `WiresPublicSurface` each contribute to BOTH chains, one
@@ -276,6 +284,19 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 BeamUxRouteShadowAudit::class,
+            );
+
+            // ADR-0236's Consequences: a Redirect that stops answering does so silently, the guest getting the uniform
+            // 404. This names one that dangles, loops, sits where a page answers, or that a host route serves first.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                Doctor\BeamUxRedirectAudit::class,
+            );
+
+            // ADR-0236 d8: a hidden page hides the pages under it, so a structural page left unpublished is named here.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                Doctor\BeamUxHiddenParentAudit::class,
             );
 
             // beam-docs-satellite 69: a composed URL is not evidence of reachability. `UrlResolver`

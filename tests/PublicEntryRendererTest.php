@@ -158,6 +158,27 @@ class PublicEntryRendererTest extends TestCase
         $this->get('/internal/docs/api')->assertNotFound();
     }
 
+    public function test_a_hidden_page_hides_the_pages_under_it_and_publishing_it_again_brings_them_back(): void
+    {
+        // ADR-0236 d8, launch 00's DF-22 (EP-30 slice 0): the publish gate walks the chain, as the nav and read rights
+        // already do. Each page keeps its own marking.
+        $this->app->bind(EntryPublishGate::class, fn () => new MarkingOnlyPublishGate);
+        $this->app->forgetInstance(PublicEntryGate::class);
+        $root = BeamUxEntry::rootFor();
+        $parent = $this->page('guides', ['segment' => 'guides', 'parent_id' => $root->getKey(), 'workflow_marking' => 'published']);
+        $child = $this->page('guides-start', ['segment' => 'start', 'parent_id' => $parent->getKey(), 'workflow_marking' => 'published']);
+        $this->get('/guides/start')->assertOk();
+
+        $parent->forceFill(['workflow_marking' => 'review'])->save();
+
+        $this->get('/guides/start')->assertNotFound();
+        $this->assertNull(app(PublicEntryGate::class)->chainForEntry($child->fresh(), 'site'), 'nor its artifact');
+        $this->assertSame('published', $child->fresh()->workflow_marking);
+
+        $parent->forceFill(['workflow_marking' => 'published'])->save();
+        $this->get('/guides/start')->assertOk();
+    }
+
     public function test_unresolvable_unpublished_and_denied_are_one_indistinguishable_404(): void
     {
         // The DEFAULT publish gate reports an UNMANAGED entry as published (the optional-workflow

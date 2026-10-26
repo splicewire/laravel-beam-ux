@@ -301,6 +301,154 @@ class RecordPageTest extends TestCase
         app(RecordPages::class)->assertSettings($page, new EntryPageSettingsData(title: 'Page', segment: '{slug}', recordPage: new RecordPageData('posts', 'slug')));
     }
 
+    public function test_a_redirect_reaches_a_record_through_its_record_page_as_the_reader_reads_it(): void
+    {
+        // ADR-0236 d1, d10 (EP-30 slice 2; ruling 8): a Record target is {collection, id}, reached at its URL through
+        // the Collection's Record Page, and only for a reader who may read the Record. The answer depends on the reader.
+        $this->page();
+        $this->recordRedirect('/old-post', 'hello');
+        $this->recordRedirect('/old-hidden', 'hidden');
+
+        $answer = $this->get('/old-post');
+
+        $answer->assertStatus(301)->assertRedirect('/posts/hello');
+        $this->assertSame('no-store, private', $answer->headers->get('Cache-Control'));
+        $this->get('/old-hidden')->assertNotFound();
+    }
+
+    public function test_a_redirect_never_sends_a_reader_to_a_record_page_that_is_hidden_or_on_another_site(): void
+    {
+        // Review of f2b5b70: the first Record Page for the Collection was taken in any realm and at any marking, so a
+        // guest was sent to a URL that answers the 404 (or another site's page). Now the Record Page must be one this
+        // realm shows the reader.
+        $page = $this->page();
+        $this->recordRedirect('/old-post', 'hello');
+        $this->app->bind(\Splicewire\Beam\Ux\Sitemap\EntryPublishGate::class, fn () => new class implements \Splicewire\Beam\Ux\Sitemap\EntryPublishGate
+        {
+            public function isPublished(BeamUxEntry $entry): bool
+            {
+                return $entry->workflow_marking !== 'review';
+            }
+        });
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Http\PublicEntryGate::class);
+
+        BeamUxEntry::query()->whereKey($page->parent_id)->update(['workflow_marking' => 'review']);
+        $this->get('/old-post')->assertNotFound();
+
+        BeamUxEntry::query()->whereKey($page->parent_id)->update(['workflow_marking' => null]);
+        $this->get('/old-post')->assertStatus(301)->assertRedirect('/posts/hello');
+        BeamUxEntry::query()->whereKey([$page->id, $page->parent_id])->update(['realm' => 'docs', 'realms' => json_encode(['docs'])]);
+        $this->get('/old-post')->assertNotFound();
+    }
+
+    public function test_a_records_url_change_leaves_a_redirect_from_its_old_url_to_the_record(): void
+    {
+        // ADR-0236 d3 (EP-31 slice 2; ruling 2): when the field a Record Page binds by changes on a Record, the write
+        // signal leaves an exact Redirect from the old URL to the Record by identity, so the old URL keeps reaching it.
+        $this->page();
+        if (! Schema::hasTable('beam_ux_redirects')) {
+            (require __DIR__.'/../database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
+        }
+        // Every Redirect write records an activity row (ADR-0236 Consequences).
+        Schema::create('activity_log', function (Blueprint $table) {
+            $table->id();
+            $table->string('log_name')->nullable()->index();
+            $table->text('description');
+            $table->nullableUuidMorphs('subject', 'subject');
+            $table->string('event')->nullable();
+            $table->nullableUuidMorphs('causer', 'causer');
+            $table->json('attribute_changes')->nullable();
+            $table->json('properties')->nullable();
+            $table->timestamps();
+        });
+        $write = function (array $changes): void {
+            $record = \Splicewire\Beam\Models\BeamParticle::query()->findOrFail('hello');
+            $record->payload = [...$record->payload, ...$changes];
+            $record->save();
+            // The signal ParticleWriter dispatches after every pipeline write.
+            event(new \Splicewire\Beam\Events\BeamParticlePersisted($record, $record->payload, $record->schema_ref));
+        };
+
+        $write(['title' => 'Renamed']);
+        $this->assertSame(0, \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->count(), 'its URL did not change');
+
+        $write(['slug' => 'hello-world']);
+        $row = \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->sole();
+        $this->assertSame(['/posts/hello', 'exact', 'record', 'posts', 'hello', 'record'],
+            [$row->path, $row->match, $row->target_kind, $row->target_collection, $row->target_record_id, $row->origin]);
+        $this->get('/posts/hello')->assertStatus(301)->assertRedirect('/posts/hello-world');
+
+        $write(['slug' => 'hi']);
+        $this->get('/posts/hello')->assertStatus(301)->assertRedirect('/posts/hi');
+        $this->get('/posts/hello-world')->assertStatus(301)->assertRedirect('/posts/hi');
+    }
+
+    public function test_a_records_url_change_on_a_tenant_connection_leaves_its_redirect_there(): void
+    {
+        // Review of 414383c7: entries and their Redirects can live on a tenant connection, so the Record Page is found,
+        // and the Redirect written, on the written Record's own connection, never the default one.
+        config(['database.connections.tenant' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']]);
+        $default = \Illuminate\Support\Facades\DB::getDefaultConnection();
+        \Illuminate\Support\Facades\DB::setDefaultConnection('tenant');
+        try {
+            $this->createTables();
+            Schema::create('beam_particles', function (Blueprint $table) {
+                $table->string('id')->primary();
+                $table->string('schema_ref');
+                $table->string('schema_id');
+                $table->string('source_tier')->default('local');
+                $table->string('migration_status')->default('current');
+                $table->json('payload');
+                $table->json('meta')->nullable();
+                $table->string('head_version')->nullable();
+                $table->timestamps();
+            });
+            (require __DIR__.'/../database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
+            Schema::create('activity_log', function (Blueprint $table) {
+                $table->id();
+                $table->string('log_name')->nullable()->index();
+                $table->text('description');
+                $table->nullableUuidMorphs('subject', 'subject');
+                $table->string('event')->nullable();
+                $table->nullableUuidMorphs('causer', 'causer');
+                $table->json('attribute_changes')->nullable();
+                $table->json('properties')->nullable();
+                $table->timestamps();
+            });
+        } finally {
+            \Illuminate\Support\Facades\DB::setDefaultConnection($default);
+        }
+        $root = tap((new BeamUxEntry)->setConnection('tenant')->forceFill(['id' => (string) \Illuminate\Support\Str::uuid(), 'namespace' => 'realms',
+            'slug' => 'site', 'type' => UxType::Page, 'realm' => 'site', 'realms' => ['site']]))->save();
+        $posts = tap((new BeamUxEntry)->setConnection('tenant')->forceFill(['id' => (string) \Illuminate\Support\Str::uuid(), 'slug' => 'posts',
+            'type' => UxType::Page, 'segment' => 'posts', 'parent_id' => $root->id, 'realm' => 'site', 'realms' => ['site']]))->save();
+        tap((new BeamUxEntry)->setConnection('tenant')->forceFill(['id' => (string) \Illuminate\Support\Str::uuid(), 'slug' => 'post',
+            'type' => UxType::Page, 'segment' => '{slug}', 'parent_id' => $posts->id, 'realm' => 'site', 'realms' => ['site'],
+            'record_page' => ['collection' => 'posts', 'field' => 'slug']]))->save();
+        \Illuminate\Support\Facades\DB::connection('tenant')->table('beam_particles')->insert(['id' => 'tenant-post', 'schema_ref' => 'https://example.test/posts/1',
+            'schema_id' => 'https://example.test/posts/1', 'payload' => json_encode(['slug' => 'old', 'title' => 'Tenant post', 'visible' => true])]);
+
+        $record = \Splicewire\Beam\Models\BeamParticle::on('tenant')->findOrFail('tenant-post');
+        $record->payload = [...$record->payload, 'slug' => 'new'];
+        $record->save();
+        event(new \Splicewire\Beam\Events\BeamParticlePersisted($record, $record->payload, $record->schema_ref));
+
+        $row = \Illuminate\Support\Facades\DB::connection('tenant')->table('beam_ux_redirects')->sole();
+        $this->assertSame(['/posts/old', 'record', 'posts', 'tenant-post'], [$row->path, $row->target_kind, $row->target_collection, $row->target_record_id]);
+        $this->assertFalse(Schema::hasTable('beam_ux_redirects') && \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->exists(),
+            'nothing on the default connection');
+    }
+
+    private function recordRedirect(string $path, string $id): void
+    {
+        if (! Schema::hasTable('beam_ux_redirects')) {
+            (require __DIR__.'/../database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
+        }
+        \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->insert(['id' => (string) \Illuminate\Support\Str::uuid(), 'realm' => 'site',
+            'path' => $path, 'match' => 'exact', 'target_kind' => 'record', 'target_collection' => 'posts', 'target_record_id' => $id,
+            'permanent' => true, 'origin' => 'author', 'created_at' => now(), 'updated_at' => now()]);
+    }
+
     public function test_the_preview_bar_offers_the_records_its_viewer_may_read_to_open_a_record_page_on(): void
     {
         // ADR-0232 d10 (EP-18): a Record Page opens on a Record the viewer picks, from those the preview's viewer may read.

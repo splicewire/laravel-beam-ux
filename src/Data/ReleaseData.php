@@ -44,6 +44,14 @@ final class ReleaseData extends BeamData
         public ?string $previewHref = null,
         /** ADR-0232 d8: whether this reader may turn the Preview Links on or off and rotate them (edit on every member). */
         public bool $canManagePreviewLinks = false,
+        /**
+         * ADR-0236 d2: the Redirects the Release leaves. While it is open, the ones it would leave (no id yet); once
+         * published, the ones it left, each with its id so an unwanted one is removed through the Redirect resource.
+         *
+         * @var list<array{id: ?string, path: string, match: string, to: ?string, origin: string}>
+         */
+        #[\Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType('Array<{ id: string | null; path: string; match: string; to: string | null; origin: string }>')]
+        public array $redirects = [],
     ) {}
 
     public static function scope(Builder $query): Builder
@@ -76,7 +84,26 @@ final class ReleaseData extends BeamData
                 ? app(\Splicewire\Beam\Ux\Preview\ReleasePreviewLinks::class)->url($model) : null,
             self::previewHref($model, $members),
             $manages,
+            self::redirects($model),
         );
+    }
+
+    /** @return list<array{id: ?string, path: string, match: string, to: ?string, origin: string}> */
+    private static function redirects(BeamUxRelease $model): array
+    {
+        if (! \Illuminate\Support\Facades\Schema::connection($model->getConnectionName())->hasTable('beam_ux_redirects')) {
+            return [];
+        }
+        if ($model->status === 'published') {
+            return \Splicewire\Beam\Ux\Models\BeamUxRedirect::on($model->getConnectionName())->where('origin_ref', (string) $model->getKey())
+                ->whereIn('origin', ['release', 'takedown'])->orderBy('path')->get()
+                ->map(fn ($row) => ['id' => (string) $row->getKey(), 'path' => $row->path, 'match' => $row->match,
+                    'to' => RedirectData::project($row)->target, 'origin' => $row->origin])->all();
+        }
+
+        return array_map(fn (array $row) => ['id' => null, 'path' => $row['path'], 'match' => $row['match'], 'to' => $row['to'],
+            'origin' => $row['reason'] === 'takedown' ? 'takedown' : 'release'],
+            app(\Splicewire\Beam\Ux\Redirect\ReleaseRedirects::class)->forRelease($model)['redirects']);
     }
 
     /** @param \Illuminate\Support\Collection<int, \Splicewire\Beam\Ux\Models\BeamUxReleaseMember> $members */

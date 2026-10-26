@@ -86,6 +86,7 @@ class EntryBodyEnvelope
             authoredComponents: JsonDocShape::is($body)
                 ? app(\Splicewire\Beam\Ux\Components\ComponentDelivery::class)->working($entry, $body, app(\Illuminate\Http\Request::class))
                 : [],
+            redirects: $pageSettings !== null ? app(\Splicewire\Beam\Ux\Redirect\RedirectService::class)->leadingTo($entry) : null,
         );
     }
 

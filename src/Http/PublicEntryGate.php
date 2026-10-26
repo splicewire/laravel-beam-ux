@@ -52,10 +52,7 @@ class PublicEntryGate
             return null;
         }
 
-        $target = $chain[array_key_last($chain)];
-
-        if ($this->publish !== null && ! $this->publish->isPublished($target)
-            && ! $preview?->admitsDraft((string) $target->getKey())) {
+        if ($this->hidden($chain, $preview)) {
             return null;
         }
 
@@ -98,8 +95,7 @@ class PublicEntryGate
             return null;
         }
 
-        if ($this->publish !== null && ! $this->publish->isPublished($entry)
-            && ! $preview?->admitsDraft((string) $entry->getKey())) {
+        if ($this->hidden($chain, $preview)) {
             return null;
         }
 
@@ -112,6 +108,27 @@ class PublicEntryGate
         }
 
         return $this->access->canRender($actor, $chain) ? $chain : null;
+    }
+
+    /**
+     * A hidden page hides the pages under it (ADR-0236 d8): the publish gate is tested on every page of the chain, as
+     * the nav and read rights already compose, and a page a Preview admits as a draft passes. Each page keeps its own
+     * marking, so publishing the parent again brings its subtree back as it was.
+     *
+     * @param  array<int, BeamUxEntry>  $chain
+     */
+    public function hidden(array $chain, ?PreviewContext $preview = null): bool
+    {
+        if ($this->publish === null) {
+            return false;
+        }
+        foreach ($chain as $node) {
+            if (! $this->publish->isPublished($node) && ! $preview?->admitsDraft((string) $node->getKey())) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

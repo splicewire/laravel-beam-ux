@@ -221,6 +221,71 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
     }
 
     /** @param array<string, ?string> $members entry id => version, null for a Take-down */
+    public function test_a_previews_redirects_answer_as_the_release_would_leave_them_and_the_bar_names_them(): void
+    {
+        // ADR-0236 d12 (EP-31 slice 3): in a Preview, Redirects answer as the Release would leave them, its moves and its
+        // Take-downs' targets included, always 302 no-store; the bar names each URL it moves or takes down and where it
+        // will go (a Take-down with no target: the uniform 404).
+        (require dirname(__DIR__).'/database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
+        $about = $this->livePage('about');
+        $team = $this->publish(BeamUxEntry::create(['slug' => 'team', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site',
+            'parent_id' => $about->id, 'segment' => 'team']), [$this->node('div')]);
+        $this->livePage('pricing');
+        $legacy = $this->livePage('legacy');
+        $gone = $this->livePage('gone');
+        $settings = \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from([...\Splicewire\Beam\Ux\Data\EntryPageSettingsData::fromEntry($about)->toArray(), 'segment' => 'company']);
+        $release = $this->release([
+            $about->id => app(EntryPublication::class)->recordDraft($about, [$this->node('div')], null, $settings)->headVersion,
+            $legacy->id => null,
+            $gone->id => null,
+        ]);
+        $release->members()->where('entry_id', $legacy->id)->update(['redirect_target' => '/pricing']);
+        $credential = $this->openLink($release);
+        $preview = fn (string $path) => $this->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)->get($path);
+
+        $moved = $preview('/about/team?x=1');
+        $moved->assertStatus(302)->assertRedirect('/company/team?x=1');
+        $this->assertStringContainsString('no-store', (string) $moved->headers->get('Cache-Control'));
+        $preview('/about')->assertStatus(302)->assertRedirect('/company');
+        $preview('/legacy')->assertStatus(302)->assertRedirect('/pricing');
+        $preview('/gone')->assertNotFound();
+        $bar = $preview('/company')->assertOk()->json('props.preview.redirects');
+        $this->unencryptedCookies = [];
+        $this->get('/about')->assertOk();
+        $this->assertSame(0, \Illuminate\Support\Facades\DB::table('beam_ux_redirects')->count(), 'a Preview writes nothing');
+
+        $this->assertSame([
+            ['from' => '/about', 'match' => 'exact', 'to' => '/company', 'reason' => 'moved'],
+            ['from' => '/about/team', 'match' => 'exact', 'to' => '/company/team', 'reason' => 'moved'],
+            ['from' => '/gone', 'match' => 'exact', 'to' => null, 'reason' => 'takedown'],
+            ['from' => '/legacy', 'match' => 'exact', 'to' => '/pricing', 'reason' => 'takedown'],
+        ], collect($bar)->sortBy('from')->values()->all());
+        $this->assertNotNull($team);
+    }
+
+    public function test_a_previews_redirect_to_a_page_only_readers_may_read_answers_its_readers(): void
+    {
+        // Review of 52f2e938: a Take-down's target that only signed-in readers may read is where its Redirect leads.
+        // A guest gets the uniform 404; a viewer who previews as themselves, and may read it, is sent there (d10).
+        (require dirname(__DIR__).'/database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
+        $members = $this->livePage('members');
+        $members->forceFill(['access' => ['auth']])->save();
+        $legacy = $this->livePage('legacy');
+        $release = $this->release([$legacy->id => null]);
+        $release->members()->where('entry_id', $legacy->id)->update(['redirect_target' => $members->id]);
+        $credential = $this->openLink($release);
+
+        $guest = $this->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)->get('/legacy');
+        $guest->assertNotFound();
+        $this->assertSame([['from' => '/legacy', 'match' => 'exact', 'to' => '/members', 'reason' => 'takedown']],
+            $this->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)->get('/')->json('props.preview.redirects'));
+
+        $asMe = $this->actingAs($this->user('reader'))->withUnencryptedCookie(ResolvePreviewContext::COOKIE, $credential)
+            ->withUnencryptedCookie(ResolvePreviewContext::VIEWER_COOKIE, 'me')->get('/legacy');
+        $asMe->assertStatus(302)->assertRedirect('/members');
+        $this->assertStringContainsString('no-store', (string) $asMe->headers->get('Cache-Control'));
+    }
+
     private function release(array $members): BeamUxRelease
     {
         $release = tap((new BeamUxRelease)->forceFill([

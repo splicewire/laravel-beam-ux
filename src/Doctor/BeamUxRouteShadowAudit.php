@@ -139,8 +139,22 @@ class BeamUxRouteShadowAudit implements DoctorAudit
         )];
     }
 
+    /**
+     * What serves a GET of the URL instead of the entry renderer, described, or null when the renderer gets it. The
+     * Redirect audit asks the same of a Redirect's own URL ({@see BeamUxRedirectAudit}).
+     */
+    public function servedInstead(string $url): ?string
+    {
+        $claimant = $this->claimantFor($url);
+        if ($claimant === null) {
+            return "nothing matches: the renderer's `where` constraint excludes it; check `beam.ux.site.reserved_prefixes`";
+        }
+
+        return $this->isRenderer($claimant) ? null : $this->describe($claimant);
+    }
+
     /** Whether the host has mounted the public renderer at all — identified by the macro's route default. */
-    private function rendererMounted(): bool
+    public function rendererMounted(): bool
     {
         foreach ($this->router->getRoutes()->getRoutes() as $route) {
             if ($this->isRenderer($route)) {
