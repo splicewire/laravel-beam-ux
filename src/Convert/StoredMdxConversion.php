@@ -150,16 +150,29 @@ final class StoredMdxConversion
         if ($out['problem'] !== null) {
             return $out;
         }
-        // Its frontmatter, with a static `export const meta` folded in as a file's is, becomes the version's page settings.
+        // Its frontmatter, with a static `export const meta` folded in as a file's is, names page settings for the version.
         [$frontmatter, $out['problem']] = $this->converter->frontmatterWithMeta($frontmatter, $converted['meta'], $converted['metaData']);
-        if ($out['problem'] !== null || $frontmatter === null) {
+        if ($out['problem'] !== null) {
             return $out;
         }
-        $header = MdxPageFile::read("---\n{$frontmatter}\n---\n");
+        // Publish sets every setting from the version, so the version starts from what the page serves now and the header
+        // overrides only the keys it names: a segment, a layout or a description it leaves out stays as it is.
+        $served = MdxPageFile::settingsOf($page);
         try {
-            $out['settings'] = MdxPageFile::settingsFrom($header['fields'], $header['unknown'], $page);
+            if ($frontmatter === null) {
+                $out['settings'] = $served;
+            } else {
+                $header = MdxPageFile::read("---\n{$frontmatter}\n---\n");
+                $named = MdxPageFile::settingsFrom($header['fields'], $header['unknown'], $page);
+                $out['settings'] = EntryPageSettingsData::validateAndCreate([
+                    ...$served->toArray(),
+                    ...array_intersect_key($named->toArray(), $header['fields']),
+                    'fields' => [...$served->fields, ...$named->fields],
+                    'unclaimed' => [...$served->unclaimed, ...$named->unclaimed],
+                ]);
+            }
         } catch (\Illuminate\Validation\ValidationException $refused) {
-            $out['problem'] = 'its frontmatter isn\'t valid page settings: '.collect($refused->errors())->flatten()->first();
+            $out['problem'] = 'its page settings aren\'t valid: '.collect($refused->errors())->flatten()->first();
         }
 
         return $out;

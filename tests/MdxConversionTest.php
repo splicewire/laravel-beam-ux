@@ -81,6 +81,8 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
             [$this->p('Intro.'), $this->content('fragments/legal-engine'), $this->content('fragments/reading-disclaimer')],
             "nav_order: 3\n", ['meta' => "export const meta = { navGroup: 'Company' }", 'metaData' => ['navGroup' => 'Company']]);
         $pinned = $about->published_version;
+        // A setting the page serves from its columns that its frontmatter doesn't name.
+        $about->forceFill(['seo_description' => 'Who we are, briefly.'])->save();
         $this->holdBlocks();
 
         $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
@@ -99,6 +101,8 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->assertSame(['p', 'LegalEngine', 'ReadingDisclaimer'], array_column($body, 'name'), 'published: the blocks, fragments as components');
         $this->assertSame('ReadingDisclaimer', $component->fresh()->getAttribute('published_component_name'));
         $this->assertSame([3, 'Company'], [$published->nav_order, $published->nav_group], 'its settings: the frontmatter, and its static meta folded in as a file\'s is');
+        // Publish sets every setting from the version, so what the header doesn't name stays as the page served it.
+        $this->assertSame(['about', 'Who we are, briefly.', 'About'], [$published->segment, $published->seo_description, $published->title]);
     }
 
     public function test_a_pending_draft_converts_on_top_and_a_page_that_would_change_is_left_out(): void
