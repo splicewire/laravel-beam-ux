@@ -118,7 +118,7 @@ class RegisterEntriesFromDisk
      *
      * @param  list<string>  $only  Exact root-relative files; empty preserves the unfiltered batch.
      * @param  ?string  $expectedPlan  Optional selected dry-run hash; mismatch refuses before writes.
-     * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, ignored: array<int, string>, failed: array<string, string>, unresolved: array<int, string>, recognized: int}
+     * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, reasserted: array<int, string>, filled: array<string, list<string>>, ignored: array<int, string>, failed: array<string, string>, unresolved: array<int, string>, recognized: int}
      */
     public function scan(string $root, ?BeamUxEntry $under = null, ?UxType $default = null, array $ignore = [], ?string $package = null, array $only = [], ?string $expectedPlan = null): array
     {
@@ -139,6 +139,7 @@ class RegisterEntriesFromDisk
         $created = [];
         $skipped = [];
         $reasserted = [];
+        $filled = [];
         $ignored = [];
 
         $unresolved = [];
@@ -147,7 +148,7 @@ class RegisterEntriesFromDisk
         if (! is_dir($root)) {
             $failed = $this->failures;
 
-            return compact('created', 'skipped', 'reasserted', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
+            return compact('created', 'skipped', 'reasserted', 'filled', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
         }
 
         $recognized = [];
@@ -208,7 +209,7 @@ class RegisterEntriesFromDisk
         if ($unresolved !== []) {
             $failed = $this->failures;
 
-            return compact('created', 'skipped', 'reasserted', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
+            return compact('created', 'skipped', 'reasserted', 'filled', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
         }
 
         foreach ($recognized as $index => [$absolute, $relative, $envelope]) {
@@ -239,13 +240,9 @@ class RegisterEntriesFromDisk
                 }
                 // A page registered before its file's settings were read gains them here, but only into columns
                 // that are still empty: a value already there (an author's, or an earlier scan's) is never replaced.
-                $empty = array_filter(
-                    $this->settingColumnsFor($src, $relative, $envelope),
-                    fn (mixed $value, string $column): bool => $existing->getAttribute($column) === null || $existing->getAttribute($column) === '',
-                    ARRAY_FILTER_USE_BOTH,
-                );
-                if ($empty !== []) {
+                if (($empty = $this->emptySettings($existing, $src, $relative, $envelope)) !== []) {
                     $existing->forceFill($empty)->save();
+                    $filled[$relative] = array_keys($empty);
                 }
                 // Born published (ADR-0225 decision 2; launch row qitem-20261016215906-483ede25): a row registered before
                 // entries were pinned is repaired here. baseline() pins only a body with NO history, so an unpublished
@@ -260,7 +257,7 @@ class RegisterEntriesFromDisk
 
         $failed = $this->failures;
 
-        return compact('created', 'skipped', 'reasserted', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
+        return compact('created', 'skipped', 'reasserted', 'filled', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
     }
 
     /**
@@ -618,6 +615,22 @@ class RegisterEntriesFromDisk
      * @param  array{slug: string, type: ?string, namespace: ?string, format: string}  $envelope
      * @return array<string, string>
      */
+    /**
+     * The page settings a rescan fills on an existing page: those its file declares whose column is still empty. A
+     * column that holds a value is never in it.
+     *
+     * @param  array{slug: string, type: ?string, namespace: ?string, format: string}  $envelope
+     * @return array<string, string> column => value
+     */
+    private function emptySettings(BeamUxEntry $existing, string $source, string $relative, array $envelope): array
+    {
+        return array_filter(
+            $this->settingColumnsFor($source, $relative, $envelope),
+            fn (mixed $value, string $column): bool => $existing->getAttribute($column) === null || $existing->getAttribute($column) === '',
+            ARRAY_FILTER_USE_BOTH,
+        );
+    }
+
     protected function settingColumnsFor(string $source, string $relative, array $envelope): array
     {
         if ($envelope['type'] !== UxType::Page->value || $envelope['format'] !== UxFormat::Mdx->value || ! config('beam.ux.mdx.holds_blocks')) {
@@ -876,6 +889,37 @@ class RegisterEntriesFromDisk
 
             return $paths;
         }, $plan);
+    }
+
+    /**
+     * The page settings an unfiltered {@see scan()} of `$root` would fill, without writing: each matched page whose
+     * file declares settings whose columns are still empty, and those columns. The same files, envelopes (the operator's
+     * `$default` type included) and rule as scan(), so `register-from-disk --dry-run` reports what a run will do.
+     *
+     * @return array<string, list<string>> relative path => columns
+     */
+    public function plannedFills(string $root, ?UxType $default = null, array $ignore = []): array
+    {
+        $fills = [];
+        $root = rtrim($root, '/');
+        if (! is_dir($root)) {
+            return $fills;
+        }
+
+        foreach ($this->files($root) as $absolute) {
+            $relative = ltrim(substr($absolute, strlen($root)), '/');
+            $envelope = ! self::ignores($ignore, $relative) && $this->disk->recognizes($relative) ? $this->disk->envelopeForPath($relative) : null;
+            if ($envelope === null || ($existing = $this->existing($envelope)) === null) {
+                continue;
+            }
+            $envelope['type'] ??= $default?->value;
+            if (($empty = $this->emptySettings($existing, (string) file_get_contents($absolute), $relative, $envelope)) !== []) {
+                $fills[$relative] = array_keys($empty);
+            }
+        }
+        ksort($fills);
+
+        return $fills;
     }
 
     /** Selected mode never reasserts, baselines or reparents an existing entry. */

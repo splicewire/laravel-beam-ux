@@ -157,12 +157,17 @@ class RegisterFromDiskCommand extends Command
             $this->components->error("{$relative}: {$reason}");
         }
 
+        foreach ($result['filled'] ?? [] as $relative => $columns) {
+            $this->components->twoColumnDetail($relative, 'filled: '.self::settingNames($columns));
+        }
+
         $this->components->info(sprintf(
-            '%d registered · %d skipped (already present) · %d ignored (not a body format) · %d failed to compile.',
+            '%d registered · %d skipped (already present) · %d ignored (not a body format) · %d failed to compile · %d filled page settings.',
             count($result['created']),
             count($result['skipped']),
             count($result['ignored']),
             count($result['failed'] ?? []),
+            count($result['filled'] ?? []),
         ));
 
         return ($result['failed'] ?? []) === [] ? self::SUCCESS : self::FAILURE;
@@ -179,15 +184,26 @@ class RegisterFromDiskCommand extends Command
         foreach ($plan['unregistered'] as $relative) {
             $this->components->twoColumnDetail($relative, in_array($relative, $plan['unresolved'], true) ? '<fg=red>would refuse: no type</>' : '<fg=yellow>would register</>');
         }
+        $fills = $this->laravel->make(RegisterEntriesFromDisk::class)->plannedFills($path, $type);
+        foreach ($fills as $relative => $columns) {
+            $this->components->twoColumnDetail($relative, '<fg=yellow>would fill: '.self::settingNames($columns).'</>');
+        }
         $this->components->info(sprintf(
-            '%d matched · %d would register · %d ignored (not a body format) · %d without a type. Nothing was written.',
+            '%d matched · %d would register · %d ignored (not a body format) · %d without a type · %d would fill page settings. Nothing was written.',
             count($plan['matched']),
             count($plan['unregistered']),
             count($plan['ignored']),
             count($plan['unresolved']),
+            count($fills),
         ));
 
         return self::SUCCESS;
+    }
+
+    /** @param  list<string>  $columns  `seo_description`, … read as the page settings an author knows (`description`, …). */
+    private static function settingNames(array $columns): string
+    {
+        return implode(', ', array_map(fn (string $column): string => preg_replace('/^seo_/', '', $column), $columns));
     }
 
     /**
