@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Splicewire\Beam\Mdx\Legal\LegalComponentsSeeder;
+use Splicewire\Beam\Mdx\Legal\LegalTexts;
 use Splicewire\Beam\Mdx\Lens\MdxLens;
 use Splicewire\Beam\Mdx\MdxBody;
 use Splicewire\Beam\Ux\Components\AuthoredComponents;
@@ -59,6 +60,9 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         @mkdir($this->root.'/fragments', 0777, true);
         file_put_contents($this->root.'/fragments/reading-disclaimer.mdx', "---\ntitle: Reading disclaimer\n---\n\nRead this first.\n");
         $this->lens->register('Read this first.', [$this->p('Read this first.')]);
+        // The host's copy of a shipped legal text, saying what the shipped component says.
+        file_put_contents($this->root.'/fragments/legal-engine.mdx', "---\ntitle: Platform\n---\n\n".$this->engine()."\n");
+        $this->lens->register($this->engine(), [$this->p($this->engine())]);
         (new LegalComponentsSeeder)->run();
     }
 
@@ -201,6 +205,22 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->assertSame(0, BeamUxEntry::query()->where('realm', 'site')->where('component_name', 'LegalEngine')->count());
     }
 
+    public function test_a_page_whose_fragment_shows_other_text_than_its_component_is_left_out(): void
+    {
+        // Review of 34327e06 (ruling 1): the Release delivers the realm's published LegalEngine, so a copy that drifted from it can't become it.
+        @mkdir($this->root.'/partials', 0777, true);
+        file_put_contents($this->root.'/partials/legal-engine.mdx', "Our platform, our own words.\n");
+        $this->lens->register('Our platform, our own words.', [$this->p('Our platform, our own words.')]);
+        $this->sourcePage('same', 'Same', "<Content name=\"fragments/legal-engine\" />\n", [$this->content('fragments/legal-engine')]);
+        $this->sourcePage('drifted', 'Drifted', "<Content name=\"partials/legal-engine\" />\n", [$this->content('partials/legal-engine')]);
+        $this->holdBlocks();
+
+        $report = app(StoredMdxConversion::class)->convert($this->root, $this->author, write: true);
+
+        $this->assertSame(['same'], $report['pages'], 'the copy that says what the shipped component says converts');
+        $this->assertStringContainsString("doesn't show what partials/legal-engine shows", $report['leftOut']['drifted']);
+    }
+
     public function test_the_command_needs_blocks_on_and_a_dry_run_writes_nothing(): void
     {
         $this->sourcePage('about', 'About', "<Content name=\"fragments/legal-engine\" />\n", [$this->content('fragments/legal-engine')]);
@@ -213,6 +233,11 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
             ->assertExitCode(0);
 
         $this->assertSame(0, BeamUxRelease::query()->count());
+    }
+
+    private function engine(): string
+    {
+        return LegalTexts::all()['legal-engine']['text'];
     }
 
     /** The host turns `holds_blocks` on before it converts: the codecs are chosen afresh, as in the command's own process. */

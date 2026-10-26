@@ -77,29 +77,30 @@ final class StoredMdxConversion
             $plans[] = [$page, $converted, $draft, [...$converted['placed'], ...($draft['placed'] ?? [])]];
         }
 
-        // Each tag a converted page places must resolve as delivery resolves it, in this realm: one published Authored
-        // Component of that name, or one this conversion makes from the host's fragment and puts in the Release.
+        // Each fragment a converted page places must resolve as delivery resolves its tag, in this realm, and show what the
+        // fragment showed: one published Authored Component of that name, or one this conversion makes from the host's
+        // fragment and puts in the Release. Resolved per fragment: two copies of one legal text are each compared.
         $components = [];
         $broken = [];
         $resolved = [];
         foreach ($plans as $plan) {
             foreach ($plan[3] as $fragment => $component) {
-                if (isset($resolved[$component])) {
+                if (isset($resolved[$fragment])) {
                     continue;
                 }
-                $resolved[$component] = true;
+                $resolved[$fragment] = true;
                 $made = $this->resolve($root, $realm, $fragment, $component, $fragments);
                 if (is_string($made)) {
-                    $broken[$component] = $made;
+                    $broken[$fragment] = $made;
                 } elseif ($made !== null) {
                     $components[$component] = $made + ['fragment' => $fragment];
                 }
             }
         }
         $plans = array_values(array_filter($plans, function (array $plan) use ($broken, &$report): bool {
-            foreach ($plan[3] as $component) {
-                if (isset($broken[$component])) {
-                    $report['leftOut'][$plan[0]->slug] = "it places <{$component} />: ".$broken[$component];
+            foreach ($plan[3] as $fragment => $component) {
+                if (isset($broken[$fragment])) {
+                    $report['leftOut'][$plan[0]->slug] = "it places <{$component} />: ".$broken[$fragment];
 
                     return false;
                 }
@@ -186,10 +187,11 @@ final class StoredMdxConversion
     }
 
     /**
-     * How a placed tag resolves in the realm: null when one published Authored Component already answers to it (delivery
-     * finds exactly one, ComponentDelivery::candidates), the component to make from the host's fragment when nothing in
-     * the realm has the name, or why the page can't place it. A same-named component that isn't that one published
-     * answer (a draft, a renamed working copy, two of them) is never shadowed or reused.
+     * How a placed fragment's tag resolves in the realm: null when one published Authored Component already answers to it
+     * (delivery finds exactly one, ComponentDelivery::candidates) and shows the fragment's text, the component to make
+     * from the host's fragment when nothing in the realm has the name, or why the page can't place it. A same-named
+     * component that isn't that one published answer (a draft, a renamed working copy, two of them) is never shadowed or
+     * reused, and one that shows other text (a site's edit, a host copy that drifted) would change the page (ruling 1).
      *
      * @return array{doc: array, title: string}|string|null
      */
@@ -197,8 +199,16 @@ final class StoredMdxConversion
     {
         $named = BeamUxEntry::query()->where('realm', $realm)->where('component_kind', ComponentKind::Authored->value)
             ->where(fn ($q) => $q->where('published_component_name', $component)->orWhere('component_name', $component))->get();
-        if ($named->count() === 1 && $named->first()->getAttribute('published_component_name') === $component && $named->first()->published_version !== null) {
-            return null;
+        $answer = $named->count() === 1 ? $named->first() : null;
+        if ($answer !== null && $answer->getAttribute('published_component_name') === $component && $answer->published_version !== null) {
+            $doc = $this->converter->fragmentDoc($root, $fragments[$fragment]);
+            if (is_string($doc)) {
+                return "the fragment {$fragment}: {$doc}";
+            }
+
+            return MdxFileConverter::visibleText($this->payload($answer, $answer->published_version) ?? []) === MdxFileConverter::visibleText($doc)
+                ? null
+                : "the published <{$component} /> in realm {$realm} doesn't show what {$fragment} shows, so the page would change";
         }
         if ($named->isNotEmpty()) {
             return $named->count() > 1
@@ -208,9 +218,6 @@ final class StoredMdxConversion
         if (MdxFileConverter::isLegal($fragment)) {
             // A legal text ships once, from laravel-beam-mdx (d8): never a host's own copy made from its fragment file.
             return "the shipped legal component isn't published in realm {$realm}: seed laravel-beam-mdx's legal components first";
-        }
-        if (! isset($fragments[$fragment])) {
-            return "no published component in realm {$realm} has that name";
         }
         if (BeamUxEntry::query()->whereNull('namespace')->where('slug', Str::kebab($component))->exists()) {
             return 'an entry already has the slug '.Str::kebab($component).', so the fragment can\'t become a component';
