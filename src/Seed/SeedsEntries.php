@@ -48,29 +48,6 @@ trait SeedsEntries
      * @param  list<array<string, mixed>>  $body
      * @param  array<string, mixed>  $attributes  extra columns (title, realm, …)
      */
-    /**
-     * A shipped MDX page's body as blocks, read through the MDX Lens as the conversion reads a file's (laravel-beam-mdx's
-     * `MdxFileConverter::convertBody()`, with its safety check), or null when it can't be: no Node where the seed runs,
-     * or a body the conversion leaves out (a `<Content>`, which no package page has fragments for). Its frontmatter
-     * stays out of the body; the seeder's attributes are its settings, as when seeding source.
-     *
-     * @return list<array<string, mixed>>|null
-     */
-    private function mdxAsBlocks(string $source): ?array
-    {
-        if (! class_exists(\Splicewire\Beam\Mdx\Convert\MdxFileConverter::class)) {
-            return null;
-        }
-        [, $body] = \Splicewire\Beam\Mdx\Convert\MdxFileConverter::split($source);
-        try {
-            $converted = app(\Splicewire\Beam\Mdx\Convert\MdxFileConverter::class)->convertBody($body, []);
-        } catch (\Throwable) {
-            return null;
-        }
-
-        return $converted['problem'] === null && $converted['meta'] === null ? $converted['doc'] : null;
-    }
-
     protected function seedComponent(
         string $slug,
         array $body,
@@ -118,7 +95,7 @@ trait SeedsEntries
         // ADR-0233 d9, "a package runs it over the pages it ships" (EP-42 S1): on a host whose MDX pages hold blocks, the
         // shipped MDX is seeded converted, so a pristine package page re-asserts as blocks (an edited one is kept, as for
         // any seed). One that can't be converted here is seeded as source below, as before, and the doctor reports it.
-        $blocks = $format === UxFormat::Mdx && config('beam.ux.mdx.holds_blocks') ? $this->mdxAsBlocks($source) : null;
+        $blocks = $format === UxFormat::Mdx ? ShippedMdx::asBlocks($source) : null;
         if ($blocks !== null) {
             return app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->seedBody(
                 ['namespace' => $namespace, 'slug' => $slug],
