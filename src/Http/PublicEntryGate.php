@@ -158,4 +158,17 @@ class PublicEntryGate
 
         return false;
     }
+
+    /**
+     * Whether a guest may read the chain: the renderer's own {@see EntryAccessResolver::canRender()}, asked for no
+     * actor, so the Page Head and the body can never disagree about who reads a page. ADR-0234 d3 composes only a title
+     * and `noindex` for a page a guest can't read. It is a different question from {@see isRestricted()} (caching): a
+     * chain may declare a requirement every guest meets (an installed package) and still be public.
+     *
+     * @param  array<int, BeamUxEntry>  $chain
+     */
+    public function guestCanRead(array $chain): bool
+    {
+        return $this->access->canRender(null, $chain);
+    }
 }

@@ -214,8 +214,9 @@ class PublicEntryController
             // and injects its own.
             'nav' => $withNav ? $this->nav->project($realm, $actor, $preview)->toArray() : null,
             // ADR-0234 d1: the Page Head, rendered once here. Inertia's server head takes these elements as they are, and
-            // the root template prints the same ones on a first load.
-            'head' => $this->head->compose($entry, $url, $restricted, $request, $chain, $record)->elements(),
+            // the root template prints the same ones on a first load. d3 withholds it where a GUEST can't read the page,
+            // decided as this renderer decides it for no actor; $restricted (any declaration) stays the caching question.
+            'head' => $this->head->compose($entry, $url, ! $this->gate->guestCanRead($chain), $request, $chain, $record)->elements(),
             ...(($bar = app(\Splicewire\Beam\Ux\Preview\PreviewBar::class)->for($request, $entry, $defaults)) === null ? [] : ['preview' => $bar]),
             // Props the package owning this page's layout contributes (DOCS-12): none unless one is registered.
             ...$this->pageProps->for($chrome['layout'], $entry, $chain, $actor),

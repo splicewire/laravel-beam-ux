@@ -81,14 +81,15 @@ final class PageHeadComposer
                 $chain = app(\Splicewire\Beam\Ux\Containment\PreviewEntryPathResolver::class)
                     ->chainForEntry((string) $entry->getKey(), (string) $entry->realm, $preview);
 
-                return $this->compose($projected, $request->path(), $chain === null || $this->gate->isRestricted($chain), $request, $chain ?? []);
+                return $this->compose($projected, $request->path(), $chain === null || ! $this->gate->guestCanRead($chain), $request, $chain ?? []);
             }
         }
 
-        // A broken ancestry denies, as it does for the renderer, so it reads as restricted.
+        // A broken ancestry denies, as it does for the renderer, so it reads as restricted. Otherwise the head is withheld
+        // only where a guest can't read the page (d3), by the renderer's own resolver.
         $chain = $this->paths->ancestry($entry);
 
-        return $this->compose($entry, $request->path(), $chain === null || $this->gate->isRestricted($chain), $request, $chain ?? []);
+        return $this->compose($entry, $request->path(), $chain === null || ! $this->gate->guestCanRead($chain), $request, $chain ?? []);
     }
 
     /**
