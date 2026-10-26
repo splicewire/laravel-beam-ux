@@ -130,6 +130,75 @@ class JsonDocPrinterTest extends TestCase
         $this->assertSame('<h2>Title</h2>;', $out);
     }
 
+    public function test_a_space_between_a_text_run_and_an_inline_element_survives_printing(): void
+    {
+        // Found by the EP-27 receipt: each child of a mixed block prints on its own line, and JSX drops whitespace that
+        // touches a line break, so "Read this " before <em> rendered "Read thisfirst". A space a reader sees prints as {" "}.
+        $out = JsonDocPrinter::print([$this->block('p', [$this->text('Read this '), $this->block('em', [$this->text('first')]), $this->text(': nothing here is advice.')])]);
+
+        $this->assertSame("<p>\n  Read this\n  {\" \"}\n  <em>first</em>\n  : nothing here is advice.\n</p>;", $out);
+    }
+
+    public function test_a_leading_space_and_a_space_only_run_print_as_markers_and_layout_whitespace_does_not(): void
+    {
+        $out = JsonDocPrinter::print([$this->block('p', [
+            $this->block('em', [$this->text('a')]), $this->text(' and '), $this->block('em', [$this->text('b')]),
+            $this->text(' '), $this->block('em', [$this->text('c')]), $this->text("\n    "), $this->block('em', [$this->text('d')]),
+        ])]);
+
+        $this->assertSame("<p>\n  <em>a</em>\n  {\" \"}\n  and\n  {\" \"}\n  <em>b</em>\n  {\" \"}\n  <em>c</em>\n  <em>d</em>\n</p>;", $out);
+    }
+
+    public function test_a_text_only_leaf_keeps_the_spaces_a_reader_sees(): void
+    {
+        $this->assertSame('<p>{" "}hi{" "}</p>;', JsonDocPrinter::print([$this->block('p', [$this->text(' hi ')])]));
+        $this->assertSame('<p>a b</p>;', JsonDocPrinter::print([$this->block('p', [$this->text('a '), $this->text('b')])]));
+        $this->assertSame('<p>Title</p>;', JsonDocPrinter::print([$this->block('p', [$this->text("\n  Title\n")])]), 'whitespace that touches a line break is layout');
+    }
+
+    public function test_only_the_whitespace_jsx_trims_is_an_edge_and_a_no_break_or_em_space_is_content(): void
+    {
+        // Review of 4a8701ef / cbc1dd74: one exact set in both printers, the one JSX trims (space, tab, line breaks). A
+        // no-break space (U+00A0) or an em space (U+2003) is text a reader sees as written, kept literally, never a marker.
+        // The JS printer's test asserts the same outputs for the same inputs.
+        $this->assertSame("<p>\u{00A0}hi\u{00A0}</p>;", JsonDocPrinter::print([$this->block('p', [$this->text("\u{00A0}hi\u{00A0}")])]));
+        $this->assertSame("<p>{\" \"}\u{00A0}hi</p>;", JsonDocPrinter::print([$this->block('p', [$this->text(" \u{00A0}hi")])]));
+        $this->assertSame("<p>\n  Read\u{2003}\n  <em>x</em>\n</p>;", JsonDocPrinter::print([$this->block('p', [$this->text("Read\u{2003}"), $this->block('em', [$this->text('x')])])]));
+    }
+
+    public function test_the_spaces_render_and_the_print_is_stable_across_a_parse(): void
+    {
+        $root = getenv('BEAM_UX_JS_ROOT');
+        if (! $root) {
+            $this->markTestSkipped('Set BEAM_UX_JS_ROOT to a Beam JS checkout with beam-ux built, for the cross-runtime proof');
+        }
+        $doc = [
+            $this->block('p', [$this->text('Read this '), $this->block('em', [$this->text('first')]), $this->text(': nothing here is advice.')]),
+            $this->block('p', [$this->block('em', [$this->text('a')]), $this->text(' and '), $this->block('em', [$this->text('b')])]),
+        ];
+        $printed = JsonDocPrinter::print($doc);
+
+        $parsed = (new \Splicewire\Beam\Ux\JsonDoc\NodeTsxLens(workingDirectory: $root))->lower($printed);
+        $this->assertSame($printed, JsonDocPrinter::print($parsed), 'print, parse, print again: the same source');
+
+        $render = new \Symfony\Component\Process\Process(['node', __DIR__.'/Fixtures/render-block-style.mjs'], null, null,
+            json_encode(['root' => $root, 'source' => JsonDocPrinter::printModule($doc), 'compiler' => __DIR__.'/../resources/compile/compile.mjs']));
+        $render->mustRun();
+        $this->assertStringContainsString('Read this <em>first</em>: nothing here is advice.', $render->getOutput());
+        $this->assertStringContainsString('<em>a</em> and <em>b</em>', $render->getOutput());
+    }
+
+    /** @param  list<array<string, mixed>>  $children */
+    private function block(string $name, array $children): array
+    {
+        return ['kind' => 'block', 'name' => $name, 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => $children];
+    }
+
+    private function text(string $value): array
+    {
+        return ['kind' => 'text', 'value' => $value];
+    }
+
     public function test_a_childless_element_prints_self_closing(): void
     {
         $out = JsonDocPrinter::print([
