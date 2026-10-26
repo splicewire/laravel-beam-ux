@@ -384,6 +384,49 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->assertFalse(app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->isPristine($page->fresh()));
     }
 
+    /**
+     * EP-42 GO 46 (the flagship's docs.build.capabilities): a row still holding what its file last asserted, whose file
+     * has since moved on without a re-assert. The conversion converts the STORED body, so the converted body differs
+     * from the file, and the byte-equality re-stamp declined. That left the row's hash naming its old source form, so it
+     * read as edited and a re-assert could never bring the newer file. Converting is a change of form, not an edit, so a
+     * row that was pristine stays pristine over its converted body, and the next re-assert brings the file.
+     */
+    public function test_a_pristine_page_whose_file_moved_on_stays_pristine_and_the_next_reassert_brings_the_file(): void
+    {
+        $page = $this->diskPage('Old words.');
+        $this->lens->register('New words.', [$this->p('New words.')]);
+        file_put_contents($this->root.'/docs/guide.mdx', "---\ntitle: Guide\n---\n\nNew words.\n");
+        $this->holdBlocks();
+
+        $report = $this->convertSignedOut();
+        app(ReleaseService::class)->transition(BeamUxRelease::query()->findOrFail($report['release']), 'publish', $this->author);
+
+        $reasserter = app(\Splicewire\Beam\Ux\Provenance\Reasserter::class);
+        $this->assertSame('Old words.', $this->publishedOf($page)[0]['children'][0]['value'], 'it converts the words it held');
+        $this->assertTrue($reasserter->isPristine($page->fresh()), 'still what its file last asserted, in its new form');
+        $this->assertTrue($reasserter->reassert($page->fresh(), 'Guide', (string) file_get_contents($this->root.'/docs/guide.mdx'), 'disk:docs/guide.mdx', [$this->p('New words.')]));
+        $this->assertSame('New words.', $this->publishedOf($page)[0]['children'][0]['value'], 'and the next re-assert brings the file');
+    }
+
+    /** The same, for a row an author had already edited before the conversion: its words are theirs, and stay. */
+    public function test_a_page_edited_before_the_conversion_stays_diverged_and_keeps_its_words(): void
+    {
+        $page = $this->diskPage('Disk words.');
+        $this->lens->register('Our words.', [$this->p('Our words.')]);
+        $pub = app(EntryPublication::class);
+        $pub->publishVersion($page->fresh(), $pub->recordDraft($page->fresh(), MdxBody::encode("---\ntitle: Guide\n---\n\nOur words.\n"))->headVersion);
+        $this->holdBlocks();
+
+        $report = $this->convertSignedOut();
+        app(ReleaseService::class)->transition(BeamUxRelease::query()->findOrFail($report['release']), 'publish', $this->author);
+
+        $reasserter = app(\Splicewire\Beam\Ux\Provenance\Reasserter::class);
+        $this->assertSame('Our words.', $this->publishedOf($page)[0]['children'][0]['value']);
+        $this->assertFalse($reasserter->isPristine($page->fresh()), 'an author\'s edit is real');
+        $this->assertFalse($reasserter->reassert($page->fresh(), 'Guide', (string) file_get_contents($this->root.'/docs/guide.mdx'), 'disk:docs/guide.mdx', [$this->p('Disk words.')]));
+        $this->assertSame('Our words.', $this->publishedOf($page)[0]['children'][0]['value']);
+    }
+
     /** A host's page registered from `docs/guide.mdx`, and that file as the files half leaves it: its header, then the body. */
     private function diskPage(string $words): BeamUxEntry
     {
