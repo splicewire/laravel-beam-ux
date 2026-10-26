@@ -37,7 +37,7 @@ use Splicewire\Beam\Ux\Type\UxType;
  */
 final class StoredMdxConversion
 {
-    /** The label a conversion records on the version it writes. A restamp recognises the conversion's own versions by it. */
+    /** The label a conversion records on the version it writes, for History. An author can write any label, so never proof. */
     public const CONVERTED = 'converted from MDX source';
 
     public function __construct(
@@ -239,47 +239,58 @@ final class StoredMdxConversion
      * Re-stamp the disk pages a conversion before the carry-through left unstamped (EP-42 GO 46 follow-up, the flagship's
      * docs.build.capabilities). Such a page was pristine, its file had moved on, and the conversion converted the older
      * body it held, but its hash still names that body's source form. So it reads as edited, and a re-assert can never
-     * bring its file. A page is re-stamped over its current body only when both hold:
-     * - the version before its conversion is exactly what its origin asserted;
-     * - every version since is the conversion's own.
-     * Any other disk page that isn't pristine is an edit, and is left as it is. A pristine page isn't touched.
+     * bring its file. A page is re-stamped over its current body only when that body is exactly the conversion of what its
+     * origin asserted: the newest version that hashes to `asserted_hash` is converted again, as the conversion converts,
+     * and the current body must print identical to it, with no draft pending.
+     *
+     * The decision rests on content, never on a version's label: a label is the author's to write (review-r1, 2026-10-26),
+     * so an edit labelled as the conversion is still an edit. A body equal to that conversion holds no authored words to
+     * lose, and that includes an author who edited and then went back to identical text. Any other disk page that isn't
+     * pristine is left as it is, and a pristine page isn't touched.
      *
      * @return array{restamped: list<string>, leftOut: array<string, string>}
      */
-    public function restampConverted(string $realm = BeamUxEntry::REALM_SITE, bool $write = true): array
+    public function restampConverted(string $root, string $realm = BeamUxEntry::REALM_SITE, bool $write = true): array
     {
         $report = ['restamped' => [], 'leftOut' => []];
         $query = BeamUxEntry::query();
         if (! Schema::hasColumn($query->getModel()->getTable(), 'asserted_hash')) {
             return $report;
         }
+        $fragments = MdxFileConverter::fragmentsUnder($root);
         $pages = $query->where('realm', $realm)->where('type', UxType::Page->value)->where('format', 'mdx')
             ->where('origin', 'like', Provenance::DISK_PREFIX.'%')->whereNotNull('asserted_hash')->orderBy('slug')->get();
         foreach ($pages as $page) {
             if ($page->particle === null || $this->reasserter->isPristine($page)) {
                 continue;
             }
-            $history = $this->versions->versions($page->particle)->reverse()->values();
-            $first = $history->search(fn ($version) => $version->label === self::CONVERTED);
-            if ($first === false) {
-                $report['leftOut'][(string) $page->slug] = 'no conversion in its history';
+            if ($this->publication->state($page)->draftPending) {
+                $report['leftOut'][(string) $page->slug] = 'a draft is pending';
 
                 continue;
             }
-            if ($history->slice($first)->contains(fn ($version) => $version->label !== self::CONVERTED)) {
-                $report['leftOut'][(string) $page->slug] = 'edited since its conversion';
+            $asserted = $this->versions->versions($page->particle)->first(fn ($version) => is_array($version->snapshot['payload'] ?? null)
+                && Provenance::hash($page->title, $page->codec()->decode($version->snapshot['payload'])) === (string) $page->asserted_hash);
+            if ($asserted === null) {
+                $report['leftOut'][(string) $page->slug] = 'no version in its history is what its origin asserted';
 
                 continue;
             }
-            $before = $first > 0 ? $history[$first - 1] : null;
-            if ($before === null || Provenance::hash($page->title, $page->codec()->decode($before->snapshot['payload'])) !== (string) $page->asserted_hash) {
-                $report['leftOut'][(string) $page->slug] = 'before its conversion it was not what its origin asserted';
+            $payload = $asserted->snapshot['payload'];
+            $converted = array_is_list($payload) ? ['doc' => $payload, 'problem' => null] : $this->page($page, $payload, $fragments);
+            if ($converted['problem'] !== null) {
+                $report['leftOut'][(string) $page->slug] = 'what its origin asserted no longer converts: '.$converted['problem'];
 
                 continue;
             }
             $current = $this->reasserter->currentBody($page);
             if ($current === null) {
                 $report['leftOut'][(string) $page->slug] = 'its body can\'t be read';
+
+                continue;
+            }
+            if ($current !== $page->codec()->decode($converted['doc'])) {
+                $report['leftOut'][(string) $page->slug] = 'its body is not the conversion of what its origin asserted';
 
                 continue;
             }

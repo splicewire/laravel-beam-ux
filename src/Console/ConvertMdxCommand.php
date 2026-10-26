@@ -34,7 +34,9 @@ class ConvertMdxCommand extends Command
         }
         $dry = (bool) $this->option('dry-run');
         if ($this->option('restamp')) {
-            return $this->restamp($stored, $dry, (string) $this->option('realm'));
+            $root = (string) ($this->option('path') ?: config('beam.mdx.content_path', resource_path('js/content')));
+
+            return $this->restamp($stored, $root, $dry, (string) $this->option('realm'));
         }
         // A dry run rehearses the writes ({@see \Splicewire\Beam\Ux\Convert\Rehearsal}), and a Release records who made it.
         $author = $this->option('author') === null ? null : Auth::getProvider()->retrieveById($this->option('author'));
@@ -97,9 +99,9 @@ class ConvertMdxCommand extends Command
     }
 
     /** `--restamp`: the disk pages a conversion left unstamped, re-stamped so the next re-assert brings their file. */
-    private function restamp(StoredMdxConversion $stored, bool $dry, string $realm): int
+    private function restamp(StoredMdxConversion $stored, string $root, bool $dry, string $realm): int
     {
-        $report = $stored->restampConverted($realm, write: ! $dry);
+        $report = $stored->restampConverted($root, $realm, write: ! $dry);
         $this->info(($dry ? 'Would re-stamp ' : 'Re-stamped ').count($report['restamped']).' page(s) a conversion left unstamped.');
         foreach ($report['restamped'] as $slug) {
             $this->line("  page {$slug}");
