@@ -50,6 +50,8 @@ class EntryLifecycleTest extends TestCase
 
         // The default WriteGate delegates to the Laravel gate (BeamUxEntryTest's precedent).
         Gate::define('create', fn ($user = null) => true);
+        // This mechanism fixture deliberately admits entry creation, including its concrete writer subject.
+        Gate::policy(BeamUxEntry::class, EntryLifecycleTestCreatePolicy::class);
         Gate::define('update', fn ($user = null) => true);
 
         // HasFacets' HasTags concern hooks a `deleted` listener unconditionally (detaches tags);
@@ -369,5 +371,13 @@ class EntryLifecycleTest extends TestCase
                 $table->unique(['tag_id', 'taggable_id', 'taggable_type']);
             });
         }
+    }
+}
+
+class EntryLifecycleTestCreatePolicy
+{
+    public function create($actor = null): bool
+    {
+        return true;
     }
 }

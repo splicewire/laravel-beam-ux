@@ -35,6 +35,8 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
             $table->string('taggable_type');
         });
         \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
+        // This mechanism fixture deliberately admits entry creation, including its concrete writer subject.
+        \Illuminate\Support\Facades\Gate::policy(BeamUxEntry::class, AuthoredComponentReviewTestCreatePolicy::class);
         \Illuminate\Support\Facades\Gate::define('update', fn ($user = null) => true);
     }
 
@@ -660,5 +662,13 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
         }
         $this->assertContains('drop index "beam_ux_component_name_unique"', $sql);
         $this->assertStringNotContainsString('drop constraint', implode(' ', $sql));
+    }
+}
+
+class AuthoredComponentReviewTestCreatePolicy
+{
+    public function create($actor = null): bool
+    {
+        return true;
     }
 }
