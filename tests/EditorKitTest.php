@@ -40,6 +40,31 @@ class EditorKitTest extends TestCase
         $this->assertContains('beam-ux-entries/{id}/preview', $routes);
     }
 
+    public function test_central_redirect_routes_keep_the_0691_route_list(): void
+    {
+        $redirectRoutes = collect(app('router')->getRoutes()->getRoutes())
+            ->filter(fn ($route) => ($route->defaults[\Splicewire\Beam\Http\Particle\ParticleController::RESOURCE] ?? null) === 'beam-ux-redirect'
+                && ! array_key_exists(\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM, $route->defaults))
+            ->map(function ($route): array {
+                $methods = $route->methods();
+                sort($methods);
+
+                return [implode('|', $methods), $route->uri(), $route->getName()];
+            })
+            ->sortBy(fn (array $route) => $route[2])
+            ->values()
+            ->all();
+
+        $this->assertSame([
+            ['DELETE', 'beam-ux-redirects/{id}', 'beam-ux-redirect.destroy'],
+            ['GET|HEAD', 'beam-ux-redirects/hooks/events', 'beam-ux-redirect.hooks.events'],
+            ['GET|HEAD', 'beam-ux-redirects', 'beam-ux-redirect.index'],
+            ['GET|HEAD', 'beam-ux-redirects/{id}', 'beam-ux-redirect.show'],
+            ['POST', 'beam-ux-redirects', 'beam-ux-redirect.store'],
+            ['PATCH|PUT', 'beam-ux-redirects/{id}', 'beam-ux-redirect.update'],
+        ], $redirectRoutes);
+    }
+
     public function test_signed_tenant_preview_opener_is_opt_in_and_site_host_scoped(): void
     {
         \Illuminate\Support\Facades\Route::domain('{tenant}.site.example.test')->group(function (): void {
@@ -99,6 +124,7 @@ class EditorKitTest extends TestCase
         EditorRoutes::mount('tenant/beam-ux-entries', 'tenant/beam-ux-releases', [
             'realm' => 'tenant',
             'abilityOverrides' => ['ux.author' => 'site.edit'],
+            'redirectsUri' => 'tenant/beam-ux-redirects',
         ]);
 
         $routes = app('router')->getRoutes();
@@ -109,6 +135,8 @@ class EditorKitTest extends TestCase
         $tenantReleaseIndex = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.index');
         $tenantReleaseShow = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.show');
         $tenantRelease = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.command');
+        $tenantRedirectIndex = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-redirect.index');
+        $centralRedirectIndex = $allRoutes->first(fn ($route) => $route->getName() === 'beam-ux-redirect.index');
         $tenantPreviewOpen = $allRoutes->first(fn ($route) => $route->getName() === 'tenant.beam-ux-release.preview-open');
         $centralPreviewOpen = $allRoutes->first(fn ($route) => $route->getName() === 'beam-ux-release.preview-open');
         $names = $allRoutes->map(fn ($route) => $route->getName())->filter()->values()->all();
@@ -117,6 +145,16 @@ class EditorKitTest extends TestCase
         $this->assertNotNull($tenantReleaseIndex, 'Registered route names: '.implode(', ', $names));
         $this->assertNotNull($tenantReleaseShow, 'Registered route names: '.implode(', ', $names));
         $this->assertNotNull($tenantRelease, 'Registered route names: '.implode(', ', $names));
+        $this->assertNotNull($tenantRedirectIndex, 'Registered route names: '.implode(', ', $names));
+        $this->assertSame('tenant/beam-ux-redirects', $tenantRedirectIndex->uri());
+        $this->assertSame('tenant', $tenantRedirectIndex->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM]);
+        $this->assertSame(
+            ['ux.author' => 'site.edit'],
+            $tenantRedirectIndex->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::ABILITY_OVERRIDES],
+        );
+        $this->assertNotNull($centralRedirectIndex, 'Central route remains mounted beside the tenant copy.');
+        $this->assertSame('beam-ux-redirects', $centralRedirectIndex->uri());
+        $this->assertArrayNotHasKey(\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM, $centralRedirectIndex->defaults);
         $this->assertNotNull($tenantPreviewOpen, 'The tenant mount alone exposes the short-lived Preview handoff.');
         $this->assertSame('tenant/beam-ux-releases/{id}/preview-open', $tenantPreviewOpen->uri());
         $this->assertNotNull($tenantPreviewOpen->defaults[\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM] ?? null);
