@@ -203,11 +203,13 @@ final class StoredMdxConversion
             return;
         }
         $file = rtrim($root, '/').'/'.substr($origin, strlen(Provenance::DISK_PREFIX));
-        if (! is_file($file)) {
+        // A read that fails is not an empty file (review-r1): nothing read, nothing compared, nothing stamped.
+        $text = is_file($file) && is_readable($file) ? file_get_contents($file) : false;
+        if (! is_string($text)) {
             return;
         }
         $printed = $page->codec()->decode($doc);
-        $body = MdxBody::encode((string) file_get_contents($file))[MdxBody::CONTENT_KEY];
+        $body = MdxBody::encode($text)[MdxBody::CONTENT_KEY];
         if ($printed !== (str_starts_with($body, "\n") ? substr($body, 1) : $body)) {
             return;
         }

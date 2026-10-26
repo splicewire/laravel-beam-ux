@@ -351,6 +351,22 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
         $this->assertFalse(app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->isPristine($page->fresh()), 'the pending draft is the working body');
     }
 
+    public function test_a_disk_page_whose_file_cannot_be_read_is_not_restamped(): void
+    {
+        // review-r1: a read that fails is not an empty file. Byte-equality is the precondition, so nothing read, nothing stamped.
+        $page = $this->diskPage('Disk words.');
+        chmod($this->root.'/docs/guide.mdx', 0);
+        $this->holdBlocks();
+        try {
+            $report = $this->convertSignedOut();
+        } finally {
+            chmod($this->root.'/docs/guide.mdx', 0644);
+        }
+
+        $this->assertSame(['guide'], $report['pages'], 'the page still converts');
+        $this->assertFalse(app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->isPristine($page->fresh()));
+    }
+
     /** A host's page registered from `docs/guide.mdx`, and that file as the files half leaves it: its header, then the body. */
     private function diskPage(string $words): BeamUxEntry
     {
