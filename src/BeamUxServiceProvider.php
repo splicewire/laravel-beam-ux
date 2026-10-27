@@ -36,6 +36,7 @@ use Splicewire\Beam\Ux\Concerns\WiresThemeSchemas;
 use Splicewire\Beam\Ux\Data\BeamUxEntryData;
 use Splicewire\Beam\Ux\Data\MirrorStatusRowData;
 use Splicewire\Beam\Ux\Data\SitemapHealthRowData;
+use Splicewire\Beam\Ux\Data\SiteHealthRowData;
 use Splicewire\Beam\Ux\Database\Seeders\BeamUxSeeder;
 use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
@@ -380,6 +381,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             'beam-ux-entry' => BeamUxEntryData::class,
             'beam-ux-mirror-status' => MirrorStatusRowData::class,
             'beam-ux-sitemap-health' => SitemapHealthRowData::class,
+            'beam-ux-site-health' => SiteHealthRowData::class,
         ] as $key => $data) {
             if (! $registry->has($key)) {
                 $registry->registerDefinition(new FilterResourceDefinition(

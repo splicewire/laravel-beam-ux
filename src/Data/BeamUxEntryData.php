@@ -95,7 +95,18 @@ class BeamUxEntryData extends BeamData
         #[Title('Nav order')]
         #[MapInputName('nav_order'), MapOutputName('navOrder')]
         public ?int $navOrder = null,
+        /** Public page address; null for components and entries outside the site realm. */
+        public ?string $url = null,
     ) {}
+
+    public static function project(BeamUxEntry $model): self
+    {
+        $data = self::from($model);
+        $data->url = $model->type === UxType::Page && $model->isReachableIn(BeamUxEntry::REALM_SITE)
+            ? $model->url() : null;
+
+        return $data;
+    }
 
     /**
      * Entries are a policy-gated catalog of every row on the mounted connection.
