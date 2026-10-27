@@ -6,10 +6,10 @@ use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Theme\ThemeResolver;
 
 /**
- * Theme token JSON Schema source (theme-entries-and-authoring ticket 01). Three namespaced
+ * Theme token JSON Schema source (theme-entries-and-authoring ticket 01). Three built-in namespaced
  * sub-schemas — `canvas`/`shell`/`site`, per the wayfinder resolution: distinct shapes today,
  * namespaced so a host overrides one without touching the others — plus a root `theme` schema
- * that `$ref`-composes all three by bare `$id`. This is the ONLY source of truth; the committed
+ * that `$ref`-composes them and optional tagged namespaces by bare `$id`. This is the ONLY source of truth; the committed
  * package artifacts under {@see self::directory()} are a generated, gitignored projection
  * ({@see BeamUxServiceProvider::registerThemeSchemas()} regenerates them on
  * every boot) — never hand-edit a `.schema.json` file directly.
@@ -47,16 +47,22 @@ class ThemeSchemas
 
     public const ROOT_ID = 'theme';
 
+    public const DOCS_ID = 'theme.docs';
+
+    public const SOURCES = 'beam-ux.theme-namespace-sources';
+
     /** Where the generated, gitignored `FilesystemSchemaRegistry` artifacts for {@see self::all()} live. */
     public static function directory(): string
     {
         return dirname(__DIR__, 2).'/resources/schemas/theme';
     }
 
-    /** @return array<int, array<string, mixed>> all four schemas, in registration order. */
+    /** @return array<int, array<string, mixed>> Built-in and contributed schemas, followed by their composed root. */
     public static function all(): array
     {
-        return [self::canvas(), self::shell(), self::site(), self::root()];
+        $namespaces = self::namespaces();
+
+        return [...$namespaces, self::root($namespaces)];
     }
 
     /** @return array<string, mixed> */
@@ -145,19 +151,150 @@ class ThemeSchemas
         ];
     }
 
-    /** @return array<string, mixed> */
-    public static function root(): array
+    /** @return list<array<string, mixed>> Built-ins plus optional, typed capability contributions. */
+    public static function namespaces(): array
     {
+        $schemas = [self::canvas(), self::shell(), self::site()];
+        $ids = array_column($schemas, '$id');
+        foreach (function_exists('app') ? app()->tagged(self::SOURCES) : [] as $source) {
+            if (! $source instanceof ThemeNamespaceSource) {
+                throw new \InvalidArgumentException('Theme namespace sources must implement '.ThemeNamespaceSource::class);
+            }
+            $schema = $source->schema();
+            $id = $schema['$id'] ?? null;
+            if (! is_string($id) || ! preg_match('/^theme\.[a-z][a-z0-9_-]*$/D', $id) || in_array($id, $ids, true)) {
+                throw new \InvalidArgumentException('Theme namespace sources must declare a distinct theme.<namespace> id.');
+            }
+            $schemas[] = $schema;
+            $ids[] = $id;
+        }
+
+        return $schemas;
+    }
+
+    /**
+     * Optional docs palette. The docs capability registers it; generic UX does not enable it itself.
+     * Defaults mirror beam-ux tokens.css, with flat dark siblings for the CSS codec round trip.
+     *
+     * @return array<string, mixed>
+     */
+    public static function docs(): array
+    {
+        $defaults = [
+            'paper' => '#eef1ee',
+            'paperRaised' => '#ffffff',
+            'muted' => '#e6eae5',
+            'ink' => '#2e2c26',
+            'inkMuted' => 'rgba(17, 32, 26, 0.5)',
+            'ink18' => 'rgba(17, 32, 26, 0.18)',
+            'line' => '#e3e6e2',
+            'green' => '#14803f',
+            'greenDeep' => '#0f5f2e',
+            'greenTint' => '#eaf6ee',
+            'signal' => '#35d07a',
+            'signal13' => 'rgba(53, 208, 122, 0.13)',
+            'signal18' => 'rgba(53, 208, 122, 0.18)',
+            'warn' => '#e8a13a',
+            'warnDeep' => '#9a6608',
+            'warnTint' => '#fdf3e3',
+            'amber' => '#d97706',
+            'info' => '#2b63a7',
+            'infoTint' => '#e8eff8',
+            'danger' => '#a3271b',
+            'dangerTint' => '#f8e9e7',
+            'rail' => '#11201a',
+            'railDeep' => '#0d1a14',
+            'railFg' => 'rgba(207, 233, 216, 0.6)',
+            'railActive' => '#eaf6ee',
+            'railAvatar' => '#1d3527',
+            'ink03' => 'rgba(17, 32, 26, 0.03)',
+            'ink04' => 'rgba(17, 32, 26, 0.04)',
+            'ink05' => 'rgba(17, 32, 26, 0.05)',
+            'ink08' => 'rgba(17, 32, 26, 0.08)',
+            'ink10' => 'rgba(17, 32, 26, 0.1)',
+            'ink12' => 'rgba(17, 32, 26, 0.12)',
+            'ink15' => 'rgba(17, 32, 26, 0.15)',
+            'ink20' => 'rgba(17, 32, 26, 0.2)',
+            'ink22' => 'rgba(17, 32, 26, 0.22)',
+            'ink30' => 'rgba(17, 32, 26, 0.3)',
+            'ink35' => 'rgba(17, 32, 26, 0.35)',
+            'ink40' => 'rgba(17, 32, 26, 0.4)',
+            'ink45' => 'rgba(17, 32, 26, 0.45)',
+            'ink50' => 'rgba(17, 32, 26, 0.5)',
+            'ink55' => 'rgba(17, 32, 26, 0.55)',
+            'ink60' => 'rgba(17, 32, 26, 0.6)',
+            'ink70' => 'rgba(17, 32, 26, 0.7)',
+            'ink80' => 'rgba(17, 32, 26, 0.8)',
+            'darkPaper' => 'oklch(0.2 0.02 165)',
+            'darkPaperRaised' => 'oklch(0.24 0.022 165)',
+            'darkMuted' => 'oklch(0.28 0.02 165)',
+            'darkInk' => 'oklch(0.93 0.015 160)',
+            'darkInkMuted' => 'oklch(0.93 0.015 160 / 0.6)',
+            'darkInk18' => 'oklch(0.93 0.015 160 / 0.18)',
+            'darkLine' => 'oklch(0.32 0.02 165)',
+            'darkGreen' => 'oklch(0.78 0.17 155)',
+            'darkGreenDeep' => 'oklch(0.82 0.15 155)',
+            'darkGreenTint' => 'oklch(0.78 0.17 155 / 0.16)',
+            'darkSignal' => 'oklch(0.78 0.17 155)',
+            'darkSignal13' => 'oklch(0.78 0.17 155 / 0.16)',
+            'darkSignal18' => 'oklch(0.78 0.17 155 / 0.22)',
+            'darkWarn' => 'oklch(0.8 0.14 75)',
+            'darkWarnDeep' => 'oklch(0.82 0.13 78)',
+            'darkWarnTint' => 'oklch(0.8 0.14 75 / 0.16)',
+            'darkAmber' => 'oklch(0.8 0.14 75)',
+            'darkInfo' => 'oklch(0.72 0.13 245)',
+            'darkInfoTint' => 'oklch(0.72 0.13 245 / 0.16)',
+            'darkDanger' => 'oklch(0.72 0.18 25)',
+            'darkDangerTint' => 'oklch(0.72 0.18 25 / 0.16)',
+            'darkRail' => 'oklch(0.17 0.02 165)',
+            'darkRailDeep' => 'oklch(0.14 0.02 165)',
+            'darkRailFg' => 'oklch(0.72 0.03 160)',
+            'darkRailActive' => 'oklch(0.95 0.015 160)',
+            'darkRailAvatar' => 'oklch(0.28 0.03 160)',
+            'darkInk03' => 'oklch(0.93 0.015 160 / 0.03)',
+            'darkInk04' => 'oklch(0.93 0.015 160 / 0.04)',
+            'darkInk05' => 'oklch(0.93 0.015 160 / 0.05)',
+            'darkInk08' => 'oklch(0.93 0.015 160 / 0.08)',
+            'darkInk10' => 'oklch(0.93 0.015 160 / 0.1)',
+            'darkInk12' => 'oklch(0.93 0.015 160 / 0.12)',
+            'darkInk15' => 'oklch(0.93 0.015 160 / 0.15)',
+            'darkInk20' => 'oklch(0.93 0.015 160 / 0.2)',
+            'darkInk22' => 'oklch(0.93 0.015 160 / 0.22)',
+            'darkInk30' => 'oklch(0.93 0.015 160 / 0.3)',
+            'darkInk35' => 'oklch(0.93 0.015 160 / 0.35)',
+            'darkInk40' => 'oklch(0.93 0.015 160 / 0.4)',
+            'darkInk45' => 'oklch(0.93 0.015 160 / 0.45)',
+            'darkInk50' => 'oklch(0.93 0.015 160 / 0.5)',
+            'darkInk55' => 'oklch(0.93 0.015 160 / 0.55)',
+            'darkInk60' => 'oklch(0.93 0.015 160 / 0.6)',
+            'darkInk70' => 'oklch(0.93 0.015 160 / 0.7)',
+            'darkInk80' => 'oklch(0.93 0.015 160 / 0.8)',
+        ];
+        $properties = [];
+        foreach ($defaults as $key => $default) {
+            $properties[$key] = self::color('Docs '.$key.' token.', $default);
+        }
+        // tokens.css intentionally leaves brand fonts to the host; inherit preserves that default.
+        $properties['fontSans'] = self::font('Docs body font family.', 'inherit');
+        $properties['fontMono'] = self::font('Docs code font family.', 'ui-monospace, monospace');
+
+        return ['$id' => self::DOCS_ID, 'type' => 'object', 'title' => 'Docs theme', 'additionalProperties' => false, 'properties' => $properties];
+    }
+
+    /** @return array<string, mixed> */
+    public static function root(?array $namespaces = null): array
+    {
+        $properties = [];
+        foreach ($namespaces ?? self::namespaces() as $schema) {
+            $properties[substr($schema['$id'], strlen('theme.'))] = ['$ref' => $schema['$id']];
+        }
+
         return [
             '$id' => self::ROOT_ID,
             'type' => 'object',
             'title' => 'Theme',
             'description' => 'The composed theme entry body — one namespace per surface-agnostic token group.',
-            'properties' => [
-                'canvas' => ['$ref' => self::CANVAS_ID],
-                'shell' => ['$ref' => self::SHELL_ID],
-                'site' => ['$ref' => self::SITE_ID],
-            ],
+            'properties' => $properties,
         ];
     }
 

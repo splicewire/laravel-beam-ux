@@ -12,7 +12,7 @@ use Splicewire\Beam\Ux\Schema\ThemeSchemas;
 use Throwable;
 
 /**
- * Computes the fully-resolved `{canvas, shell, site}` theme object per request (theme-entries-and-
+ * Computes the fully-resolved built-in and contributed theme namespaces per request (theme-entries-and-
  * authoring ticket 02): package default (ticket 01's {@see ThemeSchemas} `default` values) → central
  * `beam_ux_entries` theme row → tenant `beam_ux_entries` theme row (if one exists), deep-merged at the
  * per-token level, later tier wins. A host calls `resolve()` from its `HandleInertiaRequests::share()`
@@ -95,9 +95,9 @@ class ThemeResolver
      *                              no theme row of its own) is a pure no-op — identical to calling this
      *                              with no argument at all.
      * @param  bool  $includeCentral  Whether central theme entries participate. Hosted tenant sites
-     *                               pass false so a tenant's public theme never inherits operator-owned
-     *                               central styling; app hosts retain the historical cascade.
-     * @return array{canvas: array<string, mixed>, shell: array<string, mixed>, site: array<string, mixed>}
+     *                                pass false so a tenant's public theme never inherits operator-owned
+     *                                central styling; app hosts retain the historical cascade.
+     * @return array<string, array<string, mixed>>
      */
     public function resolve(?string $realm = null, ?PreviewContext $preview = null, bool $includeCentral = true): array
     {
@@ -174,15 +174,16 @@ class ThemeResolver
      * "package default" tier. This is also what `resolve()` falls back to on ANY failure — reported
      * or silent, see the class docblock.
      *
-     * @return array{canvas: array<string, mixed>, shell: array<string, mixed>, site: array<string, mixed>}
+     * @return array<string, array<string, mixed>>
      */
     public function defaults(): array
     {
-        return [
-            'canvas' => $this->schemaDefaults(ThemeSchemas::canvas()),
-            'shell' => $this->schemaDefaults(ThemeSchemas::shell()),
-            'site' => $this->schemaDefaults(ThemeSchemas::site()),
-        ];
+        $defaults = [];
+        foreach (ThemeSchemas::namespaces() as $schema) {
+            $defaults[substr($schema['$id'], strlen('theme.'))] = $this->schemaDefaults($schema);
+        }
+
+        return $defaults;
     }
 
     /**

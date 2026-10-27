@@ -82,6 +82,7 @@ class PublicEntryRendererTest extends TestCase
         $this->assertSame('site/entry', $response->json('page'));
         $this->assertSame('docs-api', $response->json('props.entry.slug'));
         $this->assertSame('/docs/api', $response->json('props.entry.url'));
+        $this->assertSame('#FFFFFF', $response->json('props.theme.site.background'));
     }
 
     public function test_the_entry_props_carry_its_declared_body_kind_which_chooses_the_editor(): void
@@ -407,7 +408,7 @@ class PublicEntryRendererTest extends TestCase
         $root = BeamUxEntry::rootFor();
         $this->page('docs', ['segment' => 'docs', 'parent_id' => $root->getKey(), 'layout' => 'DocsLayout']);
 
-        $this->assertSame(['entry', 'artifact', 'chrome', 'nav', 'head'], array_keys($this->get('/docs')->json('props')));
+        $this->assertSame(['theme', 'entry', 'artifact', 'chrome', 'nav', 'head'], array_keys($this->get('/docs')->json('props')));
     }
 
     public function test_a_chrome_name_that_is_not_a_nestable_entry_carries_no_address(): void

@@ -178,6 +178,7 @@ class PublicEntryController
             // EP-07d: the schema each published form renders, for the public intake keys this host's door accepts only.
             ...app(\Splicewire\Beam\Ux\Intake\IntakeForms::class)->pagePropsFor($entry),
             ...($record === null ? [] : ['record' => $record]),
+            'theme' => $theme,
             'entry' => [
                 'id' => (string) $entry->getKey(),
                 'slug' => (string) $entry->slug,

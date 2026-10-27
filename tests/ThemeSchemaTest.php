@@ -201,4 +201,24 @@ class ThemeSchemaTest extends TestCase
         $this->assertSame(ThemeSchemas::SHELL_ID, $registry->get(ThemeSchemas::SHELL_ID)['$id']);
         $this->assertArrayNotHasKey('x-marker', $registry->get(ThemeSchemas::SHELL_ID));
     }
+
+    public function test_docs_theme_is_an_additive_tagged_namespace_with_native_defaults(): void
+    {
+        $this->assertArrayNotHasKey('docs', ThemeSchemas::root()['properties']);
+        $source = new class implements \Splicewire\Beam\Ux\Schema\ThemeNamespaceSource
+        {
+            public function schema(): array
+            {
+                return ThemeSchemas::docs();
+            }
+        };
+        $this->app->instance('test.docs-theme-source', $source);
+        $this->app->tag(['test.docs-theme-source'], ThemeSchemas::SOURCES);
+        $this->assertContains('theme.docs', array_column(ThemeSchemas::all(), '$id'));
+        $this->assertSame(['$ref' => 'theme.docs'], ThemeSchemas::root()['properties']['docs']);
+        $docs = app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->defaults()['docs'];
+        $this->assertSame('#eef1ee', $docs['paper']);
+        $this->assertSame('oklch(0.2 0.02 165)', $docs['darkPaper']);
+        $this->assertSame('ui-monospace, monospace', $docs['fontMono']);
+    }
 }
