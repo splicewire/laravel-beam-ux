@@ -55,6 +55,6 @@ trait HasFacets
      */
     public function silos(): MorphToMany
     {
-        return $this->morphToMany(static::siloModel(), 'siloable');
+        return $this->morphToMany(static::siloModel(), 'siloable', config('beam.taxonomy.tables.siloables', 'siloables'));
     }
 }

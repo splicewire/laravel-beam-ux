@@ -58,6 +58,31 @@ class TaxonomyFacetsTest extends TestCase
         $this->assertFalse(Schema::hasColumn('beam_ux_entries', 'tag_id'));
     }
 
+    public static function siloPivotTables(): array
+    {
+        return [
+            'default pivot' => [null, 'siloables'],
+            'custom pivot' => ['beam_siloables', 'beam_siloables'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('siloPivotTables')]
+    public function test_silos_attach_read_and_detach_through_the_selected_pivot(?string $configured, string $pivot): void
+    {
+        if ($configured !== null) {
+            Schema::rename('siloables', $pivot);
+            config()->set('beam.taxonomy.tables.siloables', $configured);
+        }
+
+        $entry = BeamUxEntry::create(['slug' => 'classified', 'type' => UxType::Page, 'segment' => '/classified']);
+        $silo = FixtureSilo::create(['name' => 'Docs', 'slug' => 'docs']);
+        $this->assertSame($pivot, $entry->silos()->getTable());
+        $entry->silos()->attach($silo->id);
+        $this->assertSame([$silo->id], $entry->fresh()->silos->modelKeys());
+        $entry->silos()->detach($silo->id);
+        $this->assertCount(0, $entry->fresh()->silos);
+    }
+
     public function test_facets_never_change_the_route(): void
     {
         $resolver = $this->app->make(UrlResolver::class);
