@@ -32,7 +32,7 @@ final class EntryPageSettingsInputData extends BeamData
         public array $fields = [],
         /** @var array<string, string> */
         public array $unclaimed = [],
-        public ?RecordPageData $recordPage = null,
+        public ?RecordPageInputData $recordPage = null,
     ) {}
 
     /** @return array<string, array<int, string>> */
@@ -59,7 +59,7 @@ final class EntryPageSettingsInputData extends BeamData
             childFields: $this->childFields,
             fields: $this->fields,
             unclaimed: $this->unclaimed,
-            recordPage: $this->recordPage,
+            recordPage: $this->recordPage?->toRecordPageData(),
         );
     }
 }
