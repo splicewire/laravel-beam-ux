@@ -293,6 +293,11 @@ return [
         'binary' => env('BEAM_UX_NODE_BINARY', 'node'),
         'script' => env('BEAM_UX_COMPILE_SCRIPT'),
         'timeout' => env('BEAM_UX_COMPILE_TIMEOUT', 60),
+        // Compile-time token colours; null langs allows every bundled language, [] forces plain text.
+        'highlight' => [
+            'themes' => ['light' => 'github-light', 'dark' => 'github-dark'],
+            'langs' => null,
+        ],
     ],
 
     /*

@@ -237,13 +237,92 @@ const holdsTable = (source) => {
   return false
 }
 
-const compileMdx = async (source, slug, root, warnings) => {
+/** Optional highlighting belongs to the host toolchain, with beam-mdx's declared dependency as fallback. */
+const optionalHighlighting = async (root) => {
+  const require = createRequire(join(root, 'package.json'))
+  const bases = [join(root, 'package.json')]
+  const beamMdx = (require.resolve.paths('@splicewire/beam-mdx') ?? [])
+    .map((dir) => join(dir, '@splicewire', 'beam-mdx', 'package.json'))
+    .find((path) => existsSync(path))
+  if (beamMdx) bases.push(realpathSync(beamMdx))
+  for (const base of bases) {
+    try {
+      const candidate = await import(pathToFileURL(createRequire(base).resolve('shiki')).href)
+      if (typeof candidate.codeToHast === 'function' && Array.isArray(candidate.bundledLanguagesInfo)
+          && candidate.bundledLanguagesInfo.every((info) => info !== null && typeof info === 'object'
+            && typeof info.id === 'string' && (info.aliases == null || (Array.isArray(info.aliases)
+              && info.aliases.every((alias) => typeof alias === 'string'))))) return candidate
+      // An importable but incompatible host package must not prevent the declared fallback.
+
+    } catch {
+      // A host may omit highlighting; compilation still succeeds with an explicit warning.
+    }
+  }
+  return null
+}
+
+const highlightFences = (root, options, warnings) => () => async (tree) => {
+  const fences = []
+  const walk = (node) => {
+    if (node.type === 'element' && node.tagName === 'pre') {
+      const code = node.children?.find((child) => child.type === 'element' && child.tagName === 'code')
+      const language = code?.properties?.className?.find((name) => name.startsWith('language-'))?.slice(9)
+      if (language && !['text', 'txt', 'plain', 'plaintext'].includes(language.toLowerCase())) fences.push({ pre: node, code, language })
+    }
+    for (const child of node.children ?? []) walk(child)
+  }
+  walk(tree)
+  if (fences.length === 0 || (Array.isArray(options?.langs) && options.langs.length === 0)) return
+  const warn = (message, pre) => warnings.push({
+    rule: 'highlight-unavailable', line: pre.position?.start?.line ?? 1,
+    message: `Syntax highlighting unavailable: ${message}. The code block is kept as plain text.`,
+  })
+  let shiki
+  try {
+    shiki = await optionalHighlighting(root)
+  } catch {
+    warn('the optional highlighter could not be resolved', fences[0].pre)
+    return
+  }
+  if (shiki === null) {
+    warn('neither the host nor @splicewire/beam-mdx provides a compatible shiki API', fences[0].pre)
+    return
+  }
+  const themes = options?.themes ?? { light: 'github-light', dark: 'github-dark' }
+  const langs = options?.langs
+  if (typeof themes?.light !== 'string' || typeof themes?.dark !== 'string'
+      || (langs != null && (!Array.isArray(langs) || langs.some((lang) => typeof lang !== 'string')))) {
+    warn('highlight themes must name light/dark themes and langs must be a list', fences[0].pre)
+    return
+  }
+  const canonical = (lang) => shiki.bundledLanguagesInfo.find((info) => info.id === lang || info.aliases?.includes(lang))?.id
+  for (const { pre, code, language } of fences) {
+    try {
+      const known = canonical(language)
+      const lang = known && (langs == null || langs.some((allowed) => canonical(allowed) === known)) ? known : 'text'
+      const text = code.children.filter((child) => child.type === 'text').map((child) => child.value).join('')
+      const highlighted = await shiki.codeToHast(text, { lang, themes, defaultColor: false })
+      const replacement = highlighted.children.find((node) => node.type === 'element' && node.tagName === 'pre')
+      const replacementCode = replacement?.children.find((node) => node.type === 'element' && node.tagName === 'code')
+      if (!replacement || !replacementCode) throw new Error('the highlighter returned no code block')
+      // Keep the caller's language class and metadata; only Shiki's text/token tree replaces the body.
+      replacementCode.properties = { ...replacementCode.properties, ...code.properties }
+      pre.properties = { ...pre.properties, ...replacement.properties }
+      pre.children = replacement.children
+    } catch (error) {
+      warn(error instanceof Error ? error.message : 'the installed highlighter failed', pre)
+    }
+  }
+}
+
+const compileMdx = async (source, slug, root, warnings, highlight) => {
   const { compile } = await load('@mdx-js/mdx', root)
 
   const tables = await gfmTables(root, source, warnings)
 
   const compiled = await compile(stripFrontmatter(source), {
     remarkPlugins: [...(tables ? [tables] : []), stripCommentExpressions, warnHardWrappedLists(warnings)],
+    rehypePlugins: [highlightFences(root, highlight, warnings)],
     jsx: false,
     jsxRuntime: 'automatic',
     jsxImportSource: 'react',
@@ -315,7 +394,7 @@ const main = async () => {
   const warnings = []
   try {
     if (format === 'mdx') {
-      code = await compileMdx(source, slug, root, warnings)
+      code = await compileMdx(source, slug, root, warnings, input.highlight)
     } else if (format === 'tsx') {
       code = await compileTsx(source, slug, root)
     } else {

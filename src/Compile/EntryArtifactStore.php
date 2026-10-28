@@ -69,8 +69,10 @@ class EntryArtifactStore
      *
      * 4: MDX compiles GFM tables, as the MDX Lens reads them (EP-42 H2, 2026-10-26). Every artifact compiled before it
      * holds a table as a paragraph of raw pipes, and keeping its address would keep serving that.
+     * 5: fenced-code Shiki tokens carry dual-theme variables (owner-review B14); old plain-code artifacts
+     * must not retain an address whose output now includes highlighting.
      */
-    private const GENERATION = '4';
+    private const GENERATION = '5';
 
     /**
      * The version key an artifact is stamped with. Short, opaque, and stable for an UNWRITTEN row

@@ -64,6 +64,22 @@ page beneath it. Customise what a fresh install seeds with
 `vendor:publish --tag=beam-ux-docs`; **re-root** an existing one by editing the docs entry's `segment`
 — the row is yours from the moment it exists, and re-seeding never clobbers it.
 
+### Fenced code highlighting
+
+MDX fenced code with a language uses Shiki at compile time. The worker resolves it from the
+host first, then from `@splicewire/beam-mdx` (which declares it). Missing Shiki or an invalid
+highlight configuration reports `highlight-unavailable` and keeps plain code; publishing still
+works. Unknown languages use plain text. Inline code is unchanged.
+
+Set `beam.ux.compile.highlight.themes` to light/dark Shiki theme names (defaults `github-light`
+and `github-dark`). Set `langs` to a language/alias allowlist; `null` permits bundled languages,
+while `[]` keeps all fenced code plain. Token spans carry both `--shiki-light` and
+`--shiki-dark`; beam-mdx's prose/kit CSS selects the host's current theme. Highlighting does not
+run in the browser. See [Shiki's dual-theme options](https://shiki.style/guide/dual-themes).
+
+Generation 5 requires recompiling previously stored artifacts through the owning host's normal
+compile command; rollout and per-host `compile --missing` belong to the launch GO.
+
 ## Raw-MDX reader (`Splicewire\Beam\Ux\Disk\RawMdxReader`)
 
 Reads the RAW, frontmatter-stripped source of a disk-authored `.mdx` content file, server-side.

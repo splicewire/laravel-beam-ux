@@ -62,6 +62,7 @@ class NodeEntryBodyCompiler implements EntryBodyCompiler
                 'format' => $entry->format?->value,
                 'slug' => (string) $entry->slug,
                 'source' => $source,
+                'highlight' => config('beam.ux.compile.highlight', []),
                 // The host root, passed explicitly because PHP is the only side that knows it. Node
                 // resolves bare specifiers from the importing module's REAL path, and `compile.mjs`
                 // lives in this package — which reaches the host's node_modules only when the package
