@@ -3743,8 +3743,8 @@ class EntryPublicationTest extends TestCase
 
         $this->assertNull($entry->fresh()->getAttribute('published_version'));
 
-        // The compiler generation prefixes the key: 4 since MDX compiles GFM tables (EP-42 H2, 2026-10-26).
-        $expected = substr(hash('xxh128', '4:'.$entry->fresh()->particle->getAttribute('updated_at')->format('U.u')), 0, 16);
+        // Generation 5 recompiles fenced code with dual-theme Shiki tokens (owner-review B14).
+        $expected = substr(hash('xxh128', '5:'.$entry->fresh()->particle->getAttribute('updated_at')->format('U.u')), 0, 16);
         $this->assertSame($expected, $this->artifacts()->version($entry->fresh()));
     }
 
