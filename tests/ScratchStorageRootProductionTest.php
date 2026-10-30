@@ -22,5 +22,6 @@ class ScratchStorageRootProductionTest extends TestCase
         $this->assertNotSame('beam-scratch', config('beam.ux.storage.disk'));
         $this->assertNotSame('beam-scratch', config('beam.ux.compile.disk'));
         $this->assertNull(config('filesystems.disks.beam-scratch'));
+        $this->assertSame(storage_path('app/beam-ux/theme-schemas'), \Splicewire\Beam\Ux\Schema\ThemeSchemas::directory());
     }
 }

@@ -67,7 +67,7 @@ class ThemeSchemas
      */
     public static function directory(): string
     {
-        $root = ScratchStorageRoot::resolve(! app()->isProduction());
+        $root = app()->isProduction() ? null : ScratchStorageRoot::resolve();
         $base = $root ?? storage_path('app');
 
         return $base.'/beam-ux/theme-schemas';
