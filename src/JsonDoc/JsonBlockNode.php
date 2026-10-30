@@ -53,6 +53,8 @@ class JsonBlockNode extends JsonNode
         public ?\Splicewire\Beam\Ux\Bindings\RepeatData $repeat = null,
         #[Optional]
         public ?\Splicewire\Beam\Ux\Bindings\ConditionData $when = null,
+        #[Optional]
+        public ?\Splicewire\Beam\Ux\Analytics\ClickEventData $clickEvent = null,
         /** @var array<string, list<JsonNode>> */
         #[LiteralTypeScriptType('Record<string, JsonNode[]>')]
         #[Optional]

@@ -90,6 +90,9 @@ final class ManifestProfileResolver
             'x-prose' => $base['x-prose'],
             'x-admits-code' => $this->residency->isCentralResident($entry),
             ...(($collections = app(\Splicewire\Beam\Ux\Bindings\ProfileCollections::class)->manifest($entry, $profile)) === [] ? [] : ['x-collections' => $collections]),
+            // ADR-0234 d14: the Event Vocabulary a block's Click Event names from (the package's GA4 names and the host's;
+            // tenant-added names are deferred, ADR-0237 d8). Always present: the package's names are always declared.
+            'x-events' => app(\Splicewire\Beam\Analytics\Events\EventVocabulary::class)->all(),
         ]);
     }
 

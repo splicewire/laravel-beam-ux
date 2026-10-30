@@ -71,6 +71,7 @@ final class CanvasBodyGuard
         [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $body, $profile);
         app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->assertGraph($entry, $body, profile: $profile);
         app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $body, $profile);
+        app(\Splicewire\Beam\Ux\Analytics\ClickEventGuard::class)->assert($body, $profile);
         $checkIds = $this->diff->changedIds($this->workingHead($entry), $body);
 
         $this->legality->assert($body, $profile, $checkIds, $component);
@@ -132,6 +133,7 @@ final class CanvasBodyGuard
         [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $working, $profile);
         app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->assertGraph($entry, $working, publishing: true, refs: $componentRefs, profile: $profile);
         app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $working, $profile);
+        app(\Splicewire\Beam\Ux\Analytics\ClickEventGuard::class)->assert($working, $profile);
         $this->legality->assert($working, $profile, $this->diff->changedIds($published, $working), $component);
         // EP-07d: at Publish EVERY form is re-checked, not only the changed ones, so a restored version or an allow-list
         // that shrank since the save never puts a form live that posts to a schema the door refuses.

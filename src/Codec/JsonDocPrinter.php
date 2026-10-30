@@ -287,6 +287,18 @@ class JsonDocPrinter
                 $attrs .= ' '.$attribute.'={'.json_encode($declaration->toArray(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}';
             }
         }
+        // ADR-0234 d13: the Click Event. Source keeps the `bdEvent` declaration the lenses read back; the compiled
+        // artifact carries it as a DOM-safe `data-bd-event` string that the site runtime's one delegated click listener
+        // reports (none is installed in the canvas or a Preview).
+        if ($node->clickEvent !== null) {
+            if ($isFragment) {
+                throw new \InvalidArgumentException('A fragment cannot carry a Click Event.');
+            }
+            $event = json_encode($node->clickEvent->toArray(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            $attrs .= $module
+                ? ' data-bd-event={'.json_encode($event, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}'
+                : ' bdEvent={'.$event.'}';
+        }
         if ($style !== null && ! $isFragment) {
             if ($module) {
                 $index = count($styles);
