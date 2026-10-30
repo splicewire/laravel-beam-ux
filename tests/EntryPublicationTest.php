@@ -4278,6 +4278,9 @@ class EntryPublicationTest extends TestCase
             $table->string('causer_id')->nullable();
             $table->json('attribute_changes')->nullable();
             $table->json('properties')->nullable();
+            if (class_exists(\Spatie\Activitylog\LogBatch::class)) {
+                $table->uuid('batch_uuid')->nullable();
+            }
             $table->timestamps();
         });
 
