@@ -60,5 +60,15 @@ jobs:
       - name: Lint (Pint)
         run: composer pint -- --test
 
+      # The compile tests build entries through a host-local Node toolchain (esbuild, @mdx-js/mdx) that
+      # the suite owns in tests/Fixtures/entry-body-host; without it 150 tests fail (b5c5672, 2026-10-30).
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+
+      - name: Install the entry-body test host
+        run: npm ci --prefix tests/Fixtures/entry-body-host --no-audit --no-fund
+
       - name: Run the suite
         run: composer test
