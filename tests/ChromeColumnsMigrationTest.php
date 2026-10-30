@@ -60,14 +60,14 @@ class ChromeColumnsMigrationTest extends TestCase
     public function test_current_create_and_additive_stubs_are_repeatable_without_replacing_values(): void
     {
         (require dirname(__DIR__).'/database/migrations/shared/create_beam_ux_entries_table.php.stub')->up();
-        $this->database->table('beam_ux_entries')->insert([
+        $this->database->getConnection()->table('beam_ux_entries')->insert([
             'id' => 'chrome-row', 'slug' => 'page', 'type' => 'page',
             'layout' => 'existing-layout', 'template' => 'existing-template', 'nav_group' => 'Existing group',
         ]);
         $this->runDeclaredEntryAdditions();
         $this->runDeclaredEntryAdditions();
         $this->assertChromeColumns();
-        $row = $this->database->table('beam_ux_entries')->first();
+        $row = $this->database->getConnection()->table('beam_ux_entries')->first();
         $this->assertSame('existing-layout', $row->layout);
         $this->assertSame('existing-template', $row->template);
         $this->assertSame('Existing group', $row->nav_group);
@@ -79,12 +79,12 @@ class ChromeColumnsMigrationTest extends TestCase
             $table->string('id');
             $table->string('layout')->nullable();
         });
-        $this->database->table('beam_ux_entries')->insert(['id' => 'existing', 'layout' => 'keep-layout']);
+        $this->database->getConnection()->table('beam_ux_entries')->insert(['id' => 'existing', 'layout' => 'keep-layout']);
         $migration = $this->chromeMigration();
         $migration->up();
         $migration->up();
         $this->assertChromeColumns();
-        $row = $this->database->table('beam_ux_entries')->first();
+        $row = $this->database->getConnection()->table('beam_ux_entries')->first();
         $this->assertSame('keep-layout', $row->layout);
         $this->assertNull($row->template);
         $this->assertNull($row->nav_group);
