@@ -2,6 +2,8 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use Splicewire\Beam\Ux\Schema\ThemeSchemas;
+
 /** review-r1: under a cached config the env() in config/beam/ux.php is never read; the process env still applies. */
 class ScratchStorageRootFromProcessEnvTest extends TestCase
 {
@@ -27,5 +29,6 @@ class ScratchStorageRootFromProcessEnvTest extends TestCase
     {
         $this->assertSame('beam-scratch', config('beam.ux.storage.disk'));
         $this->assertSame($this->root, config('filesystems.disks.beam-scratch.root'));
+        $this->assertSame($this->root.'/beam-ux/theme-schemas', ThemeSchemas::directory());
     }
 }

@@ -67,6 +67,11 @@ class ThemeSchemas
     public static function directory(): string
     {
         $root = config('beam.ux.scratch_storage_root');
+
+        if ((! is_string($root) || $root === '') && ! app()->isProduction()) {
+            $root = getenv('BEAM_SCRATCH_STORAGE_ROOT') ?: null;
+        }
+
         $base = is_string($root) && $root !== '' ? $root : storage_path('app');
 
         return $base.'/beam-ux/theme-schemas';
