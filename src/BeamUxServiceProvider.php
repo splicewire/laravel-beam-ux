@@ -116,6 +116,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 'shared/add_record_page_to_beam_ux_entries_table',
                 'shared/add_component_kind_to_beam_ux_entries_table',
                 'shared/add_component_names_to_beam_ux_entries_table',
+                'shared/add_chrome_to_beam_ux_entries_table',
                 'shared/create_beam_ux_releases_table',
                 // A Release's provenance (`origin`: direct | built). An ALTER beside the create for the same reason
                 // as its siblings; existing Releases are `built`.

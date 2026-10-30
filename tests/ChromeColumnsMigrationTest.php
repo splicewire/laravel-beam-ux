@@ -17,7 +17,7 @@ class ChromeColumnsMigrationTest extends TestCase
 {
     private Container $previousContainer;
 
-    private $previousFacadeApplication;
+    private ?Container $previousFacadeApplication;
 
     private Capsule $database;
 
@@ -88,6 +88,25 @@ class ChromeColumnsMigrationTest extends TestCase
         $this->assertSame('keep-layout', $row->layout);
         $this->assertNull($row->template);
         $this->assertNull($row->nav_group);
+    }
+
+    public function test_rollback_does_not_remove_chrome_owned_by_an_existing_create(): void
+    {
+        (require dirname(__DIR__).'/database/migrations/shared/create_beam_ux_entries_table.php.stub')->up();
+        $this->database->getConnection()->table('beam_ux_entries')->insert([
+            'id' => 'keep-row', 'slug' => 'page', 'type' => 'page', 'nav_group' => 'Keep group',
+        ]);
+        $this->chromeMigration()->up();
+        // Rollback loads a NEW migration instance; no in-memory added-column tracking can protect it.
+        $this->chromeMigration()->down();
+        $this->assertChromeColumns();
+        $this->assertSame('Keep group', $this->database->getConnection()->table('beam_ux_entries')->first()->nav_group);
+    }
+
+    public function test_missing_entry_table_is_left_for_the_create_migration(): void
+    {
+        $this->chromeMigration()->up();
+        $this->assertFalse(Schema::hasTable('beam_ux_entries'));
     }
 
     public function test_publish_only_registration_orders_chrome_after_component_names(): void
