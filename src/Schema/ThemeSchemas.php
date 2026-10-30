@@ -51,10 +51,25 @@ class ThemeSchemas
 
     public const SOURCES = 'beam-ux.theme-namespace-sources';
 
-    /** Where the generated, gitignored `FilesystemSchemaRegistry` artifacts for {@see self::all()} live. */
+    /**
+     * Where the generated, gitignored `FilesystemSchemaRegistry` artifacts for {@see self::all()} live.
+     *
+     * PER-HOST, under the host's own `storage/app/beam-ux/` (beside the compiled artifacts and honouring
+     * `beam.ux.scratch_storage_root`) — NEVER the package's shared `resources/schemas/theme`.
+     * landing-motion ticket 25: that package directory is one checkout shared by every host linking the
+     * live `splicewire/laravel-beam-ux`, so a host booting a different `theme` shape ran
+     * {@see WiresThemeSchemas::forgetStaleThemeArtifact()} (unlink) and `FilesystemSchemaRegistry::register()`
+     * (a non-atomic `file_put_contents`) over the artifact another host was mid-read of — two shapes
+     * replacing each other's single `theme.<id-hash>.schema.json` and 500ing a request that landed
+     * between them (`file_get_contents(...): No such file` / `Refusing to overwrite frozen schema "theme"`).
+     * A per-host location ends the sharing; `register()`'s frozen-schema fingerprint guard is unchanged.
+     */
     public static function directory(): string
     {
-        return dirname(__DIR__, 2).'/resources/schemas/theme';
+        $root = config('beam.ux.scratch_storage_root');
+        $base = is_string($root) && $root !== '' ? $root : storage_path('app');
+
+        return $base.'/beam-ux/theme-schemas';
     }
 
     /** @return array<int, array<string, mixed>> Built-in and contributed schemas, followed by their composed root. */
