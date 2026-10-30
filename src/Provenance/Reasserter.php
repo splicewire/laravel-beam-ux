@@ -45,7 +45,7 @@ final class Reasserter
     public function seedBody(array $coordinate, array $attributes, array $body, string $origin): BeamUxEntry
     {
         if (! $this->asserts($origin)) {
-            throw new \InvalidArgumentException('A system seed requires package: or disk: provenance.');
+            throw new \InvalidArgumentException('A system seed requires package:, disk: or pack: provenance.');
         }
         $publication = app(EntryPublication::class);
         $publication->requireVersionStore();
@@ -171,7 +171,8 @@ final class Reasserter
     private function asserts(string $origin): bool
     {
         return str_starts_with($origin, Provenance::DISK_PREFIX)
-            || str_starts_with($origin, Provenance::PACKAGE_PREFIX);
+            || str_starts_with($origin, Provenance::PACKAGE_PREFIX)
+            || str_starts_with($origin, Provenance::PACK_PREFIX);
     }
 
     /** The row's stored body as {@see isPristine()} reads it, so a re-stamp hashes exactly what pristine-ness compares. */

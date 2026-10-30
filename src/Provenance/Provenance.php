@@ -29,6 +29,9 @@ final class Provenance
     /** A package stub, e.g. `package:splicewire/laravel-beam-docs`. */
     public const PACKAGE_PREFIX = 'package:';
 
+    /** A Scaffold Pack copy, e.g. `pack:starter-site` (ADR-0227 d2: ADR-0215 §1's fourth origin; §2 applies unchanged). */
+    public const PACK_PREFIX = 'pack:';
+
     public static function disk(string $relative): string
     {
         return self::DISK_PREFIX.ltrim($relative, '/');
@@ -37,6 +40,11 @@ final class Provenance
     public static function package(string $vendorName): string
     {
         return self::PACKAGE_PREFIX.$vendorName;
+    }
+
+    public static function pack(string $slug): string
+    {
+        return self::PACK_PREFIX.$slug;
     }
 
     /**
@@ -51,7 +59,9 @@ final class Provenance
         return match (true) {
             $origin === self::CMS => 3,
             $origin !== null && str_starts_with($origin, self::DISK_PREFIX) => 2,
-            $origin !== null && str_starts_with($origin, self::PACKAGE_PREFIX) => 1,
+            // A pack copy ranks with a package stub: both are shipped content a tenant starts from, below the host's
+            // own disk files and its edits.
+            $origin !== null && (str_starts_with($origin, self::PACKAGE_PREFIX) || str_starts_with($origin, self::PACK_PREFIX)) => 1,
             default => 0,
         };
     }

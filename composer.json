@@ -34,6 +34,7 @@
         "splicewire/laravel-beam": "*",
         "splicewire/laravel-beam-accounts": "*",
         "splicewire/laravel-beam-analytics": "*",
+        "splicewire/laravel-beam-sync": "*",
         "splicewire/laravel-beam-mdx": "*",
         "splicewire/laravel-beam-sitemap": "dev-main",
         "splicewire/laravel-beam-taxonomy": "*",

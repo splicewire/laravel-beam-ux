@@ -148,7 +148,7 @@ use Splicewire\Beam\Write\ParticleWriter;
  * @property string|null $particle_id
  */
 #[UseCascadePolicy]
-class BeamUxEntry extends Model implements WorkflowManaged
+class BeamUxEntry extends Model implements \Splicewire\Sync\Contracts\Syncable, WorkflowManaged
 {
     use HasFacets;
     use HasUuids;
@@ -156,6 +156,7 @@ class BeamUxEntry extends Model implements WorkflowManaged
     use SoftDeletes {
         restore as private restoreSoftDeleted;
     }
+    use \Splicewire\Beam\Ux\Sync\SyncsAsPackCopy;
     use WorkflowManagedTrait;
 
     protected $table = 'beam_ux_entries';

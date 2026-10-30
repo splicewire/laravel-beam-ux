@@ -213,6 +213,14 @@ class EntryPublication
         return ['parentId' => $data->parentId, 'segment' => $data->segment];
     }
 
+    /** The body the entry's publication pin points at, or null when nothing is published (EP-36: a pack copies only this). */
+    public function publishedBodyOf(BeamUxEntry $entry): ?array
+    {
+        $body = $this->publishedBody($entry);
+
+        return is_array($body) ? $body : null;
+    }
+
     private function publishedBody(BeamUxEntry $entry): mixed
     {
         $particle = $this->particle($entry);
