@@ -9,6 +9,9 @@ use Splicewire\Beam\Ux\Provenance\Provenance;
 use Splicewire\Beam\Ux\Provenance\Reasserter;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Tests\AuthoredComponentNativeTestCase;
+use Splicewire\Beam\Ux\Type\UxType;
+use Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle;
+use Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry;
 use Splicewire\Sync\Contracts\SyncLineageResolver;
 
 /**
@@ -103,12 +106,24 @@ class PackCopyTest extends AuthoredComponentNativeTestCase
     public function test_a_page_taken_down_after_publishing_does_not_travel_though_its_pin_remains(): void
     {
         $this->assertTrue(Schema::hasColumn('beam_ux_entries', 'workflow_marking'), 'this host keeps a workflow marking');
+        // A workflow manages pages here, so the marking decides publicness (WorkflowMarkingPublishGate).
+        $this->runBeamWorkflowsMigrations();
+        $this->app->make(WorkflowBindingRegistry::class)->bind(UxType::Page->value, EntryPublishLifecycle::DEFINITION);
         $page = $this->published('withdrawn', $this->body('Was public'));
         $page->forceFill(['workflow_marking' => 'draft'])->save();
         $this->assertNotNull($this->publishedBody($page), 'the pin still points at the old version');
 
         $this->expectException(\LogicException::class);
         $page->fresh()->toSyncPayload();
+    }
+
+    /** No workflow manages pages here, so, as on the site (WorkflowMarkingPublishGate), the pin alone makes it published. */
+    public function test_a_pinned_page_no_workflow_manages_travels_with_a_null_marking(): void
+    {
+        $page = $this->published('legacy', $this->body('Legacy page'));
+        $page->forceFill(['workflow_marking' => null])->save();
+
+        $this->assertSame($this->body('Legacy page'), $page->fresh()->toSyncPayload()['body']);
     }
 
     public function test_an_unpublished_entry_does_not_travel(): void

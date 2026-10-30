@@ -36,11 +36,11 @@ trait SyncsAsPackCopy
 
     public function toSyncPayload(): array
     {
-        // Published means both: the workflow marking says so (a take-down returns it to draft but leaves the pin,
-        // build-qa EP-36 review), and the pin points at a version. A host without the marking column has only the pin.
-        if (\Illuminate\Support\Facades\Schema::hasColumn($this->getTable(), 'workflow_marking')
-            && $this->getAttribute('workflow_marking') !== self::MARKING_PUBLISHED) {
-            throw new \LogicException("Entry [{$this->getKey()}] is not published (its workflow marking is not published); a pack copies only what is published.");
+        // Published means what the site means by it: the host's bound EntryPublishGate (a workflow-managed entry is
+        // public only at the published marking, so a take-down that returns it to draft while leaving the pin withholds
+        // it; an unmanaged entry is public) and a publication pin that points at a version (build-qa EP-36 reviews).
+        if (! app(\Splicewire\Beam\Ux\Sitemap\EntryPublishGate::class)->isPublished($this)) {
+            throw new \LogicException("Entry [{$this->getKey()}] is not published; a pack copies only what is published.");
         }
         $body = app(EntryPublication::class)->publishedBodyOf($this);
         if ($body === null) {
