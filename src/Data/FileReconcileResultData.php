@@ -2,10 +2,11 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 
-#[TypeScript]
+#[TypeScript, Title('File reconcile result')]
 final class FileReconcileResultData extends BeamData
 {
     public function __construct(

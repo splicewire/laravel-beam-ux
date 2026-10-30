@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\JsonDoc;
 
 use Schemastud\DataSchemas\Attributes\MorphUnion;
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\LaravelData\Attributes\PropertyForMorph;
 use Spatie\LaravelData\Contracts\PropertyMorphableData;
 use Splicewire\Beam\Data\BeamData;
@@ -21,6 +22,7 @@ use Splicewire\Beam\Data\BeamData;
     'text' => JsonTextNode::class,
     'opaque' => JsonOpaqueNode::class,
 ])]
+#[Title('Document node')]
 abstract class JsonNode extends BeamData implements PropertyMorphableData
 {
     // #[PropertyForMorph] is what marks `kind` as the discriminator Spatie passes to morph() at

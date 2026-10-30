@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
@@ -9,7 +10,7 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScriptType;
 use Splicewire\Beam\Data\BeamData;
 
 /** Author-only read projection; nothing here updates the Local Session document or its saved head. */
-#[TypeScript]
+#[TypeScript, Title('Canvas bindings')]
 final class EntryCanvasBindingsOutputData extends BeamData
 {
     public function __construct(

@@ -2,13 +2,14 @@
 
 namespace Splicewire\Beam\Ux\Components;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\JsonDoc\ComponentReference;
 
 /** Stored on the sole root block, so the body and interface have exactly one version history. */
-#[TypeScript]
+#[TypeScript, Title('Component definition')]
 class ComponentDefinitionData extends BeamData
 {
     /** @param list<ComponentPropData> $props */

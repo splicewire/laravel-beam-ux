@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Data;
 use Rushing\DataFilters\Attributes\Filterable;
 use Rushing\DataFilters\Attributes\Sortable;
 use Rushing\DataFilters\Operators\Exact;
+use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\Column;
 use Schemastud\Frame\Attributes\Widget;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
@@ -23,7 +24,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
     policy: DiagnosticsAbility::NAME, readPolicy: DiagnosticsReadPolicy::class,
     readBoundary: BeamParticleResource::READ_BOUNDARY_GLOBAL,
 )]
-#[TypeScript]
+#[TypeScript, Title('Site health')]
 class SiteHealthRowData extends BeamData
 {
     public function __construct(

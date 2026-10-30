@@ -2,11 +2,12 @@
 
 namespace Splicewire\Beam\Ux\Components;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\JsonDoc\ComponentReference;
 
-#[TypeScript]
+#[TypeScript, Title('Component prop')]
 class ComponentPropData extends BeamData
 {
     public const RUNTIME_PROPS = ['children', 'components', 'bindings', 'bindingRuntime', 'styleRegistry', 'className', 'key', 'ref'];

@@ -2,13 +2,14 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\Components\ComponentDefinitionData;
 use Splicewire\Beam\Ux\JsonDoc\JsonNode;
 
-#[TypeScript]
+#[TypeScript, Title('Component canvas')]
 class ComponentCanvasData extends BeamData
 {
     /** @param list<JsonNode> $body @param array<string, mixed> $bindings */

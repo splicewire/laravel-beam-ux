@@ -2,10 +2,11 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 
-#[TypeScript]
+#[TypeScript, Title('New component')]
 final class EntryComponentCreateInputData extends BeamData
 {
     use \Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;

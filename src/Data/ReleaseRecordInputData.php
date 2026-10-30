@@ -8,7 +8,7 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
 
-#[TypeScript]
+#[TypeScript, Title('Record release')]
 final class ReleaseRecordInputData extends BeamData
 {
     use RejectsUnknownInputKeys;

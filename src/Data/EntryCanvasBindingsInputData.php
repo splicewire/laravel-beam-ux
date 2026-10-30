@@ -2,11 +2,12 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 
 /** Unsaved Local Session document only; no Collection, identity or saved settings override. */
-#[TypeScript]
+#[TypeScript, Title('Canvas bindings request')]
 final class EntryCanvasBindingsInputData extends BeamData
 {
     public const MAX_BODY_BYTES = 262144;

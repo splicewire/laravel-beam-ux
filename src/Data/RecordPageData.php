@@ -2,12 +2,13 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
 
 /** ADR-0229 d8: names offered by this entry's profile, never resource classes or client addresses. */
-#[TypeScript]
+#[TypeScript, Title('Record page')]
 final class RecordPageData extends BeamData
 {
     use RejectsUnknownInputKeys;

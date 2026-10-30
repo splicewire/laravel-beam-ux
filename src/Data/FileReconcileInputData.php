@@ -2,12 +2,13 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
 
 /** The exact inspection confirmed by the user; the server never fills fresh defaults at submit. */
-#[TypeScript]
+#[TypeScript, Title('File reconcile')]
 final class FileReconcileInputData extends BeamData
 {
     use RejectsUnknownInputKeys;

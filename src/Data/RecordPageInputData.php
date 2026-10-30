@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
@@ -12,7 +13,7 @@ use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
  * request schema, so the one class nested on both axes rendered two shapes under one OpenAPI component name, and a host
  * documenting both the draft write and the entry body could not build its API reference.
  */
-#[TypeScript]
+#[TypeScript, Title('Record page')]
 final class RecordPageInputData extends BeamData
 {
     use RejectsUnknownInputKeys;

@@ -2,10 +2,11 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 
-#[TypeScript]
+#[TypeScript, Title('Component capabilities')]
 final class EntryComponentCapabilitiesOutputData extends BeamData
 {
     /** Counts direct referring entries across retained heads/pins/releases, not transitive pages or instance occurrences. */

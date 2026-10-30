@@ -3,12 +3,13 @@
 namespace Splicewire\Beam\Ux\Data;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Recording\ReleaseRecording;
 
-#[TypeScript]
+#[TypeScript, Title('Release recording')]
 final class ReleaseRecordingData extends BeamData
 {
     public function __construct(

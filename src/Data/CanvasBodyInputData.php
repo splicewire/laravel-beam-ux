@@ -6,6 +6,7 @@ use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Schemastud\DataSchemas\Attributes\Description;
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
@@ -13,7 +14,7 @@ use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
 use Splicewire\Beam\Ux\JsonDoc\JsonNode;
 
 /** The typed blocks input; the legacy save-body DTO still accepts source/form dictionaries. */
-#[TypeScript]
+#[TypeScript, Title('Canvas body')]
 class CanvasBodyInputData extends BeamData
 {
     use RejectsUnknownInputKeys;

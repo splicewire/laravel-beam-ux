@@ -2,11 +2,12 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 
 /** Safe response-only guidance. No raw compiler diagnostics or durable history claim. */
-#[TypeScript]
+#[TypeScript, Title('File draft diagnostic')]
 final class FileDraftDiagnosticData extends BeamData
 {
     public function __construct(
