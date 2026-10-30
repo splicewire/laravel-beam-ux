@@ -40,10 +40,10 @@ class PackCopyTest extends AuthoredComponentNativeTestCase
             'children' => $component ? [] : [['kind' => 'text', 'value' => $text]]]];
     }
 
-    private function published(string $slug, array $body, array $attributes = []): BeamUxEntry
+    private function published(string $slug, array $body, array $attributes = [], string $type = 'page'): BeamUxEntry
     {
         return app(Reasserter::class)->seedBody(
-            ['namespace' => null, 'slug' => $slug, 'realm' => 'site', 'type' => 'page'],
+            ['namespace' => null, 'slug' => $slug, 'realm' => 'site', 'type' => $type],
             ['title' => ucfirst($slug), 'format' => 'tsx', ...$attributes],
             $body,
             Provenance::package('splicewire/starter-fixture'),
@@ -192,10 +192,30 @@ class PackCopyTest extends AuthoredComponentNativeTestCase
         $this->assertSame((string) $targetParent->getKey(), (string) $copy->parent_id);
     }
 
+    /**
+     * The sync engine follows syncDependencies(), so an unpublished component a page uses must not be one: it would refuse to
+     * serialize and fail the whole pack apply (found by EP-36 slice 3's tower test, build-qa review).
+     */
+    public function test_an_unpublished_component_a_page_uses_is_not_a_dependency(): void
+    {
+        $this->published('hero', $this->body('Hero'), type: 'component')->forceFill(['published_component_name' => 'Hero'])->save();
+        $draft = BeamUxEntry::create(['slug' => 'banner', 'type' => 'component', 'format' => 'tsx', 'realm' => 'site']);
+        $draft->forceFill(['published_component_name' => 'Banner'])->save();
+        $page = app(Reasserter::class)->seedBody(['namespace' => null, 'slug' => 'landing', 'realm' => 'site', 'type' => 'page'],
+            ['title' => 'Landing', 'format' => 'tsx'],
+            [...$this->body('', 'Hero', component: true), ...$this->body('', 'Banner', component: true)],
+            Provenance::package('splicewire/starter-fixture'));
+
+        $dependencies = $page->fresh()->syncDependencies()[BeamUxEntry::class] ?? [];
+
+        $this->assertNotContains((string) $draft->getKey(), $dependencies);
+        $this->assertCount(1, $dependencies);
+    }
+
     public function test_dependencies_are_the_parent_and_the_authored_components_the_published_body_uses(): void
     {
         $parent = $this->published('parent', $this->body('Parent'));
-        $component = BeamUxEntry::create(['slug' => 'hero', 'type' => 'component', 'format' => 'tsx', 'realm' => 'site']);
+        $component = $this->published('hero', $this->body('Hero'), type: 'component');
         $component->forceFill(['published_component_name' => 'Hero'])->save();
         $unused = BeamUxEntry::create(['slug' => 'footer', 'type' => 'component', 'format' => 'tsx', 'realm' => 'site']);
         $unused->forceFill(['published_component_name' => 'Footer'])->save();

@@ -71,18 +71,37 @@ trait SyncsAsPackCopy
     /** @return array<class-string, list<string>> */
     public function syncDependencies(): array
     {
-        $ids = $this->parent_id === null ? [] : [(string) $this->parent_id];
+        $candidates = [];
+        if ($this->parent_id !== null && ($parent = static::query()->find($this->parent_id)) !== null) {
+            $candidates[] = $parent;
+        }
         $body = app(EntryPublication::class)->publishedBodyOf($this) ?? [];
         $used = app(AuthoredComponents::class)->names($body);
         if ($used !== []) {
             foreach (app(AuthoredComponents::class)->entries($this) as $component) {
                 if (in_array($component->getAttribute('published_component_name'), $used, true)) {
-                    $ids[] = (string) $component->getKey();
+                    $candidates[] = $component;
                 }
+            }
+        }
+        // The sync engine follows these, so only what would itself travel may be one: an unpublished parent or component
+        // would refuse to serialize and fail the whole pack apply (EP-36 slice 3 review). A withheld parent leaves the
+        // copy's parent null through the lineage resolver.
+        $ids = [];
+        foreach ($candidates as $candidate) {
+            if (self::isPublishedForPack($candidate)) {
+                $ids[] = (string) $candidate->getKey();
             }
         }
 
         return $ids === [] ? [] : [static::class => array_values(array_unique($ids))];
+    }
+
+    /** Published as the site means it (the bound EntryPublishGate) and pinned to a version: what a pack may copy. */
+    private static function isPublishedForPack(BeamUxEntry $entry): bool
+    {
+        return app(\Splicewire\Beam\Ux\Sitemap\EntryPublishGate::class)->isPublished($entry)
+            && app(EntryPublication::class)->publishedBodyOf($entry) !== null;
     }
 
     public static function fromSyncPayload(array $data, array $config = []): static
