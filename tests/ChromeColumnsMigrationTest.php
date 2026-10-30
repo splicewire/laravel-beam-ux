@@ -31,7 +31,7 @@ class ChromeColumnsMigrationTest extends TestCase
         $this->database = new Capsule($container);
         $this->database->addConnection(['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
         $container->instance('db', $this->database->getDatabaseManager());
-        $container->bind('db.schema', fn () => $this->database->schema());
+        $container->bind('db.schema', fn () => $this->database->getConnection()->getSchemaBuilder());
         Container::setInstance($container);
         Facade::clearResolvedInstances();
         Facade::setFacadeApplication($container);
