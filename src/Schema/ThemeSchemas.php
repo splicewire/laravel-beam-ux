@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Schema;
 
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
+use Splicewire\Beam\Ux\Storage\ScratchStorageRoot;
 use Splicewire\Beam\Ux\Theme\ThemeResolver;
 
 /**
@@ -66,13 +67,8 @@ class ThemeSchemas
      */
     public static function directory(): string
     {
-        $root = config('beam.ux.scratch_storage_root');
-
-        if ((! is_string($root) || $root === '') && ! app()->isProduction()) {
-            $root = getenv('BEAM_SCRATCH_STORAGE_ROOT') ?: null;
-        }
-
-        $base = is_string($root) && $root !== '' ? $root : storage_path('app');
+        $root = ScratchStorageRoot::resolve(! app()->isProduction());
+        $base = $root ?? storage_path('app');
 
         return $base.'/beam-ux/theme-schemas';
     }

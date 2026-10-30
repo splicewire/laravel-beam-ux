@@ -13,6 +13,7 @@ use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Storage\MirrorGitStatus;
 use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
+use Splicewire\Beam\Ux\Storage\ScratchStorageRoot;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Write\ParticleWriter;
 
@@ -41,8 +42,8 @@ trait WiresStorage
         $this->app->booting(function (): void {
             // The process environment as a fallback (review-r1): under a cached config the env() in config/beam/ux.php is
             // never read, so an exported root would be ignored silently and the rehearsal would write storage/ again.
-            $root = config('beam.ux.scratch_storage_root') ?: (getenv('BEAM_SCRATCH_STORAGE_ROOT') ?: null);
-            if (! is_string($root) || $root === '') {
+            $root = ScratchStorageRoot::resolve();
+            if ($root === null) {
                 return;
             }
             // Never in production (build.qa): a stray env line would send every body mirror and artifact to a temp dir,
