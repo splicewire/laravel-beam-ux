@@ -76,6 +76,24 @@ class PackCopyTest extends AuthoredComponentNativeTestCase
         $this->assertStringNotContainsString('Unreleased draft', json_encode($payload));
     }
 
+    /**
+     * Editor-parity ticket 20 (settled by ticket 17): a pack never carries a Hosted site's Site Settings. Its brand and its
+     * GA4 measurement id are the tenant's own (laravel-beam-analytics ADR-0237 d6), so a copied id would put the source's
+     * analytics property on every new site. A copied page keeps its SEO fields and Click Events (version and block fields).
+     */
+    public function test_a_copy_carries_no_analytics_id_or_brand_only_page_fields(): void
+    {
+        $source = $this->published('home', $this->body('Welcome'));
+        $source->forceFill(['seo_description' => 'Start here'])->save();
+
+        $payload = $source->fresh()->toSyncPayload();
+        $keys = implode(' ', array_keys($payload['attributes']));
+
+        $this->assertDoesNotMatchRegularExpression('/analytics|measurement|ga4|gtm|tracking|brand|logo|site_name/i', $keys);
+        $this->assertArrayHasKey('seo_description', $payload['attributes']);
+        $this->assertSame(['id', 'coordinate', 'attributes', 'parent_id', 'body'], array_keys($payload));
+    }
+
     public function test_an_unpublished_entry_does_not_travel(): void
     {
         $draftOnly = BeamUxEntry::create(['slug' => 'draft-only', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
