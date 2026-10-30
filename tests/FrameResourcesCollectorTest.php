@@ -178,6 +178,21 @@ class FrameResourcesCollectorTest extends TestCase
         $this->assertSame(['Tenants', 'Packs', 'Plans', 'Hooks', 'Zeta', 'Alpha'], $titles);
     }
 
+    public function test_the_section_join_uses_the_same_realm_presentation_overlay_as_the_manifest(): void
+    {
+        $this->app->make(\Splicewire\Beam\Realm\RealmResourceRegistry::class)->override(
+            'plans', 'operator', new \Splicewire\Beam\Realm\RealmResourceOverride(
+                label: 'Site plans', section: 'site', navOrder: 0,
+            ),
+        );
+
+        $this->assertSame(['Site plans'], $this->titles('site', 'operator'));
+        $this->assertSame(['Tenants', 'Packs', 'Hooks'], $this->titles('platform', 'operator'));
+        // The operator-only presentation does not change membership or the tenant's declared section.
+        $this->assertSame(['Audit'], $this->titles('platform', 'tenant'));
+        $this->assertSame([], $this->titles('site', 'tenant'));
+    }
+
     // ---------------------------------------------------------------- realm + RBAC
 
     public function test_a_section_carries_only_the_resources_its_realm_holds(): void

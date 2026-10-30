@@ -16,6 +16,7 @@ use Splicewire\Beam\Authorization\SeatGate;
 use Splicewire\Beam\Particle\ListRouteName;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
+use Splicewire\Beam\Realm\RealmResourceRegistry;
 
 /**
  * The Frame-resources contributor — the registered popcorn capability that yields a section's
@@ -78,6 +79,7 @@ class FrameResourcesInvocable implements Invocable
         private RouteContextProjector $routes,
         private ResourceVisibility $visibility,
         private SeatGate $seatGate,
+        private RealmResourceRegistry $realmResources,
     ) {}
 
     public function name(): string
@@ -188,8 +190,15 @@ class FrameResourcesInvocable implements Invocable
      */
     private function resourceChildren(string $section, string $realm, ?Authenticatable $user, array $hrefs): array
     {
-        $matches = array_filter(
+        // The manifest already projects presentation through this registry. Apply it BEFORE matching the
+        // section, label and order too, otherwise a realm-rehomed resource has a route but no matching rail seat.
+        // Start with Frame's complete registry so non-particle declarations are preserved.
+        $definitions = array_map(
+            fn (ResourceDefinition $definition): ResourceDefinition => $this->realmResources->apply($definition, $realm),
             $this->registry->all(),
+        );
+        $matches = array_filter(
+            $definitions,
             fn (ResourceDefinition $def): bool => $def->nav->section === $section
                 && $this->resourceInRealm($def->key, $realm)
                 && $this->resourceViewable($def, $user, $realm),
