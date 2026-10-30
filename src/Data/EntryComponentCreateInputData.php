@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Description;
 use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
@@ -12,7 +13,13 @@ final class EntryComponentCreateInputData extends BeamData
     use \Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
 
     /** @param list<\Splicewire\Beam\Ux\JsonDoc\JsonNode> $body */
-    public function __construct(public string $title, #[\Spatie\LaravelData\Attributes\DataCollectionOf(\Splicewire\Beam\Ux\JsonDoc\JsonNode::class)] public array $body) {}
+    public function __construct(
+        #[Description('The display title of the reusable component to create.')]
+        public string $title,
+        #[\Spatie\LaravelData\Attributes\DataCollectionOf(\Splicewire\Beam\Ux\JsonDoc\JsonNode::class)]
+        #[Description('The single canvas root to save as the reusable component body.')]
+        public array $body,
+    ) {}
 
     public static function validate(\Illuminate\Contracts\Support\Arrayable|array $payload): \Illuminate\Contracts\Support\Arrayable|array
     {

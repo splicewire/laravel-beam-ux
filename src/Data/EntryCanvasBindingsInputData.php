@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Description;
 use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
@@ -19,8 +20,10 @@ final class EntryCanvasBindingsInputData extends BeamData
     /** @param list<\Splicewire\Beam\Ux\JsonDoc\JsonNode> $body */
     public function __construct(
         #[\Spatie\LaravelData\Attributes\DataCollectionOf(\Splicewire\Beam\Ux\JsonDoc\JsonNode::class)]
+        #[Description('The unsaved canvas document to inspect for live bindings; no saved entry body is changed.')]
         public array $body,
         #[\Spatie\TypeScriptTransformer\Attributes\Optional]
+        #[Description('Optional record identifier used to resolve the canvas document in a record context.')]
         public ?string $recordValue = null,
     ) {}
 
