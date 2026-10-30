@@ -36,6 +36,12 @@ trait SyncsAsPackCopy
 
     public function toSyncPayload(): array
     {
+        // Published means both: the workflow marking says so (a take-down returns it to draft but leaves the pin,
+        // build-qa EP-36 review), and the pin points at a version. A host without the marking column has only the pin.
+        if (\Illuminate\Support\Facades\Schema::hasColumn($this->getTable(), 'workflow_marking')
+            && $this->getAttribute('workflow_marking') !== self::MARKING_PUBLISHED) {
+            throw new \LogicException("Entry [{$this->getKey()}] is not published (its workflow marking is not published); a pack copies only what is published.");
+        }
         $body = app(EntryPublication::class)->publishedBodyOf($this);
         if ($body === null) {
             throw new \LogicException("Entry [{$this->getKey()}] has no published version; a pack copies only what is published.");

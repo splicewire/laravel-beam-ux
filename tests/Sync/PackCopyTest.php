@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Tests\Sync;
 
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Provenance\Provenance;
 use Splicewire\Beam\Ux\Provenance\Reasserter;
@@ -92,6 +93,22 @@ class PackCopyTest extends AuthoredComponentNativeTestCase
         $this->assertDoesNotMatchRegularExpression('/analytics|measurement|ga4|gtm|tracking|brand|logo|site_name/i', $keys);
         $this->assertArrayHasKey('seo_description', $payload['attributes']);
         $this->assertSame(['id', 'coordinate', 'attributes', 'parent_id', 'body'], array_keys($payload));
+    }
+
+    /**
+     * build-qa (EP-36 review): a take-down moves the workflow marking back to draft without clearing the publication pin
+     * (ReleaseService), so the pin alone would still let a withdrawn page travel. Where the marking exists it must say
+     * published too.
+     */
+    public function test_a_page_taken_down_after_publishing_does_not_travel_though_its_pin_remains(): void
+    {
+        $this->assertTrue(Schema::hasColumn('beam_ux_entries', 'workflow_marking'), 'this host keeps a workflow marking');
+        $page = $this->published('withdrawn', $this->body('Was public'));
+        $page->forceFill(['workflow_marking' => 'draft'])->save();
+        $this->assertNotNull($this->publishedBody($page), 'the pin still points at the old version');
+
+        $this->expectException(\LogicException::class);
+        $page->fresh()->toSyncPayload();
     }
 
     public function test_an_unpublished_entry_does_not_travel(): void
