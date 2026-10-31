@@ -6,6 +6,7 @@ export interface RepeatQueryData {
     sort?: string | null;
     limit?: number;
     filterVariant?: string | null;
+    ids?: string[] | null;
 }
 export interface RepeatData {
     collection?: string | null;

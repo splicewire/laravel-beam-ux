@@ -5,7 +5,9 @@ namespace Splicewire\Beam\Ux\Bindings;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Collections\CollectionSchemaResolver;
+use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Filters\FilterQuerySelection;
+use Splicewire\Beam\Ux\JsonDoc\NodeChildren;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /** Shared save/publish admission. This validates declarations; it never reads Records. */
@@ -22,11 +24,11 @@ final class BindingBodyGuard
         if ($stems !== []) {
             $connection = $entry->getConnection();
             if ($connection->transactionLevel() > 0
-                && $connection->getSchemaBuilder()->hasTable(\Splicewire\Beam\Facades\Beam::table('schemas'))) {
+                && $connection->getSchemaBuilder()->hasTable(Beam::table('schemas'))) {
                 // Publish/save already owns its entry rows. Share the exact native schema anchors
                 // with registration before reading latest field/filter vocabulary (READ COMMITTED).
                 foreach ($stems as $stem) {
-                    $connection->table(\Splicewire\Beam\Facades\Beam::table('schemas'))
+                    $connection->table(Beam::table('schemas'))
                         ->where('schema_name', $stem)->orderBy('version')->orderBy('id')->lockForUpdate()->get();
                 }
             }
@@ -79,7 +81,7 @@ final class BindingBodyGuard
                     ? $this->profiles->require($entry, $repeat['collection'])
                     : $this->relation(['source' => $source], $repeat['relation'])['source'];
                 $query = $repeat['query'] ?? [];
-                $allowed = $source !== null || $current->parentEntryId !== null ? ['limit'] : ['filter', 'sort', 'limit', 'filterVariant'];
+                $allowed = $source !== null || $current->parentEntryId !== null ? ['limit'] : ['filter', 'sort', 'limit', 'filterVariant', 'ids'];
                 if (! is_array($query) || array_diff(array_keys($query), $allowed)) {
                     $this->refuse('This Repeat query uses an undeclared field.');
                 }
@@ -89,8 +91,11 @@ final class BindingBodyGuard
                 } catch (\InvalidArgumentException|\TypeError $e) {
                     $this->refuse($e->getMessage());
                 }
+                if (isset($query['ids']) && ! isset($current->address['collection'])) {
+                    $this->refuse('Record selections require a registered Collection source.');
+                }
                 $parameters = array_filter($query, fn ($value) => $value !== null);
-                unset($parameters['limit']);
+                unset($parameters['limit'], $parameters['ids']);
                 if ($parameters !== []) {
                     // The owner's saved-filter validator owns names, types, variants and access. No second vocabulary.
                     app(BindingRequestScope::class)->run(app(Request::class), $current->address,
@@ -98,7 +103,7 @@ final class BindingBodyGuard
                 }
                 $this->queries($repeat['empty'] ?? [], $entry, $source, $ids);
             }
-            $this->queries(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node), $entry, $current, $ids);
+            $this->queries(NodeChildren::of($node), $entry, $current, $ids);
         }
     }
 
@@ -113,7 +118,7 @@ final class BindingBodyGuard
                     return true;
                 }
             }
-            if ($this->hasBindings(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node))) {
+            if ($this->hasBindings(NodeChildren::of($node))) {
                 return true;
             }
         }

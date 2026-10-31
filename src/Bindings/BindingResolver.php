@@ -3,12 +3,21 @@
 namespace Splicewire\Beam\Ux\Bindings;
 
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
+use Splicewire\Beam\Authorization\ResourceReadGuard;
+use Splicewire\Beam\Collections\CollectionRecordData;
+use Splicewire\Beam\Collections\CollectionRelations;
+use Splicewire\Beam\Collections\CollectionSchemaResolver;
+use Splicewire\Beam\Collections\StandaloneRecordQuery;
 use Splicewire\Beam\Particle\ParticleFrameResourceHandler;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
+use Splicewire\Beam\Read\ReadContext;
+use Splicewire\Beam\Ux\Canvas\ViewGateFilter;
 use Splicewire\Beam\Ux\Data\RepeatRecordsData;
+use Splicewire\Beam\Ux\JsonDoc\NodeChildren;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Preview\PreviewContext;
 
@@ -36,8 +45,8 @@ final class BindingResolver
     /** Internal author-envelope path: the same reader, on the already authorized current body. */
     public function resolveDocument(BeamUxEntry $entry, array $body, Request $request, string $realm): array
     {
-        $gate = app(\Illuminate\Contracts\Auth\Access\Gate::class)->forUser($request->user());
-        $body = (new \Splicewire\Beam\Ux\Canvas\ViewGateFilter($gate))->filter($body);
+        $gate = app(Gate::class)->forUser($request->user());
+        $body = (new ViewGateFilter($gate))->filter($body);
         $out = [];
         $this->walk($body, $entry, $request, $realm, $out);
 
@@ -60,7 +69,7 @@ final class BindingResolver
                     $this->walk($node['repeat']['empty'] ?? [], $entry, $request, $realm, $out);
                 }
             } else {
-                $this->walk(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node), $entry, $request, $realm, $out);
+                $this->walk(NodeChildren::of($node), $entry, $request, $realm, $out);
             }
         }
     }
@@ -70,7 +79,7 @@ final class BindingResolver
         $repeat = $node['repeat'];
         $source = $this->profiles->require($entry, (string) ($repeat['collection'] ?? ''));
         $query = $repeat['query'] ?? [];
-        if (! is_array($query) || array_diff(array_keys($query), ['filter', 'sort', 'limit', 'filterVariant'])) {
+        if (! is_array($query) || array_diff(array_keys($query), ['filter', 'sort', 'limit', 'filterVariant', 'ids'])) {
             throw ValidationException::withMessages(['repeat.query' => 'Unknown saved query field.']);
         }
         $limit = $query['limit'] ?? 25;
@@ -82,7 +91,15 @@ final class BindingResolver
         } catch (DroppedBindingField) {
             return new RepeatRecordsData([], false, max(1, min(10000, (int) $request->query('repeat_'.$node['id'], 1))));
         }
-        unset($query['limit']);
+        try {
+            $selection = RepeatQueryData::from($query)->ids;
+        } catch (\InvalidArgumentException|\TypeError $refusal) {
+            throw ValidationException::withMessages(['repeat.query.ids' => $refusal->getMessage()]);
+        }
+        if ($selection !== null && ! isset($source->address['collection'])) {
+            throw ValidationException::withMessages(['repeat.query.ids' => 'Record selections require a registered Collection source.']);
+        }
+        unset($query['limit'], $query['ids']);
         $context = null;
         $page = max(1, min(10000, (int) $request->query('repeat_'.$node['id'], 1)));
         // Duplicate creates new parameter bags. Never let a browser's filter or address override the saved declaration.
@@ -96,11 +113,11 @@ final class BindingResolver
             try {
                 $rows = app(BindingRequestScope::class)->run($request, [...$query, ...$source->address],
                     function (Request $read) use ($resource, $realm, $limit, $page, &$context) {
-                        $context = app(\Splicewire\Beam\Authorization\ResourceReadGuard::class)->bindReadContext($resource, $read);
+                        $context = app(ResourceReadGuard::class)->bindReadContext($resource, $read);
 
                         return app(ParticleFrameResourceHandler::class)->forRequest($read, $realm)
                             ->indexWindow($resource->toResourceDefinition(), $limit + 1, ($page - 1) * $limit);
-                    });
+                    }, $selection === null ? null : new RepeatSelectedRecords(app(StandaloneRecordQuery::class), $selection));
             } catch (AuthorizationException) {
                 // Refused and empty have one public shape; no author fallback.
                 $rows = [];
@@ -113,7 +130,7 @@ final class BindingResolver
     }
 
     /** Project each level as a batch; never resolve a relation inside an outer-record loop. */
-    private function project(array $node, array $rows, CollectionSource $source, Request $request, bool $enriched, ?\Splicewire\Beam\Read\ReadContext $context, ?BeamUxEntry $entry = null): array
+    private function project(array $node, array $rows, CollectionSource $source, Request $request, bool $enriched, ?ReadContext $context, ?BeamUxEntry $entry = null): array
     {
         $fields = $this->fields($node);
         $recordPage = $entry === null ? null : app(RecordPages::class)->pageFor($entry, $source);
@@ -133,17 +150,17 @@ final class BindingResolver
 
             return $visible;
         }, $rows);
-        $nested = $this->nestedRepeats(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node));
+        $nested = $this->nestedRepeats(NodeChildren::of($node));
         if ($nested === []) {
             return $records;
         }
         if (! isset($source->address['collection'])) {
             throw ValidationException::withMessages(['repeat.relation' => 'Nested Repeat requires an owner-declared Collection relation.']);
         }
-        $definition = app(\Splicewire\Beam\Collections\CollectionSchemaResolver::class)->resolve($source->address['collection']);
+        $definition = app(CollectionSchemaResolver::class)->resolve($source->address['collection']);
         if (! $enriched && $rows !== []) {
-            $relationData = app(\Splicewire\Beam\Collections\CollectionRelations::class)->resolve(
-                array_map(fn ($row) => \Splicewire\Beam\Collections\CollectionRecordData::from($row), $rows), $request->user(), $context);
+            $relationData = app(CollectionRelations::class)->resolve(
+                array_map(fn ($row) => CollectionRecordData::from($row), $rows), $request->user(), $context);
             foreach ($rows as &$row) {
                 $row['relations'] = $relationData[$row['id']] ?? [];
             }
@@ -195,7 +212,7 @@ final class BindingResolver
                 }
                 $out[$id] = $node;
             } else {
-                foreach ($this->nestedRepeats(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node)) as $id => $repeat) {
+                foreach ($this->nestedRepeats(NodeChildren::of($node)) as $id => $repeat) {
                     if (isset($out[$id])) {
                         throw ValidationException::withMessages(['repeat' => 'A nested Repeat requires a unique block id.']);
                     }
@@ -246,7 +263,7 @@ final class BindingResolver
                 $fields[] = $prop['value'];
             }
         }
-        foreach (\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node) as $child) {
+        foreach (NodeChildren::of($node) as $child) {
             if (! isset($child['repeat'])) {
                 $fields = [...$fields, ...$this->fields($child)];
             } else {

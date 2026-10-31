@@ -2,6 +2,8 @@
 
 The canvas binding inspector uses the entry's Manifest Profile `x-collections`. Fields come from each offered Collection's owning schema. Repeat query controls use declared `x-filter.name` and `x-sort.name` metadata; they do not invent query names. Field Bindings and `when` rules update the existing Local Session document and its undo history. Saving remains the ordinary draft operation.
 
+A saved root Collection Repeat may declare `query.ids`, a list of at most 100 Record UUIDs. Omission or `null` retains the normal query; `[]` explicitly selects no Records. The subset intersects the selected Collection and its normal visitor/Public Read gates, retaining the existing sort. It does not order by the UUID list. Child-page and nested relation Repeats do not accept this field. The inspector does not yet offer a handpicked-Record control.
+
 Live data uses the optional `UxBuilderClient.canvasBindings(entryId, body, recordValue, {signal})` port. The default Beam Inertia adapter sends a same-origin, CSRF-protected POST to the addressed entry's `canvas-bindings` read operation. Hosts mounting `EditorRoutes::mount()` inside their authenticated editor group receive that operation. An injected client without the port displays “unavailable”; it never falls back to a public resource URL.
 
 The server checks authentication, `ux.author`, and the addressed entry's update ability before reading its body, profile, or Records. It validates the unsaved document using the normal binding guard, then reads through the existing resource guards as that author. It takes the Record Page declaration from the saved Working Head, never from unsaved client settings. Save a changed declaration and reopen the editor to refresh its field vocabulary.
