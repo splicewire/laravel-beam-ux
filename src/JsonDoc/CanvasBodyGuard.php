@@ -66,6 +66,7 @@ final class CanvasBodyGuard
         }
 
         $this->assertWellFormed($body);
+        $body = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->document($entry, $body);
 
         $profile = $this->resolver->resolve($entry);
         [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $body, $profile);
@@ -128,6 +129,8 @@ final class CanvasBodyGuard
         }
 
         $this->assertWellFormed($working);
+        $working = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->document($entry, $working);
+        $published = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->document($entry, $published);
 
         $profile = $this->resolver->resolve($entry);
         [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $working, $profile);

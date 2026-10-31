@@ -20,6 +20,17 @@ class PublishedBindingDocument
         return $this->readVersion($entry, $preview->versionFor((string) $entry->getKey()));
     }
 
+    /** Page Fields are read from the same immutable publication pin as the body. */
+    public function pageSettings(BeamUxEntry $entry): array
+    {
+        $pin = $entry->getAttribute('published_version');
+        if ($pin === null || $entry->particle_id === null) {
+            return [];
+        }
+
+        return app(VersionStore::class)->version($entry->versionable(), (string) $pin)?->snapshot['meta']['pageSettings'] ?? [];
+    }
+
     private function readVersion(BeamUxEntry $entry, ?string $pin): array
     {
         if ($pin === null || $entry->particle_id === null) {

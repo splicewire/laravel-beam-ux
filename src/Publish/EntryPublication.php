@@ -352,6 +352,7 @@ class EntryPublication
             throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);
         }
         if ($pageSettings !== null) {
+            $pageSettings = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->settings($entry, $pageSettings);
             app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->assertSettings($entry, $pageSettings);
             // ADR-0233 d4: a page names only Page Fields the host registers, its own are checked against the class
             // the parent it names declares (a draft that moves the page answers to its new parent), and an unclaimed
@@ -674,6 +675,8 @@ class EntryPublication
 
     private function writeAfterLocks(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings): array
     {
+        $body = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->document(
+            app(\Splicewire\Beam\Ux\Bindings\RecordPages::class)->validationEntry($entry, $pageSettings?->toArray()), $body);
         $body = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->prepare($entry, $body);
         // ADR-0227 d1 / ADR-0228 d8 — THE CHOKE: every canvas-body write that goes through publication
         // (save-body, save-source, a draft via recordDraft) is held to the realm's Manifest Profile here,

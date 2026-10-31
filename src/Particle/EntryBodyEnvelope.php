@@ -55,6 +55,8 @@ class EntryBodyEnvelope
      */
     public function of(BeamUxEntry $entry, array $body, ?string $compileError = null): BeamUxEntryBodyData
     {
+        $body = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->document($entry, $body);
+
         return new BeamUxEntryBodyData(
             mediaLibrary: \Splicewire\Beam\Ux\Media\EntryMedia::available() && app(\Splicewire\Beam\Ux\Media\EntryMedia::class)->allowed($entry, app(\Splicewire\Beam\Authorization\ActorPort::class)->actor()),
             slug: (string) $entry->slug,
@@ -72,8 +74,8 @@ class EntryBodyEnvelope
             styleRegistry: \Splicewire\Beam\Ux\Style\StyleRegistry::fromTheme(app(\Splicewire\Beam\Ux\Theme\ThemeResolver::class)->resolve()),
             pageSettings: $pageSettings = $this->typeValue($entry) === 'page'
                 ? (($settings = $entry->particle?->meta['pageSettings'] ?? null) !== null
-                    ? \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from($settings)
-                    : \Splicewire\Beam\Ux\Data\EntryPageSettingsData::fromEntry($entry))
+                    ? app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->settings($entry, \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from($settings), reading: true)
+                    : app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->settings($entry, \Splicewire\Beam\Ux\Data\EntryPageSettingsData::fromEntry($entry), reading: true))
                 : null,
             // The Page Fields of the parent the working copy names, so a draft that moves the page edits its new parent's.
             pageFields: $pageSettings !== null ? [

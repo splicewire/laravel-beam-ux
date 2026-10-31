@@ -77,6 +77,11 @@ final class BindingResolver
         if (! is_int($limit) || $limit < 1 || $limit > 100) {
             throw ValidationException::withMessages(['repeat.query.limit' => 'The Repeat limit must be between 1 and 100.']);
         }
+        try {
+            $query = app(BindingFieldEvolution::class)->query($source, $query, $entry);
+        } catch (DroppedBindingField) {
+            return new RepeatRecordsData([], false, max(1, min(10000, (int) $request->query('repeat_'.$node['id'], 1))));
+        }
         unset($query['limit']);
         $context = null;
         $page = max(1, min(10000, (int) $request->query('repeat_'.$node['id'], 1)));
@@ -112,11 +117,15 @@ final class BindingResolver
     {
         $fields = $this->fields($node);
         $recordPage = $entry === null ? null : app(RecordPages::class)->pageFor($entry, $source);
-        $records = array_map(function (array $row) use ($fields, $source, $recordPage): array {
+        $aliases = app(BindingFieldEvolution::class)->fieldPaths($source, $fields, $entry);
+        $records = array_map(function (array $row) use ($fields, $source, $recordPage, $aliases): array {
             $visible = [];
             foreach ($fields as $field) {
-                if (Arr::has($row, $field)) {
-                    Arr::set($visible, $field, Arr::get($row, $field));
+                $current = $aliases[$field];
+                if ($current !== null && Arr::has($row, $current)) {
+                    // Frozen compiled modules still name their original field. Supply it from the
+                    // current declared field, through the owner's already-projected row.
+                    Arr::set($visible, $field, Arr::get($row, $current));
                 }
             }
             // EP-23 owns Record Pages. Do not invent an editor URL for visitors.
@@ -199,13 +208,16 @@ final class BindingResolver
     }
 
     /** Project the root Record scope; Repeat children have their own separately guarded scope. */
-    public function projectRoot(array $body, array $row, array $additionalFields = []): array
+    public function projectRoot(array $body, array $row, array $additionalFields = [], ?CollectionSource $source = null, ?BeamUxEntry $entry = null): array
     {
         $fields = $this->fields(['children' => $body]);
         $visible = [];
-        foreach (array_unique([...$fields, ...$additionalFields]) as $field) {
-            if (Arr::has($row, $field)) {
-                Arr::set($visible, $field, Arr::get($row, $field));
+        $fields = array_values(array_unique([...$fields, ...$additionalFields]));
+        $aliases = $source === null ? array_combine($fields, $fields) : app(BindingFieldEvolution::class)->fieldPaths($source, $fields, $entry);
+        foreach ($fields as $field) {
+            $current = $aliases[$field];
+            if ($current !== null && Arr::has($row, $current)) {
+                Arr::set($visible, $field, Arr::get($row, $current));
             }
         }
         if (isset($row['url'])) {
