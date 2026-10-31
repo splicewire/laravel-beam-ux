@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Bindings;
 
 use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Schema\SchemaId;
+use Splicewire\Beam\Ux\Codec\JsonDocShape;
 
 /** Pure preflight over a publication snapshot, never the mutable working body or Record migration outcome. */
 final class SchemaBindingImpact
@@ -11,6 +12,7 @@ final class SchemaBindingImpact
     /** @return list<string> Dropped field references on this published page. */
     public function fields(array $versions, array $schema, array $body, array $sources, ?array $recordPage, ?callable $relation = null): array
     {
+        $body = JsonDocShape::is($body) ? $body : [];
         $stem = SchemaId::from($schema['$id'])->stem();
         if (! in_array($stem, $sources, true) && ! $this->hasRelations($body)) {
             return [];
@@ -37,6 +39,7 @@ final class SchemaBindingImpact
     /** Only actual binding slots, including the Repeat empty subtree; literal props are not references. */
     public function collections(array $body, ?array $recordPage = null): array
     {
+        $body = JsonDocShape::is($body) ? $body : [];
         $names = is_string($recordPage['collection'] ?? null) ? [$recordPage['collection']] : [];
         foreach ($body as $node) {
             if (is_string($node['repeat']['collection'] ?? null)) {

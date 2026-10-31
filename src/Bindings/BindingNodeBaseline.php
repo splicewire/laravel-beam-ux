@@ -2,6 +2,8 @@
 
 namespace Splicewire\Beam\Ux\Bindings;
 
+use Splicewire\Beam\Ux\Codec\JsonDocShape;
+
 /** Exact node + structural location + enclosing binding context, including idless text nodes. */
 final class BindingNodeBaseline
 {
@@ -9,7 +11,7 @@ final class BindingNodeBaseline
 
     public function __construct(array $body)
     {
-        self::visit($body, function (array $node, string $path, array $context): void {
+        self::visit(JsonDocShape::is($body) ? $body : [], function (array $node, string $path, array $context): void {
             $this->nodes[$path] = self::canonical([$node, $context]);
         });
     }

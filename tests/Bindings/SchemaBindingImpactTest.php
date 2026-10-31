@@ -129,7 +129,7 @@ return null;
         };
     }
 
-    private function guard(?array $recordPage = null): \Splicewire\Beam\Ux\Bindings\GuardSchemaRegistration
+    private function guard(?array $recordPage = null, ?array $body = null): \Splicewire\Beam\Ux\Bindings\GuardSchemaRegistration
     {
         app()->instance(\Splicewire\Beam\Ux\Bindings\ManifestCollectionSource::class, new class implements \Splicewire\Beam\Ux\Bindings\ManifestCollectionSource
         {
@@ -145,7 +145,7 @@ return null;
         };
         $page->method('getAttribute')->willReturnCallback($attributes);
         $page->method('__get')->willReturnCallback($attributes);
-        $documents = new class($this->body()) extends \Splicewire\Beam\Ux\Bindings\PublishedBindingDocument
+        $documents = new class($body ?? $this->body()) extends \Splicewire\Beam\Ux\Bindings\PublishedBindingDocument
         {
             public function __construct(private array $body) {}
 
@@ -167,6 +167,23 @@ return null;
                 return [$this->page];
             }
         };
+    }
+
+    public function test_actual_listener_allows_a_new_collection_with_a_published_mdx_page(): void
+    {
+        $body = (new \Splicewire\Beam\Ux\Codec\MdxBodyCodec)->encode('# Published page');
+        $schema = $this->old();
+        $schema['$id'] = 'https://tenant.test/schemas/new/notes/1';
+        ($this->guard(body: $body))(new \Splicewire\Beam\Schema\SchemaVersionRegistering($schema, [], $this->registry(), 'tenant'));
+        self::assertSame([], (new SchemaBindingImpact)->fields([$this->old()], $schema, $body, [], null));
+    }
+
+    public function test_source_body_does_not_waive_record_page_address_protection(): void
+    {
+        $body = (new \Splicewire\Beam\Ux\Codec\MdxBodyCodec)->encode('# Published page');
+        $schema = ['$id' => $this->stem.'/2', 'properties' => ['title' => ['type' => 'string']]];
+        $this->expectException(ValidationException::class);
+        (new SchemaBindingImpact)->fields([$this->old()], $schema, $body, ['articles' => $this->stem], ['collection' => 'articles', 'field' => 'slug']);
     }
 
     public function test_actual_listener_reports_before_freeze_accepts_only_matching_receipt_and_rechecks_stale_pins(): void

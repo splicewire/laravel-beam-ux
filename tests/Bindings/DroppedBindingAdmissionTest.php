@@ -289,6 +289,17 @@ final class DroppedBindingAdmissionTest extends TestCase
         $profile = ['x-collections' => [['name' => 'articles']]];
         $guard->assert($entry, $body, $profile, $before);
         self::assertSame('fields.old', $body[0]['children'][0]['field']);
+        $sourceBody = (new \Splicewire\Beam\Ux\Codec\TsxBodyCodec)->encode('<main>Source page</main>');
+        $validCanvas = $this->body();
+        $validCanvas[0]['children'][0]['field'] = 'fields.slug';
+        $guard->assert($entry, $validCanvas, $profile, $sourceBody);
+        self::assertSame('fields.slug', $validCanvas[0]['children'][0]['field']);
+        try {
+            $guard->assert($entry, $body, $profile, $sourceBody);
+            self::fail('A prior TSX source cannot grandfather a new dropped-field binding.');
+        } catch (ValidationException $error) {
+            self::assertArrayHasKey('body', $error->errors());
+        }
         $owner = new class extends \Splicewire\Beam\Filters\FilterQuerySelection
         {
             public array $seen = [];
