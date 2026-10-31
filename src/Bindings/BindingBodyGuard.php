@@ -18,9 +18,23 @@ final class BindingBodyGuard
         if (! $this->hasBindings($body)) {
             return;
         }
+        $stems = app(BindingFieldEvolution::class)->referencedStems($entry, $body);
+        if ($stems !== []) {
+            $connection = $entry->getConnection();
+            if ($connection->transactionLevel() > 0
+                && $connection->getSchemaBuilder()->hasTable(\Splicewire\Beam\Facades\Beam::table('schemas'))) {
+                // Publish/save already owns its entry rows. Share the exact native schema anchors
+                // with registration before reading latest field/filter vocabulary (READ COMMITTED).
+                foreach ($stems as $stem) {
+                    $connection->table(\Splicewire\Beam\Facades\Beam::table('schemas'))
+                        ->where('schema_name', $stem)->orderBy('version')->orderBy('id')->lockForUpdate()->get();
+                }
+            }
+        }
         $offers = $profile['x-collections'] ?? [];
         foreach ($offers as &$offer) {
             $offer['source'] = $this->profiles->require($entry, $offer['name']);
+            $offer['schema'] = $this->profiles->fieldSchema($offer['source']);
         }
         unset($offer);
         $declaration = $entry->getAttribute('record_page');

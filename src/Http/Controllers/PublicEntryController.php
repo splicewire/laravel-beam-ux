@@ -141,9 +141,16 @@ class PublicEntryController
                 return app(\Splicewire\Beam\Ux\Redirect\RedirectResolver::class)->answer($request, $path, $realm, $actor, $preview)
                     ?? abort(Response::HTTP_NOT_FOUND);
             }
+            $source = app(\Splicewire\Beam\Ux\Bindings\ProfileCollections::class)->require($entry, $entry->getAttribute('record_page')['collection']);
+            $frozenBody = $preview === null
+                ? app(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class)->read($entry)
+                : app(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class)->readPreview($entry, $preview);
+            $aliases = app(\Splicewire\Beam\Ux\Bindings\BindingResolver::class)->projectRoot($frozenBody, $record, source: $source, entry: $entry);
+            $record['fields'] = array_replace_recursive($record['fields'] ?? [], $aliases['fields'] ?? []);
             $entry = clone $entry;
+            $declaration = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->recordPage($entry, $entry->getAttribute('record_page'));
             foreach (['titleField' => 'title', 'descriptionField' => 'seo_description', 'socialImageField' => 'seo_social_image'] as $field => $attribute) {
-                $name = $entry->getAttribute('record_page')[$field] ?? null;
+                $name = $declaration[$field] ?? null;
                 if ($name !== null) {
                     $entry->setAttribute($attribute, \Illuminate\Support\Arr::get($record, 'fields.'.$name));
                 }

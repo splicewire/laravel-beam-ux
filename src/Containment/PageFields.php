@@ -115,6 +115,11 @@ final class PageFields
             if ($schema === null) {
                 throw ValidationException::withMessages(['pageSettings.fields' => 'The parent names no available Page Fields schema.']);
             }
+            try {
+                $fields = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->pageFields($class, $fields);
+            } catch (InvalidArgumentException $e) {
+                throw ValidationException::withMessages(['pageSettings.fields' => $e->getMessage()]);
+            }
             foreach (array_keys(array_diff_key($fields, $schema['properties'])) as $name) {
                 throw ValidationException::withMessages(["pageSettings.fields.{$name}" => 'The parent\'s Page Fields do not declare this field.']);
             }

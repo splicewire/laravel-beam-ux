@@ -59,6 +59,7 @@ final class CanvasBindings
         \Splicewire\Beam\Ux\Data\EntryCanvasBindingsInputData::assertBounds(['body' => $body]);
         \Splicewire\Beam\Ux\Data\CanvasBodyInputData::validateAndCreate(['body' => $body]);
         $page = app(RecordPages::class)->validationEntry($entry);
+        $body = app(BindingFieldEvolution::class)->document($page, $body);
         $profile = app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve($page);
         app(BindingBodyGuard::class)->assert($page, $body, $profile);
         $resolver = app(BindingResolver::class);
@@ -71,6 +72,7 @@ final class CanvasBindings
 
             return new EntryCanvasBindingsOutputData($bindings, null, [], false, false, null, $this->pagePublic($entry));
         }
+        $declaration = app(BindingFieldEvolution::class)->recordPage($page, $declaration);
         $records = app(RecordPages::class);
         $rows = $records->choiceWindow($page, $request, (string) $page->realm, self::CHOICE_LIMIT + 1);
         $hasMore = count($rows) > self::CHOICE_LIMIT;

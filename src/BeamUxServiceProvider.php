@@ -35,8 +35,8 @@ use Splicewire\Beam\Ux\Concerns\WiresStorage;
 use Splicewire\Beam\Ux\Concerns\WiresThemeSchemas;
 use Splicewire\Beam\Ux\Data\BeamUxEntryData;
 use Splicewire\Beam\Ux\Data\MirrorStatusRowData;
-use Splicewire\Beam\Ux\Data\SitemapHealthRowData;
 use Splicewire\Beam\Ux\Data\SiteHealthRowData;
+use Splicewire\Beam\Ux\Data\SitemapHealthRowData;
 use Splicewire\Beam\Ux\Database\Seeders\BeamUxSeeder;
 use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
 use Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit;
@@ -141,6 +141,10 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
     public function packageRegistered(): void
     {
+        $this->app->make(\Illuminate\Contracts\Events\Dispatcher::class)->listen(
+            \Splicewire\Beam\Schema\SchemaVersionRegistering::class,
+            Bindings\GuardSchemaRegistration::class,
+        );
         $this->app->scoped(Bindings\RecordPageScope::class);
         $this->app->scoped(Components\ComponentScope::class);
         $this->app->bind(PreviewGrantResolver::class, PreviewGrantService::class);

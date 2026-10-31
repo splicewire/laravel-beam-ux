@@ -60,6 +60,10 @@ final class ChildPageRecords
             return [];
         }
 
-        return app(VersionStore::class)->version($entry->versionable(), (string) $pin)?->snapshot['meta']['pageSettings']['fields'] ?? [];
+        $fields = app(VersionStore::class)->version($entry->versionable(), (string) $pin)?->snapshot['meta']['pageSettings']['fields'] ?? [];
+        $schema = \Splicewire\Beam\Ux\Containment\PageFields::forChild($entry);
+
+        return $schema !== null && ! class_exists($schema)
+            ? app(BindingFieldEvolution::class)->pageFields($schema, $fields, true) : $fields;
     }
 }

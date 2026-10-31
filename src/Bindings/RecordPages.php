@@ -70,6 +70,29 @@ final class RecordPages
             $this->refuse('A Record Page requires an offered schema Collection.');
         }
         $definition = app(CollectionSchemaResolver::class)->resolve($stem);
+        // Same native schema anchor as Collection unique writes; serialize this Collection, never the whole entries table.
+        $connection = $entry->getConnection();
+        if (! $connection->getSchemaBuilder()->hasTable(\Splicewire\Beam\Facades\Beam::table('schemas'))) {
+            $this->refuse('Record Pages require a registered database schema anchor.');
+        }
+        $anchors = $connection->table(\Splicewire\Beam\Facades\Beam::table('schemas'))
+            ->where('schema_name', $definition->stem())->orderBy('version')->orderBy('id')->lockForUpdate()->get();
+        if ($anchors->isEmpty()) {
+            $this->refuse('Record Pages require a registered database schema anchor.');
+        }
+        // A publisher may have waited behind registration. Use the locked current artifact, not
+        // the pre-lock resolver memo or a repeatable-read snapshot of the previous version.
+        $artifact = $anchors->last()->artifact;
+        $artifact = is_array($artifact) ? $artifact : json_decode($artifact, true, flags: JSON_THROW_ON_ERROR);
+        $definition = new \Splicewire\Beam\Collections\CollectionDefinition($artifact);
+        $versions = $anchors->map(fn ($row) => is_array($row->artifact) ? $row->artifact : json_decode($row->artifact, true, flags: JSON_THROW_ON_ERROR))->all();
+        $evolution = new DeclaredFieldRenames($versions);
+        $declaration = clone $declaration;
+        foreach (['field', 'titleField', 'descriptionField', 'socialImageField'] as $key) {
+            if ($declaration->{$key} !== null) {
+                $declaration->{$key} = $evolution->field($declaration->{$key}) ?? $declaration->{$key};
+            }
+        }
         $property = $definition->properties()[$declaration->field] ?? [];
         if (($property['type'] ?? null) !== 'string' || ! in_array($declaration->field, $definition->uniqueFields(), true)) {
             $this->refuse('The URL field must be a declared unique string field of the Collection.');
@@ -81,16 +104,6 @@ final class RecordPages
             if ($field !== null && ($definition->properties()[$field]['type'] ?? null) !== 'string') {
                 $this->refuse('Title and SEO bindings must name declared string fields.');
             }
-        }
-        // Same native schema anchor as Collection unique writes; serialize this Collection, never the whole entries table.
-        $connection = $entry->getConnection();
-        if (! $connection->getSchemaBuilder()->hasTable(\Splicewire\Beam\Facades\Beam::table('schemas'))) {
-            $this->refuse('Record Pages require a registered database schema anchor.');
-        }
-        $anchor = $connection->table(\Splicewire\Beam\Facades\Beam::table('schemas'))
-            ->where('schema_name', $definition->stem())->orderBy('version')->orderBy('id')->lockForUpdate()->first();
-        if ($anchor === null) {
-            $this->refuse('Record Pages require a registered database schema anchor.');
         }
         $others = $this->candidates($entry, $settings)->with('particle')->orderBy('id')->get();
         foreach ($others as $other) {
@@ -189,6 +202,7 @@ final class RecordPages
         if (! is_array($declaration)) {
             return;
         }
+        $declaration = app(BindingFieldEvolution::class)->recordPage($page, $declaration);
         try {
             for ($offset = 0; ; $offset += 100) {
                 $rows = $this->readWindow($page, $request, $realm, 100, $offset, $value);
@@ -214,7 +228,7 @@ final class RecordPages
 
     private function readWindow(BeamUxEntry $page, Request $request, string $realm, int $limit, int $offset, ?string $value = null): array
     {
-        $declaration = $page->getAttribute('record_page');
+        $declaration = app(BindingFieldEvolution::class)->recordPage($page, $page->getAttribute('record_page'));
         $source = $this->profiles->require($page, $declaration['collection']);
         $resource = app(ParticleResourceRegistry::class)->get($source->resource);
         $records = $value === null ? null : new RecordPageRecords(app(\Splicewire\Beam\Collections\StandaloneRecordQuery::class), $declaration['field'], $value);
@@ -233,7 +247,7 @@ final class RecordPages
 
     public function resolve(BeamUxEntry $page, string $value, Request $request, string $realm): ?array
     {
-        $field = $page->getAttribute('record_page')['field'] ?? null;
+        $field = app(BindingFieldEvolution::class)->recordPage($page, $page->getAttribute('record_page') ?? [])['field'] ?? null;
         if (! is_string($field) || self::slug($value) === null) {
             return null;
         }
@@ -251,7 +265,8 @@ final class RecordPages
     public function url(BeamUxEntry $page, array $row): ?string
     {
         $declaration = $page->getAttribute('record_page');
-        $slug = self::slug(Arr::get($row, 'fields.'.($declaration['field'] ?? '')));
+        $field = app(BindingFieldEvolution::class)->recordPage($page, $declaration)['field'] ?? '';
+        $slug = self::slug(Arr::get($row, 'fields.'.$field));
         $url = $page->url();
 
         return $slug === null || $url === null ? null : str_replace('{'.$declaration['field'].'}', rawurlencode($slug), $url);
