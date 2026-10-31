@@ -54,13 +54,29 @@ trait SyncsAsPackCopy
             }
         }
 
-        return [
+        $publishedSettings = app(EntryPublication::class)->publishedSettingsOf($this);
+        $publishedParent = $publishedSettings !== null ? $publishedSettings->parentId : $this->parent_id;
+        if ($publishedSettings !== null) {
+            $attributes = array_replace($attributes, [
+                'title' => $publishedSettings->title, 'segment' => $publishedSettings->segment,
+                'nav_order' => $publishedSettings->navOrder, 'nav_group' => $publishedSettings->navGroup,
+                'layout' => $publishedSettings->layout, 'template' => $publishedSettings->template,
+                'seo_description' => $publishedSettings->description, 'seo_social_image' => $publishedSettings->socialImage,
+                'seo_page_type' => $publishedSettings->pageType, 'seo_published_date' => $publishedSettings->publishedDate,
+            ]);
+        }
+        $payload = [
             'id' => (string) $this->getKey(),
             'coordinate' => ['namespace' => $this->namespace, 'slug' => $this->slug, 'realm' => $this->realm, 'type' => $this->getRawOriginal('type') ?? $this->getAttribute('type')],
             'attributes' => $attributes,
-            'parent_id' => $this->parent_id === null ? null : (string) $this->parent_id,
+            'parent_id' => $publishedParent === null ? null : (string) $publishedParent,
             'body' => $body,
+            'pageSettings' => $publishedSettings,
         ];
+
+        return app()->bound(EntryPackDependencies::class)
+            ? app(EntryPackDependencies::class)->export($this, $payload)
+            : EntryPackSyncData::from($payload)->toArray();
     }
 
     public function syncHash(): string
@@ -72,7 +88,9 @@ trait SyncsAsPackCopy
     public function syncDependencies(): array
     {
         $candidates = [];
-        if ($this->parent_id !== null && ($parent = static::query()->find($this->parent_id)) !== null) {
+        $settings = app(EntryPublication::class)->publishedSettingsOf($this);
+        $parentId = $settings !== null ? $settings->parentId : $this->parent_id;
+        if ($parentId !== null && ($parent = static::query()->find($parentId)) !== null) {
             $candidates[] = $parent;
         }
         $body = app(EntryPublication::class)->publishedBodyOf($this) ?? [];
@@ -94,7 +112,14 @@ trait SyncsAsPackCopy
             }
         }
 
-        return $ids === [] ? [] : [static::class => array_values(array_unique($ids))];
+        $dependencies = $ids === [] ? [] : [static::class => array_values(array_unique($ids))];
+        if (app()->bound(EntryPackDependencies::class)) {
+            foreach (app(EntryPackDependencies::class)->dependencies($this) as $class => $extra) {
+                $dependencies[$class] = array_values(array_unique([...($dependencies[$class] ?? []), ...$extra]));
+            }
+        }
+
+        return $dependencies;
     }
 
     /** Published as the site means it (the bound EntryPublishGate) and pinned to a version: what a pack may copy. */
@@ -106,6 +131,9 @@ trait SyncsAsPackCopy
 
     public static function fromSyncPayload(array $data, array $config = []): static
     {
+        if (app()->bound(EntryPackDependencies::class)) {
+            $data = app(EntryPackDependencies::class)->import($data, $config);
+        }
         $slug = $config[self::PACK_SLUG_CONFIG] ?? null;
         if (! is_string($slug) || $slug === '') {
             throw new \InvalidArgumentException('A beam-ux-entry copy needs the applying pack\'s slug ['.self::PACK_SLUG_CONFIG.'].');
@@ -118,10 +146,14 @@ trait SyncsAsPackCopy
                 ? $resolver->resolveTargetId(static::class, (string) $data['parent_id'])
                 : null;
         }
+        $settings = isset($data['pageSettings']) ? \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from($data['pageSettings']) : null;
+        if ($settings !== null) {
+            $settings->parentId = $attributes['parent_id'] ?? null;
+        }
 
         $isNew = ! static::query()->where($data['coordinate'])->exists();
         /** @var static $entry */
-        $entry = app(Reasserter::class)->seedBody($data['coordinate'], $attributes, $data['body'], Provenance::pack($slug));
+        $entry = app(Reasserter::class)->seedBody($data['coordinate'], $attributes, $data['body'], Provenance::pack($slug), $settings);
         if ($isNew) {
             // seedBody fills only mass-assignable attributes; the page settings are set as the editor sets them.
             $entry->forceFill(array_diff_key($attributes, ['title' => true]))->save();

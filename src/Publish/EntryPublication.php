@@ -221,6 +221,16 @@ class EntryPublication
         return is_array($body) ? $body : null;
     }
 
+    /** Settings from the same publication pin as publishedBodyOf; a draft never travels in a pack. */
+    public function publishedSettingsOf(BeamUxEntry $entry): ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData
+    {
+        $particle = $this->particle($entry);
+        $pin = $this->publishedVersionId($entry);
+        $settings = $particle === null || $pin === null ? null : ($this->versions->version($particle, $pin)?->snapshot['meta']['pageSettings'] ?? null);
+
+        return is_array($settings) ? \Splicewire\Beam\Ux\Data\EntryPageSettingsData::from($settings) : null;
+    }
+
     private function publishedBody(BeamUxEntry $entry): mixed
     {
         $particle = $this->particle($entry);

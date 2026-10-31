@@ -95,7 +95,7 @@ class PackCopyTest extends AuthoredComponentNativeTestCase
 
         $this->assertDoesNotMatchRegularExpression('/analytics|measurement|ga4|gtm|tracking|brand|logo|site_name/i', $keys);
         $this->assertArrayHasKey('seo_description', $payload['attributes']);
-        $this->assertSame(['id', 'coordinate', 'attributes', 'parent_id', 'body'], array_keys($payload));
+        $this->assertSame(['id', 'coordinate', 'attributes', 'parent_id', 'body', 'pageSettings', 'schemaSources'], array_keys($payload));
     }
 
     /**

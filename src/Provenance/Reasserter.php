@@ -42,7 +42,7 @@ final class Reasserter
     }
 
     /** Seed shipped structured content without passing it through the author profile guard. */
-    public function seedBody(array $coordinate, array $attributes, array $body, string $origin): BeamUxEntry
+    public function seedBody(array $coordinate, array $attributes, array $body, string $origin, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): BeamUxEntry
     {
         if (! $this->asserts($origin)) {
             throw new \InvalidArgumentException('A system seed requires package:, disk: or pack: provenance.');
@@ -51,7 +51,7 @@ final class Reasserter
         $publication->requireVersionStore();
         $model = new BeamUxEntry;
 
-        return $model->getConnection()->transaction(function () use ($model, $coordinate, $attributes, $body, $origin, $publication) {
+        return $model->getConnection()->transaction(function () use ($model, $coordinate, $attributes, $body, $origin, $publication, $pageSettings) {
             $existing = $model->newQuery()->where($coordinate)->lockForUpdate()->first();
             if ($existing !== null) {
                 $this->reassertBody($existing, $attributes['title'] ?? null, $body, $origin);
@@ -62,12 +62,15 @@ final class Reasserter
                 return $existing->refresh();
             }
             $entry = $model->newInstance(array_merge(BeamUxEntry::publishedMarkingAttributes(), $attributes, $coordinate));
+            if ($pageSettings !== null) {
+                $entry->forceFill(['child_fields' => $pageSettings->childFields, 'record_page' => $pageSettings->recordPage?->toArray()]);
+            }
             if ($entry->getConnection()->getSchemaBuilder()->hasColumn($entry->getTable(), 'origin')) {
                 $entry->origin = $origin;
                 $entry->asserted_hash = Provenance::hash($entry->title, $entry->codec()->decode($body));
             }
             $entry->save();
-            $this->writeAndPublish($entry, $body, $publication, 'seeded');
+            $this->writeAndPublish($entry, $body, $publication, 'seeded', $pageSettings);
 
             return $entry->refresh();
         });
@@ -143,12 +146,22 @@ final class Reasserter
     }
 
     /** Shared connection-bound system write; caller owns the transaction and provenance check. */
-    private function writeAndPublish(BeamUxEntry $entry, array $body, EntryPublication $publication, string $label): void
+    private function writeAndPublish(BeamUxEntry $entry, array $body, EntryPublication $publication, string $label, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): void
     {
         $written = $this->drivers->resolveOnEntryConnection($entry)->write((string) ($entry->particle_id ?? ''), $body, $entry->namespace);
         if ($written->key !== '') {
             $entry->particle_id = $written->key;
             $entry->save();
+        }
+        if ($pageSettings !== null) {
+            $particle = $entry->fresh()->versionable();
+            if (! $particle instanceof \Splicewire\Beam\Models\BeamParticle) {
+                throw new \LogicException('Pack Page Fields require the entry\'s normal versioned particle.');
+            }
+            $meta = $particle->meta ?? [];
+            $meta['pageSettings'] = $pageSettings->toArray();
+            $particle->meta = $meta;
+            $particle->save();
         }
         // Every caller is a seed or a re-import (seeded / reasserted), never an author save: no mirror write.
         $publication->publishWritten($entry->refresh(), $label, mirror: false);
