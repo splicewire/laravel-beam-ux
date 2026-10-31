@@ -62,8 +62,8 @@ final class EntryPageSettingsData extends BeamData
             'publishedDate' => ['nullable', 'date_format:Y-m-d'],
             'fileLanguage' => ['nullable', 'string', 'in:tsx,mdx'],
             'childFields' => ['nullable', 'string', static function (string $attribute, mixed $value, \Closure $fail): void {
-                if ($value !== null && \Splicewire\Beam\Ux\Containment\PageFields::classNamed((string) $value) === null) {
-                    $fail('The host registers no Page Fields by this name (beam.ux.page_fields).');
+                if ($value !== null && \Splicewire\Beam\Ux\Containment\PageFields::named((string) $value) === null) {
+                    $fail('No host class or tenant registered schema declares these Page Fields.');
                 }
             }],
             'recordPage' => ['nullable', 'array:collection,field,titleField,descriptionField,socialImageField'],

@@ -18,8 +18,9 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * the fields page settings shows on each child, the save check ({@see check()}), and the Record fields of the parent's
  * child-page Collection (ADR-0229 d1).
  *
- * The host registers the Data classes by name in `beam.ux.page_fields`; a parent page's `childFields` setting names
- * one, and that map is the only way a class is named, never client input. A class's properties are flat scalars
+ * The host registers Data classes by name in `beam.ux.page_fields`; that map is the only way a class is named,
+ * never client input. ADR-0238 d3 also permits a tenant's registered schema stem through the host-supplied
+ * RegisteredPageFields registry. Neither path requires a Collection marker. Page Fields remain flat scalars
  * (string, int, float, bool, each nullable), so a child's values print as frontmatter (ADR-0233 d3) and read back typed.
  * A child's values are page settings held in its version (`fields`), keyed by the class's property names.
  */
@@ -33,20 +34,34 @@ final class PageFields
         return is_string($class) && class_exists($class) ? $class : null;
     }
 
+    /** A legacy host class or a tenant's registered schema stem (ADR-0238 d3). */
+    public static function named(?string $name): ?string
+    {
+        return self::classNamed($name) ?? ($name !== null && self::registeredSchema($name) !== null ? $name : null);
+    }
+
+    private static function registeredSchema(string $name): ?array
+    {
+        return app()->bound(RegisteredPageFields::class) ? app(RegisteredPageFields::class)->schema($name) : null;
+    }
+
     /** @return list<string> the names a parent's `childFields` may take */
     public static function names(): array
     {
-        return array_values(array_filter(array_keys(config('beam.ux.page_fields', [])), fn ($name) => self::classNamed((string) $name) !== null));
+        $classes = array_values(array_filter(array_keys(config('beam.ux.page_fields', [])), fn ($name) => self::classNamed((string) $name) !== null));
+        $schemas = app()->bound(RegisteredPageFields::class) ? array_keys(app(RegisteredPageFields::class)->schemas()) : [];
+
+        return array_values(array_unique([...$classes, ...$schemas]));
     }
 
-    /** The class a page's fields follow under its current parent (the row's `parent_id`). */
+    /** The class or registered schema stem a page follows under its current parent. */
     public static function forChild(BeamUxEntry $child): ?string
     {
         return self::forParent($child, $child->parent_id);
     }
 
     /**
-     * The class a page's fields follow under the parent `$parentId`: the one that parent's published `childFields`
+     * The class or registered schema stem under `$parentId`: what that parent's published `childFields`
      * names. A null parent is a root page, which no parent declares fields for. The caller names the parent
      * explicitly, so a draft that moves the page (to the root, or to another parent) is checked against its new parent.
      */
@@ -56,7 +71,7 @@ final class PageFields
             return null;
         }
 
-        return self::classNamed($child->newQuery()->whereKey($parentId)->value('child_fields'));
+        return self::named($child->newQuery()->whereKey($parentId)->value('child_fields'));
     }
 
     /**
@@ -69,7 +84,7 @@ final class PageFields
     public static function assertUnclaimed(?string $class, array $unclaimed): void
     {
         $declared = EntryPageSettingsData::reservedFrontmatterKeys();
-        foreach ($class === null ? [] : array_keys(self::parameters($class)) as $name) {
+        foreach ($class === null ? [] : array_keys(self::fieldTypes($class)) as $name) {
             $declared[] = FrontmatterParser::canonicalize($name);
         }
         foreach (array_keys($unclaimed) as $key) {
@@ -94,6 +109,25 @@ final class PageFields
             }
 
             return [];
+        }
+        if (! class_exists($class)) {
+            $schema = self::registeredSchema($class);
+            if ($schema === null) {
+                throw ValidationException::withMessages(['pageSettings.fields' => 'The parent names no available Page Fields schema.']);
+            }
+            foreach (array_keys(array_diff_key($fields, $schema['properties'])) as $name) {
+                throw ValidationException::withMessages(["pageSettings.fields.{$name}" => 'The parent\'s Page Fields do not declare this field.']);
+            }
+            // The declared shape is an object even when no optional fields were entered.
+            // Preserve {} through the shared gate's array envelope instead of validating [].
+            if (! app(\Schemastud\DataSchemas\Migration\AcceptanceGate::class)->accepts(
+                ['fields' => (object) $fields],
+                ['type' => 'object', 'properties' => ['fields' => $schema]],
+            )) {
+                throw ValidationException::withMessages(['pageSettings.fields' => 'These Page Fields do not conform to the parent\'s registered schema.']);
+            }
+
+            return array_filter($fields, static fn ($value) => $value !== null);
         }
         $parameters = self::parameters($class);
         foreach (array_keys(array_diff_key($fields, $parameters)) as $name) {
@@ -130,14 +164,14 @@ final class PageFields
             return [[], $keys];
         }
         $declared = [];
-        foreach (self::parameters($class) as $name => $parameter) {
-            $declared[FrontmatterParser::canonicalize($name)] = $parameter;
+        foreach (self::fieldTypes($class) as $name => $type) {
+            $declared[FrontmatterParser::canonicalize($name)] = ['name' => $name, 'type' => $type];
         }
         $fields = [];
         $rest = [];
         foreach ($keys as $key => $value) {
             isset($declared[$key])
-                ? $fields[$declared[$key]->getName()] = self::typed($declared[$key], $value)
+                ? $fields[$declared[$key]['name']] = self::typed($declared[$key]['type'], $value)
                 : $rest[$key] = $value;
         }
 
@@ -162,10 +196,31 @@ final class PageFields
         return $out;
     }
 
-    /** @return array<string, mixed> the class's JSON schema, for page settings and the Collection's Record fields */
+    /** @return array<string, mixed> the declared schema for page settings and child-page Collection fields */
     public static function schema(string $class): array
     {
+        if (! class_exists($class)) {
+            return self::registeredSchema($class) ?? throw new InvalidArgumentException('No available registered Page Fields schema.');
+        }
+
         return app(Generator::class)->forResponse()->generate(new ReflectionClass($class));
+    }
+
+    /** @return array<string, string> scalar types shared by schema and class-backed frontmatter */
+    private static function fieldTypes(string $class): array
+    {
+        if (class_exists($class)) {
+            return array_map(static fn (ReflectionParameter $parameter) => $parameter->getType()->getName(), self::parameters($class));
+        }
+        $types = [];
+        foreach (self::schema($class)['properties'] as $name => $field) {
+            $type = array_values(array_diff((array) $field['type'], ['null']))[0];
+            $types[$name] = match ($type) {
+                'integer' => 'int', 'number' => 'float', 'boolean' => 'bool', default => 'string',
+            };
+        }
+
+        return $types;
     }
 
     /** @return array<string, ReflectionParameter> keyed by property name, in declaration order */
@@ -186,11 +241,9 @@ final class PageFields
         return $parameters;
     }
 
-    private static function typed(ReflectionParameter $parameter, string $value): mixed
+    private static function typed(string $type, string $value): mixed
     {
-        $type = $parameter->getType();
-
-        return match ($type instanceof ReflectionNamedType ? $type->getName() : 'string') {
+        return match ($type) {
             'bool' => match ($value) {
                 'true' => true,
                 'false' => false,

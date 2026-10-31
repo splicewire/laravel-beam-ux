@@ -359,8 +359,8 @@ class EntryPublication
             if ($pageSettings->fileLanguage !== null && ! \Splicewire\Beam\Ux\Format\FileLanguage::allows($entry, $pageSettings->fileLanguage)) {
                 throw ValidationException::withMessages(['pageSettings.fileLanguage' => "This page cannot be written in {$pageSettings->fileLanguage} on this host (ADR-0233 d5)."]);
             }
-            if ($pageSettings->childFields !== null && \Splicewire\Beam\Ux\Containment\PageFields::classNamed($pageSettings->childFields) === null) {
-                throw ValidationException::withMessages(['pageSettings.childFields' => 'The host registers no Page Fields by this name (beam.ux.page_fields).']);
+            if ($pageSettings->childFields !== null && \Splicewire\Beam\Ux\Containment\PageFields::named($pageSettings->childFields) === null) {
+                throw ValidationException::withMessages(['pageSettings.childFields' => 'No host class or tenant registered schema declares these Page Fields.']);
             }
             $class = \Splicewire\Beam\Ux\Containment\PageFields::forParent($entry, $pageSettings->parentId);
             $pageSettings->fields = \Splicewire\Beam\Ux\Containment\PageFields::check($class, $pageSettings->fields);

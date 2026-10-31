@@ -74,7 +74,7 @@ final class ProfileCollections
             // ADR-0233 d4: the Page Fields the parent declares are the Record fields beside the child's own.
             $parent = BeamUxEntry::query()->find($source->parentEntryId);
             $class = $parent === null || ! \Illuminate\Support\Facades\Schema::hasColumn('beam_ux_entries', 'child_fields')
-                ? null : \Splicewire\Beam\Ux\Containment\PageFields::classNamed($parent->getAttribute('child_fields'));
+                ? null : \Splicewire\Beam\Ux\Containment\PageFields::named($parent->getAttribute('child_fields'));
             if ($class !== null) {
                 $schema['properties']['fields'] = \Splicewire\Beam\Ux\Containment\PageFields::schema($class);
             }
