@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Analytics;
 
 use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\LaravelData\Optional;
+use Spatie\TypeScriptTransformer\Attributes\Optional as TypeScriptOptional;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 
@@ -18,6 +19,7 @@ final class ClickEventData extends BeamData
 {
     public function __construct(
         public string $name,
+        #[TypeScriptOptional]
         public string|Optional $label = new Optional,
     ) {}
 }
