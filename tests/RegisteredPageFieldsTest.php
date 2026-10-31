@@ -144,4 +144,27 @@ final class RegisteredPageFieldsTest extends TestCase
         ]]);
         self::assertSame([], PageFields::check(self::STEM, []));
     }
+
+    public function test_required_nullable_field_cannot_pass_then_disappear_from_saved_fields(): void
+    {
+        app(SchemaRegistry::class)->register(['$id' => self::STEM.'/3', 'type' => 'object', 'required' => ['note'], 'properties' => [
+            'note' => ['type' => ['string', 'null']],
+        ]]);
+        // Page Fields omit nulls in the version and mirror, so required presence must be
+        // checked on that exact normalized shape, before accepting a draft.
+        $this->expectException(ValidationException::class);
+        PageFields::check(self::STEM, ['note' => null]);
+    }
+
+    public function test_accepted_required_nullable_output_revalidates_and_roundtrips_frontmatter(): void
+    {
+        app(SchemaRegistry::class)->register(['$id' => self::STEM.'/3', 'type' => 'object', 'required' => ['note'], 'properties' => [
+            'note' => ['type' => ['string', 'null']],
+        ]]);
+        $saved = PageFields::check(self::STEM, ['note' => 'Keep me']);
+        self::assertSame($saved, PageFields::check(self::STEM, $saved));
+        [$imported, $unclaimed] = PageFields::fromFrontmatter(self::STEM, PageFields::toFrontmatter($saved));
+        self::assertSame($saved, PageFields::check(self::STEM, $imported));
+        self::assertSame([], $unclaimed);
+    }
 }

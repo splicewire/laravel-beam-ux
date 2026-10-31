@@ -118,6 +118,9 @@ final class PageFields
             foreach (array_keys(array_diff_key($fields, $schema['properties'])) as $name) {
                 throw ValidationException::withMessages(["pageSettings.fields.{$name}" => 'The parent\'s Page Fields do not declare this field.']);
             }
+            // Validate precisely what the version and frontmatter retain. In particular,
+            // a required nullable field cannot pass as null and disappear after validation.
+            $fields = array_filter($fields, static fn ($value) => $value !== null);
             // The declared shape is an object even when no optional fields were entered.
             // Preserve {} through the shared gate's array envelope instead of validating [].
             if (! app(\Schemastud\DataSchemas\Migration\AcceptanceGate::class)->accepts(
@@ -127,7 +130,7 @@ final class PageFields
                 throw ValidationException::withMessages(['pageSettings.fields' => 'These Page Fields do not conform to the parent\'s registered schema.']);
             }
 
-            return array_filter($fields, static fn ($value) => $value !== null);
+            return $fields;
         }
         $parameters = self::parameters($class);
         foreach (array_keys(array_diff_key($fields, $parameters)) as $name) {
