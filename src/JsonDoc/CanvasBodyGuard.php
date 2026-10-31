@@ -50,6 +50,14 @@ final class CanvasBodyGuard
         return is_array($body) ? $body : [];
     }
 
+    /** Stored working metadata, falling back to the persisted row, never a prospective validation clone. */
+    public function workingRecordPage(BeamUxEntry $entry): ?array
+    {
+        $settings = $entry->particle?->meta['pageSettings'] ?? null;
+
+        return is_array($settings) ? ($settings['recordPage'] ?? null) : $entry->getOriginal('record_page');
+    }
+
     /**
      * Refuse a canvas body the realm's resolved Manifest Profile does not admit, as a 422 on `body`
      * naming each offending node by id + path. A non-JsonDoc body is source, so where the profile refuses
@@ -71,9 +79,11 @@ final class CanvasBodyGuard
         $profile = $this->resolver->resolve($entry);
         [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $body, $profile);
         app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->assertGraph($entry, $body, profile: $profile);
-        app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $body, $profile);
+        $previous = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->document($entry, $this->workingHead($entry));
+        $previousPage = $this->workingRecordPage($entry);
+        app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $body, $profile, $previous, $previousPage);
         app(\Splicewire\Beam\Ux\Analytics\ClickEventGuard::class)->assert($body, $profile);
-        $checkIds = $this->diff->changedIds($this->workingHead($entry), $body);
+        $checkIds = $this->diff->changedIds($previous, $body);
 
         $this->legality->assert($body, $profile, $checkIds, $component);
         // EP-07d: a changed form posts only to a public intake schema this host's door accepts.
@@ -135,7 +145,8 @@ final class CanvasBodyGuard
         $profile = $this->resolver->resolve($entry);
         [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $working, $profile);
         app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->assertGraph($entry, $working, publishing: true, refs: $componentRefs, profile: $profile);
-        app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $working, $profile);
+        $publishedSettings = app(\Splicewire\Beam\Ux\Bindings\PublishedBindingDocument::class)->pageSettings($entry);
+        app(\Splicewire\Beam\Ux\Bindings\BindingBodyGuard::class)->assert($entry, $working, $profile, $published, array_key_exists('recordPage', $publishedSettings) ? $publishedSettings['recordPage'] : $entry->getOriginal('record_page'));
         app(\Splicewire\Beam\Ux\Analytics\ClickEventGuard::class)->assert($working, $profile);
         $this->legality->assert($working, $profile, $this->diff->changedIds($published, $working), $component);
         // EP-07d: at Publish EVERY form is re-checked, not only the changed ones, so a restored version or an allow-list

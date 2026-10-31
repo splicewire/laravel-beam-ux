@@ -116,11 +116,60 @@ final class BindingFieldEvolution
         return $out;
     }
 
+    /** A known missing field's last frozen declaration; never an invented type or a renamed alias. */
+    public function droppedScope(BeamUxEntry $entry, array $scope, string $path): ?array
+    {
+        $source = $scope['source'] ?? null;
+        if ((! $source instanceof CollectionSource && ! isset($scope['schemaStem'])) || ! str_starts_with($path, 'fields.')) {
+            return null;
+        }
+        $stem = $scope['schemaStem'] ?? $this->stem($entry, $source);
+        $history = $stem === null ? [] : $this->history($stem);
+        if (count($history) < 2) {
+            return null;
+        }
+        $latest = $history[array_key_last($history)];
+        if (($scope['schema']['properties']['fields'] ?? null) !== $latest) {
+            return null; // A different host target/field projection is not a proved registry drop.
+        }
+        $current = (new DeclaredFieldRenames($history))->field(substr($path, 7));
+        if ($current !== null && $current !== substr($path, 7)) {
+            return null; // A declared rename follows its destination; it cannot become a drop exception.
+        }
+        array_pop($history); // A fallback must be historical, never the current declaration itself.
+        foreach (array_reverse($history) as $schema) {
+            $candidate = [...$scope, 'schema' => ['type' => 'object', 'properties' => ['fields' => $schema],
+                '$defs' => $schema['$defs'] ?? [], 'definitions' => $schema['definitions'] ?? []]];
+            try {
+                // Use the SAME resolver, including local-reference checks, as ordinary admission.
+                (new BindingFieldValidator)->declaredField($path, $candidate);
+
+                return $candidate;
+            } catch (MissingBindingField) {
+                // Older artifacts may not yet declare this exact nested field.
+            }
+        }
+
+        return null;
+    }
+
     public function query(CollectionSource $source, array $query, ?BeamUxEntry $entry = null): array
     {
         $stem = $source->address['collection'] ?? ($entry === null ? null : $this->stem($entry, $source));
 
         return $stem === null ? $query : (new DeclaredFieldRenames($this->history($stem)))->query($query);
+    }
+
+    public function queryForValidation(CollectionSource $source, array $query, BeamUxEntry $entry): array
+    {
+        $stem = $this->stem($entry, $source);
+
+        $history = $stem === null ? [] : $this->history($stem);
+        if ($history === [] || ($this->profiles->fieldSchema($source)['properties']['fields'] ?? null) !== $history[array_key_last($history)]) {
+            return $query; // An alternate host target cannot borrow a different registry's drop proof.
+        }
+
+        return (new DeclaredFieldRenames($history))->queryForValidation($query);
     }
 
     public function settings(BeamUxEntry $entry, \Splicewire\Beam\Ux\Data\EntryPageSettingsData $settings, bool $reading = false): \Splicewire\Beam\Ux\Data\EntryPageSettingsData
