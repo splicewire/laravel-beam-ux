@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Media\Data;
 
 use Illuminate\Http\UploadedFile;
+use Schemastud\DataSchemas\Attributes\Description;
 use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType;
 use Splicewire\Beam\Data\BeamData;
@@ -15,6 +16,7 @@ final class EntryImageUploadData extends BeamData
 
     public function __construct(
         // A host generator cannot transform UploadedFile; on the client the upload is a browser File.
+        #[Description('JPEG, PNG, GIF, WebP or AVIF image file up to 8 MiB (8192 KiB). The server checks the actual file bytes; SVG, HTML and remote URLs are not accepted.')]
         #[LiteralTypeScriptType('File')]
         public UploadedFile $file,
     ) {}
