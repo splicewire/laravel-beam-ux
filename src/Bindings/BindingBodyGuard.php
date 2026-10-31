@@ -13,7 +13,7 @@ final class BindingBodyGuard
 {
     public function __construct(private ProfileCollections $profiles, private BindingFieldValidator $fields) {}
 
-    public function assert(BeamUxEntry $entry, array $body, array $profile): void
+    public function assert(BeamUxEntry $entry, array $body, array $profile, array $previous = [], ?array $previousRecordPage = null): void
     {
         if (! $this->hasBindings($body)) {
             return;
@@ -31,21 +31,49 @@ final class BindingBodyGuard
                 }
             }
         }
+        $profile = $this->profile($entry, $profile);
+        $declaration = $entry->getAttribute('record_page');
+        $baseline = new BindingNodeBaseline($previous);
+        $rootMatches = is_array($declaration) && $previousRecordPage !== null
+            && ($declaration['collection'] ?? null) === ($previousRecordPage['collection'] ?? null);
+        $this->fields->assert($body, $profile,
+            fn ($scope, $relation) => $this->relation($scope, $relation),
+            function ($path, $scope, $node, $location, $context) use ($entry, $baseline, $rootMatches) {
+                $hasIndependentSource = isset($node['repeat']['collection'])
+                    || array_filter($context, fn ($part) => isset($part['repeat']['collection'])) !== [];
+                if ((! $hasIndependentSource && ! $rootMatches) || ! $baseline->unchanged($node, $location, $context)) {
+                    return null;
+                }
+
+                return app(BindingFieldEvolution::class)->droppedScope($entry, $scope, $path);
+            });
+        $ids = [];
+        $retainedQueries = [];
+        BindingNodeBaseline::visit($body, function ($node, $path, $context) use ($baseline, &$retainedQueries) {
+            if (isset($node['repeat'], $node['id']) && $baseline->unchanged($node, $path, $context)) {
+                $retainedQueries[$node['id']] = true;
+            }
+        });
+        $this->queries($body, $entry, null, $ids, $retainedQueries);
+    }
+
+    /** Refresh owner schemas only after admission holds the registration anchors. */
+    private function profile(BeamUxEntry $entry, array $profile): array
+    {
+        $declaration = $entry->getAttribute('record_page');
         $offers = $profile['x-collections'] ?? [];
         foreach ($offers as &$offer) {
             $offer['source'] = $this->profiles->require($entry, $offer['name']);
             $offer['schema'] = $this->profiles->fieldSchema($offer['source']);
         }
         unset($offer);
-        $declaration = $entry->getAttribute('record_page');
         $recordScope = null;
         if (is_array($declaration)) {
             $source = $this->profiles->require($entry, $declaration['collection']);
             $recordScope = ['source' => $source, 'schema' => $this->profiles->fieldSchema($source), 'hasRecordPage' => true, 'recordPageRoot' => true];
         }
-        $this->fields->assert($body, [...$profile, 'x-collections' => $offers, 'x-record' => $recordScope], fn ($scope, $relation) => $this->relation($scope, $relation));
-        $ids = [];
-        $this->queries($body, $entry, null, $ids);
+
+        return [...$profile, 'x-collections' => $offers, 'x-record' => $recordScope];
     }
 
     private function relation(array $scope, string $name): array
@@ -61,7 +89,7 @@ final class BindingBodyGuard
         return ['name' => $source->name, 'source' => $target, 'schema' => $this->profiles->fieldSchema($target), 'hasRecordPage' => false];
     }
 
-    private function queries(array $nodes, BeamUxEntry $entry, ?CollectionSource $source, array &$ids): void
+    private function queries(array $nodes, BeamUxEntry $entry, ?CollectionSource $source, array &$ids, array $retainedQueries): void
     {
         foreach ($nodes as $node) {
             $current = $source;
@@ -92,13 +120,17 @@ final class BindingBodyGuard
                 $parameters = array_filter($query, fn ($value) => $value !== null);
                 unset($parameters['limit']);
                 if ($parameters !== []) {
-                    // The owner's saved-filter validator owns names, types, variants and access. No second vocabulary.
+                    if (isset($retainedQueries[$id])) {
+                        $parameters = app(BindingFieldEvolution::class)->queryForValidation($current, $parameters, $entry);
+                    }
+                    // The owner still checks every current/unknown alias, variant and access, even when all
+                    // known-dropped aliases were removed from this validation-only copy.
                     app(BindingRequestScope::class)->run(app(Request::class), $current->address,
                         fn () => app(FilterQuerySelection::class)->validateParticle($current->resource, $parameters));
                 }
-                $this->queries($repeat['empty'] ?? [], $entry, $source, $ids);
+                $this->queries($repeat['empty'] ?? [], $entry, $source, $ids, $retainedQueries);
             }
-            $this->queries(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node), $entry, $current, $ids);
+            $this->queries(\Splicewire\Beam\Ux\JsonDoc\NodeChildren::of($node), $entry, $current, $ids, $retainedQueries);
         }
     }
 

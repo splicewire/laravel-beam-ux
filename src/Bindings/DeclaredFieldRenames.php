@@ -95,6 +95,59 @@ final class DeclaredFieldRenames
         return $query;
     }
 
+    /** @return list<string> Only known dropped aliases, never unknown names or current renames. */
+    public function droppedQueryFields(array $query): array
+    {
+        if (($query['filterVariant'] ?? null) !== null) {
+            return []; // A separate owner vocabulary is not proved by this Collection's artifacts.
+        }
+        $out = [];
+        foreach (['filter' => 'x-filter', 'sort' => 'x-sort'] as $key => $keyword) {
+            $aliases = $key === 'filter' ? array_keys($query[$key] ?? [])
+                : array_map(fn ($sort) => str_starts_with($sort, '-') ? substr($sort, 1) : $sort, explode(',', $query[$key] ?? ''));
+            foreach ($aliases as $alias) {
+                try {
+                    $this->alias((string) $alias, $keyword);
+                } catch (DroppedBindingField) {
+                    $out[] = $key.'.'.$alias;
+                }
+            }
+        }
+
+        return array_values(array_unique($out));
+    }
+
+    /** Admission-only projection of an unchanged saved query. The persisted query remains untouched. */
+    public function queryForValidation(array $query): array
+    {
+        if (($query['filterVariant'] ?? null) !== null) {
+            return $query; // Keep the complete selected vocabulary for the normal owner validator.
+        }
+        if (is_array($query['filter'] ?? null)) {
+            foreach ($query['filter'] as $alias => $value) {
+                try {
+                    $this->alias((string) $alias, 'x-filter');
+                } catch (DroppedBindingField) {
+                    unset($query['filter'][$alias]);
+                }
+            }
+        }
+        if (is_string($query['sort'] ?? null)) {
+            $kept = [];
+            foreach (explode(',', $query['sort']) as $sort) {
+                try {
+                    $this->alias(str_starts_with($sort, '-') ? substr($sort, 1) : $sort, 'x-sort');
+                    $kept[] = $sort;
+                } catch (DroppedBindingField) {
+                    // Only aliases proved dropped by frozen artifacts are omitted from CURRENT validation.
+                }
+            }
+            $query['sort'] = implode(',', $kept);
+        }
+
+        return $this->query($query);
+    }
+
     private function alias(string $alias, string $keyword): string
     {
         $latest = $this->versions[array_key_last($this->versions)] ?? [];

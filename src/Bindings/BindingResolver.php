@@ -68,7 +68,12 @@ final class BindingResolver
     private function records(array $node, BeamUxEntry $entry, Request $request, string $realm): RepeatRecordsData
     {
         $repeat = $node['repeat'];
-        $source = $this->profiles->require($entry, (string) ($repeat['collection'] ?? ''));
+        try {
+            $source = $this->profiles->require($entry, (string) ($repeat['collection'] ?? ''));
+        } catch (MissingProfileCollection) {
+            // A held/missing Collection has no Records. Do not reinterpret access or backing failures as absence.
+            return new RepeatRecordsData([], false, max(1, min(10000, (int) $request->query('repeat_'.$node['id'], 1))));
+        }
         $query = $repeat['query'] ?? [];
         if (! is_array($query) || array_diff(array_keys($query), ['filter', 'sort', 'limit', 'filterVariant'])) {
             throw ValidationException::withMessages(['repeat.query' => 'Unknown saved query field.']);

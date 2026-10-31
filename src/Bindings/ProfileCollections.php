@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\Bindings;
 
-use Illuminate\Validation\ValidationException;
 use LogicException;
 use ReflectionClass;
 use Schemastud\DataSchemas\Generators\Generator;
@@ -33,7 +32,7 @@ final class ProfileCollections
     public function require(BeamUxEntry $entry, string $name): CollectionSource
     {
         return $this->sources($entry)[$name]
-            ?? throw ValidationException::withMessages(['repeat.collection' => 'The Collection is not offered by this Manifest Profile.']);
+            ?? throw MissingProfileCollection::named($name);
     }
 
     /** Field vocabulary comes from the owning resource/schema, never a second handwritten schema. */

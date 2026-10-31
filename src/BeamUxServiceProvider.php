@@ -233,6 +233,10 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             );
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
+                Doctor\DroppedBindingsAudit::class,
+            );
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
                 Doctor\AuthoredComponentAudit::class,
             );
             $this->app->make(BeamDoctorManifest::class)->register(

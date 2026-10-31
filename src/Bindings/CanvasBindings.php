@@ -61,7 +61,14 @@ final class CanvasBindings
         $page = app(RecordPages::class)->validationEntry($entry);
         $body = app(BindingFieldEvolution::class)->document($page, $body);
         $profile = app(\Splicewire\Beam\Ux\Manifest\ManifestProfileResolver::class)->resolve($page);
-        app(BindingBodyGuard::class)->assert($page, $body, $profile);
+        $previous = app(BindingFieldEvolution::class)->document($page,
+            app(\Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard::class)->workingHead($entry));
+        $previousPage = app(\Splicewire\Beam\Ux\JsonDoc\CanvasBodyGuard::class)->workingRecordPage($entry);
+        try {
+            app(BindingBodyGuard::class)->assert($page, $body, $profile, $previous, $previousPage);
+        } catch (MissingProfileCollection) {
+            // Preview is a read: only an absent explicit offer is empty, never an access/backing failure.
+        }
         $resolver = app(BindingResolver::class);
         $bindings = $resolver->resolveDocument($page, $body, $request, (string) $page->realm);
         $declaration = $page->getAttribute('record_page');
