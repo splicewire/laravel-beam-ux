@@ -3649,6 +3649,30 @@ class EntryPublicationTest extends TestCase
         $this->assertNull($this->artifacts()->read($entry->fresh()), 'an empty restore, published, left a module behind');
     }
 
+    public function test_an_unbound_immediate_save_preserves_the_server_initial_body_for_restore(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'immediate-first', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $publication = app(EntryPublication::class);
+        $this->assertNull($entry->particle_id);
+        $this->assertSame([], $publication->state($entry)->versions);
+
+        EntryBodySaveOp::handle($entry, $this->saveRequest(self::BODY_TWO), actor: null);
+
+        $state = $publication->state($entry->fresh());
+        $this->assertCount(2, $state->versions, 'The server initial body must precede the first authored version.');
+        $this->assertFalse($state->draftPending);
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
+        $baseline = $state->versions[1];
+        $restored = $publication->restore($entry->fresh(), $baseline->id);
+        $publication->publishVersion($entry->fresh(), $restored->headVersion);
+        $this->assertStringContainsString('<div', (string) $this->artifacts()->read($entry->fresh()));
+        $this->assertStringNotContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
+        $this->assertSame([[
+            'kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false,
+            'props' => [], 'children' => [],
+        ]], $publication->publishedBody($entry->fresh()));
+    }
+
     public function test_an_immediate_save_still_publishes_and_now_records_the_history_it_never_had(): void
     {
         // The contract `g2-beam-author-entry` proves: a save through this op is live when it returns.
