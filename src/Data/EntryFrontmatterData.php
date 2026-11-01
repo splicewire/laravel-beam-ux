@@ -4,9 +4,9 @@ namespace Splicewire\Beam\Ux\Data;
 
 use Schemastud\DataSchemas\Contracts\SchemaIdentity;
 use Spatie\LaravelData\Attributes\MapInputName;
+use Spatie\LaravelData\Attributes\MapName;
 use Spatie\LaravelData\Data;
 use Spatie\LaravelData\Mappers\SnakeCaseMapper;
-use Splicewire\Beam\Data\Attributes\WireNameExemption;
 use Splicewire\Beam\Mdx\Frontmatter\Contracts\DeclaresFrontmatterFields;
 use Splicewire\Beam\Mdx\Frontmatter\Contracts\Frontmatter;
 use Splicewire\Beam\Mdx\Frontmatter\Contracts\HydratesFromFrontmatter;
@@ -51,30 +51,15 @@ class EntryFrontmatterData extends Data implements DeclaresFrontmatterFields, Fr
     public function __construct(
         public ?string $realm = null,
         public ?string $segment = null,
-        #[MapInputName('nav_order')]
-        #[WireNameExemption(
-            format: 'Beam authored frontmatter',
-            citation: 'ADR-0212 frontmatter declaration seam',
-            reason: 'The authoring grammar canonicalizes this persisted content key to snake_case.',
-        )]
-        public ?int $nav_order = null,
-        #[MapInputName('nav_group')]
-        #[WireNameExemption(
-            format: 'Beam authored frontmatter',
-            citation: 'ADR-0212 frontmatter declaration seam',
-            reason: 'The authoring grammar canonicalizes this persisted content key to snake_case.',
-        )]
-        public ?string $nav_group = null,
+        #[MapName('nav_order')]
+        public ?int $navOrder = null,
+        #[MapName('nav_group')]
+        public ?string $navGroup = null,
         public ?string $title = null,
         public ?string $layout = null,
         public ?string $template = null,
-        #[MapInputName('workflow_marking')]
-        #[WireNameExemption(
-            format: 'Beam authored frontmatter',
-            citation: 'ADR-0212 frontmatter declaration seam',
-            reason: 'The authoring grammar canonicalizes this persisted content key to snake_case.',
-        )]
-        public ?string $workflow_marking = null,
+        #[MapName('workflow_marking')]
+        public ?string $workflowMarking = null,
         public array $leftovers = [],
     ) {}
 

@@ -3,14 +3,12 @@
 namespace Splicewire\Beam\Ux\Tests;
 
 use PHPUnit\Framework\Attributes\Test;
-use Rushing\Doctor\DoctorStatus;
 use Schemastud\DataSchemas\Contracts\SchemaIdentity;
+use Spatie\LaravelData\Attributes\MapName;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
-use Splicewire\Beam\Data\Attributes\WireNameExemption;
 use Splicewire\Beam\Mdx\Frontmatter\Contracts\Frontmatter;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterResolver;
-use Splicewire\Beam\Surgeon\WireNameDeclarationAudit;
 use Splicewire\Beam\Ux\Data\EntryFrontmatterData;
 
 /**
@@ -54,9 +52,37 @@ class EntryFrontmatterDataTest extends TestCase
 
         $data = EntryFrontmatterData::fromFrontmatter($parsed);
 
-        $this->assertSame(7, $data->nav_order);
-        $this->assertSame('Build', $data->nav_group);
+        $this->assertSame(7, $data->navOrder);
+        $this->assertSame('Build', $data->navGroup);
         $this->assertSame('account', $data->realm);
+    }
+
+    #[Test]
+    public function it_maps_camel_properties_to_the_stable_snake_case_frontmatter_keys(): void
+    {
+        $data = EntryFrontmatterData::from([
+            'nav_order' => 7,
+            'nav_group' => 'Guides',
+            'workflow_marking' => 'draft',
+        ]);
+
+        $this->assertSame(7, $data->navOrder);
+        $this->assertSame('Guides', $data->navGroup);
+        $this->assertSame('draft', $data->workflowMarking);
+        $this->assertSame([
+            'realm' => null,
+            'segment' => null,
+            'nav_order' => 7,
+            'nav_group' => 'Guides',
+            'title' => null,
+            'layout' => null,
+            'template' => null,
+            'workflow_marking' => 'draft',
+            'leftovers' => [],
+        ], $data->toArray());
+        $this->assertFalse(property_exists($data, 'nav_order'));
+        $this->assertFalse(property_exists($data, 'nav_group'));
+        $this->assertFalse(property_exists($data, 'workflow_marking'));
     }
 
     #[Test]
@@ -67,29 +93,24 @@ class EntryFrontmatterDataTest extends TestCase
 
         $data = EntryFrontmatterData::from(['nav_order' => 9, 'realm' => 'site']);
 
-        $this->assertSame(9, $data->nav_order);
+        $this->assertSame(9, $data->navOrder);
         $this->assertSame('site', $data->realm);
     }
 
     #[Test]
-    public function each_multi_word_frontmatter_key_declares_its_own_wire_name(): void
+    public function each_multi_word_frontmatter_property_maps_to_its_wire_name(): void
     {
         $reflection = new \ReflectionClass(EntryFrontmatterData::class);
 
-        $this->assertSame([], $reflection->getAttributes(WireNameExemption::class));
-
-        foreach (['nav_order', 'nav_group', 'workflow_marking'] as $property) {
-            $this->assertCount(1, $reflection->getProperty($property)->getAttributes(WireNameExemption::class));
+        foreach ([
+            'navOrder' => 'nav_order',
+            'navGroup' => 'nav_group',
+            'workflowMarking' => 'workflow_marking',
+        ] as $property => $wireName) {
+            $attributes = $reflection->getProperty($property)->getAttributes(MapName::class);
+            $this->assertCount(1, $attributes);
+            $this->assertSame([$wireName], $attributes[0]->getArguments());
         }
-
-        $findings = (new WireNameDeclarationAudit(
-            [EntryFrontmatterData::class],
-            input: CamelCaseMapper::class,
-        ))->run();
-
-        $this->assertCount(1, $findings);
-        $this->assertSame(DoctorStatus::Pass, $findings[0]->status);
-        $this->assertStringContainsString('3 documented wire-name exemption(s)', $findings[0]->detail);
     }
 
     #[Test]
@@ -111,6 +132,6 @@ class EntryFrontmatterDataTest extends TestCase
         $shape = app(FrontmatterResolver::class)->hydrate($parsed);
 
         $this->assertInstanceOf(EntryFrontmatterData::class, $shape);
-        $this->assertSame(3, $shape->nav_order);
+        $this->assertSame(3, $shape->navOrder);
     }
 }
