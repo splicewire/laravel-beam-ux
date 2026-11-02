@@ -101,6 +101,30 @@ class EntryBodyClearTest extends TestCase
         $this->assertCount(3, $restored->versions);
     }
 
+    public function test_clear_appends_one_version_after_an_immediate_initial_baseline_and_keeps_it_restorable(): void
+    {
+        $entry = BeamUxEntry::create([
+            'slug' => 'clear-immediate-baseline', 'type' => UxType::Page->value,
+            'format' => 'tsx', 'realm' => 'site', 'namespace' => 'starter',
+        ]);
+        $initial = app(\Splicewire\Beam\Ux\Publish\EntryInitialBody::class)->resolve($entry);
+        EntryBodySaveOp::handle($entry, Request::create('/x', 'POST', ['body' => self::BODY]), actor: null);
+        $publication = app(EntryPublication::class);
+        $before = $publication->state($entry->fresh());
+        $this->assertCount(2, $before->versions);
+        $baseline = $before->versions[1]->id;
+
+        $cleared = $publication->clear($entry->fresh(), 'clear draft');
+
+        $this->assertCount(3, $cleared->versions);
+        $this->assertSame($before->publishedVersion, $cleared->publishedVersion);
+        $this->assertSame([], app(EntryBodyEnvelope::class)->read($entry->fresh())->body);
+        $restored = $publication->restore($entry->fresh(), $baseline);
+        $this->assertCount(4, $restored->versions);
+        $this->assertSame($before->publishedVersion, $restored->publishedVersion);
+        $this->assertEquals($initial, app(EntryBodyEnvelope::class)->read($entry->fresh())->body);
+    }
+
     public function test_clear_audit_records_the_actor_without_a_restorable_activity_preimage(): void
     {
         $entry = $this->savedPage(self::BODY);
@@ -361,7 +385,10 @@ class EntryBodyClearTest extends TestCase
             'namespace' => 'starter',
         ]);
 
-        EntryBodySaveOp::handle($entry, Request::create('/x', 'POST', ['body' => $body]), actor: null);
+        // Already-authored system fixture: one published version, independent of first-save initialization.
+        $publication = app(EntryPublication::class);
+        $publication->write($entry, $body);
+        $publication->publishWritten($entry->refresh());
 
         return $entry->fresh();
     }

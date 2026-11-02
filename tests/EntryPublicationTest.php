@@ -1899,6 +1899,28 @@ class EntryPublicationTest extends TestCase
         }
     }
 
+    public function test_refused_first_immediate_save_leaves_no_baseline_or_mirror(): void
+    {
+        Storage::fake('mirror');
+        config(['beam.ux.storage.mirror_disk' => 'mirror']);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->bindSplitTenancy();
+        $entry = BeamUxEntry::create(['slug' => 'refused-immediate', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $pub = app(EntryPublication::class);
+        try {
+            EntryBodySaveOp::handle($entry, $this->saveRequest([[
+                'kind' => 'block', 'name' => 'UnknownIsland', 'isComponent' => true,
+                'props' => [], 'children' => [], 'dynamic' => false,
+            ]]), actor: null);
+            $this->fail('the edited unknown component must be refused');
+        } catch (ValidationException) {
+            $this->assertNull($entry->fresh()->particle_id);
+            $this->assertNull($entry->fresh()->published_version);
+            $this->assertSame([], $pub->state($entry->fresh())->versions);
+            $this->assertSame([], Storage::disk('mirror')->allFiles());
+        }
+    }
+
     public function test_refused_edit_after_initialization_leaves_no_pin_or_mirror(): void
     {
         Storage::fake('mirror');
@@ -3649,6 +3671,64 @@ class EntryPublicationTest extends TestCase
         $this->assertNull($this->artifacts()->read($entry->fresh()), 'an empty restore, published, left a module behind');
     }
 
+    public function test_immediate_save_refuses_a_missing_particle_without_recursive_transactions(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'orphan-immediate', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site',
+            'particle_id' => '00000000-0000-4000-8000-000000000001']);
+        // Bound the faulty branch so this public regression cannot exhaust memory on the old code.
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Database\Events\TransactionBeginning::class, function ($event): void {
+            if ($event->connection->transactionLevel() > 3) {
+                throw new \RuntimeException('Recursive baseline transaction tripwire');
+            }
+        });
+        try {
+            EntryBodySaveOp::handle($entry, $this->saveRequest(self::BODY_TWO), actor: null);
+            $this->fail('A missing particle must be refused.');
+        } catch (ValidationException $error) {
+            $this->assertStringContainsString('particle', $error->errors()['body'][0]);
+            $this->assertSame('00000000-0000-4000-8000-000000000001', $entry->fresh()->particle_id);
+            $this->assertSame(0, BeamParticle::count());
+        }
+    }
+
+    public function test_immediate_first_save_retries_the_whole_reservation_after_a_deadlock(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'retry-immediate', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $saves = 0;
+        BeamUxEntry::saving(function (BeamUxEntry $saving) use (&$saves): void {
+            if ($saving->slug === 'retry-immediate' && $saving->particle_id !== null && ++$saves === 1) {
+                throw new \PDOException('deadlock detected during component reservation', 40001);
+            }
+        });
+        EntryBodySaveOp::handle($entry, $this->saveRequest(self::BODY_TWO), actor: null);
+        $this->assertGreaterThan(1, $saves);
+        $state = app(EntryPublication::class)->state($entry->fresh());
+        $this->assertCount(2, $state->versions);
+        $this->assertFalse($state->draftPending);
+        $this->assertStringContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
+    }
+
+    public function test_immediate_first_save_normalizes_an_exhausted_reservation_conflict(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'conflict-immediate', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
+        $attempts = 0;
+        BeamUxEntry::saving(function (BeamUxEntry $saving) use (&$attempts): void {
+            if ($saving->slug === 'conflict-immediate' && $saving->particle_id !== null) {
+                $attempts++;
+                throw new \PDOException('deadlock detected during component reservation', 40001);
+            }
+        });
+        try {
+            EntryBodySaveOp::handle($entry, $this->saveRequest(self::BODY_TWO), actor: null);
+            $this->fail('An exhausted reservation conflict must refuse the save.');
+        } catch (ValidationException $error) {
+            $this->assertStringContainsString('Retry the save', $error->getMessage());
+            $this->assertSame(2, $attempts);
+            $this->assertNull($entry->fresh()->particle_id);
+            $this->assertSame(0, BeamParticle::count());
+        }
+    }
+
     public function test_an_unbound_immediate_save_preserves_the_server_initial_body_for_restore(): void
     {
         $entry = BeamUxEntry::create(['slug' => 'immediate-first', 'type' => 'page', 'format' => 'tsx', 'realm' => 'site']);
@@ -3667,10 +3747,10 @@ class EntryPublicationTest extends TestCase
         $publication->publishVersion($entry->fresh(), $restored->headVersion);
         $this->assertStringContainsString('<div', (string) $this->artifacts()->read($entry->fresh()));
         $this->assertStringNotContainsString('Two', (string) $this->artifacts()->read($entry->fresh()));
-        $this->assertSame([[
+        $this->assertEquals([[
             'kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false,
             'props' => [], 'children' => [],
-        ]], $publication->publishedBody($entry->fresh()));
+        ]], app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->read($entry->fresh())->body);
     }
 
     public function test_an_immediate_save_still_publishes_and_now_records_the_history_it_never_had(): void
