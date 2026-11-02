@@ -126,9 +126,7 @@ class EntryBodySaveOp
         // entry's first version, and the write is about to destroy it. Without that, the body a reader
         // was served up to this moment would exist nowhere, and `restore` on the very next edit would
         // have nothing to roll back to. It is a no-op for an entry that already has history.
-        $publication->baseline($model, mirror: true);
-
-        $written = $publication->write($model, $body);
+        $written = $publication->writeImmediate($model, $body);
 
         return [
             'key' => $written['key'],

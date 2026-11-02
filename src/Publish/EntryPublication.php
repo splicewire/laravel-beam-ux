@@ -157,25 +157,7 @@ class EntryPublication
                 throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('This entry has history but no valid Publication Pin. Repair its pin before editing.');
             }
             if ($unauthored) {
-                // FIRST SAVE, never mount: the locked null-base comparison owns initialization.
-                // The baseline is server-owned. A client-supplied initialBody is not authority.
-                $baseline = app(EntryInitialBody::class)->resolve($locked);
-                if ($locked->particle_id === null) {
-                    $this->write($locked, $baseline);
-                }
-                $version = $this->versions->snapshot($this->requireParticle($locked), 'baseline');
-                // The writer may normalize legacy styles: compile and mirror the frozen snapshot.
-                $baseline = $version->snapshot['payload'];
-                app(CompileEntryBody::class)->forVersion($locked, (string) $version->id, $baseline);
-                // A new component has no guest-visible default page to preserve. Its first draft is not publication.
-                if (! app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->authored($locked)) {
-                    $locked->published_version = (string) $version->id;
-                    $locked->save();
-                    $snapshot = clone $locked;
-                    $locked->getConnection()->afterCommit(function () use ($snapshot, $baseline) {
-                        $this->mirror->mirror($snapshot, $this->placements->resolve($snapshot)->pathFor($snapshot), $baseline);
-                    });
-                }
+                $this->initializeBaseline($locked, mirror: true);
             }
 
             $state = $this->recordDraftAfterLocks($locked, $body, $label, $pageSettings);
@@ -608,6 +590,61 @@ class EntryPublication
         $entry->getConnection()->transaction(
             fn () => $this->pinAndCompile($entry, $this->versions->snapshot($particle, 'baseline'), false, $mirror),
         );
+    }
+
+    /**
+     * Preserve the server initial body only at the immediate author-save boundary.
+     * System baseline callers must not create a body, a publication pin or a broken-binding refusal.
+     * The reservation owns both initialization and the authored write, including conflict retries.
+     *
+     * @param  array<int|string, mixed>  $body
+     * @return array{key: string, body: array<string, mixed>}
+     */
+    public function writeImmediate(BeamUxEntry $entry, array $body): array
+    {
+        $this->requireVersionStore();
+
+        $written = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reservationTransaction($entry->getConnection(), function () use ($entry, $body): array {
+            $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
+            if ($locked->particle_id === null) {
+                $this->initializeBaseline($locked, mirror: true);
+            } else {
+                if ($this->particle($locked) === null) {
+                    throw ValidationException::withMessages(['body' => 'This entry references a missing particle. Repair its binding before saving.']);
+                }
+                $this->baseline($locked, mirror: true);
+            }
+
+            return $this->write($locked, $body);
+        });
+        $entry->refresh();
+
+        return $written;
+    }
+
+    /** The server-owned first body is shared by CAS drafts and immediate author saves only. */
+    private function initializeBaseline(BeamUxEntry $entry, bool $mirror): void
+    {
+        // The baseline is server-owned. A client-supplied initialBody is not authority.
+        $baseline = app(EntryInitialBody::class)->resolve($entry);
+        if ($entry->particle_id === null) {
+            $this->write($entry, $baseline);
+        }
+        $version = $this->versions->snapshot($this->requireParticle($entry), 'baseline');
+        // The writer may normalize legacy styles: compile and mirror the frozen snapshot.
+        $baseline = $version->snapshot['payload'];
+        app(CompileEntryBody::class)->forVersion($entry, (string) $version->id, $baseline);
+        // A new component has no guest-visible default page to preserve. Its first draft is not publication.
+        if (! app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->authored($entry)) {
+            $entry->published_version = (string) $version->id;
+            $entry->save();
+            $snapshot = clone $entry;
+            if ($mirror) {
+                $entry->getConnection()->afterCommit(function () use ($snapshot, $baseline) {
+                    $this->mirror->mirror($snapshot, $this->placements->resolve($snapshot)->pathFor($snapshot), $baseline);
+                });
+            }
+        }
     }
 
     /**
