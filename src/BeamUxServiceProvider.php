@@ -148,6 +148,11 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         $this->app->scoped(Bindings\RecordPageScope::class);
         $this->app->scoped(Components\ComponentScope::class);
         $this->app->bind(PreviewGrantResolver::class, PreviewGrantService::class);
+        // The docs-link seam's shipped default (registry-docs ticket 01, amended ruling 1): no docs
+        // capability, no link — `urlFor()` answers null, never throws, never guesses. `bindIf` is the
+        // host-bindings container-lane default; beam-docs supersedes with a plain `bind()` (installing
+        // it IS the posture), and the pair is order-independent by construction.
+        $this->app->bindIf(Docs\DocsLinkResolver::class, Docs\NullDocsLinkResolver::class);
         // DOCS-06b: the templates the provenance backfill may match an unstamped row against; packages register theirs.
         $this->app->singleton(Provenance\ProvenanceTemplates::class);
 
