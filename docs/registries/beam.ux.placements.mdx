@@ -1,0 +1,64 @@
+---
+title: Entry file placements
+segment: beam.ux.placements
+nav_order: 46
+excerpt: Named strategies that derive the disk path an entry's file is mirrored to.
+---
+
+# Entry file placements
+
+`beam.ux.placements` holds the named **file placement** strategies. A placement derives the disk path
+an entry's file lands at when it is mirrored to a filesystem, for example a git-tracked directory you
+want entry bodies committed to. It decides where the file goes on disk and nothing else: an entry's
+URL comes from its containment tree, never from its placement.
+
+{/* registry-facts:start — generated from the #[IsRegistry] declaration by `splicewire:beam:docs:registries:scaffold`. Rerun the command; do not edit between these markers. */}
+
+- **Root:** `beam.ux.placements`
+- **Entries:** `Splicewire\Beam\Ux\Placement\FilePlacement`
+- **Duplicate keys:** Supersede — a later registration under a taken key replaces the earlier entry, in its place
+- **Population:** Optional — an empty registry is normal
+- **Order:** `46` (display order, ascending)
+- **Declared by:** `Splicewire\Beam\Ux\Placement\PlacementResolver`
+
+{/* registry-facts:end */}
+
+## What ships
+
+- `default` composes the entry's namespace (dots become slashes), its type, its slug and the
+  codec's extension: `marketing/page/pricing.mdx`.
+- `date-partitioned` files by creation date under a root, `articles` unless
+  `beam.ux.placement.date_root` says otherwise: `articles/2026/11/launch-notes.mdx`.
+
+## Adding a strategy
+
+Implement `FilePlacement`, whose one method returns the path for an entry, and register it by name:
+
+```php
+use Splicewire\Beam\Ux\Placement\PlacementResolver;
+
+app(PlacementResolver::class)->register('by-author', new ByAuthorPlacement);
+```
+
+## How an entry's placement is chosen
+
+Most specific first:
+
+1. The entry's own `placement_ref`, naming a registered strategy.
+2. The `beam.ux.placement.namespaces` config map, a namespace prefix to strategy name, matched by the
+   longest prefix. `['articles' => 'date-partitioned']` files every `articles.*` entry by date.
+3. An entry imported from disk keeps its original relative path.
+4. `default`.
+
+A name in the reference or the map that isn't registered throws, rather than quietly falling back.
+
+## Related registries
+
+- [`beam.ux.codecs`](beam.ux.codecs): supplies the extension.
+- [`beam.ux.storage-drivers`](beam.ux.storage-drivers): chosen by the same precedence.
+- [The beam-ux entry cluster](beam.ux): how the three fit together.
+
+## Going deeper
+
+The source is
+[`PlacementResolver`](https://github.com/splicewire/laravel-beam-ux/blob/main/src/Placement/PlacementResolver.php).

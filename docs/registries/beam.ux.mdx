@@ -1,0 +1,48 @@
+---
+title: The beam-ux entry cluster
+segment: beam.ux
+nav_order: 44
+excerpt: The three registries that decide how an authored entry's body is encoded, where it is filed and where it is stored.
+---
+
+# The beam-ux entry cluster
+
+Everything under `beam.ux.` decides what happens to the body of an authored entry, a page or
+component written in TSX, MDX or CSS, between the editor and storage. All three registries are
+declared by [`splicewire/laravel-beam-ux`](https://github.com/splicewire/laravel-beam-ux), which
+seeds each with working defaults, so a host registers only what it adds or changes.
+
+Which one you reach for:
+
+- **Support a new source format**: [`beam.ux.codecs`](beam.ux.codecs).
+- **Change the file path an entry is mirrored to**: [`beam.ux.placements`](beam.ux.placements).
+- **Store some entries' bodies somewhere else**: [`beam.ux.storage-drivers`](beam.ux.storage-drivers).
+
+## How they fit together
+
+A **codec**, chosen by the entry's `format`, turns the raw source an author writes into the
+structured body that is versioned and stored, and back again. A **storage driver** is where that
+body is read and written. A **placement** derives the disk path the entry's file lands at when it is
+mirrored. The codec also supplies the file extension that path uses.
+
+## One precedence rule, twice
+
+Placements and storage drivers are each chosen per entry by the same precedence, most specific first:
+
+1. the entry's own reference (`placement_ref` or `driver_ref`), naming a registered strategy;
+2. a namespace map from config, matched by the longest namespace prefix;
+3. the registered `default`.
+
+Placement adds one step before the default: an entry imported from disk keeps its original relative
+path. The namespace maps are host config pointing at names in the registry, not entries of their
+own.
+
+## What a duplicate means here
+
+All three **supersede**: registering a name that is already taken replaces the entry. That is how a
+host replaces the seeded `default` placement or storage driver.
+
+## Going deeper
+
+[Popcorn registries](/beam/docs/foundations/registries) explains roots, keys and duplicate policies in
+general.

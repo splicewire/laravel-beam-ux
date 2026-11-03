@@ -1,0 +1,67 @@
+---
+title: Entry storage drivers
+segment: beam.ux.storage-drivers
+nav_order: 47
+excerpt: Named storage drivers that decide where an entry's body is read and written.
+---
+
+# Entry storage drivers
+
+`beam.ux.storage-drivers` holds the named **storage drivers** an entry's body can be read from and
+written to. Each entry is a `StorageDriver`, the storage port from `splicewire/laravel-beam`, so any
+driver written for Beam's schema storage works here too.
+
+{/* registry-facts:start — generated from the #[IsRegistry] declaration by `splicewire:beam:docs:registries:scaffold`. Rerun the command; do not edit between these markers. */}
+
+- **Root:** `beam.ux.storage-drivers`
+- **Entries:** `Splicewire\Beam\Storage\StorageDriver`
+- **Duplicate keys:** Supersede — a later registration under a taken key replaces the earlier entry, in its place
+- **Population:** Optional — an empty registry is normal
+- **Order:** `47` (display order, ascending)
+- **Declared by:** `Splicewire\Beam\Ux\Storage\StorageDriverResolver`
+
+{/* registry-facts:end */}
+
+## What ships
+
+- `default` is a stacked driver. The database particle is the record of truth, and a filesystem disk
+  holds a mirror keyed by the particle's id. The disk is `beam.ux.storage.disk`, or the framework
+  default when that is unset.
+- `particle` is the database particle alone, with no disk mirror.
+
+## Adding a driver
+
+```php
+use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
+
+app(StorageDriverResolver::class)->register('archive', new S3ArchiveStorageDriver);
+```
+
+Then point entries at it, by their `driver_ref` or by namespace.
+
+## How an entry's driver is chosen
+
+Most specific first:
+
+1. The entry's own `driver_ref`, naming a registered driver.
+2. The `beam.ux.storage.namespaces` config map, a namespace prefix to driver name, matched by the
+   longest prefix.
+3. `default`.
+
+## Entries on another connection
+
+An entry that lives on a database connection other than the default must have its body written on
+that same connection, inside any transaction the caller holds. A driver that implements
+`ConnectionAwareStorageDriver` is bound to the entry's connection. A driver that can't be bound is
+refused for such an entry rather than allowed to write where a rollback can't reach it. Implement
+`ConnectionAwareStorageDriver` if your driver writes to the database.
+
+## Related registries
+
+- [`beam.ux.placements`](beam.ux.placements): chosen by the same precedence.
+- [The beam-ux entry cluster](beam.ux): how the three fit together.
+
+## Going deeper
+
+The source is
+[`StorageDriverResolver`](https://github.com/splicewire/laravel-beam-ux/blob/main/src/Storage/StorageDriverResolver.php).

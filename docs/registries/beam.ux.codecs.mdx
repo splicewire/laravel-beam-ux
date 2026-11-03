@@ -1,0 +1,63 @@
+---
+title: Entry body codecs
+segment: beam.ux.codecs
+nav_order: 45
+excerpt: One codec per source format, translating an entry's raw TSX, MDX or CSS into its stored body and back.
+---
+
+# Entry body codecs
+
+`beam.ux.codecs` holds one **body codec** per source format. A codec translates between the raw text
+an author writes, such as a `.tsx` or `.mdx` file body, and the structured body that is versioned and
+stored. Every entry resolves its codec by its own `format`, so an entry of any format gets the same
+versioning and storage treatment. The one exception is a theme entry, which always uses the CSS
+codec whatever its `format` says.
+
+{/* registry-facts:start — generated from the #[IsRegistry] declaration by `splicewire:beam:docs:registries:scaffold`. Rerun the command; do not edit between these markers. */}
+
+- **Root:** `beam.ux.codecs`
+- **Entries:** `Splicewire\Beam\Ux\Codec\BodyCodec`
+- **Duplicate keys:** Supersede — a later registration under a taken key replaces the earlier entry, in its place
+- **Population:** Optional — an empty registry is normal
+- **Order:** `45` (display order, ascending)
+- **Declared by:** `Splicewire\Beam\Ux\Codec\CodecRegistry`
+
+{/* registry-facts:end */}
+
+## What ships
+
+The package seeds three codecs, keyed by format value: `tsx`, `mdx` and `css`. The MDX codec stores
+source by default; a host that sets `beam.ux.mdx.holds_blocks` gets the block-holding MDX codec
+instead.
+
+## Adding a format
+
+Implement `BodyCodec` and register an instance. It keys itself by `format()->value`:
+
+```php
+use Splicewire\Beam\Ux\Codec\CodecRegistry;
+
+app(CodecRegistry::class)->register(new YamlBodyCodec);
+```
+
+A codec answers four things: its `format()`, the file `extension()` its bodies materialize to, and
+`encode()` and `decode()`, which must be inverses so a body round-trips. The format can be a case of
+your own enum implementing `UxFormatCase`. The registry keys on the string value, not the enum
+class, so your format sits beside the package's own.
+
+## Who reads it
+
+Every `BeamUxEntry`, through `codec()`, whenever its body is encoded, decoded or given a file
+extension. Asking for a format with no codec throws.
+
+## Related registries
+
+- [`beam.ux.placements`](beam.ux.placements): uses the codec's extension in the file path.
+- [The beam-ux entry cluster](beam.ux): how the three fit together.
+
+## Going deeper
+
+The source is
+[`CodecRegistry`](https://github.com/splicewire/laravel-beam-ux/blob/main/src/Codec/CodecRegistry.php),
+and the port is
+[`BodyCodec`](https://github.com/splicewire/laravel-beam-ux/blob/main/src/Codec/BodyCodec.php).
