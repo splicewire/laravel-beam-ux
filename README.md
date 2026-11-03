@@ -102,3 +102,47 @@ $source = $this->rawMdx->read('legal/privacy'); // string|null
   or `null` when the file is absent (the caller renders its default — degrade-not-fabricate).
 - **Config:** `beam.ux.content_path` (env `BEAM_UX_CONTENT_PATH`, default `resources/js/content`) — the
   base-path-relative content root. Bound as a singleton by `BeamUxServiceProvider` against that config.
+
+## Registries
+
+This package declares three registries. The [beam-ux cluster page](docs/registries/beam.ux.mdx) says which one you
+reach for.
+
+- [`beam.ux.codecs`](docs/registries/beam.ux.codecs.mdx): one codec per source format, translating an entry's raw
+  TSX, MDX or CSS into its stored body and back.
+- [`beam.ux.placements`](docs/registries/beam.ux.placements.mdx): the strategies that derive the disk path an entry's
+  file is mirrored to.
+- [`beam.ux.storage-drivers`](docs/registries/beam.ux.storage-drivers.mdx): the drivers that decide where an entry's
+  body is read and written.
+
+It registers into registries `splicewire/laravel-beam` owns:
+
+- [`beam.install.steps`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.install.steps.mdx):
+  the beam-ux install step.
+- [`beam.doctor.audits`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.doctor.audits.mdx):
+  the beam-ux audits, covering migrations, access, chrome, MDX pages, themes, artifacts, routes, redirects,
+  reachability and the version store, among others.
+- [`beam.seed.steps`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.seed.steps.mdx):
+  the beam-ux seeder.
+- [`beam.nav.sections`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.nav.sections.mdx):
+  the `authoring` and `ops` sections in the `operator` and `tenant` realms.
+- [`beam.particle.resources`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.particle.resources.mdx)
+  and [`beam.particle.operations`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/beam.particle.operations.mdx):
+  the entry, release, redirect, mirror-status and health resources and their operations, plus a `{realm}-dashboard`
+  resource for each realm that has none.
+- [`schemas.sources`](https://github.com/splicewire/laravel-beam/blob/main/docs/registries/schemas.sources.mdx):
+  the `theme` schema source.
+
+It also registers into registries other packages own:
+
+- [`beam.sitemap.sources`](https://github.com/splicewire/laravel-beam-sitemap/blob/main/docs/registries/beam.sitemap.sources.mdx),
+  owned by `splicewire/laravel-beam-sitemap`: `EntrySitemapSource`, for published entries.
+- [`beam.workflows.blueprints`](https://github.com/splicewire/laravel-beam-workflows/blob/main/docs/registries/beam.workflows.blueprints.mdx),
+  [`beam.workflows.bindings`](https://github.com/splicewire/laravel-beam-workflows/blob/main/docs/registries/beam.workflows.bindings.mdx),
+  [`beam.workflows.subject-resolvers`](https://github.com/splicewire/laravel-beam-workflows/blob/main/docs/registries/beam.workflows.subject-resolvers.mdx)
+  and [`beam.workflows.types`](https://github.com/splicewire/laravel-beam-workflows/blob/main/docs/registries/beam.workflows.types.mdx),
+  owned by `splicewire/laravel-beam-workflows`: the entry publish and release lifecycles, the release binding and
+  resolver, and the `page` and `component` types. Only when that package is installed.
+- [`data-nav`](https://github.com/stephenr85/laravel-data-nav/blob/main/docs/registries/data-nav.mdx) and
+  [`data-nav.navigations`](https://github.com/stephenr85/laravel-data-nav/blob/main/docs/registries/data-nav.navigations.mdx),
+  owned by `rushing/laravel-data-nav`: the frame-resources nav invocable, and one declared-section navigation per realm.
