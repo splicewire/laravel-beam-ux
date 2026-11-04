@@ -118,7 +118,9 @@ class RegisterEntriesFromDisk
      *
      * @param  list<string>  $only  Exact root-relative files; empty preserves the unfiltered batch.
      * @param  ?string  $expectedPlan  Optional selected dry-run hash; mismatch refuses before writes.
-     * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, reasserted: array<int, string>, filled: array<string, list<string>>, ignored: array<int, string>, failed: array<string, string>, unresolved: array<int, string>, recognized: int}
+     *                                 `unreadable` names each already-present row this host could not read, with the diagnostic (registry-docs ticket 16):
+     *                                 kept like an edited row, but never counted as one, and absent from `skipped`.
+     * @return array{created: array<int, BeamUxEntry>, skipped: array<int, string>, reasserted: array<int, string>, unreadable: array<string, string>, filled: array<string, list<string>>, ignored: array<int, string>, failed: array<string, string>, unresolved: array<int, string>, recognized: int}
      */
     public function scan(string $root, ?BeamUxEntry $under = null, ?UxType $default = null, array $ignore = [], ?string $package = null, array $only = [], ?string $expectedPlan = null): array
     {
@@ -139,6 +141,7 @@ class RegisterEntriesFromDisk
         $created = [];
         $skipped = [];
         $reasserted = [];
+        $unreadable = [];
         $filled = [];
         $ignored = [];
 
@@ -148,7 +151,7 @@ class RegisterEntriesFromDisk
         if (! is_dir($root)) {
             $failed = $this->failures;
 
-            return compact('created', 'skipped', 'reasserted', 'filled', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
+            return compact('created', 'skipped', 'reasserted', 'unreadable', 'filled', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
         }
 
         $recognized = [];
@@ -209,7 +212,7 @@ class RegisterEntriesFromDisk
         if ($unresolved !== []) {
             $failed = $this->failures;
 
-            return compact('created', 'skipped', 'reasserted', 'filled', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
+            return compact('created', 'skipped', 'reasserted', 'unreadable', 'filled', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
         }
 
         foreach ($recognized as $index => [$absolute, $relative, $envelope]) {
@@ -233,8 +236,11 @@ class RegisterEntriesFromDisk
                 // An edited row is left for docs.diverged; cms is untouched. No-op pre-migration.
                 $src = (string) file_get_contents($absolute);
                 $title = $this->containmentFor($src, $relative, $envelope)['title'] ?? null;
-                if (app(Reasserter::class)->reassert($existing, $title, $src, $this->originFor($relative), $this->loweredForReassert($existing, $src))) {
+                $outcome = app(Reasserter::class)->reassertion($existing, $title, $src, $this->originFor($relative), $this->loweredForReassert($existing, $src));
+                if ($outcome === Reasserter::REASSERTED) {
                     $reasserted[] = $relative;
+                } elseif (str_starts_with($outcome, Reasserter::UNREADABLE)) {
+                    $unreadable[$relative] = substr($outcome, strlen(Reasserter::UNREADABLE) + 2, -1);
                 } else {
                     $skipped[] = $relative;
                 }
@@ -257,7 +263,7 @@ class RegisterEntriesFromDisk
 
         $failed = $this->failures;
 
-        return compact('created', 'skipped', 'reasserted', 'filled', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
+        return compact('created', 'skipped', 'reasserted', 'unreadable', 'filled', 'ignored', 'failed', 'unresolved') + ['recognized' => $recognizedCount];
     }
 
     /**
@@ -984,7 +990,7 @@ class RegisterEntriesFromDisk
             $created[] = $this->register($item['envelope'], $sources[$item['path']], $item['path']);
         }
 
-        return ['created' => $created, 'skipped' => $skipped, 'reasserted' => [], 'ignored' => [],
+        return ['created' => $created, 'skipped' => $skipped, 'reasserted' => [], 'unreadable' => [], 'ignored' => [],
             'failed' => $this->failures, 'unresolved' => [], 'recognized' => count($plan['entries']), 'plan_sha256' => $plan['sha256']];
     }
 

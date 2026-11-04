@@ -2,7 +2,9 @@
 
 namespace Splicewire\Beam\Ux\Provenance;
 
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Ux\Compile\CompilationFailed;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -36,10 +38,28 @@ final class Reasserter
      */
     public function reassert(BeamUxEntry $existing, ?string $title, string $source, string $incomingOrigin, ?array $body = null): bool
     {
+        return $this->reassertion($existing, $title, $source, $incomingOrigin, $body) === self::REASSERTED;
+    }
+
+    /**
+     * {@see reassert()}, saying why a row was left: {@see REASSERTED}, {@see LEFT}, or the diagnostic of a stored body this
+     * host cannot read (prefixed {@see UNREADABLE}). An unreadable row is kept, as an edited one is (ADR-0215 §2), but it
+     * is not an edit, and a caller that reports must not count it as one (registry-docs ticket 16).
+     */
+    public function reassertion(BeamUxEntry $existing, ?string $title, string $source, string $incomingOrigin, ?array $body = null): string
+    {
         // `$body`: the source already lowered to blocks by a caller that lowers as it registers (an MDX file on a host that
         // holds MDX as blocks); the codec's encode does not lower.
         return $this->reassertBody($existing, $title, $body ?? $existing->codec()->encode($source), $incomingOrigin);
     }
+
+    public const REASSERTED = 'reasserted';
+
+    /** Left as it is: edited, unchanged, out-ranked, cms or unknown origin, or the schema predates DOCS-06. */
+    public const LEFT = 'left';
+
+    /** The prefix of {@see reassertion()}'s answer for a row whose stored body this host cannot read. */
+    public const UNREADABLE = 'stored body unreadable on this host';
 
     /** Seed shipped structured content without passing it through the author profile guard. */
     public function seedBody(array $coordinate, array $attributes, array $body, string $origin, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): BeamUxEntry
@@ -86,30 +106,40 @@ final class Reasserter
         return $body !== [] && array_is_list($body) && ! array_is_list((array) ($existing->particle?->payload ?? []));
     }
 
-    private function reassertBody(BeamUxEntry $existing, ?string $title, array $body, string $incomingOrigin): bool
+    private function reassertBody(BeamUxEntry $existing, ?string $title, array $body, string $incomingOrigin): string
     {
         if (! Schema::hasColumn($existing->getTable(), 'asserted_hash')) {
-            return false; // Pre-migration: create-once stands; a row without provenance is never re-asserted.
+            return self::LEFT; // Pre-migration: create-once stands; a row without provenance is never re-asserted.
         }
 
         $origin = (string) ($existing->origin ?? '');
         if (! $this->asserts($origin)) {
-            return false; // cms or unknown origin: never re-asserted by a seed or import.
+            return self::LEFT; // cms or unknown origin: never re-asserted by a seed or import.
         }
 
         if (Provenance::rank($incomingOrigin) < Provenance::rank($origin)) {
-            return false; // DOC-5: a weaker origin yields to the stronger incumbent.
+            return self::LEFT; // DOC-5: a weaker origin yields to the stronger incumbent.
         }
 
-        if (! $this->isPristine($existing)) {
-            return false; // Edited (or unreadable): kept and reported by docs.diverged, never overwritten.
+        // Unreadable is not edited (registry-docs ticket 16): both are kept, but this one is said, because nothing on this
+        // host can tell whether the row is pristine, so no seed will re-assert it until the host can print its body.
+        [$current, $why] = $this->stored($existing);
+        if ($why !== null) {
+            $row = ($existing->namespace ? "{$existing->namespace}." : '').$existing->slug;
+            Log::warning("beam-ux: not re-asserted {$row} ({$origin}): ".self::UNREADABLE." ({$why})");
+
+            return self::UNREADABLE." ({$why})";
+        }
+
+        if (! $this->pristine($existing, $current)) {
+            return self::LEFT; // Edited: kept and reported by docs.diverged, never overwritten.
         }
 
         $newTitle = $title ?? $existing->title;
         // Like with like: the new source as it WOULD be stored, the form the asserted hash was taken over.
         $newHash = Provenance::hash($newTitle, $existing->codec()->decode($body));
         if ($newHash === (string) $existing->asserted_hash && ! $this->changesKind($existing, $body)) {
-            return false; // Pristine and the origin is unchanged: nothing to re-assert.
+            return self::LEFT; // Pristine and the origin is unchanged: nothing to re-assert.
         }
 
         // Born published (ADR-0225 decision 2; review-r1, 2026-10-16): a re-asserted body is a new published version, so
@@ -133,7 +163,7 @@ final class Reasserter
 
         // Only an entry with no particle (nothing to version) still compiles separately.
         if ($existing->refresh()->published_version !== null) {
-            return true;
+            return self::REASSERTED;
         }
 
         try {
@@ -142,7 +172,7 @@ final class Reasserter
             // Non-fatal, as in the seed path: reported by BeamUxArtifactAudit.
         }
 
-        return true;
+        return self::REASSERTED;
     }
 
     /** Shared connection-bound system write; caller owns the transaction and provenance check. */
@@ -176,9 +206,15 @@ final class Reasserter
         if (! Schema::hasColumn($entry->getTable(), 'asserted_hash') || (string) ($entry->asserted_hash ?? '') === '') {
             return false;
         }
-        $current = $this->currentBody($entry);
 
-        return $current !== null && Provenance::hash($entry->title, $current) === (string) $entry->asserted_hash;
+        return $this->pristine($entry, $this->currentBody($entry));
+    }
+
+    /** {@see isPristine()} over a body already read, so a caller that read it once does not print it twice. */
+    private function pristine(BeamUxEntry $entry, ?string $current): bool
+    {
+        return Schema::hasColumn($entry->getTable(), 'asserted_hash') && (string) ($entry->asserted_hash ?? '') !== ''
+            && $current !== null && Provenance::hash($entry->title, $current) === (string) $entry->asserted_hash;
     }
 
     private function asserts(string $origin): bool
@@ -208,16 +244,47 @@ final class Reasserter
     /** The row's stored body as {@see isPristine()} reads it, so a re-stamp hashes exactly what pristine-ness compares. */
     public function currentBody(BeamUxEntry $entry): ?string
     {
+        return $this->stored($entry)[0];
+    }
+
+    /**
+     * Why this host cannot read a row's stored body (the lens's or the store's own diagnostic), or null when it can, or
+     * when the row has no body to read at all (no particle). A row that is unreadable is neither pristine nor edited: it
+     * is unjudged, and every reporter says so rather than calling it an edit (registry-docs ticket 16).
+     */
+    public function unreadable(BeamUxEntry $entry): ?string
+    {
+        return $this->stored($entry)[1];
+    }
+
+    /**
+     * One read of the stored body, for a caller that needs both answers without printing it twice.
+     *
+     * @return array{0: ?string, 1: ?string} the stored body, or null and (when a body exists but can't be read) why
+     */
+    public function stored(BeamUxEntry $entry): array
+    {
         if ($entry->particle_id === null) {
-            return null;
+            return [null, null];
         }
 
         try {
             $item = $this->drivers->resolveOnEntryConnection($entry)->read((string) $entry->particle_id);
+            if ($item === null) {
+                return [null, "no stored item for particle {$entry->particle_id}"];
+            }
 
-            return $item === null ? null : $entry->codec()->decode($item->body);
-        } catch (Throwable) {
-            return null;
+            return [$entry->codec()->decode($item->body), null];
+        } catch (Throwable $e) {
+            return [null, self::diagnostic($e)];
         }
+    }
+
+    /** A lens refusal is a ValidationException whose message is generic; its first error is the lens's own words. */
+    public static function diagnostic(Throwable $e): string
+    {
+        $first = $e instanceof ValidationException ? collect($e->errors())->flatten()->first() : null;
+
+        return trim((string) ($first ?? $e->getMessage())) ?: $e::class;
     }
 }

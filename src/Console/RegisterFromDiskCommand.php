@@ -164,17 +164,24 @@ class RegisterFromDiskCommand extends Command
             $this->components->error("{$relative}: {$reason}");
         }
 
+        // Kept like an edited row, but not an edit: this host could not print the stored body, so it cannot tell whether the
+        // row is pristine (registry-docs ticket 16). The lens's own diagnostic is the remedy's first clue.
+        foreach ($result['unreadable'] ?? [] as $relative => $why) {
+            $this->components->twoColumnDetail($relative, '<fg=yellow>not re-asserted: '.\Splicewire\Beam\Ux\Provenance\Reasserter::UNREADABLE." ({$why})</>");
+        }
+
         foreach ($result['filled'] ?? [] as $relative => $columns) {
             $this->components->twoColumnDetail($relative, 'filled: '.self::settingNames($columns));
         }
 
         $this->components->info(sprintf(
-            '%d registered · %d skipped (already present) · %d ignored (not a body format) · %d failed to compile · %d filled page settings.',
+            '%d registered · %d skipped (already present) · %d ignored (not a body format) · %d failed to compile · %d filled page settings%s.',
             count($result['created']),
             count($result['skipped']),
             count($result['ignored']),
             count($result['failed'] ?? []),
             count($result['filled'] ?? []),
+            ($unreadable = count($result['unreadable'] ?? [])) > 0 ? " · {$unreadable} not re-asserted (".\Splicewire\Beam\Ux\Provenance\Reasserter::UNREADABLE.')' : '',
         ));
 
         return ($result['failed'] ?? []) === [] ? self::SUCCESS : self::FAILURE;
@@ -262,9 +269,12 @@ class RegisterFromDiskCommand extends Command
         }
         $left = count($result['rows']) - $would;
         $pristine = count(array_filter($result['rows'], fn (array $row): bool => $row['verdict'] === 'pristine'));
+        // Counted apart (registry-docs ticket 16): an unreadable row is unjudged, never an edit, and never re-stamped.
+        $unreadable = count(array_filter($result['rows'], fn (array $row): bool => str_starts_with($row['verdict'], \Splicewire\Beam\Ux\Provenance\RegisteredRowRestamp::UNREADABLE)));
+        $unread = $unreadable > 0 ? " · {$unreadable} ".\Splicewire\Beam\Ux\Provenance\RegisteredRowRestamp::UNREADABLE : '';
         $this->components->info($apply
-            ? sprintf('%d re-stamped of %d that qualified · %d left alone (%d pristine).', $result['restamped'], $would, $left, $pristine)
-            : sprintf('%d would re-stamp · %d left alone (%d pristine). Nothing was written; pass --apply to write.', $would, $left, $pristine));
+            ? sprintf('%d re-stamped of %d that qualified · %d left alone (%d pristine)%s.', $result['restamped'], $would, $left, $pristine, $unread)
+            : sprintf('%d would re-stamp · %d left alone (%d pristine)%s. Nothing was written; pass --apply to write.', $would, $left, $pristine, $unread));
 
         return $result['missing'] === [] && (! $apply || $result['restamped'] === $would) ? self::SUCCESS : self::FAILURE;
     }

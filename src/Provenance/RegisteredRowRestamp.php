@@ -17,14 +17,28 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
  * row first registered on a host that holds MDX as blocks read edited at birth and never re-asserted (69 of 109 origin
  * rows on www, 2026-11-04). The fix stamps new rows correctly; this re-stamps the rows already born that way.
  *
+ * It also repairs a deliberate change of the MDX lens's print (registry-docs ticket 16): every row stamped over the old
+ * print reads non-pristine under the new one, though no word moved.
+ *
+ * Before any guard, the stored body must be READABLE on this host. A host that cannot print it (a lens that does not
+ * resolve) can judge nothing, so the row is named "stored body unreadable on this host (<diagnostic>)" and never an edit.
+ *
  * It re-stamps a row ONLY when all four hold, and each one is a proof rather than a heuristic:
  *
  * 1. the row is not pristine (a pristine row needs nothing);
- * 2. `asserted_hash == hash(title, asStored(codec, originFile))`: the origin asserted exactly the file now on disk, so
- *    the old stamp is the defect's and not a stale assertion of an earlier file;
+ * 2. the stamp is accounted for, one of two ways:
+ *    - `asserted_hash == hash(title, asStored(codec, originFile))`: the origin asserted exactly the file now on disk,
+ *      so the old stamp is the born-unstamped defect's and not a stale assertion of an earlier file; or
+ *    - the stored blocks are still the file's lowering under the CURRENT print (guard 3's structural test): the stamp
+ *      was taken over an older print of these same blocks, so only the print moved;
  * 3. the stored print `===` the file's registration ({@see RegisterEntriesFromDisk::asWritten()}): the row holds that
  *    file's lowering and no authored word;
  * 4. no draft is pending.
+ *
+ * A host edit fails both halves of guard 2 (its blocks are not the file's lowering, and its stamp is not the raw file),
+ * so it is still refused, as is a row whose file moved on since it was asserted. One case stays refused by design: a
+ * row whose file moved on AND whose print changed cannot be told from an edit, because the old print is gone; a seed
+ * that ran before the print change had already re-asserted it.
  *
  * Then `asserted_hash = hash(title, currentBody)`, the value {@see Reasserter::isPristine()} compares, and nothing else:
  * no body, version, placement, origin or timestamp moves. A row that fails a guard is listed with its reason and never
@@ -36,6 +50,9 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
 final class RegisteredRowRestamp
 {
     public const RESTAMP = 'would re-stamp';
+
+    /** The verdict's prefix for a row this host cannot read; the lens's diagnostic follows in parentheses. */
+    public const UNREADABLE = Reasserter::UNREADABLE;
 
     public function __construct(
         private RegisterFromDisk $disk,
@@ -70,7 +87,12 @@ final class RegisteredRowRestamp
                 if (! self::asserts((string) $entry->origin)) {
                     continue; // a cms row is never judged, as docs.diverged does not judge it
                 }
-                $rows[] = $this->row($entry, null, $this->reasserter->isPristine($entry) ? 'pristine' : 'no origin file under the declared sources');
+                [$current, $why] = $this->reasserter->stored($entry);
+                $rows[] = $this->row($entry, null, match (true) {
+                    $why !== null => self::UNREADABLE." ({$why})",
+                    $current !== null && (string) ($entry->asserted_hash ?? '') !== '' && Provenance::hash($entry->title, $current) === (string) $entry->asserted_hash => 'pristine',
+                    default => 'no origin file under the declared sources',
+                });
             }
         }
 
@@ -97,23 +119,28 @@ final class RegisteredRowRestamp
         return ['rows' => $rows, 'restamped' => $restamped, 'missing' => $missing];
     }
 
-    /** The four guards, in order; the first that refuses names the row's reason. */
+    /** Readability, then the four guards, in order; the first that refuses names the row's reason. */
     private function verdict(BeamUxEntry $entry, string $source): string
     {
         if (! self::asserts((string) ($entry->origin ?? ''))) {
             return 'not a seeded or imported row (origin '.($entry->origin ?? 'none').')';
         }
-        if ($this->reasserter->isPristine($entry)) {
+        [$current, $why] = $this->reasserter->stored($entry);
+        if ($why !== null) {
+            return self::UNREADABLE." ({$why})";
+        }
+        if ($current === null) {
+            return 'no stored body';
+        }
+        if ((string) ($entry->asserted_hash ?? '') !== '' && Provenance::hash($entry->title, $current) === (string) $entry->asserted_hash) {
             return 'pristine';
         }
-        if (Provenance::hash($entry->title, Provenance::asStored($entry->codec(), $source)) !== (string) $entry->asserted_hash) {
+        $written = RegisterEntriesFromDisk::asWritten($entry, $source);
+        $rawFile = Provenance::hash($entry->title, Provenance::asStored($entry->codec(), $source)) === (string) $entry->asserted_hash;
+        if (! $rawFile && $current !== $written) {
             return 'asserted hash is not this file (an edit, or the file moved on since registration)';
         }
-        $current = $this->reasserter->currentBody($entry);
-        if ($current === null) {
-            return 'stored body unreadable';
-        }
-        if ($current !== RegisterEntriesFromDisk::asWritten($entry, $source)) {
+        if ($current !== $written) {
             return 'stored body is not this file\'s registration (an authored change)';
         }
         if ($this->publication->state($entry)->draftPending) {

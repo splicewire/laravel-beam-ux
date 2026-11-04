@@ -55,6 +55,10 @@ class DiskEntriesPublicationTest extends TestCase
 
     protected function tearDown(): void
     {
+        foreach (glob($this->root.'/page/*') ?: [] as $file) {
+            @unlink($file);
+        }
+        @rmdir($this->root.'/elsewhere');
         @unlink($this->root.'/page/guide.mdx');
         @rmdir($this->root.'/page');
         @rmdir($this->root);
@@ -398,6 +402,158 @@ class DiskEntriesPublicationTest extends TestCase
         $this->assertSame(str_repeat('0', 64), $orphan->fresh()->asserted_hash);
     }
 
+    // ── An unreadable body, and a print change (registry-docs ticket 16) ───────────────────────────────────────────────
+
+    /** The flagship's diagnostic, verbatim in shape (registry-docs ticket 14 §1). */
+    private const UNRESOLVED = 'beam-mdx lens: cannot resolve [@splicewire/beam-mdx/lens] from the host at /srv/host ([@splicewire/beam-mdx] does not export [./lens])';
+
+    /** Swap the host's MDX lens; every print and read after this goes through it. */
+    private function useLens(\Splicewire\Beam\Mdx\Lens\MdxLens $lens): void
+    {
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, $lens);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\JsonDoc\SourceToBlocks::class);
+        $this->app->forgetInstance(RegisterEntriesFromDisk::class);
+    }
+
+    /** A row registered correctly (born pristine) on a host whose lens worked. */
+    private function registeredPristine(string $slug = 'guide', string $source = self::WRAPPED): BeamUxEntry
+    {
+        if (! Schema::hasColumn('beam_ux_entries', 'seo_description')) {
+            (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        }
+        $this->holdReflowingBlocks();
+        file_put_contents($this->root."/page/{$slug}.mdx", $source);
+        app(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
+        $entry = BeamUxEntry::query()->where('slug', $slug)->firstOrFail();
+        $this->assertTrue(app(Reasserter::class)->isPristine($entry), "{$slug} is born pristine");
+
+        return $entry;
+    }
+
+    public function test_restamp_names_a_row_this_host_cannot_print_as_unreadable_never_as_an_edit(): void
+    {
+        $this->registeredPristine();
+        $this->useLens(new UnresolvableMdxLens(self::UNRESOLVED));
+        $before = $this->snapshot();
+
+        $output = $this->restamp(apply: true);
+        $this->assertStringContainsString('guide (package:acme/docs)', $output);
+        $this->assertStringContainsString('stored body unreadable on this host ('.self::UNRESOLVED.')', $output);
+        $this->assertStringNotContainsString('asserted hash is not this file', $output);
+        $this->assertStringContainsString('0 re-stamped of 0 that qualified · 1 left alone (0 pristine) · 1 stored body unreadable on this host', $output);
+        $this->assertSame($before, $this->snapshot(), 'an unreadable row is never written');
+
+        // The whole-host mode: a row no declared source reaches is unreadable too, not "no origin file".
+        mkdir($this->root.'/elsewhere');
+        config(['beam.docs.sources' => [['path' => $this->root.'/elsewhere']]]);
+        $output = $this->restamp(options: ['--restamp' => true, '--sources' => true]);
+        $this->assertStringContainsString('stored body unreadable on this host ('.self::UNRESOLVED.')', $output);
+        $this->assertStringNotContainsString('no origin file under the declared sources', $output);
+        $this->assertStringContainsString('1 stored body unreadable on this host', $output);
+    }
+
+    public function test_a_rescan_reports_a_row_it_could_not_read_apart_from_one_it_kept_as_edited(): void
+    {
+        $this->registeredPristine();
+        $this->registeredPristine('notes', "---\ntitle: Notes\n---\n\nNotes the file\nwraps.\n");
+        $this->authorEditOf(BeamUxEntry::query()->where('slug', 'notes')->firstOrFail(), 'Our words.');
+        $this->useLens(new OnlyNotesMdxLens(new ReflowingMdxLens, self::UNRESOLVED));
+        \Illuminate\Support\Facades\Log::spy();
+
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
+        $this->assertSame(['page/guide.mdx' => self::UNRESOLVED], $result['unreadable'] ?? null, 'unreadable, with the lens diagnostic');
+        $this->assertSame(['page/notes.mdx'], $result['skipped'], 'the edited row is kept, and only it is "skipped"');
+        $this->assertSame([], $result['reasserted']);
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->withArgs(fn (string $message): bool => str_contains($message, 'stored body unreadable on this host') && str_contains($message, self::UNRESOLVED));
+
+        $exit = \Illuminate\Support\Facades\Artisan::call('splicewire:beam:ux:register-from-disk', ['path' => $this->root]);
+        $output = (string) preg_replace('/\s+/', ' ', \Illuminate\Support\Facades\Artisan::output());
+        $this->assertStringContainsString('page/guide.mdx', $output);
+        $this->assertStringContainsString('not re-asserted: stored body unreadable on this host ('.self::UNRESOLVED.')', $output);
+        $this->assertStringContainsString('· 1 not re-asserted (stored body unreadable on this host)', $output);
+        $this->assertSame(0, $exit, $output);
+    }
+
+    public function test_after_a_print_change_restamp_restamps_an_untouched_row_and_refuses_a_host_edit(): void
+    {
+        $this->registeredPristine();
+        $notes = $this->registeredPristine('notes', "---\ntitle: Notes\n---\n\nNotes the file\nwraps.\n");
+        $this->authorEditOf($notes, 'Our words.');
+        $editedHash = $notes->fresh()->asserted_hash;
+
+        // The deliberate print change: the lens now ends every document with a blank line. Every stored print re-hashes.
+        $this->useLens(new ChangedPrintMdxLens(new ReflowingMdxLens));
+        $this->assertFalse(app(Reasserter::class)->isPristine($this->guide()), 'a print change leaves the untouched row non-pristine');
+        $before = $this->snapshot();
+
+        $output = $this->restamp();
+        $this->assertMatchesRegularExpression('/guide \(package:acme\/docs\) (\.+ )?would re-stamp/', $output);
+        $this->assertMatchesRegularExpression('/notes \(package:acme\/docs\) (\.+ )?asserted hash is not this file/', $output);
+        $this->assertStringContainsString('1 would re-stamp · 1 left alone (0 pristine). Nothing was written', $output);
+        $this->assertSame($before, $this->snapshot());
+
+        $output = $this->restamp(apply: true);
+        $this->assertStringContainsString('1 re-stamped of 1 that qualified · 1 left alone (0 pristine)', $output);
+        $this->assertTrue(app(Reasserter::class)->isPristine($this->guide()), 'the untouched row is pristine under the new print');
+        $notes = $notes->fresh();
+        $this->assertFalse(app(Reasserter::class)->isPristine($notes), 'the host edit stays edited');
+        $this->assertSame($editedHash, $notes->asserted_hash);
+        $this->assertSame("Our words.\n\n", app(Reasserter::class)->currentBody($notes), 'and its words are kept');
+
+        // And the repaired row follows its file again.
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: A guide\n---\n\nRevised on disk.\n");
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
+        $this->assertSame(['page/guide.mdx'], $result['reasserted']);
+    }
+
+    /**
+     * Ticket 15's corpus (`splicewire/laravel-beam-mdx` `tests/Lens/fixtures/print-stability/`, 28 real docs pages) through
+     * a deliberate print change. With `BEAM_MDX_LENS_HOST` the lens is the real one under the change; without, the
+     * reflowing fake reads the same files.
+     */
+    public function test_after_a_print_change_restamp_restamps_every_untouched_corpus_page_and_refuses_the_edited_one(): void
+    {
+        $dir = dirname((string) (new \ReflectionClass(\Splicewire\Beam\Mdx\Lens\NodeMdxLens::class))->getFileName(), 3).'/tests/Lens/fixtures/print-stability';
+        $this->assertFileExists($dir.'/corpus.json', 'ticket 15\'s corpus is reachable from this vendor');
+        $slugs = array_keys((array) json_decode((string) file_get_contents($dir.'/corpus.json'), true));
+        $this->assertGreaterThanOrEqual(25, count($slugs), 'an emptied corpus cannot pass');
+
+        $host = getenv('BEAM_MDX_LENS_HOST') ?: null;
+        $lens = $host !== null ? new \Splicewire\Beam\Mdx\Lens\NodeMdxLens('node', null, $host) : new ReflowingMdxLens;
+        if (! Schema::hasColumn('beam_ux_entries', 'seo_description')) {
+            (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        }
+        $this->holdReflowingBlocks();
+        $this->useLens($lens);
+        @unlink($this->root.'/page/guide.mdx');
+        $names = [];
+        foreach ($slugs as $slug) {
+            $name = 'corpus-'.str_replace(['.', '_'], '-', $slug);
+            copy("{$dir}/{$slug}.source.mdx", $this->root."/page/{$name}.mdx");
+            $names[] = $name;
+        }
+        app(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
+        $rows = BeamUxEntry::query()->whereIn('slug', $names)->get();
+        $this->assertCount(count($names), $rows, 'every corpus page registered');
+        foreach ($rows as $row) {
+            $this->assertTrue(app(Reasserter::class)->isPristine($row), "{$row->slug} is born pristine");
+        }
+        $edited = $rows->firstWhere('slug', 'corpus-music-loop');
+        $this->authorEditOf($edited, 'Our words.');
+
+        $this->useLens(new ChangedPrintMdxLens($lens));
+        $untouched = count($names) - 1;
+        $output = $this->restamp();
+        $this->assertStringContainsString("{$untouched} would re-stamp · 1 left alone (0 pristine). Nothing was written", $output);
+        $this->assertMatchesRegularExpression('/corpus-music-loop \(package:acme\/docs\) (\.+ )?asserted hash is not this file/', $output);
+
+        $output = $this->restamp(apply: true);
+        $this->assertStringContainsString("{$untouched} re-stamped of {$untouched} that qualified · 1 left alone (0 pristine)", $output);
+        foreach (BeamUxEntry::query()->whereIn('slug', $names)->get() as $row) {
+            $this->assertSame($row->slug !== 'corpus-music-loop', app(Reasserter::class)->isPristine($row), $row->slug);
+        }
+    }
+
     public function test_restamp_refuses_options_out_of_place(): void
     {
         $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root, '--apply' => true])->assertFailed();
@@ -416,13 +572,19 @@ class DiskEntriesPublicationTest extends TestCase
     /** A site edit, published as an author's write (which records activity). */
     private function authorEdit(string $text): void
     {
+        $this->authorEditOf($this->guide(), $text);
+    }
+
+    /** {@see authorEdit()} on any row. */
+    private function authorEditOf(BeamUxEntry $entry, string $text): void
+    {
         $core = dirname((new \ReflectionClass(\Splicewire\Beam\BeamServiceProvider::class))->getFileName(), 2);
         if (! Schema::hasTable('activity_log')) {
             (require $core.'/database/migrations/shared/create_activity_log_table.php.stub')->up();
         }
         $pub = app(EntryPublication::class);
         $edited = [['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => $text]], 'dynamic' => false]];
-        $pub->publishVersion($this->guide(), $pub->recordDraft($this->guide(), $edited)->headVersion);
+        $pub->publishVersion($entry->fresh(), $pub->recordDraft($entry->fresh(), $edited)->headVersion);
     }
 
     /**
@@ -572,7 +734,7 @@ class DiskEntriesPublicationTest extends TestCase
         $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
 
         $recipe = BeamUxEntry::query()->where('slug', 'recipe')->firstOrFail();
-        $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($recipe->versionable(), $recipe->published_version)->snapshot;
+        $version = app(VersionStore::class)->version($recipe->versionable(), $recipe->published_version)->snapshot;
         $this->assertSame(['schema_type' => 'HowTo', 'audience' => 'cooks'], $version['meta']['pageSettings']['unclaimed']);
         $this->assertSame('Recipe', $version['meta']['pageSettings']['title']);
         $this->assertSame(4, $version['meta']['pageSettings']['navOrder']);
@@ -599,7 +761,7 @@ class DiskEntriesPublicationTest extends TestCase
         $this->assertSame('recipe', $parent->child_fields);
         $pie = BeamUxEntry::query()->where('slug', 'pie')->firstOrFail();
         $this->assertSame($parent->id, $pie->parent_id);
-        $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($pie->versionable(), $pie->published_version)->snapshot;
+        $version = app(VersionStore::class)->version($pie->versionable(), $pie->published_version)->snapshot;
         $this->assertSame(['servings' => 4, 'vegetarian' => true], $version['meta']['pageSettings']['fields']);
         $this->assertSame(['schema_type' => 'Recipe'], $version['meta']['pageSettings']['unclaimed']);
         $this->assertArrayNotHasKey('recipes/page/pie.mdx', $result['failed']);
@@ -810,7 +972,7 @@ class DiskEntriesPublicationTest extends TestCase
     {
         $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root);
         $before = $this->guide();
-        $body = app(\Splicewire\Beam\Ux\Storage\StorageDriverResolver::class)->resolve($before)->read((string) $before->particle_id)?->body;
+        $body = app(StorageDriverResolver::class)->resolve($before)->read((string) $before->particle_id)?->body;
         Schema::drop(Beam::table('versions'));
         $this->writeGuide("# Guide\n\nChanged on disk.\n");
 
@@ -823,7 +985,7 @@ class DiskEntriesPublicationTest extends TestCase
 
         $after = $this->guide();
         $this->assertSame((string) $before->asserted_hash, (string) $after->asserted_hash, 'the provenance hash moved');
-        $this->assertSame($body, app(\Splicewire\Beam\Ux\Storage\StorageDriverResolver::class)->resolve($after)->read((string) $after->particle_id)?->body, 'the body was rewritten');
+        $this->assertSame($body, app(StorageDriverResolver::class)->resolve($after)->read((string) $after->particle_id)?->body, 'the body was rewritten');
     }
 
     public function test_hydrating_an_empty_entry_is_born_published(): void
@@ -924,7 +1086,7 @@ class DiskEntriesPublicationTest extends TestCase
         $this->failNextPinSave();
 
         try {
-            app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->reassert($entry->fresh(), 'Guide', "# Guide\n\nChanged on disk.\n", \Splicewire\Beam\Ux\Provenance\Provenance::disk('page/guide.mdx'));
+            app(Reasserter::class)->reassert($entry->fresh(), 'Guide', "# Guide\n\nChanged on disk.\n", \Splicewire\Beam\Ux\Provenance\Provenance::disk('page/guide.mdx'));
             $this->fail('a failure while pinning a central re-assert was swallowed');
         } catch (\RuntimeException $e) {
             $this->assertSame('simulated failure saving the publication pin', $e->getMessage());
@@ -935,7 +1097,7 @@ class DiskEntriesPublicationTest extends TestCase
         $this->assertSame([1, 0], $this->rows('particles'));
         $this->assertSame([1, 0], $this->rows('versions'));
 
-        $this->assertTrue(app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->reassert($entry->fresh(), 'Guide', "# Guide\n\nChanged on disk.\n", \Splicewire\Beam\Ux\Provenance\Provenance::disk('page/guide.mdx')));
+        $this->assertTrue(app(Reasserter::class)->reassert($entry->fresh(), 'Guide', "# Guide\n\nChanged on disk.\n", \Splicewire\Beam\Ux\Provenance\Provenance::disk('page/guide.mdx')));
 
         $this->assertNotSame($pin, (string) $entry->fresh()->published_version, 'a central re-assert left the old pin');
         $this->assertSame([1, 0], $this->rows('particles'), 'the re-assert left the entry connection or its particle');
@@ -1051,5 +1213,57 @@ class FailingDiskCompiler implements EntryBodyCompiler
         self::$attempts++;
 
         throw \Splicewire\Beam\Ux\Compile\CompilationFailed::for($entry, 'no toolchain here');
+    }
+}
+
+/** A host whose `@splicewire/beam-mdx` cannot be resolved: every read and print throws the lens's own diagnostic. */
+class UnresolvableMdxLens implements \Splicewire\Beam\Mdx\Lens\MdxLens
+{
+    public function __construct(private string $diagnostic) {}
+
+    public function read(string $body, array $context = []): array
+    {
+        throw \Illuminate\Validation\ValidationException::withMessages(['source' => $this->diagnostic]);
+    }
+
+    public function print(array $doc): string
+    {
+        throw \Illuminate\Validation\ValidationException::withMessages(['source' => $this->diagnostic]);
+    }
+}
+
+/** Prints only a doc whose words are an author's edit ("Our words."); any other print throws, as an unresolvable lens does. */
+class OnlyNotesMdxLens implements \Splicewire\Beam\Mdx\Lens\MdxLens
+{
+    public function __construct(private \Splicewire\Beam\Mdx\Lens\MdxLens $inner, private string $diagnostic) {}
+
+    public function read(string $body, array $context = []): array
+    {
+        return $this->inner->read($body, $context);
+    }
+
+    public function print(array $doc): string
+    {
+        if (($doc[0]['children'][0]['value'] ?? null) !== 'Our words.') {
+            throw \Illuminate\Validation\ValidationException::withMessages(['source' => $this->diagnostic]);
+        }
+
+        return $this->inner->print($doc);
+    }
+}
+
+/** A deliberate print change over any lens: the same reading, every document printed with one more trailing newline. */
+class ChangedPrintMdxLens implements \Splicewire\Beam\Mdx\Lens\MdxLens
+{
+    public function __construct(private \Splicewire\Beam\Mdx\Lens\MdxLens $inner) {}
+
+    public function read(string $body, array $context = []): array
+    {
+        return $this->inner->read($body, $context);
+    }
+
+    public function print(array $doc): string
+    {
+        return $this->inner->print($doc)."\n";
     }
 }
