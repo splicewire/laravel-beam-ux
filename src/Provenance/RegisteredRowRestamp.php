@@ -44,6 +44,10 @@ use Splicewire\Beam\Ux\Publish\EntryPublication;
  * no body, version, placement, origin or timestamp moves. A row that fails a guard is listed with its reason and never
  * written, so an edited row stays edited (ADR-0215 §2) and its remedy stays the owner's.
  *
+ * A package stub row (`package:` with no file under any declared source, e.g. a docs root) is listed as "no origin file
+ * under the declared sources" and never written here: the stub is its origin, and only its seed holds the stub as it
+ * asserts it, so its seed re-stamps it under these same guards ({@see Reasserter::RESTAMPED}, registry-docs ticket 18).
+ *
  * Dry-run unless `$apply`. The write is a compare-and-set on the old hash, so a row stamped by anything else between the
  * plan and the write is left alone.
  */

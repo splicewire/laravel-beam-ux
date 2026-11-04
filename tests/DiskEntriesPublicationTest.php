@@ -554,6 +554,117 @@ class DiskEntriesPublicationTest extends TestCase
         }
     }
 
+    // ── A package stub row after a print change (registry-docs ticket 18) ──────────────────────────────────────────────
+
+    private const STUB = "---\ntitle: Docs\n---\n\nThe docs the package\nships, hard-wrapped.\n";
+
+    /** A package seeder's step, as laravel-beam-docs' DocsSeeder takes it: one shipped MDX stub, no file any source reaches. */
+    private function seedStub(string $slug, string $source = self::STUB, string $title = 'Docs'): ?BeamUxEntry
+    {
+        $seeder = new class
+        {
+            use \Splicewire\Beam\Ux\Seed\SeedsEntries;
+
+            public function run(string $slug, string $source, string $title): ?BeamUxEntry
+            {
+                return $this->seedPage($slug, $source, ['title' => $title, 'realm' => 'site', 'segment' => $slug], origin: 'package:acme/docs');
+            }
+        };
+
+        return $seeder->run($slug, $source, $title)?->fresh();
+    }
+
+    /** Stub rows seeded on a host whose lens worked, so each is born pristine; the shipped MDX is held as blocks. */
+    private function seededStubs(string ...$slugs): void
+    {
+        if (! Schema::hasColumn('beam_ux_entries', 'seo_description')) {
+            (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        }
+        $this->holdReflowingBlocks();
+        foreach ($slugs as $slug) {
+            $row = $this->seedStub($slug);
+            $this->assertTrue(array_is_list((array) $row->particle->payload), "{$slug} is held as blocks");
+            $this->assertTrue(app(Reasserter::class)->isPristine($row), "{$slug} is born pristine");
+        }
+    }
+
+    private function stubRow(string $slug): BeamUxEntry
+    {
+        return BeamUxEntry::query()->where('slug', $slug)->firstOrFail();
+    }
+
+    public function test_after_a_print_change_a_reseed_restamps_an_untouched_stub_row_and_keeps_a_host_edit(): void
+    {
+        $this->seededStubs('docs', 'docs-api');
+        $this->authorEditOf($this->stubRow('docs-api'), 'Our words.');
+        $editedHash = $this->stubRow('docs-api')->asserted_hash;
+
+        $this->useLens(new ChangedPrintMdxLens(new ReflowingMdxLens));
+        $this->assertFalse(app(Reasserter::class)->isPristine($this->stubRow('docs')), 'a print change leaves the stub row non-pristine');
+        $this->assertTrue($this->diverged($this->stubRow('docs')), 'and docs.diverged names it');
+
+        // The gap: no declared source reaches a stub row, so the repair verb has nothing to prove it against.
+        config(['beam.docs.sources' => [['path' => $this->root]]]);
+        $output = $this->restamp(options: ['--restamp' => true, '--sources' => true]);
+        $this->assertMatchesRegularExpression('/docs \(package:acme\/docs\) (\.+ )?no origin file under the declared sources/', $output);
+
+        $before = $this->snapshot();
+        $docs = $this->seedStub('docs');
+        $this->seedStub('docs-api');
+
+        $this->assertTrue(app(Reasserter::class)->isPristine($docs), 'the untouched stub row is pristine under the new print');
+        $this->assertFalse($this->diverged($docs));
+        $after = $this->snapshot();
+        // Only `asserted_hash` moved: no body, version, particle, activity, placement or timestamp.
+        $this->assertSame($before[Beam::table('particles')], $after[Beam::table('particles')], 'no body was written');
+        $this->assertSame($before[Beam::table('versions')], $after[Beam::table('versions')], 'no version was recorded');
+        $strip = fn (array $rows): array => array_map(fn (array $r): array => array_diff_key($r, ['asserted_hash' => 1]), $rows);
+        $this->assertSame($strip($before['beam_ux_entries']), $strip($after['beam_ux_entries']), 'only the hash column moved');
+
+        $api = $this->stubRow('docs-api');
+        $this->assertFalse(app(Reasserter::class)->isPristine($api), 'the host edit stays edited');
+        $this->assertSame($editedHash, $api->asserted_hash);
+        $this->assertSame("Our words.\n\n", app(Reasserter::class)->currentBody($api), 'and its words are kept');
+
+        // And the repaired row follows its stub again.
+        $this->seedStub('docs', "---\ntitle: Docs\n---\n\nA revised stub.\n");
+        $this->assertSame("A revised stub.\n\n", app(Reasserter::class)->currentBody($this->stubRow('docs')));
+    }
+
+    public function test_after_a_print_change_a_reseed_refuses_a_retitled_stub_row_and_one_with_a_draft_pending(): void
+    {
+        $this->seededStubs('docs', 'docs-api');
+        // A host retitle, the body untouched: the title is half of what the origin asserts.
+        \DB::table('beam_ux_entries')->where('slug', 'docs')->update(['title' => 'Our title']);
+        // A draft recorded and not published, its body the stub's own lowering.
+        $api = $this->stubRow('docs-api');
+        app(EntryPublication::class)->recordDraft($api, (array) $api->particle->payload);
+        $this->assertTrue(app(EntryPublication::class)->state($this->stubRow('docs-api'))->draftPending);
+
+        $this->useLens(new ChangedPrintMdxLens(new ReflowingMdxLens));
+        $hashes = BeamUxEntry::query()->pluck('asserted_hash', 'slug')->all();
+        $this->seedStub('docs');
+        $this->seedStub('docs-api');
+
+        $this->assertSame($hashes, BeamUxEntry::query()->pluck('asserted_hash', 'slug')->all(), 'neither is re-stamped');
+        $this->assertSame('Our title', $this->stubRow('docs')->title, 'the host title is kept');
+    }
+
+    public function test_a_reseed_names_a_stub_row_this_host_cannot_print_as_unreadable_and_never_restamps_it(): void
+    {
+        $this->seededStubs('docs');
+        $hash = $this->stubRow('docs')->asserted_hash;
+        $this->useLens(new UnresolvableMdxLens(self::UNRESOLVED));
+        \Illuminate\Support\Facades\Log::spy();
+
+        $this->seedStub('docs');
+
+        $this->assertSame($hash, $this->stubRow('docs')->asserted_hash);
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message): bool => str_contains($message, 'docs (package:acme/docs): stored body unreadable on this host ('.self::UNRESOLVED.')'),
+        )->once();
+    }
+
     public function test_restamp_refuses_options_out_of_place(): void
     {
         $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root, '--apply' => true])->assertFailed();

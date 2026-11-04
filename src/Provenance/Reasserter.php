@@ -38,22 +38,33 @@ final class Reasserter
      */
     public function reassert(BeamUxEntry $existing, ?string $title, string $source, string $incomingOrigin, ?array $body = null): bool
     {
-        return $this->reassertion($existing, $title, $source, $incomingOrigin, $body) === self::REASSERTED;
+        // Every caller of this boolean form is a package seeder, so it re-stamps a stub row that still holds the stub.
+        return $this->reassertion($existing, $title, $source, $incomingOrigin, $body, seed: true) === self::REASSERTED;
     }
 
     /**
      * {@see reassert()}, saying why a row was left: {@see REASSERTED}, {@see LEFT}, or the diagnostic of a stored body this
      * host cannot read (prefixed {@see UNREADABLE}). An unreadable row is kept, as an edited one is (ADR-0215 §2), but it
      * is not an edit, and a caller that reports must not count it as one (registry-docs ticket 16).
+     *
+     * `$seed`: the caller is a seed asserting its stub, so a non-pristine row that still holds exactly that stub is
+     * re-stamped ({@see RESTAMPED}, {@see restampsAsItsStub()}). A disk scan leaves it false: a disk row has a file the
+     * dry-run repair verb proves against ({@see RegisteredRowRestamp}).
      */
-    public function reassertion(BeamUxEntry $existing, ?string $title, string $source, string $incomingOrigin, ?array $body = null): string
+    public function reassertion(BeamUxEntry $existing, ?string $title, string $source, string $incomingOrigin, ?array $body = null, bool $seed = false): string
     {
         // `$body`: the source already lowered to blocks by a caller that lowers as it registers (an MDX file on a host that
         // holds MDX as blocks); the codec's encode does not lower.
-        return $this->reassertBody($existing, $title, $body ?? $existing->codec()->encode($source), $incomingOrigin);
+        return $this->reassertBody($existing, $title, $body ?? $existing->codec()->encode($source), $incomingOrigin, $seed);
     }
 
     public const REASSERTED = 'reasserted';
+
+    /**
+     * A seed found a non-pristine row that still holds exactly what it now asserts, and moved only its `asserted_hash`
+     * (registry-docs ticket 18). No body, version, placement or title was written.
+     */
+    public const RESTAMPED = 'restamped';
 
     /** Left as it is: edited, unchanged, out-ranked, cms or unknown origin, or the schema predates DOCS-06. */
     public const LEFT = 'left';
@@ -74,7 +85,7 @@ final class Reasserter
         return $model->getConnection()->transaction(function () use ($model, $coordinate, $attributes, $body, $origin, $publication, $pageSettings) {
             $existing = $model->newQuery()->where($coordinate)->lockForUpdate()->first();
             if ($existing !== null) {
-                $this->reassertBody($existing, $attributes['title'] ?? null, $body, $origin);
+                $this->reassertBody($existing, $attributes['title'] ?? null, $body, $origin, seed: true);
                 // Same repair as SeedsEntries: baseline only pins a body with no history,
                 // never an unpublished draft which already has history.
                 $publication->baseline($existing->refresh(), mirror: false);
@@ -106,7 +117,7 @@ final class Reasserter
         return $body !== [] && array_is_list($body) && ! array_is_list((array) ($existing->particle?->payload ?? []));
     }
 
-    private function reassertBody(BeamUxEntry $existing, ?string $title, array $body, string $incomingOrigin): string
+    private function reassertBody(BeamUxEntry $existing, ?string $title, array $body, string $incomingOrigin, bool $seed = false): string
     {
         if (! Schema::hasColumn($existing->getTable(), 'asserted_hash')) {
             return self::LEFT; // Pre-migration: create-once stands; a row without provenance is never re-asserted.
@@ -132,6 +143,10 @@ final class Reasserter
         }
 
         if (! $this->pristine($existing, $current)) {
+            if ($seed && $current !== null && $this->restampsAsItsStub($existing, $title, $body, $current, $incomingOrigin, $origin)) {
+                return self::RESTAMPED;
+            }
+
             return self::LEFT; // Edited: kept and reported by docs.diverged, never overwritten.
         }
 
@@ -173,6 +188,50 @@ final class Reasserter
         }
 
         return self::REASSERTED;
+    }
+
+    /**
+     * A seed's repair for a stub row whose stamp went stale while its words did not (registry-docs ticket 18): after a
+     * deliberate change of the MDX lens's print, every row stamped over the old print reads non-pristine, and a stub row
+     * (`docs`, `docs-api`, `docs-mcp`) has no file the repair verb ({@see RegisteredRowRestamp}) can reach. Its origin is
+     * the stub, and only the seed holds that stub exactly as it asserts it (filled, lowered, titled), so the seed proves
+     * the row against it, under {@see RegisteredRowRestamp}'s guards:
+     *
+     * 1. the row is not pristine (the caller's branch);
+     * 2. the stamp is accounted for: the row is this origin's own (the incoming origin is the row's) and keeps the title
+     *    the stub asserts, so the stale hash is this origin's assertion of these words under an older print;
+     * 3. the stored print `===` the stub's lowering under the CURRENT print: the row holds the stub and no authored word;
+     * 4. no draft is pending.
+     *
+     * Then `asserted_hash = hash(title, currentBody)` by compare-and-set on the old hash, and nothing else: no body,
+     * version, placement, title or timestamp moves, so ADR-0215 §2 holds (content is never overwritten, it already IS
+     * the origin's). A host edit, a retitle, or a draft fails a guard and is kept. As for the verb, a row whose stub moved
+     * on AND whose print changed cannot be told from an edit and stays refused; a seed before the print change had
+     * already re-asserted it.
+     */
+    private function restampsAsItsStub(BeamUxEntry $existing, ?string $title, array $body, string $current, string $incomingOrigin, string $origin): bool
+    {
+        if ($incomingOrigin !== $origin || ($title !== null && $title !== $existing->title)) {
+            return false;
+        }
+        if ($current !== $existing->codec()->decode($body)) {
+            return false;
+        }
+        if (app(EntryPublication::class)->state($existing)->draftPending) {
+            return false;
+        }
+
+        // Compare-and-set, through the query builder: only the hash column, no model events, no timestamps.
+        $restamped = $existing->getConnection()->table($existing->getTable())
+            ->where($existing->getKeyName(), $existing->getKey())
+            ->where('asserted_hash', (string) $existing->asserted_hash)
+            ->update(['asserted_hash' => Provenance::hash($existing->title, $current)]) === 1;
+        if ($restamped) {
+            $row = ($existing->namespace ? "{$existing->namespace}." : '').$existing->slug;
+            Log::info("beam-ux: re-stamped {$row} ({$origin}): it still holds its stub under the current print; no word moved");
+        }
+
+        return $restamped;
     }
 
     /** Shared connection-bound system write; caller owns the transaction and provenance check. */
