@@ -2,6 +2,8 @@
 
 namespace Splicewire\Beam\Ux\Format;
 
+use Schemastud\DataSchemas\Contracts\ProvidesEnumLabel;
+use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Ux\Codec\BodyCodec;
 use Splicewire\Beam\Ux\Codec\UxFormatCase;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -18,7 +20,8 @@ use Splicewire\Beam\Ux\Type\UxType;
  * a host's own bespoke enum can satisfy it without ever touching this class. This enum is the
  * generated (or hand-curated, today) "known so far" set, not a ceiling — Tsx/Mdx/Css are the S1 seed.
  */
-enum UxFormat: string implements UxFormatCase
+#[TypeScript]
+enum UxFormat: string implements ProvidesEnumLabel, UxFormatCase
 {
     /** TSX/JSX — the default. Its codec honors `body_style` (auto-import preamble). */
     case Tsx = 'tsx';
@@ -39,5 +42,14 @@ enum UxFormat: string implements UxFormatCase
     public function extension(): string
     {
         return $this->value;
+    }
+
+    public function label(): string
+    {
+        return match ($this) {
+            self::Tsx => 'TSX',
+            self::Mdx => 'MDX',
+            self::Css => 'CSS',
+        };
     }
 }

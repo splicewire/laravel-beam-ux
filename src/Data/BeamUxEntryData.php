@@ -14,6 +14,8 @@ use Spatie\LaravelData\Attributes\MapOutputName;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
+use Splicewire\Beam\Ux\Body\BodyKind;
+use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Theme\ThemeResolver;
@@ -97,6 +99,10 @@ class BeamUxEntryData extends BeamData
         public ?int $navOrder = null,
         /** Public page address; null for components and entries outside the site realm. */
         public ?string $url = null,
+        /** Body language used by CanvasOrRefusal to decide whether this entry can be edited as blocks. */
+        public ?UxFormat $format = null,
+        /** Declared body contract; unlike payload shape, this is stable for the entry's type and format. */
+        public ?BodyKind $bodyKind = null,
     ) {}
 
     public static function project(BeamUxEntry $model): self
@@ -104,6 +110,8 @@ class BeamUxEntryData extends BeamData
         $data = self::from($model);
         $data->url = $model->type === UxType::Page && $model->isReachableIn(BeamUxEntry::REALM_SITE)
             ? $model->url() : null;
+        $data->format = $model->format;
+        $data->bodyKind = $model->bodyKind();
 
         return $data;
     }

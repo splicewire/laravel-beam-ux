@@ -482,6 +482,36 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertArrayNotHasKey('nav_order', $data->toArray());
     }
 
+    public function test_the_read_projection_carries_the_blocks_canvas_classification(): void
+    {
+        $entry = BeamUxEntry::create([
+            'namespace' => '',
+            'slug' => 'canvas-page',
+            'type' => UxType::Page,
+            'format' => 'tsx',
+        ]);
+
+        $data = BeamUxEntryData::project($entry);
+
+        $this->assertSame('tsx', $data->toArray()['format']);
+        $this->assertSame('blocks', $data->toArray()['bodyKind']);
+    }
+
+    public function test_the_read_projection_keeps_non_blocks_entries_classified(): void
+    {
+        $entry = BeamUxEntry::create([
+            'namespace' => 'theme',
+            'slug' => 'brand',
+            'type' => UxType::Theme,
+            'format' => 'css',
+        ]);
+
+        $data = BeamUxEntryData::project($entry);
+
+        $this->assertSame('css', $data->toArray()['format']);
+        $this->assertSame('form', $data->toArray()['bodyKind']);
+    }
+
     public function test_after_write_seeds_a_theme_entry_with_the_currently_resolved_theme(): void
     {
         $entry = BeamUxEntry::create(['namespace' => '', 'slug' => 'default', 'type' => UxType::Theme]);

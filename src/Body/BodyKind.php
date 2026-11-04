@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Body;
 
+use Schemastud\DataSchemas\Contracts\ProvidesEnumLabel;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 
 /**
@@ -13,7 +14,7 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
  * save.
  */
 #[TypeScript]
-enum BodyKind: string
+enum BodyKind: string implements ProvidesEnumLabel
 {
     /** A JsonDoc the canvas edits (a `tsx` page). `AcceptsJsonDoc` comes to mean exactly this kind. */
     case Blocks = 'blocks';
@@ -23,4 +24,13 @@ enum BodyKind: string
 
     /** Fields checked against the entry's own `schema` and written through the codec (a theme). */
     case Form = 'form';
+
+    public function label(): string
+    {
+        return match ($this) {
+            self::Blocks => 'Blocks',
+            self::Source => 'Source',
+            self::Form => 'Form',
+        };
+    }
 }
