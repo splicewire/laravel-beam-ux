@@ -89,6 +89,12 @@ final class Provenance
      * host that has not run the DOCS-06 migration keeps working (the package's hasColumn-tolerance
      * convention). Returns `[]` otherwise, and the create is unchanged.
      *
+     * The hash here is the source as {@see asStored()} gives it, which is the stored form ONLY where the body
+     * write is `codec->encode($source)`. A blocks-kind write lowers the source instead, and the lens's print of
+     * that lowering is not the source (no frontmatter, hard wraps reflowed). So every create site re-stamps
+     * after its body write through {@see Reasserter::stampWritten()}, over the body read back from the store
+     * (registry-docs ticket 09/10: 69 www rows were born reading edited because register-from-disk did not).
+     *
      * @return array{origin?: string, asserted_hash?: string}
      */
     public static function stamp(string $origin, ?string $title, string $body, BodyCodec $codec): array
@@ -108,7 +114,11 @@ final class Provenance
      * A source as the store hands it back: the codec's encode-then-decode round trip, which is exactly what
      * `docs.diverged` and the re-assert read. A codec may re-encode on write (CssBodyCodec regenerates its header),
      * so the raw source is not what is stored. Hashing the raw source made such a row read "edited" the moment it
-     * was seeded, and it never re-asserted again (DOCS-06, lead 03:01Z). Every asserted hash goes through this.
+     * was seeded, and it never re-asserted again (DOCS-06, lead 03:01Z).
+     *
+     * It is the stored form only where the write is `codec->encode`. Where the write lowers the source to blocks
+     * (an MDX page on a host that holds blocks, a tsx page through the TSX Lens), the stored form is the codec's
+     * decode of THAT body, and the asserted hash must be taken over it ({@see Reasserter::stampWritten()}).
      *
      * It requires a DETERMINISTIC round trip: a codec whose encode stamps a timestamp or anything random would make
      * every row read edited. A codec author must keep encode(decode(x)) stable (review-r1).

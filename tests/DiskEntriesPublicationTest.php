@@ -14,6 +14,7 @@ use Splicewire\Beam\Ux\Compile\EntryBodyCompiler;
 use Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk;
 use Splicewire\Beam\Ux\JsonDoc\TsxLens;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Provenance\Reasserter;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Storage\PlacedDiskMirror;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
@@ -196,6 +197,244 @@ class DiskEntriesPublicationTest extends TestCase
 
         $this->assertStringContainsString('Our words.', \Splicewire\Beam\Mdx\MdxBody::decode($this->publishedBody($this->guide())), 'edited: kept');
         $this->assertNotContains('page/guide.mdx', $result['reasserted']);
+    }
+
+    /**
+     * Registry-docs ticket 09/10: a page FIRST registered on a host that already holds MDX as blocks is pristine at birth.
+     * Registration stamped the raw file and then stored its lowering, whose print drops the frontmatter and reflows a
+     * hard-wrapped paragraph, so the row read edited from the start and never re-asserted (69 rows on www, 2026-11-04).
+     */
+    public function test_a_disk_page_first_registered_as_blocks_is_pristine_re_asserts_and_keeps_a_site_edit(): void
+    {
+        $this->assertFirstRegistrationAsBlocksIsPristine(null, 'disk:page/guide.mdx');
+    }
+
+    public function test_a_package_page_first_registered_as_blocks_is_pristine_re_asserts_and_keeps_a_site_edit(): void
+    {
+        $this->assertFirstRegistrationAsBlocksIsPristine('acme/docs', 'package:acme/docs');
+    }
+
+    private function assertFirstRegistrationAsBlocksIsPristine(?string $package, string $origin): void
+    {
+        // A host that holds blocks carries the page-settings columns (the excerpt lands in seo_description).
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        $this->holdReflowingBlocks();
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: A guide\n---\n\nA paragraph the author\nhard-wrapped at a narrow width.\n\nA second paragraph.\n");
+        app(RegisterEntriesFromDisk::class)->scan($this->root, package: $package);
+        $reasserter = app(Reasserter::class);
+
+        $this->assertSame($origin, $this->guide()->origin);
+        $this->assertTrue($reasserter->isPristine($this->guide()), 'born pristine: the asserted hash is the stored form');
+        $this->assertFalse($this->diverged($this->guide()), 'docs.diverged is silent on a freshly registered row');
+
+        // A changed file reaches the row on the next scan.
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: A guide\n---\n\nA paragraph the author\nrevised on disk.\n\nA second paragraph.\n");
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, package: $package);
+        $this->assertContains('page/guide.mdx', $result['reasserted']);
+        $this->assertStringContainsString('the author revised on disk.', (string) $reasserter->currentBody($this->guide()));
+        $this->assertTrue($reasserter->isPristine($this->guide()));
+
+        // A site edit is kept, and docs.diverged names it.
+        $this->authorEdit('Our words.');
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: A guide\n---\n\nThe origin moved on again.\n");
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, package: $package);
+        $this->assertNotContains('page/guide.mdx', $result['reasserted']);
+        $this->assertSame("Our words.\n", $reasserter->currentBody($this->guide()), 'edited: kept');
+        $this->assertTrue($this->diverged($this->guide()));
+    }
+
+    // ── The one-time re-stamp (registry-docs ticket 10 item 3) ──────────────────────────────────────────────────────
+
+    private const WRAPPED = "---\ntitle: Guide\nexcerpt: A guide\n---\n\nA paragraph the author\nhard-wrapped at a narrow width.\n";
+
+    /** A row as register-from-disk created it before ticket 10: its body lowered, its hash taken over the raw file. */
+    private function bornUnstamped(?string $package = null, string $source = self::WRAPPED): BeamUxEntry
+    {
+        if (! Schema::hasColumn('beam_ux_entries', 'seo_description')) {
+            (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        }
+        $this->holdReflowingBlocks();
+        file_put_contents($this->root.'/page/guide.mdx', $source);
+        app(RegisterEntriesFromDisk::class)->scan($this->root, package: $package);
+        $entry = $this->guide();
+        $old = \Splicewire\Beam\Ux\Provenance\Provenance::hash($entry->title, \Splicewire\Beam\Ux\Provenance\Provenance::asStored($entry->codec(), $source));
+        \DB::table('beam_ux_entries')->where('id', $entry->id)->update(['asserted_hash' => $old]);
+        $this->assertFalse(app(Reasserter::class)->isPristine($this->guide()), 'the fixture reproduces the defect');
+
+        return $this->guide();
+    }
+
+    /** @return array<string, list<array<string, mixed>>> every row of every table the re-stamp could touch */
+    private function snapshot(): array
+    {
+        $tables = ['beam_ux_entries', Beam::table('particles'), Beam::table('versions')];
+        if (Schema::hasTable('activity_log')) {
+            $tables[] = 'activity_log';
+        }
+
+        return collect($tables)->mapWithKeys(fn (string $t) => [$t => \DB::table($t)->orderBy('id')->get()->map(fn ($r) => (array) $r)->all()])->all();
+    }
+
+    /** Run the re-stamp over the fixture root and assert it succeeded; returns its whole output, unwrapped. */
+    private function restamp(bool $apply = false, array $options = []): string
+    {
+        $exit = \Illuminate\Support\Facades\Artisan::call('splicewire:beam:ux:register-from-disk', $options ?: ['path' => $this->root, '--restamp' => true] + ($apply ? ['--apply' => true] : []));
+        $output = (string) preg_replace('/\s+/', ' ', \Illuminate\Support\Facades\Artisan::output());
+        $this->assertSame(0, $exit, $output);
+
+        return $output;
+    }
+
+    public function test_restamp_dry_run_lists_the_row_and_writes_nothing_then_apply_makes_it_pristine_and_a_reassert_is_a_no_op(): void
+    {
+        $this->bornUnstamped('acme/docs');
+        $before = $this->snapshot();
+
+        $output = $this->restamp();
+        $this->assertStringContainsString('would re-stamp', $output);
+        $this->assertStringContainsString('1 would re-stamp · 0 left alone (0 pristine)', $output);
+        $this->assertSame($before, $this->snapshot(), 'a dry run is byte-identical');
+
+        $output = $this->restamp(apply: true);
+        $this->assertStringContainsString('1 re-stamped of 1 that qualified', $output);
+        $entry = $this->guide();
+        $this->assertTrue(app(Reasserter::class)->isPristine($entry), 'pristine after --apply');
+        $after = $this->snapshot();
+        $before['beam_ux_entries'][0]['asserted_hash'] = $entry->asserted_hash;
+        $this->assertSame($before, $after, 'nothing but asserted_hash moved: no body, version, origin, placement or timestamp');
+
+        // A re-assert over the unchanged file is a no-op, and a second re-stamp finds nothing to do.
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
+        $this->assertSame([], $result['reasserted']);
+        $this->assertSame($after, $this->snapshot());
+        $output = $this->restamp(apply: true);
+        $this->assertStringContainsString('0 re-stamped of 0', $output);
+        $this->assertStringContainsString('1 left alone (1 pristine)', $output);
+
+        // The flow the defect froze: a changed file now reaches the row.
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: A guide\n---\n\nRevised on disk.\n");
+        $result = $this->app->make(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
+        $this->assertSame(['page/guide.mdx'], $result['reasserted']);
+        $this->assertSame("Revised on disk.\n", app(Reasserter::class)->currentBody($this->guide()));
+    }
+
+    public function test_restamp_refuses_a_pristine_row(): void
+    {
+        $this->holdReflowingBlocks();
+        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
+        file_put_contents($this->root.'/page/guide.mdx', self::WRAPPED);
+        app(RegisterEntriesFromDisk::class)->scan($this->root);
+        $before = $this->snapshot();
+
+        $output = $this->restamp(apply: true);
+        $this->assertStringContainsString('1 left alone (1 pristine)', $output);
+        $this->assertStringContainsString('0 re-stamped of 0', $output);
+        $this->assertSame($before, $this->snapshot());
+    }
+
+    public function test_restamp_refuses_a_row_whose_file_moved_on_since_it_was_asserted(): void
+    {
+        $this->bornUnstamped();
+        file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: A guide\n---\n\nA later file.\n");
+        $before = $this->snapshot();
+
+        $output = $this->restamp(apply: true);
+        $this->assertStringContainsString('asserted hash is not this file', $output);
+        $this->assertStringContainsString('0 re-stamped of 0', $output);
+        $this->assertSame($before, $this->snapshot());
+    }
+
+    public function test_restamp_refuses_a_host_edit_and_keeps_it(): void
+    {
+        $this->bornUnstamped();
+        $old = $this->guide()->asserted_hash;
+        $this->authorEdit('Our words.');
+        // An edit that left the hash as the origin's (the edit is what diverges), so guards 1 and 2 hold and 3 must refuse.
+        $this->assertSame($old, $this->guide()->asserted_hash);
+        $before = $this->snapshot();
+
+        $output = $this->restamp(apply: true);
+        $this->assertStringContainsString('an authored change', $output);
+        $this->assertStringContainsString('0 re-stamped of 0', $output);
+        $this->assertSame($before, $this->snapshot());
+        $this->assertSame("Our words.\n", app(Reasserter::class)->currentBody($this->guide()), 'the host edit is kept');
+        $this->assertTrue($this->diverged($this->guide()), 'and docs.diverged still names it');
+    }
+
+    public function test_restamp_refuses_a_row_with_a_draft_pending(): void
+    {
+        $this->bornUnstamped();
+        $core = dirname((new \ReflectionClass(\Splicewire\Beam\BeamServiceProvider::class))->getFileName(), 2);
+        (require $core.'/database/migrations/shared/create_activity_log_table.php.stub')->up();
+        // A draft whose words are the file's own (fresh node ids, same print): guards 1–3 hold, so only the draft refuses it.
+        $pub = app(EntryPublication::class);
+        $entry = $this->guide();
+        $pub->recordDraft($entry, app(\Splicewire\Beam\Ux\JsonDoc\SourceToBlocks::class)->convert("A paragraph the author\nhard-wrapped at a narrow width.\n", [], null, $entry->format));
+        $this->assertTrue($pub->state($this->guide())->draftPending);
+        $before = $this->snapshot();
+
+        $output = $this->restamp(apply: true);
+        $this->assertStringContainsString('draft pending', $output);
+        $this->assertStringContainsString('0 re-stamped of 0', $output);
+        $this->assertSame($before, $this->snapshot());
+    }
+
+    public function test_restamp_over_the_declared_sources_reaches_package_sources_and_names_an_orphan(): void
+    {
+        $this->bornUnstamped('acme/docs');
+        config(['beam.docs.sources' => [['path' => $this->root, 'package' => 'acme/docs']]]);
+        // A seeded row whose file is gone (www's `engines`): listed with its reason, never written.
+        $orphan = BeamUxEntry::query()->create(['slug' => 'engines', 'type' => UxType::Page, 'format' => 'mdx', 'namespace' => null]);
+        \DB::table('beam_ux_entries')->where('id', $orphan->id)->update(['origin' => 'disk:engines.mdx', 'asserted_hash' => str_repeat('0', 64)]);
+
+        $output = $this->restamp(options: ['--restamp' => true, '--sources' => true]);
+        $this->assertStringContainsString('engines (disk:engines.mdx)', $output);
+        $this->assertStringContainsString('no origin file under the declared sources', $output);
+        $this->assertStringContainsString('guide (package:acme/docs)', $output);
+        $this->assertStringContainsString('1 would re-stamp · 1 left alone (0 pristine). Nothing was written', $output);
+        $output = $this->restamp(options: ['--restamp' => true, '--sources' => true, '--apply' => true]);
+        $this->assertStringContainsString('1 re-stamped of 1 that qualified · 1 left alone', $output);
+        $this->assertTrue(app(Reasserter::class)->isPristine($this->guide()));
+        $this->assertSame(str_repeat('0', 64), $orphan->fresh()->asserted_hash);
+    }
+
+    public function test_restamp_refuses_options_out_of_place(): void
+    {
+        $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root, '--apply' => true])->assertFailed();
+        $this->artisan('splicewire:beam:ux:register-from-disk', ['path' => $this->root, '--restamp' => true, '--sources' => true])->assertFailed();
+        $this->artisan('splicewire:beam:ux:register-from-disk', ['--restamp' => true])->assertFailed();
+    }
+
+    /** `docs.diverged`'s own comparison (laravel-beam-docs `DocsDivergedAudit`): the stored body's hash against the asserted one. */
+    private function diverged(BeamUxEntry $entry): bool
+    {
+        $stored = app(StorageDriverResolver::class)->resolve($entry)->read((string) $entry->particle_id)->body;
+
+        return \Splicewire\Beam\Ux\Provenance\Provenance::hash($entry->title, $entry->codec()->decode($stored)) !== (string) $entry->asserted_hash;
+    }
+
+    /** A site edit, published as an author's write (which records activity). */
+    private function authorEdit(string $text): void
+    {
+        $core = dirname((new \ReflectionClass(\Splicewire\Beam\BeamServiceProvider::class))->getFileName(), 2);
+        if (! Schema::hasTable('activity_log')) {
+            (require $core.'/database/migrations/shared/create_activity_log_table.php.stub')->up();
+        }
+        $pub = app(EntryPublication::class);
+        $edited = [['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => $text]], 'dynamic' => false]];
+        $pub->publishVersion($this->guide(), $pub->recordDraft($this->guide(), $edited)->headVersion);
+    }
+
+    /**
+     * Hold MDX as blocks with a fake lens that does what the real one does to these files: one block per paragraph, a
+     * hard-wrapped paragraph printed back on one line. So the stored print is NOT the file, as on www.
+     */
+    private function holdReflowingBlocks(): void
+    {
+        config(['beam.ux.mdx.holds_blocks' => true]);
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Codec\CodecRegistry::class);
+        $this->app->forgetInstance(RegisterEntriesFromDisk::class);
+        $this->app->instance(\Splicewire\Beam\Mdx\Lens\MdxLens::class, new ReflowingMdxLens);
     }
 
     /** The host turns `holds_blocks` on: the codecs are chosen afresh, and a lens reads `## From MDX` as one heading. */
@@ -758,6 +997,28 @@ class DiskEntriesPublicationTest extends TestCase
         foreach (['create_beam_particles_table', 'create_beam_versions_table'] as $stub) {
             (require $beam.$stub.'.php.stub')->up();
         }
+    }
+}
+
+/** A fake MDX lens shaped like the real one for prose: one `p` block per paragraph, hard wraps reflowed onto one line. */
+class ReflowingMdxLens implements \Splicewire\Beam\Mdx\Lens\MdxLens
+{
+    public function read(string $body, array $context = []): array
+    {
+        $doc = [];
+        foreach (preg_split('/\n\s*\n/', trim($body)) ?: [] as $paragraph) {
+            if (trim($paragraph) === '') {
+                continue;
+            }
+            $doc[] = ['kind' => 'block', 'name' => 'p', 'isComponent' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => (string) preg_replace('/\s*\n\s*/', ' ', trim($paragraph))]], 'dynamic' => false];
+        }
+
+        return ['doc' => $doc, 'meta' => null];
+    }
+
+    public function print(array $doc): string
+    {
+        return implode("\n\n", array_map(fn (array $block): string => (string) ($block['children'][0]['value'] ?? ''), $doc))."\n";
     }
 }
 

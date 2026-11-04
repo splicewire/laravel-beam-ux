@@ -356,6 +356,12 @@ class RegisterEntriesFromDisk
                 $this->writeBody($entry, $source, lower: false);
             }
 
+            // The asserted hash is the body AS WRITTEN (registry-docs ticket 09/10). The create stamped the source as
+            // the codec round-trips it, but a blocks-kind write lowers it, and the lens prints the lowering without the
+            // frontmatter and with hard wraps reflowed: a row first registered on a host that holds blocks read edited
+            // at birth and never re-asserted. Re-stamped here over exactly what isPristine() and the re-assert compare.
+            app(Reasserter::class)->stampWritten($entry->refresh());
+
             // Compiles too; its compile error is kept with this run's failures below rather than thrown. No mirror: the
             // body was read from the file the mirror would write, and lowering is not byte-preserving.
             if (($error = $publication->publishWritten($entry->refresh(), 'registered', mirror: false)) !== null) {
@@ -505,6 +511,25 @@ class RegisterEntriesFromDisk
         $meta['pageSettings'] = $settings->toArray();
         $particle->meta = $meta;
         $particle->save();
+    }
+
+    /**
+     * The stored form a registration of `$source` writes into `$entry`, read back as {@see Reasserter::currentBody()}
+     * reads it: {@see writeBody()}'s lowering for a blocks-kind entry (or its raw-source fallback where the lens refuses),
+     * the codec's round trip otherwise. Ticket 10's re-stamp compares a row against this to prove it holds exactly its
+     * file's registration and no authored word. Pure apart from the lens read; writes nothing.
+     */
+    public static function asWritten(BeamUxEntry $entry, string $source): string
+    {
+        if ($entry->bodyKind() === BodyKind::Blocks) {
+            try {
+                return $entry->codec()->decode(app(SourceToBlocks::class)->convert(self::lowerable($entry, $source), [], app(ManifestProfileResolver::class)->resolve($entry), $entry->format));
+            } catch (ValidationException) {
+                // register()'s fallback: the lens could not read the file, so its source was encoded unlowered.
+            }
+        }
+
+        return $entry->codec()->decode($entry->codec()->encode($source, $entry->body_style));
     }
 
     /**

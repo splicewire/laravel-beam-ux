@@ -37,17 +37,24 @@ class RegisterFromDiskCommand extends Command
     use AsSystemWriter;
 
     protected $signature = 'splicewire:beam:ux:register-from-disk
-        {path : The directory to scan for un-registered body files}
+        {path? : The directory to scan for un-registered body files (omit only with --restamp --sources)}
         {--under= : Public path or entry id of the entry scan-root files hang from (default: the realm root)}
         {--type= : The UxType for files whose directory does not name one (layout|template|page|component|theme)}
         {--only=* : Exact body path relative to the unchanged scan root (repeat for each file)}
         {--expect-plan= : Refuse selected apply unless this native dry-run SHA256 still matches}
-        {--dry-run : Report which files are already registered and which would be, and write nothing}';
+        {--dry-run : Report which files are already registered and which would be, and write nothing}
+        {--restamp : Repair rows registered before ticket 10 stamped the stored form (dry run unless --apply)}
+        {--sources : With --restamp: every declared docs source (beam.docs.sources) instead of one path}
+        {--apply : With --restamp: write the re-stamps the dry run lists}';
 
     protected $description = 'Register on-disk BeamUx bodies (every format) not yet in the DB; infer type+namespace+containment from path; run S9 draft inference at import.';
 
     public function handle(EntryPathResolver $paths): int
     {
+        if ($this->option('restamp') || $this->option('sources') || $this->option('apply')) {
+            return $this->restamp();
+        }
+
         $path = (string) $this->argument('path');
 
         if (! is_dir($path)) {
@@ -198,6 +205,68 @@ class RegisterFromDiskCommand extends Command
         ));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * `--restamp` (registry-docs ticket 10): the one-time repair for rows `register()` stamped over the raw file while it
+     * stored the file's lowering, so they read edited from birth and never re-asserted. {@see RegisteredRowRestamp} holds
+     * the four guards; this lists every row it reached with its verdict, and writes only with `--apply`.
+     *
+     * `--sources` reaches `package:` sources too, by walking `beam.docs.sources` exactly as the docs seed does, and also
+     * lists every seeded or imported row no file reached. Placement (ticket 10 item 3): a mode on this command rather
+     * than a seed-side loop in laravel-beam-docs, because the repair is one-time and operator-run; a seed step would run
+     * it on every seed, forever, and it needs no beam-docs code (the sources are config, read here as
+     * {@see \Splicewire\Beam\Ux\Provenance\ProvenanceBackfill} reads the same shape).
+     */
+    private function restamp(): int
+    {
+        if (! $this->option('restamp')) {
+            $this->components->error('--sources and --apply belong to --restamp.');
+
+            return self::FAILURE;
+        }
+        $path = (string) $this->argument('path');
+        if ($this->option('sources') === ($path !== '')) {
+            $this->components->error('--restamp takes either a path or --sources, not both and not neither.');
+
+            return self::FAILURE;
+        }
+        if ($path !== '' && ! is_dir($path)) {
+            $this->components->error("Not a directory: {$path}");
+
+            return self::FAILURE;
+        }
+        $sources = $path !== '' ? [['path' => $path]] : array_values((array) config('beam.docs.sources', []));
+        if ($sources === []) {
+            $this->components->error('No docs source is declared (beam.docs.sources).');
+
+            return self::FAILURE;
+        }
+        $apply = (bool) $this->option('apply');
+
+        // Resolved inside the swap, as the import is (handle() records why).
+        $result = $this->asSystemWriter(fn () => $this->laravel->make(\Splicewire\Beam\Ux\Provenance\RegisteredRowRestamp::class)
+            ->run($sources, $apply, unreached: $path === ''));
+
+        $would = 0;
+        foreach ($result['rows'] as $row) {
+            $restamp = $row['verdict'] === \Splicewire\Beam\Ux\Provenance\RegisteredRowRestamp::RESTAMP;
+            $would += $restamp ? 1 : 0;
+            $this->components->twoColumnDetail(
+                "{$row['row']} ({$row['origin']})",
+                $restamp ? ($apply ? '<fg=green>re-stamped</>' : '<fg=yellow>would re-stamp</>') : $row['verdict'],
+            );
+        }
+        foreach ($result['missing'] as $declared) {
+            $this->components->error("Declared docs source [{$declared}] is missing on disk.");
+        }
+        $left = count($result['rows']) - $would;
+        $pristine = count(array_filter($result['rows'], fn (array $row): bool => $row['verdict'] === 'pristine'));
+        $this->components->info($apply
+            ? sprintf('%d re-stamped of %d that qualified · %d left alone (%d pristine).', $result['restamped'], $would, $left, $pristine)
+            : sprintf('%d would re-stamp · %d left alone (%d pristine). Nothing was written; pass --apply to write.', $would, $left, $pristine));
+
+        return $result['missing'] === [] && (! $apply || $result['restamped'] === $would) ? self::SUCCESS : self::FAILURE;
     }
 
     /** @param  list<string>  $columns  `seo_description`, … read as the page settings an author knows (`description`, …). */

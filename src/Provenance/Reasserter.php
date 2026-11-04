@@ -188,6 +188,23 @@ final class Reasserter
             || str_starts_with($origin, Provenance::PACK_PREFIX);
     }
 
+    /**
+     * Stamp `asserted_hash` over the body the origin just WROTE, read back from the store: the one form isPristine(), the
+     * re-assert and `docs.diverged` compare. A create site calls this after its body write, inside its transaction, so
+     * a write that transforms the source (a blocks-kind lowering) cannot leave the row reading edited at birth
+     * (registry-docs ticket 09/10). Writes only that column; a no-op pre-migration or when no body was written.
+     */
+    public function stampWritten(BeamUxEntry $entry): void
+    {
+        if (! Schema::hasColumn($entry->getTable(), 'asserted_hash') || ($written = $this->currentBody($entry)) === null) {
+            return;
+        }
+        $entry->asserted_hash = Provenance::hash($entry->title, $written);
+        if ($entry->isDirty('asserted_hash')) {
+            $entry->save();
+        }
+    }
+
     /** The row's stored body as {@see isPristine()} reads it, so a re-stamp hashes exactly what pristine-ness compares. */
     public function currentBody(BeamUxEntry $entry): ?string
     {

@@ -186,6 +186,10 @@ trait SeedsEntries
                 $entry->save();
             }
 
+            // Hash what was written, as register-from-disk does (registry-docs ticket 10). This path encodes unlowered, so
+            // the value equals the create's stamp today; reading it back keeps a future lowering here from reopening ticket 09.
+            app(\Splicewire\Beam\Ux\Provenance\Reasserter::class)->stampWritten($entry->refresh());
+
             // Pin the written body and compile it at the pinned address: what a reader is served from now on. A failure
             // to pin propagates and rolls the row back (EntryPublication already tolerates a compile failure, returning
             // it rather than throwing).
