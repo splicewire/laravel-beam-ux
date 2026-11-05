@@ -2374,7 +2374,7 @@ class EntryPublicationTest extends TestCase
         foreach (['create_calendar_actions_table', 'create_calendar_action_attempts_table'] as $name) {
             (require $root.'/database/migrations/shared/'.$name.'.php.stub')->up();
         }
-        config(['beam.calendars.action_handlers' => ['kind.workflow-transition' => \Splicewire\Beam\Workflows\Calendar\WorkflowActionHandler::class]]);
+        config(['beam.calendars.action-handlers' => ['kind.workflow-transition' => \Splicewire\Beam\Workflows\Calendar\WorkflowActionHandler::class]]);
         $this->app->singleton(\Splicewire\Beam\Calendars\Actions\ActionService::class);
         $this->app->instance(\Splicewire\Beam\Calendars\Contracts\ActionContextProvider::class,
             new class implements \Splicewire\Beam\Calendars\Contracts\ActionContextProvider
