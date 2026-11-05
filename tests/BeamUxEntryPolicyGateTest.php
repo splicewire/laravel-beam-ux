@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Tests;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User as AuthUser;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Rushing\PermissionCascade\PermissionCascadeServiceProvider;
 use Rushing\PermissionCascade\Policies\ConfiguredModelPolicy;
@@ -13,6 +14,7 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 use Spatie\Permission\PermissionServiceProvider;
 use Spatie\Permission\Traits\HasRoles;
+use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
@@ -113,6 +115,7 @@ class BeamUxEntryPolicyGateTest extends TestCase
 
     public function test_a_holder_of_the_class_family_is_admitted_gate_closed(): void
     {
+        $this->useTenantMount();
         $gate = Gate::forUser($this->holder('beam-ux-entry.view', 'beam-ux-entry.update'));
         $entry = $this->entry();
 
@@ -123,11 +126,120 @@ class BeamUxEntryPolicyGateTest extends TestCase
         $this->assertFalse($gate->allows('delete', $entry));
     }
 
+    public function test_a_central_author_can_list_and_edit_entries_without_cascade_tokens(): void
+    {
+        Gate::define('ux.author', fn (?PolicyGateUser $user): bool => $user?->email === 'author');
+        $author = PolicyGateUser::create(['email' => 'author']);
+        $entry = $this->entry();
+        $policy = Gate::getPolicyFor(BeamUxEntry::class);
+
+        $this->assertSame(\Splicewire\Beam\Ux\Authorization\BeamUxEntryPolicy::class, app()->make('permission-cascade-policy:'.BeamUxEntry::class)::class);
+        $this->assertSame(\Splicewire\Beam\Ux\Authorization\BeamUxEntryPolicy::class, $policy::class);
+        $this->assertTrue(Gate::forUser($author)->allows('viewAny', BeamUxEntry::class), 'central list access follows ux.author');
+        $this->assertTrue(Gate::forUser($author)->allows('update', $entry), 'central edit access follows ux.author');
+    }
+
+    public function test_a_central_reader_without_ux_author_cannot_list_or_edit_entries(): void
+    {
+        Gate::define('ux.author', fn (?PolicyGateUser $user): bool => $user?->email === 'author');
+        $reader = $this->stranger();
+        $entry = $this->entry();
+        $policy = Gate::getPolicyFor(BeamUxEntry::class);
+
+        $this->assertFalse(Gate::forUser($reader)->allows('viewAny', BeamUxEntry::class));
+        $this->assertFalse(Gate::forUser($reader)->allows('update', $entry));
+    }
+
+    public function test_tenant_entries_keep_the_existing_cascade_authorization(): void
+    {
+        $this->useTenantMount();
+        $member = $this->holder('beam-ux-entry.view', 'beam-ux-entry.update');
+        $entry = $this->entry();
+        $policy = Gate::getPolicyFor(BeamUxEntry::class);
+
+        $this->assertTrue(Gate::forUser($member)->allows('viewAny', BeamUxEntry::class));
+        $this->assertTrue(Gate::forUser($member)->allows('update', $entry));
+        $this->assertFalse(Gate::forUser($this->stranger())->allows('update', $entry));
+    }
+
+    public function test_non_frame_tenant_site_editor_keeps_cascade_access_without_ux_author(): void
+    {
+        $this->useActiveTenantOnNonFrameRoute();
+        Gate::define('site.edit', fn (?PolicyGateUser $user): bool => $user?->email === 'tenant-editor');
+        Gate::define('ux.author', fn (?PolicyGateUser $user): bool => $user?->email === 'central-author');
+
+        $editor = $this->holder('beam-ux-entry.view', 'beam-ux-entry.update');
+        $editor->email = 'tenant-editor';
+        $editor->save();
+        $entry = $this->entry();
+
+        $this->assertTrue(Gate::forUser($editor)->allows('site.edit'));
+        $this->assertFalse(Gate::forUser($editor)->allows('ux.author'));
+        $this->assertTrue(Gate::forUser($editor)->allows('viewAny', BeamUxEntry::class));
+        $this->assertTrue(Gate::forUser($editor)->allows('update', $entry));
+    }
+
+    public function test_non_frame_tenant_does_not_elevate_a_ux_author_only_actor(): void
+    {
+        $this->useActiveTenantOnNonFrameRoute();
+        Gate::define('ux.author', fn (?PolicyGateUser $user): bool => $user?->email === 'central-author');
+
+        $author = PolicyGateUser::create(['email' => 'central-author']);
+        $entry = $this->entry();
+
+        $this->assertTrue(Gate::forUser($author)->allows('ux.author'));
+        $this->assertFalse(Gate::forUser($author)->allows('viewAny', BeamUxEntry::class));
+        $this->assertFalse(Gate::forUser($author)->allows('update', $entry));
+    }
+
     // ── Fixtures ────────────────────────────────────────────────────────────────────────────────
 
     private function entry(): BeamUxEntry
     {
         return BeamUxEntry::create(['slug' => 'hero', 'type' => 'component', 'namespace' => 'kit.hero']);
+    }
+
+    private function useTenantMount(): void
+    {
+        $route = Route::get('/policy/tenant', fn () => null)
+            ->defaults(\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM, 'tenant');
+        request()->setRouteResolver(fn () => $route);
+    }
+
+    private function useActiveTenantOnNonFrameRoute(): void
+    {
+        $this->app->instance(TenancyContext::class, new class implements TenancyContext
+        {
+            public function isMultiTenant(): bool
+            {
+                return true;
+            }
+
+            public function isActive(): bool
+            {
+                return true;
+            }
+
+            public function currentTenant(): ?object
+            {
+                return (object) ['id' => 'tenant-acme'];
+            }
+
+            public function currentTenantId(): int|string|null
+            {
+                return 'tenant-acme';
+            }
+
+            public function centralConnection(): ?string
+            {
+                return 'central';
+            }
+        });
+
+        // Deliberately no ParticleOperationController::REALM default: this represents the
+        // tenant UX API and editor routes that run after tenancy initialization outside Frame.
+        $route = Route::get('/api/tenant/beam-ux-entries', fn () => null);
+        request()->setRouteResolver(fn () => $route);
     }
 
     private function stranger(): PolicyGateUser

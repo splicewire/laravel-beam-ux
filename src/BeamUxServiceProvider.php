@@ -7,7 +7,6 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Rushing\DataFilters\Registry\ResourceDefinition as FilterResourceDefinition;
 use Rushing\DataFilters\Registry\ResourceRegistry as FilterResourceRegistry;
-use Rushing\PermissionCascade\Support\CascadePolicyRegistrar;
 use Rushing\Popcorn\Concerns\ChainsTraitMethods;
 use Rushing\Popcorn\Contracts\ChainsTraitMethods as ChainsTraitMethodsContract;
 use Rushing\Popcorn\Registries\ScopesRegistrant;
@@ -17,6 +16,7 @@ use Splicewire\Beam\Doctor\BeamDoctorManifest;
 use Splicewire\Beam\Install\BeamInstallManifest;
 use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Seed\BeamSeedManifest;
+use Splicewire\Beam\Ux\Authorization\BeamUxEntryPolicy;
 use Splicewire\Beam\Ux\Concerns\WiresAccess;
 use Splicewire\Beam\Ux\Concerns\WiresCodecs;
 use Splicewire\Beam\Ux\Concerns\WiresCommands;
@@ -225,7 +225,12 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // everyone but a host's Root bypass, `GateWriteGate` denied every REST write, and the Frame nav
         // hid the seat. One declaration, consumed by all four; the `beam-ux-entry.*` family is seeded to
         // a host's admin role by the host. `EntryAccessGate` (the public surface) is a different question.
-        CascadePolicyRegistrar::register(BeamUxEntry::class);
+        // The generic registrar always creates ConfiguredModelPolicy and does not honor the
+        // attribute's optional custom policy class. This model needs a realm-aware policy, so
+        // keep the same per-model binding convention while registering its concrete subclass.
+        $entryPolicy = 'permission-cascade-policy:'.BeamUxEntry::class;
+        $this->app->bind($entryPolicy, fn () => new BeamUxEntryPolicy(BeamUxEntry::class));
+        Gate::policy(BeamUxEntry::class, $entryPolicy);
 
         // A Release reads by the rule its resource declares, `ux.author`, whether listed or opened (EP-15 receipt).
         Gate::policy(Models\BeamUxRelease::class, Release\ReleasePolicy::class);
