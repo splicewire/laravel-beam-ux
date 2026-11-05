@@ -163,6 +163,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // host-bindings container-lane default; beam-docs supersedes with a plain `bind()` (installing
         // it IS the posture), and the pair is order-independent by construction.
         $this->app->bindIf(Docs\DocsLinkResolver::class, Docs\NullDocsLinkResolver::class);
+        // The record-leaf nav seam's shipped default (make-surface 01): a host with no record leaf persists no nav
+        // items, so `OrphanedNavItemAudit` has nothing to orphan. A host with one binds its own source with `bind()`.
+        $this->app->bindIf(Nav\Contracts\NavItemSource::class, Nav\NoNavItemSource::class);
         // DOCS-06b: the templates the provenance backfill may match an unstamped row against; packages register theirs.
         $this->app->singleton(Provenance\ProvenanceTemplates::class);
 
