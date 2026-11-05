@@ -128,6 +128,7 @@ class BeamUxEntryPolicyGateTest extends TestCase
 
     public function test_a_central_author_can_list_and_edit_entries_without_cascade_tokens(): void
     {
+        $this->useOperatorMount();
         Gate::define('ux.author', fn (?PolicyGateUser $user): bool => $user?->email === 'author');
         $author = PolicyGateUser::create(['email' => 'author']);
         $entry = $this->entry();
@@ -141,6 +142,7 @@ class BeamUxEntryPolicyGateTest extends TestCase
 
     public function test_a_central_reader_without_ux_author_cannot_list_or_edit_entries(): void
     {
+        $this->useOperatorMount();
         Gate::define('ux.author', fn (?PolicyGateUser $user): bool => $user?->email === 'author');
         $reader = $this->stranger();
         $entry = $this->entry();
@@ -159,7 +161,30 @@ class BeamUxEntryPolicyGateTest extends TestCase
 
         $this->assertTrue(Gate::forUser($member)->allows('viewAny', BeamUxEntry::class));
         $this->assertTrue(Gate::forUser($member)->allows('update', $entry));
+        $this->assertFalse(Gate::forUser($this->stranger())->allows('viewAny', BeamUxEntry::class));
         $this->assertFalse(Gate::forUser($this->stranger())->allows('update', $entry));
+    }
+
+    public function test_frame_resolved_tenant_realm_keeps_cascade_access_on_the_generic_socket(): void
+    {
+        // Tower's generic Frame resource routes carry this server-owned default even when the
+        // ParticleOperationController realm default is absent (no ability override map).
+        $this->useFrameTenantMount();
+        Gate::define('ux.author', fn (?PolicyGateUser $user): bool => $user?->email === 'central-author');
+
+        $member = $this->holder('beam-ux-entry.view', 'beam-ux-entry.update');
+        $entry = $this->entry();
+
+        $this->assertFalse(Gate::forUser($member)->allows('ux.author'));
+        $this->assertTrue(Gate::forUser($member)->allows('viewAny', BeamUxEntry::class));
+        $this->assertTrue(Gate::forUser($member)->allows('update', $entry));
+        $this->assertFalse(Gate::forUser($this->stranger())->allows('viewAny', BeamUxEntry::class));
+
+        // Central authoring authority must not elevate an actor through a tenant Frame mount.
+        $author = PolicyGateUser::create(['email' => 'central-author']);
+        $this->assertTrue(Gate::forUser($author)->allows('ux.author'));
+        $this->assertFalse(Gate::forUser($author)->allows('viewAny', BeamUxEntry::class));
+        $this->assertFalse(Gate::forUser($author)->allows('update', $entry));
     }
 
     public function test_non_frame_tenant_site_editor_keeps_cascade_access_without_ux_author(): void
@@ -177,6 +202,7 @@ class BeamUxEntryPolicyGateTest extends TestCase
         $this->assertFalse(Gate::forUser($editor)->allows('ux.author'));
         $this->assertTrue(Gate::forUser($editor)->allows('viewAny', BeamUxEntry::class));
         $this->assertTrue(Gate::forUser($editor)->allows('update', $entry));
+        $this->assertFalse(Gate::forUser($this->stranger())->allows('viewAny', BeamUxEntry::class));
     }
 
     public function test_non_frame_tenant_does_not_elevate_a_ux_author_only_actor(): void
@@ -192,6 +218,52 @@ class BeamUxEntryPolicyGateTest extends TestCase
         $this->assertFalse(Gate::forUser($author)->allows('update', $entry));
     }
 
+    public function test_legacy_unmarked_frame_mount_keeps_cascade_and_ignores_untrusted_operator_markers(): void
+    {
+        $this->useLegacyFrameMount();
+        Gate::define('ux.author', fn (?PolicyGateUser $user): bool => $user?->email === 'central-author');
+        Gate::define('site.edit', fn (?PolicyGateUser $user): bool => $user?->email === 'tenant-member');
+
+        $member = $this->holder('beam-ux-entry.view', 'beam-ux-entry.update');
+        $member->email = 'tenant-member';
+        $member->save();
+        $entry = $this->entry();
+
+        $this->assertTrue(Gate::forUser($member)->allows('site.edit'));
+        $this->assertFalse(Gate::forUser($member)->allows('ux.author'));
+        $this->assertTrue(Gate::forUser($member)->allows('viewAny', BeamUxEntry::class));
+        $this->assertTrue(Gate::forUser($member)->allows('update', $entry));
+        $this->assertFalse(Gate::forUser($this->stranger())->allows('viewAny', BeamUxEntry::class));
+
+        // Request-controlled values cannot turn a realm-agnostic route into the central mount.
+        request()->query->set('realm', 'operator');
+        request()->request->set('realm', 'operator');
+        request()->headers->set('X-Realm', 'operator');
+        $author = PolicyGateUser::create(['email' => 'central-author']);
+        $this->assertTrue(Gate::forUser($author)->allows('ux.author'));
+        $this->assertFalse(Gate::forUser($author)->allows('viewAny', BeamUxEntry::class));
+        $this->assertFalse(Gate::forUser($author)->allows('update', $entry));
+    }
+
+    public function test_an_operator_marker_uses_ux_author_only_without_active_tenancy(): void
+    {
+        $this->useOperatorMount();
+        Gate::define('ux.author', fn (?PolicyGateUser $user): bool => $user?->email === 'central-author');
+
+        $author = PolicyGateUser::create(['email' => 'central-author']);
+        $entry = $this->entry();
+        $this->assertTrue(Gate::forUser($author)->allows('viewAny', BeamUxEntry::class));
+        $this->assertTrue(Gate::forUser($author)->allows('update', $entry));
+        $this->assertFalse(Gate::forUser($this->stranger())->allows('viewAny', BeamUxEntry::class));
+
+        // Even an operator-marked route delegates to the cascade once tenancy is active.
+        $this->useActiveTenantOnNonFrameRoute();
+        request()->route()->defaults('realm', 'operator');
+        $member = $this->holder('beam-ux-entry.view', 'beam-ux-entry.update');
+        $this->assertTrue(Gate::forUser($member)->allows('viewAny', BeamUxEntry::class));
+        $this->assertFalse(Gate::forUser($author)->allows('viewAny', BeamUxEntry::class));
+    }
+
     // ── Fixtures ────────────────────────────────────────────────────────────────────────────────
 
     private function entry(): BeamUxEntry
@@ -203,6 +275,26 @@ class BeamUxEntryPolicyGateTest extends TestCase
     {
         $route = Route::get('/policy/tenant', fn () => null)
             ->defaults(\Splicewire\Beam\Http\Particle\ParticleOperationController::REALM, 'tenant');
+        request()->setRouteResolver(fn () => $route);
+    }
+
+    private function useFrameTenantMount(): void
+    {
+        $route = Route::get('/frame/resources/{resource}', fn () => null)
+            ->defaults('realm', 'tenant');
+        request()->setRouteResolver(fn () => $route);
+    }
+
+    private function useOperatorMount(): void
+    {
+        $route = Route::get('/api/operator/frame/resources/{resource}', fn () => null)
+            ->defaults('realm', 'operator');
+        request()->setRouteResolver(fn () => $route);
+    }
+
+    private function useLegacyFrameMount(): void
+    {
+        $route = Route::get('/frame/resources/{resource}', fn () => null);
         request()->setRouteResolver(fn () => $route);
     }
 
