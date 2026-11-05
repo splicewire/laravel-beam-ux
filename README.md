@@ -2,6 +2,28 @@
 
 The beam-ux authoring package (`Splicewire\Beam\Ux\*`) — the beam-tier authoring/orchestration UX layer over beam-core.
 
+## Mounting a second realm's console (`Route::beamRealmConsole()`)
+
+The tenant console is the host's root mount. A realm with its own route base (`operator` at `/operator`, a
+package realm such as `exec` at `/exec`) gets its console from one line, above `Route::beamUxSite()`:
+
+```php
+Route::beamRealmConsole('exec', ['auth', 'verified']);
+```
+
+| route | path | what |
+|---|---|---|
+| `{realm}.home` | `{base}` | redirects to `{base}/dashboard`, the realm's dashboard leaf |
+| `{realm}.frame.manifest` | `{base}/frame/manifest` | `FrameManifestController` with `defaults('realm', $realm)` |
+| `{realm}.frame.console` | `{base}/{frameRoute}` | the `frame/console` page with `{realm, basename, manifestUrl}` |
+
+- The middleware is yours, plus `can:{ability}` for the realm's own gate (`RealmGateAbility::for()`), so the
+  console is never a softer door than its dashboard. A realm that gates nothing gets no `can:`.
+- `{frameRoute}` is constrained to the first segments of every leaf the realm projects and every nav seat
+  declared for it. Nothing is written down; a projector failure mounts no console.
+- `page:` names another page component (default `frame/console`); `home: false` leaves the front door to you.
+- The page renders through the `EntryRenderer` port (Inertia by default). A realm mounted at `/` is refused.
+
 ## Serving entries publicly (`Route::beamUxSite()`)
 
 ADR-0165 made containment the organization spine — `realm` + `parent_id` + `segment` compose an entry's

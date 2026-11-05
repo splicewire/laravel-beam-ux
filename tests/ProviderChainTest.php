@@ -70,6 +70,10 @@ class ProviderChainTest extends TestCase
         // Added by EP-28 at order 51: `@beamPageHead`, the root template's slot for the Page Head the public renderer
         // composes (ADR-0234 d1). It needs nothing booted before it. The boot count moved 13 -> 14 with it.
         'bootPageHeadDirective',
+        // Added by exec-board ticket 04 at order 52: the `Route::beamRealmConsole()` macro, a prefixed realm's
+        // frame console in one host line. A macro definition reads nothing at boot, so it sits beside the other
+        // route macro. The boot count moved 14 -> 15 with it.
+        'bootRealmConsoleMacro',
         // Added 2026-09-05 with the FrameResourcesInvocable lift: the collector that attaches a
         // resource declaring `section:` to its nav seat was host code at exactly one host. Registering
         // it here means any host gets it. `order: 55` seats it between `bootPublicRouteMacro` (50) and
@@ -142,7 +146,7 @@ class ProviderChainTest extends TestCase
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
         $this->assertCount(13, $this->chain('register'));
-        $this->assertCount(14, $this->chain('boot'));
+        $this->assertCount(15, $this->chain('boot'));
     }
 
     public function test_the_provider_declares_the_contract_so_a_detector_can_find_it(): void
