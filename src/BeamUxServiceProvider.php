@@ -47,7 +47,6 @@ use Splicewire\Beam\Ux\Doctor\BeamUxChromeAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxIntakeFormAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxManifestRegistryAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxMdxPagesAudit;
-use Splicewire\Beam\Ux\Doctor\BeamUxMigrationsAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxReachabilityAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxRouteShadowAudit;
 use Splicewire\Beam\Ux\Doctor\BeamUxThemeResolutionAudit;
@@ -259,9 +258,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 'splicewire/laravel-beam-ux',
                 Doctor\AuthoredComponentAudit::class,
             );
-            $this->app->make(BeamDoctorManifest::class)->register(
+            $this->app->make(BeamDoctorManifest::class)->stubMigrations(
                 'splicewire/laravel-beam-ux',
-                BeamUxMigrationsAudit::class,
+                self::class,
             );
 
             // The standing check on ADR-0212's two rights: rows carrying a token the bound gate does
