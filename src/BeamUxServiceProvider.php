@@ -10,6 +10,7 @@ use Rushing\DataFilters\Registry\ResourceRegistry as FilterResourceRegistry;
 use Rushing\PermissionCascade\Support\CascadePolicyRegistrar;
 use Rushing\Popcorn\Concerns\ChainsTraitMethods;
 use Rushing\Popcorn\Contracts\ChainsTraitMethods as ChainsTraitMethodsContract;
+use Rushing\Popcorn\Registries\ScopesRegistrant;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 use Splicewire\Beam\Doctor\BeamDoctorManifest;
@@ -75,6 +76,7 @@ use Splicewire\Beam\Write\ParticleWriter;
 class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTraitMethodsContract
 {
     use ChainsTraitMethods;
+    use ScopesRegistrant;
     use WiresAccess;
     use WiresCodecs;
     use WiresCommands;
@@ -92,6 +94,12 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
     use WiresSitemap;
     use WiresStorage;
     use WiresThemeSchemas;
+
+    /** Every registry write in register()/boot() that names no `$by` records this package. */
+    protected function registrant(): string
+    {
+        return 'splicewire/laravel-beam-ux';
+    }
 
     public function configurePackage(Package $package): void
     {
