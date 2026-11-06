@@ -30,6 +30,9 @@ class SiteMapRowDataTest extends AuthoredComponentNativeTestCase
         parent::setUp();
         (require dirname(__DIR__).'/database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
         (require dirname(__DIR__).'/database/migrations/shared/create_beam_ux_releases_table.php.stub')->up();
+        // The File column reads MirrorGitStatus, whose GitRepoRegistrar records the repo a mirror file sits in.
+        $core = dirname((new \ReflectionClass(\Splicewire\Beam\BeamServiceProvider::class))->getFileName(), 2);
+        (require $core.'/database/migrations/shared/create_beam_git_repos_table.php.stub')->up();
         config()->set('app.url', 'https://example.test');
         Gate::define('create', fn ($user = null) => true);
         Gate::define('update', fn ($user = null) => true);
@@ -126,6 +129,7 @@ class SiteMapRowDataTest extends AuthoredComponentNativeTestCase
 
     public function test_the_file_column_is_central_only_whatever_the_diagnostics_ability_says(): void
     {
+        $this->mirrorInsideAGitRepo();
         $page = $this->livePage('about');
         Gate::define('beam-ux-entry.update', fn ($user = null) => true);
         $this->actAs(new User);
@@ -151,6 +155,7 @@ class SiteMapRowDataTest extends AuthoredComponentNativeTestCase
 
     public function test_a_file_repair_names_the_member_of_the_latest_published_release_or_why_none_is_eligible(): void
     {
+        $this->mirrorInsideAGitRepo();
         $page = $this->livePage('about');
         Gate::define('beam-ux-entry.update', fn ($user = null) => true);
         $this->actAs(new User);
@@ -259,6 +264,20 @@ class SiteMapRowDataTest extends AuthoredComponentNativeTestCase
             'version_id' => $version, 'created_at' => now(), 'updated_at' => now()]);
 
         return $id;
+    }
+
+    /**
+     * The mirror inside a real git repository, as on a fresh clone. A worktree's `.git` is a file, which
+     * `GitRepoRegistrar::findGitRoot()` (an `is_dir` test) does not see, so a run from a worktree never reached the
+     * registrar while a clone did (orch2's tots run, 2026-11-06).
+     */
+    private function mirrorInsideAGitRepo(): void
+    {
+        $root = sys_get_temp_dir().'/beamux-site-map-mirror-'.uniqid();
+        mkdir($root.'/.git', 0777, true);
+        config(['filesystems.disks.component-mirror' => ['driver' => 'local', 'root' => $root]]);
+        \Illuminate\Support\Facades\Storage::forgetDisk('component-mirror');
+        $this->beforeApplicationDestroyed(fn () => \Illuminate\Support\Facades\File::deleteDirectory($root));
     }
 
     private function actAs(User $user): void
