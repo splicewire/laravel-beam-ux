@@ -81,6 +81,21 @@ class ClickEventTest extends AuthoredComponentNativeTestCase
         $this->assertStringNotContainsString('bdEvent=', $module);
     }
 
+    public function test_module_keeps_click_event_on_a_styled_node(): void
+    {
+        $block = $this->block(['name' => 'generate_lead', 'label' => 'Hero CTA']);
+        $block['style'] = ['layers' => [['declarations' => ['color' => 'red']]]];
+
+        $module = JsonDocPrinter::printModule([$block]);
+
+        $this->assertStringContainsString('data-bd-event={'.json_encode(json_encode(['name' => 'generate_lead', 'label' => 'Hero CTA'])).'}', $module);
+        $this->assertStringContainsString('blockStyles.classes[0]', $module);
+
+        $plainModule = JsonDocPrinter::printModule([$this->block(['name' => 'generate_lead', 'label' => 'Hero CTA'])]);
+        $this->assertStringContainsString('data-bd-event={', $plainModule);
+        $this->assertStringNotContainsString('blockStyles.classes', $plainModule);
+    }
+
     public function test_a_block_hydrates_its_click_event_and_round_trips_it(): void
     {
         $node = JsonNode::from($this->block(['name' => 'generate_lead', 'label' => 'Hero CTA']));

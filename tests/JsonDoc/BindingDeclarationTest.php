@@ -35,6 +35,30 @@ class BindingDeclarationTest extends TestCase
         $this->assertStringContainsString('Empty', $module);
     }
 
+    public function test_module_keeps_repeat_and_when_runtime_helpers_on_styled_nodes(): void
+    {
+        $repeat = $this->block();
+        $repeat['id'] = 'styled-repeat';
+        $repeat['repeat'] = ['collection' => 'articles'];
+        $repeat['style'] = ['layers' => [['declarations' => ['color' => 'red']]]];
+        $repeatModule = \Splicewire\Beam\Ux\Codec\JsonDocPrinter::printModule([$repeat]);
+        $this->assertStringContainsString('bindingRuntime.repeat(bindings["styled-repeat"]', $repeatModule);
+        $this->assertStringContainsString('blockStyles.classes[0]', $repeatModule);
+        $repeatSource = \Splicewire\Beam\Ux\Codec\JsonDocPrinter::print([$repeat]);
+        $this->assertStringContainsString('bdRepeat={', $repeatSource);
+        $this->assertStringContainsString('bdStyle={', $repeatSource);
+
+        $when = $this->block();
+        $when['when'] = ['all' => [['field' => 'title', 'operator' => 'is set']]];
+        $when['style'] = ['layers' => [['declarations' => ['color' => 'red']]]];
+        $whenModule = \Splicewire\Beam\Ux\Codec\JsonDocPrinter::printModule([$when]);
+        $this->assertStringContainsString('bindingRuntime.when(', $whenModule);
+        $this->assertStringContainsString('blockStyles.classes[0]', $whenModule);
+        $whenSource = \Splicewire\Beam\Ux\Codec\JsonDocPrinter::print([$when]);
+        $this->assertStringContainsString('bdWhen={', $whenSource);
+        $this->assertStringContainsString('bdStyle={', $whenSource);
+    }
+
     public function test_hydration_preserves_repeat_empty_state_conditions_and_field_bindings(): void
     {
         $body = $this->block();
