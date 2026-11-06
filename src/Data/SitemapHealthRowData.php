@@ -31,9 +31,11 @@ use Splicewire\Beam\Ux\Type\UxType;
  * `routable` duplicates `EntrySitemapSource::routable()`'s two-line check rather than calling it — that
  * method is private, and a two-line boolean isn't worth widening a private method's visibility or
  * extracting a shared helper for two call sites. `published`/`entitled` delegate to the SAME
- * `EntryPublishGate`/`EntryEntitlementGate` ports the real sitemap feed reads, so this dashboard can
- * never drift from what's actually crawlable — a host that re-binds either port (its own workflow
- * lifecycle, its own entitlement authority) changes both surfaces identically, no source-side edit here.
+ * `EntryPublishGate`/`EntryEntitlementGate` ports the real sitemap feed reads, so a host that re-binds either
+ * port changes both surfaces identically. `indexed` is still a shortcut, not the feed's verdict: the feed also
+ * drops an unplaced page, one a guest may not list, one under a hidden ancestor, and expands a Record Page
+ * (research 37 F3). The Site map's {@see SiteMapRowData} reports the feed's own verdict
+ * ({@see \Splicewire\Beam\Ux\Sitemap\SitemapEligibility}).
  */
 #[ParticleResource(
     key: 'beam-ux-sitemap-health',

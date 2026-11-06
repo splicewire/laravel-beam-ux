@@ -200,6 +200,21 @@ class RecordPageTest extends TestCase
         $this->assertFalse((bool) array_filter($urls, fn ($url) => str_contains($url, '{') || str_ends_with($url, '/hidden')));
     }
 
+    public function test_the_site_map_row_counts_the_record_urls_the_sitemap_lists(): void
+    {
+        // owner-review-20261102 research 37 (37-T1): a Record Page is one row on the Site map whose verdict is the
+        // sitemap's own expansion (one URL per record a guest reads), never the parameter path.
+        $page = $this->page();
+        $row = \Splicewire\Beam\Ux\Data\SiteMapRowData::project($page->fresh());
+        $urls = array_map(fn ($url) => $url->url, iterator_to_array(app(\Splicewire\Beam\Ux\Sitemap\EntrySitemapSource::class)->urls()));
+        $records = array_values(array_filter($urls, fn ($url) => str_contains($url, '/posts/')));
+
+        $this->assertTrue($row->search->listed);
+        $this->assertSame('record-page', $row->search->reason);
+        $this->assertSame(count($records), $row->search->urlCount);
+        $this->assertSame(1, $row->search->urlCount, 'the visible record only');
+    }
+
     public function test_record_page_body_fields_have_the_collection_scope_and_printer_accepts_the_record_prop(): void
     {
         $entry = $this->page();
