@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Data\RedirectTraceData;
+use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRedirect;
 
 /**
@@ -88,7 +89,9 @@ final class RedirectTraces
             return null;
         }
         if ($last->target_kind === 'page') {
-            return $last->target_entry_id === null ? null : (string) $last->target_entry_id;
+            // A page that is gone has no row on the map: the walk is a loose one, never attached to a stale id.
+            return $last->target_entry_id !== null && BeamUxEntry::on($connection)->whereKey($last->target_entry_id)->exists()
+                ? (string) $last->target_entry_id : null;
         }
         if ($last->target_kind === 'path' && $last->target_path !== null) {
             $chain = $this->paths->resolve((string) $last->target_path, $realm);

@@ -61,6 +61,7 @@ class RedirectTracesTest extends AuthoredComponentNativeTestCase
         $this->assertSame(['too-long', 5, true], $this->shape($traces['/hop-0']));
         $this->assertSame(['answered', 1, false], $this->shape($traces['/hop-6']));
         $this->assertSame(['gone', 1, true], $this->shape($traces['/to-nowhere']));
+        $this->assertNull($traces['/to-nowhere']->pageId, 'a gone target names no page, so the map lists it as a loose redirect');
         $this->assertSame(['shadowed', 0, false], $this->shape($traces['/pricing']), 'a page answers it, so it never runs; the doctor names it');
     }
 
