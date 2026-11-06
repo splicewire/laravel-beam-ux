@@ -359,6 +359,35 @@ class FrameRouteContextProjectionTest extends TestCase
         $this->assertInstanceOf(FrameNavContribution::class, $port->inner());
     }
 
+    public function test_a_standalone_page_naming_its_realm_is_kept_out_of_another_central_realm(): void
+    {
+        // Two CENTRAL realms, so the central/scoped split alone cannot tell them apart: before an entry could name its
+        // realm, a board realm beside the operator console was handed the operator's desks and mounted them under its
+        // own base (`/exec/meters`).
+        $operator = new \Schemastud\Frame\Realm\RealmDefinition(key: 'operator', routeBase: '/operator', guard: null, central: true);
+        $board = new \Schemastud\Frame\Realm\RealmDefinition(key: 'exec', routeBase: '/exec', guard: null, central: true);
+        $tenant = new \Schemastud\Frame\Realm\RealmDefinition(key: 'tenant', routeBase: '/', guard: null, central: false);
+
+        $plan = new RouteContextPlan(
+            centralStandalone: [
+                ['routeName' => 'meters', 'path' => 'meters', 'mounts' => 'detail', 'realm' => 'operator'],
+                ['routeName' => 'help', 'path' => 'help', 'mounts' => 'detail'],
+            ],
+            scopedStandalone: [
+                ['routeName' => 'calendar', 'path' => 'calendar', 'mounts' => 'detail', 'realm' => 'tenant'],
+                ['routeName' => 'elsewhere', 'path' => 'elsewhere', 'mounts' => 'detail', 'realm' => 'workspace'],
+            ],
+        );
+
+        $names = fn (array $entries): array => array_column($entries, 'routeName');
+
+        $this->assertSame(['meters', 'help'], $names($plan->standaloneFor($operator)));
+        // The named page stays with its realm; the unnamed one is still shared by every central realm.
+        $this->assertSame(['help'], $names($plan->standaloneFor($board)));
+        // The scoped list obeys the same rule, and the central/scoped split is unchanged.
+        $this->assertSame(['calendar'], $names($plan->standaloneFor($tenant)));
+    }
+
     public function test_the_plan_the_package_binds_is_empty_because_every_list_in_it_is_host_ia(): void
     {
         $plan = $this->app->make(RouteContextPlan::class);

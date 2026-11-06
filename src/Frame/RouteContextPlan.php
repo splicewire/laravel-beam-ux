@@ -30,8 +30,8 @@ class RouteContextPlan
      * @param  array<int, string>  $foldedResources  resource keys that emit NO leaf because their surface is another resource's page. Safe only for a resource absent from the nav — there is no `routeName` join left to satisfy.
      * @param  array<int, string>  $detaillessResources  resource keys that declare `showable` but whose per-record detail THIS host does not serve. `showable` is the server saying `records/{id}` answers; whether this host's client has a page for it is a separate, host-owned fact.
      * @param  array<string, string>  $shellBases  shell key → the path segment it mounts at under the realm's `routeBase`. `''` is the no-shell case. A shell registered client-side and missing here silently drops a segment from every href built off it, so pin this set in a test.
-     * @param  array<int, array{routeName: string, path: string, mounts: string, guard?: ?string, shell?: string}>  $centralStandalone  resource-less leaves for a CENTRAL realm ({@see RealmDefinition::$central}) — bespoke pages with no backing frame resource.
-     * @param  array<int, array{routeName: string, path: string, mounts: string, guard?: ?string, shell?: string}>  $scopedStandalone  the same, for a non-central (workspace/user/site) realm.
+     * @param  array<int, array{routeName: string, path: string, mounts: string, guard?: ?string, shell?: string, realm?: ?string}>  $centralStandalone  resource-less leaves for a CENTRAL realm ({@see RealmDefinition::$central}) — bespoke pages with no backing frame resource. An entry that names a `realm` is emitted in that realm only.
+     * @param  array<int, array{routeName: string, path: string, mounts: string, guard?: ?string, shell?: string, realm?: ?string}>  $scopedStandalone  the same, for a non-central (workspace/user/site) realm.
      */
     public function __construct(
         public readonly array $heavyweightEditors = [],
@@ -58,15 +58,24 @@ class RouteContextPlan
     /**
      * The resource-less standalone leaves for one realm.
      *
-     * The split is on {@see RealmDefinition::$central} rather than on a realm NAME, so a host that
+     * The list is chosen on {@see RealmDefinition::$central} rather than on a realm NAME, so a host that
      * contributes a fourth realm gets one of the two lists by its declared shape instead of
-     * falling through a branch nobody wrote. A host wanting per-realm standalone lists writes a
-     * plan per realm and binds them by key — the projector never assumes there is only one plan.
+     * falling through a branch nobody wrote.
      *
-     * @return array<int, array{routeName: string, path: string, mounts: string, guard?: ?string, shell?: string}>
+     * Within that list, an entry that names its `realm` is kept for that realm only. A host with two
+     * central realms (an operator console and a board, say) names the realm on each page, so the
+     * operator's desks are not also mounted under the board's base; an entry naming no realm is
+     * kept for every realm of its shape, as before.
+     *
+     * @return array<int, array{routeName: string, path: string, mounts: string, guard?: ?string, shell?: string, realm?: ?string}>
      */
     public function standaloneFor(RealmDefinition $realm): array
     {
-        return $realm->central ? $this->centralStandalone : $this->scopedStandalone;
+        $entries = $realm->central ? $this->centralStandalone : $this->scopedStandalone;
+
+        return array_values(array_filter(
+            $entries,
+            static fn (array $entry): bool => ($entry['realm'] ?? null) === null || $entry['realm'] === $realm->key,
+        ));
     }
 }
