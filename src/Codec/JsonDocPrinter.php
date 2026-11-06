@@ -279,12 +279,14 @@ class JsonDocPrinter
             unset($layer);
         }
         $attrs = implode('', array_map(fn (JsonProp $prop) => self::printProp($prop, $module, $record), $props));
-        foreach (['bdRepeat' => $node->repeat, 'bdWhen' => $node->when] as $attribute => $declaration) {
-            if ($declaration !== null) {
-                if ($isFragment) {
-                    throw new \InvalidArgumentException('A fragment cannot carry binding declarations.');
+        if (! $module) {
+            foreach (['bdRepeat' => $node->repeat, 'bdWhen' => $node->when] as $attribute => $declaration) {
+                if ($declaration !== null) {
+                    if ($isFragment) {
+                        throw new \InvalidArgumentException('A fragment cannot carry binding declarations.');
+                    }
+                    $attrs .= ' '.$attribute.'={'.json_encode($declaration->toArray(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}';
                 }
-                $attrs .= ' '.$attribute.'={'.json_encode($declaration->toArray(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}';
             }
         }
         // ADR-0234 d13: the Click Event. Source keeps the `bdEvent` declaration the lenses read back; the compiled
@@ -295,9 +297,9 @@ class JsonDocPrinter
                 throw new \InvalidArgumentException('A fragment cannot carry a Click Event.');
             }
             $event = json_encode($node->clickEvent->toArray(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-            $attrs .= $module
-                ? ' data-bd-event={'.json_encode($event, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}'
-                : ' bdEvent={'.$event.'}';
+            if (! $module) {
+                $attrs .= ' bdEvent={'.$event.'}';
+            }
         }
         if ($style !== null && ! $isFragment) {
             if ($module) {
@@ -316,6 +318,12 @@ class JsonDocPrinter
                 $attrs .= ' className={['.$class.',blockStyles.classes['.$index.']].filter(Boolean).join(" ")}';
             } else {
                 $attrs .= ' bdStyle={'.json_encode($style, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}';
+            }
+        }
+        if ($module) {
+            if ($node->clickEvent !== null) {
+                $event = json_encode($node->clickEvent->toArray(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+                $attrs .= ' data-bd-event={'.json_encode($event, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).'}';
             }
         }
         if (! $module && $node->component !== null) {
