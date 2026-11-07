@@ -12,6 +12,7 @@ use Splicewire\Beam\Ux\Console\ReapArtifactsCommand;
 use Splicewire\Beam\Ux\Console\RegisterFromDiskCommand;
 use Splicewire\Beam\Ux\Console\ScaffoldCommand;
 use Splicewire\Beam\Ux\Console\SeedNavCommand;
+use Splicewire\Beam\Ux\Console\StampShellCommand;
 use Splicewire\Beam\Ux\Console\UpdateFromNewerCommand;
 
 /**
@@ -45,6 +46,8 @@ trait WiresCommands
             PinNodeCommand::class,
             ReapArtifactsCommand::class,
             \Splicewire\Beam\Ux\Console\ConvertMdxCommand::class,
+            // make-surface 02: the copy-once shell stamp (route lines and staff seeding printed, routes never edited).
+            StampShellCommand::class,
         ]);
     }
 }

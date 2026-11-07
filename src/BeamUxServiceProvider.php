@@ -167,6 +167,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         $this->app->bindIf(Nav\Contracts\NavItemSource::class, Nav\NoNavItemSource::class);
         // DOCS-06b: the templates the provenance backfill may match an unstamped row against; packages register theirs.
         $this->app->singleton(Provenance\ProvenanceTemplates::class);
+        // make-surface 02: the shell stamp catalog. Bound at register so a tier package can contribute its own stamp
+        // file or route line from its boot (tower-shell's `Route::towerSpa()` is the named example).
+        $this->app->singleton(Shell\ShellStamps::class, fn () => Shell\ShellStamps::withDefaults());
 
         // EP-07 (N3447): the shipped auth-page islands, composed into every realm's Manifest Profile. Packages tag their
         // own ManifestNodeSource the same way.
@@ -362,6 +365,13 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 'splicewire/laravel-beam-ux',
                 BeamUxVersionStoreAudit::class,
             );
+
+            // make-surface 02: a stamped shell file that drifted from its stub, or 01's retired machinery back in the
+            // host. Never writes; WARN only, because a tailored host is legitimate.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                Doctor\ShellStampParityAudit::class,
+            );
         }
 
         // Self-registers its own install step (config merge is automatic; migrations publish tag +
@@ -374,6 +384,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 note: 'Optional: set beam.ux.storage.mirror_disk to a git-tracked disk (see config/filesystems.php) '.
                     'for diffable, version-controlled page bodies on publish. Unset by default — no disk writes '.
                     'until you opt in.',
+                // make-surface 02: stamp the shell for beam.ux.shell.surfaces as the cascade's completion step. It keeps
+                // every tailored file (no --force), so an established host only gains the files it lacks.
+                commands: ['splicewire:beam:ux:stamp-shell'],
             );
         }
 

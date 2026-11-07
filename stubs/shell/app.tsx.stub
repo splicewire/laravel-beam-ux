@@ -1,0 +1,18 @@
+import { createInertiaApp } from '@inertiajs/react';
+import { beamInertiaOptions } from '@splicewire/beam-inertia';
+import type { PageModule } from '@splicewire/beam-inertia';
+
+/**
+ * Stamped by `splicewire:beam:ux:stamp-shell`: the host's Inertia mount. beam-inertia owns the layouts, the packaged
+ * pages (site, account, operator, auth, settings, os) and each realm's chrome, resolved from the page name's prefix.
+ * This file supplies only the host's own pages and options. It is the host's now: a re-stamp keeps a tailored copy
+ * unless --force.
+ */
+const pages = import.meta.glob<PageModule>('./pages/**/*.tsx');
+
+createInertiaApp(
+    beamInertiaOptions({
+        development: import.meta.env.DEV,
+        pages,
+    }),
+);
