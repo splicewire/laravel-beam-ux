@@ -2,10 +2,12 @@
 
 namespace Splicewire\Beam\Ux\Ia;
 
+use Rushing\DataNav\NavContext;
 use Rushing\DataNav\NavRegistry;
 use Schemastud\Frame\Contracts\FrameNavContributor;
 use Splicewire\Beam\Ux\Frame\DeclaredSectionNavigation;
 use Splicewire\Beam\Ux\Frame\FrameNavContribution;
+use Splicewire\Beam\Ux\Frame\ProvidesNavContext;
 
 /**
  * M5: the decorator over WHATEVER {@see FrameNavContributor} a host binds (ux-walkthrough SPEC, UX-06). beam-ux wraps
@@ -17,7 +19,7 @@ use Splicewire\Beam\Ux\Frame\FrameNavContribution;
  * node is pruned; otherwise the host wrote it and {@see IaInvariants::enforce()} throws (outside production) or reports
  * and prunes (in production).
  */
-class IaCheckedNavContributor implements FrameNavContributor
+class IaCheckedNavContributor implements FrameNavContributor, ProvidesNavContext
 {
     public function __construct(
         protected FrameNavContributor $inner,
@@ -28,6 +30,12 @@ class IaCheckedNavContributor implements FrameNavContributor
     public function inner(): FrameNavContributor
     {
         return $this->inner;
+    }
+
+    /** Forwarded, so wrapping a contributor neither hides its context nor invents one it does not have. */
+    public function navContextFor(string $realm): ?NavContext
+    {
+        return $this->inner instanceof ProvidesNavContext ? $this->inner->navContextFor($realm) : null;
     }
 
     public function contributeNav(?string $realm): ?array

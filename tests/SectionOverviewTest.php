@@ -12,13 +12,18 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Rushing\DataNav\Contracts\NavGateStage;
 use Rushing\DataNav\NavContext;
 use Rushing\DataNav\NavGate;
+use Rushing\DataNav\NavLink;
 use Rushing\DataNav\NavNode;
+use Rushing\DataNav\NavTree;
 use Rushing\PermissionCascade\Contracts\EntitlementResolver;
 use Rushing\PermissionCascade\PermissionCascadeServiceProvider;
 use Schemastud\Frame\Attributes\Summary;
+use Schemastud\Frame\Contracts\FrameNavContributor;
 use Schemastud\Frame\Contracts\ResourceSummaryProvider;
 use Schemastud\Frame\Data\SummaryFigureData;
 use Schemastud\Frame\Data\SummaryResponseData;
@@ -34,7 +39,10 @@ use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Particle\Backing\StreamsRecords;
 use Splicewire\Beam\Particle\ParticleResource;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
+use Splicewire\Beam\Ux\Frame\FrameNavContribution;
+use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
 use Splicewire\Beam\Ux\Frame\RealmConsoleSegments;
+use Splicewire\Beam\Ux\Ia\IaCheckedNavContributor;
 use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
 use Splicewire\Beam\Ux\Tests\Fixtures\FakeEntitlementResolver;
 
@@ -324,6 +332,117 @@ class SectionOverviewTest extends TestCase
         $this->getJson('frame/resources/operator-reports-overview')->assertOk();
     }
 
+    /**
+     * The charter's ruling: the stage allows when its attribute is absent, as tower's entitlement stage does with no tenant,
+     * and only the host's contributor supplies the attribute. A gate building its own context would admit what the rail denies.
+     */
+    public function test_a_stage_allowing_on_an_absent_attribute_denies_on_the_rail_and_on_the_overview_alike(): void
+    {
+        $this->app->bind(FrameNavContributor::class, OvTieredContribution::class);
+        $this->app->make(NavGate::class)->through(new OvContextStage);
+        $this->flag(permission: 'ov.tier');
+        $this->actingAs($this->staff());
+
+        $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+
+        $this->assertNull($this->seatNode($manifest), 'the rail denies');
+        $this->assertNotContains('operator-reports-overview.index', array_column($manifest['routeContext'], 'routeName'));
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    public function test_asking_for_the_context_reads_no_tree_so_a_direct_request_cannot_recurse(): void
+    {
+        $this->app->bind(FrameNavContributor::class, OvCountingContribution::class);
+        OvCountingContribution::$built = 0;
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        // Inside a real request, with no nav build open: the gate alone, then the tree count.
+        Route::get('ov-gate-probe', fn (): array => [
+            'build_open' => app()->bound(NavContext::class),
+            'allowed' => Gate::allows('section-overview.view.operator.reports'),
+            'built' => OvCountingContribution::$built,
+        ]);
+        app('router')->getRoutes()->refreshNameLookups();
+
+        $this->getJson('ov-gate-probe')->assertOk()->assertExactJson(['build_open' => false, 'allowed' => true, 'built' => 0]);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertOk();
+        $this->assertSame(1, OvCountingContribution::$built, 'only the backing\'s own rail read built one');
+    }
+
+    public function test_the_ia_checked_decorator_forwards_the_context(): void
+    {
+        $this->app->bind(FrameNavContributor::class, OvTieredContribution::class);
+        $this->actingAs($this->staff());
+
+        $contributor = $this->app->make(FrameNavContributor::class);
+
+        $this->assertInstanceOf(IaCheckedNavContributor::class, $contributor);
+        $this->assertSame('denied', $contributor->navContextFor('operator')->attribute('ov.tier'));
+    }
+
+    public function test_a_contributor_without_the_interface_means_the_overview_refuses(): void
+    {
+        $this->app->bind(FrameNavContributor::class, fn (): FrameNavContributor => new OvBareContributor);
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        $this->assertInstanceOf(IaCheckedNavContributor::class, $this->app->make(FrameNavContributor::class));
+        $this->assertNull($this->app->make(FrameNavContributor::class)->navContextFor('operator'));
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    public function test_a_context_about_another_user_means_the_overview_refuses(): void
+    {
+        OvOtherUserContribution::$user = (new User)->forceFill(['id' => 99]);
+        $this->app->bind(FrameNavContributor::class, OvOtherUserContribution::class);
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    public function test_a_context_with_no_user_means_the_overview_refuses(): void
+    {
+        OvOtherUserContribution::$user = null;
+        $this->app->bind(FrameNavContributor::class, OvOtherUserContribution::class);
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    public function test_a_context_that_throws_means_the_overview_refuses(): void
+    {
+        $this->app->bind(FrameNavContributor::class, OvThrowingContribution::class);
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        $this->assertFalse(Gate::forUser($this->staff())->allows('section-overview.view.operator.reports'));
+    }
+
+    /** Tower's shape: the same person projected as another model object sharing the key. */
+    public function test_a_context_projecting_the_same_person_as_another_object_is_still_that_reader(): void
+    {
+        OvOtherUserContribution::$user = (new User)->forceFill(['id' => 7, 'email' => 'mirror@example.test']);
+        $this->app->bind(FrameNavContributor::class, OvOtherUserContribution::class);
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertOk();
+    }
+
+    public function test_a_stock_contribution_admits_its_reader_on_both_the_manifest_and_a_direct_request(): void
+    {
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        $this->assertInstanceOf(FrameNavContribution::class, $this->app->make(FrameNavContributor::class)->inner());
+        $this->assertNotNull($this->seatNode($this->getJson('frame/manifest')->assertOk()->json()));
+        $this->getJson('frame/resources/operator-reports-overview')->assertOk();
+    }
+
     public function test_a_stage_that_admits_the_token_admits_the_overview(): void
     {
         $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => true));
@@ -395,6 +514,102 @@ class SectionOverviewTest extends TestCase
         $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
     }
 
+    /** @return array<string, array{string}> */
+    public static function sameOriginForms(): array
+    {
+        return ['absolute' => ['http://localhost'], 'absolute on another scheme' => ['https://localhost'], 'scheme-relative' => ['//localhost'], 'another case' => ['HTTP://LOCALHOST']];
+    }
+
+    #[DataProvider('sameOriginForms')]
+    public function test_a_same_origin_static_on_a_route_that_denies_the_reader_is_not_open(string $origin): void
+    {
+        Gate::define('ov.never', fn (): bool => false);
+        Route::get('ov-restricted', fn () => 'restricted')->middleware('can:ov.never');
+        app('router')->getRoutes()->refreshNameLookups();
+
+        $this->onlyTheStaticDecides(['title' => 'Restricted', 'href' => $origin.'/ov-restricted']);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    #[DataProvider('sameOriginForms')]
+    public function test_a_same_origin_static_on_a_route_that_admits_the_reader_is_open(string $origin): void
+    {
+        Gate::define('ov.always', fn (): bool => true);
+        Route::get('ov-allowed', fn () => 'allowed')->middleware('can:ov.always');
+        app('router')->getRoutes()->refreshNameLookups();
+
+        $this->onlyTheStaticDecides(['title' => 'Allowed', 'href' => $origin.'/ov-allowed']);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertOk();
+    }
+
+    /** @return array<string, array{string}> */
+    public static function otherOriginForms(): array
+    {
+        return ['absolute' => ['https://docs.example.test/ov-restricted'], 'scheme-relative' => ['//docs.example.test/ov-restricted'], 'same host, another port' => ['http://localhost:8080/ov-restricted']];
+    }
+
+    #[DataProvider('otherOriginForms')]
+    public function test_a_genuinely_different_origin_counts_as_external(string $href): void
+    {
+        $this->onlyTheStaticDecides(['title' => 'Elsewhere', 'href' => $href]);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertOk();
+    }
+
+    public function test_a_non_web_scheme_with_a_host_is_not_open(): void
+    {
+        $this->onlyTheStaticDecides(['title' => 'Files', 'href' => 'ftp://docs.example.test/reports']);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    public function test_another_scheme_is_not_open(): void
+    {
+        $this->onlyTheStaticDecides(['title' => 'Mail', 'href' => 'mailto:reports@example.test']);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    /**
+     * A console host binds a request built from `app.url` (Laravel's SetRequestForConsole), and frame's registry needs one, so
+     * no real path reaches admission with none. The branch is asked directly, to pin that it fails closed if one ever does.
+     */
+    private function opensWithNoRequest(string $href): bool
+    {
+        Gate::define('ov.never', fn (): bool => false);
+        Route::get('ov-restricted', fn () => 'restricted')->middleware('can:ov.never');
+        app('router')->getRoutes()->refreshNameLookups();
+        $user = $this->staff();
+        $invocable = $this->app->make(FrameResourcesInvocable::class);
+        $this->app->forgetInstance('request');
+        $this->assertFalse($this->app->bound('request'));
+
+        return (new \ReflectionMethod($invocable, 'opens'))->invoke($invocable, NavLink::make(title: 'Row', href: $href), 'operator', $user, []);
+    }
+
+    public function test_with_no_request_app_url_decides_what_is_this_hosts_own_origin(): void
+    {
+        config(['app.url' => 'https://app.example.test']);
+
+        $this->assertFalse($this->opensWithNoRequest('https://app.example.test/ov-restricted'), 'own origin: the route denies');
+    }
+
+    public function test_with_no_request_another_origin_than_app_url_is_external(): void
+    {
+        config(['app.url' => 'https://app.example.test']);
+
+        $this->assertTrue($this->opensWithNoRequest('https://docs.example.test/ov-restricted'));
+    }
+
+    public function test_with_no_request_and_no_app_url_an_absolute_href_is_not_open(): void
+    {
+        config(['app.url' => null]);
+
+        $this->assertFalse($this->opensWithNoRequest('https://docs.example.test/ov-restricted'));
+    }
+
     public function test_a_fragment_static_goes_nowhere_and_is_not_open(): void
     {
         $this->onlyTheStaticDecides(['title' => 'Here', 'href' => '#here']);
@@ -460,6 +675,69 @@ class OvStage implements NavGateStage
     public function allows(NavNode $node, NavContext $context): bool
     {
         return ($this->decides)($node);
+    }
+}
+
+/** Denies the seat only when the contributor's attribute says so, and allows when the attribute is absent. */
+class OvContextStage implements NavGateStage
+{
+    public function allows(NavNode $node, NavContext $context): bool
+    {
+        return ($node->meta['permission'] ?? null) !== 'ov.tier' || $context->attribute('ov.tier') !== 'denied';
+    }
+}
+
+/** A host's contributor with a richer context, in the shape of tower's. */
+class OvTieredContribution extends FrameNavContribution
+{
+    protected function context(string $realm): NavContext
+    {
+        $base = parent::context($realm);
+
+        return new NavContext(user: $base->user, request: $base->request, attributes: [...$base->attributes, 'ov.tier' => 'denied']);
+    }
+}
+
+/** Counts tree builds, to show the gate causes none. */
+class OvCountingContribution extends FrameNavContribution
+{
+    public static int $built = 0;
+
+    public function contributeNav(?string $realm): ?array
+    {
+        self::$built++;
+
+        return parent::contributeNav($realm);
+    }
+}
+
+/** A contributor that hands its stages a context about someone else, or nobody. */
+class OvOtherUserContribution extends FrameNavContribution
+{
+    public static ?User $user = null;
+
+    protected function context(string $realm): NavContext
+    {
+        $base = parent::context($realm);
+
+        return new NavContext(user: self::$user, request: $base->request, attributes: $base->attributes);
+    }
+}
+
+class OvThrowingContribution extends FrameNavContribution
+{
+    public function navContextFor(string $realm): ?NavContext
+    {
+        throw new RuntimeException('no tenant here');
+    }
+}
+
+/** A host's own contributor that does not extend the package's. */
+class OvBareContributor implements FrameNavContributor
+{
+    public function contributeNav(?string $realm): ?array
+    {
+        return ['nav' => NavTree::make([])->toArray(), 'routeContext' => []];
     }
 }
 

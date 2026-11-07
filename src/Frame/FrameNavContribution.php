@@ -40,7 +40,7 @@ use Splicewire\Beam\Realm\RealmRegistry;
  * What DOES throw is {@see RouteContextValidator}: a duplicate route name, an unbound nav seat or a
  * non-flat mount are grammar errors in the host's own plan, gettable right without knowing the host.
  */
-class FrameNavContribution implements FrameNavContributor
+class FrameNavContribution implements FrameNavContributor, ProvidesNavContext
 {
     public function __construct(
         protected RouteContextProjector $routes,
@@ -170,6 +170,12 @@ class FrameNavContribution implements FrameNavContributor
         }
 
         return $kept;
+    }
+
+    /** {@see ProvidesNavContext}: the context this contributor's stages get, through the same overridable method. */
+    public function navContextFor(string $realm): ?NavContext
+    {
+        return $this->context($realm);
     }
 
     /**

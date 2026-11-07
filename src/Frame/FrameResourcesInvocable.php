@@ -189,10 +189,13 @@ class FrameResourcesInvocable implements Invocable
      * - **A named route** must be mounted in this realm, and is then asked what the route context would ask: the resource's
      *   read gate, or the seat gate for a standalone page. Reading the route context itself would re-enter the overview's
      *   own gate.
-     * - **An unnamed local href** must match a real route of this realm with a resolvable seat gate that admits the reader.
-     *   Anything less is not open: no route, a fallback-only match, another realm's entry route, or no declared gate.
-     * - **An external href** counts as open, because this host holds no gate for it. The stages above still judged it.
-     * - **Anything else** (an empty href or a bare fragment) goes nowhere and is not open.
+     * - **An unnamed local href,** whether written as a path or as an absolute or scheme-relative URL to this host's own
+     *   origin, must match a real route of this realm with a resolvable seat gate that admits the reader. Anything less is
+     *   not open: no route, a fallback-only match, another realm's entry route, or no declared gate.
+     * - **An http(s) or scheme-relative href to a genuinely different origin** counts as open, because this host holds no
+     *   gate for it. The stages above still judged it.
+     * - **Anything else** goes nowhere a reader can be admitted to, and is not open: an empty href, a bare fragment, another
+     *   scheme such as `mailto:`, or an absolute href when this host cannot say what its own origin is.
      *
      * @param  array<string, string>  $hrefs
      */
@@ -207,13 +210,77 @@ class FrameResourcesInvocable implements Invocable
         $href = $node->href;
         $parts = is_string($href) ? parse_url($href) : false;
 
-        if ($parts !== false && (isset($parts['scheme']) || isset($parts['host']))) {
-            return true;
+        if ($parts === false) {
+            return false;
+        }
+
+        if (isset($parts['host'])) {
+            if (! in_array(strtolower($parts['scheme'] ?? 'https'), ['http', 'https'], true)) {
+                return false;
+            }
+
+            $origins = $this->ownOrigins();
+
+            if ($origins === []) {
+                return false;
+            }
+
+            if (! in_array($this->origin($parts['host'], $parts['port'] ?? null), $origins, true)) {
+                return true;
+            }
+
+            $root = ($parts['scheme'] ?? 'https').'://'.$parts['host'].(isset($parts['port']) ? ':'.$parts['port'] : '');
+            $path = IaInvariants::internalPath($parts['path'] ?? '/') ?? '/';
+
+            return $this->localPathOpens($path, $realm, $user, $root);
+        }
+
+        if (isset($parts['scheme'])) {
+            return false;
         }
 
         $path = IaInvariants::internalPath($href);
+        $container = Container::getInstance();
 
-        return $path !== null && $this->localPathOpens($path, $realm, $user);
+        return $path !== null && $this->localPathOpens($path, $realm, $user, $container->bound('request') ? $container->make('request')->getSchemeAndHttpHost() : '');
+    }
+
+    /**
+     * What counts as this host's own origin: the current request's, and `app.url`'s. With no request, as on the console, only
+     * `app.url` answers, and with neither the list is empty. Matching either sends a href through local admission, which is
+     * the stricter path, so a host served on two names is judged by its own routes on both.
+     *
+     * @return list<string>
+     */
+    private function ownOrigins(): array
+    {
+        $container = Container::getInstance();
+        $origins = [];
+
+        if ($container->bound('request')) {
+            $request = $container->make('request');
+            $origins[] = $this->origin($request->getHost(), $request->getPort());
+        }
+
+        $configured = $container->bound('config') ? $container->make('config')->get('app.url') : null;
+        $parts = is_string($configured) ? parse_url($configured) : false;
+
+        if ($parts !== false && isset($parts['host'])) {
+            $origins[] = $this->origin($parts['host'], $parts['port'] ?? null);
+        }
+
+        return array_values(array_unique($origins));
+    }
+
+    /**
+     * Host and non-default port. The scheme is left out on purpose: `http://` to a host served on `https://` is still this
+     * host's own route, and reading it as a different origin would wave it through as external.
+     */
+    private function origin(string $host, int|string|null $port): string
+    {
+        $port = (int) $port;
+
+        return strtolower($host).(in_array($port, [0, 80, 443], true) ? '' : ':'.$port);
     }
 
     private function routeOpens(string $routeName, string $realm, ?Authenticatable $user): bool
@@ -231,10 +298,9 @@ class FrameResourcesInvocable implements Invocable
         return $resolution === null || $this->seatGate->allows($resolution, $user, $realm);
     }
 
-    private function localPathOpens(string $path, string $realm, ?Authenticatable $user): bool
+    private function localPathOpens(string $path, string $realm, ?Authenticatable $user, string $root): bool
     {
         $container = Container::getInstance();
-        $root = $container->bound('request') ? $container->make('request')->getSchemeAndHttpHost() : '';
 
         try {
             $route = $container->make('router')->getRoutes()->match(Request::create($root.$path, 'GET'));
