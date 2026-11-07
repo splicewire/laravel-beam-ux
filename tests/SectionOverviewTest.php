@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use Closure;
 use Illuminate\Contracts\Pagination\CursorPaginator;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
@@ -9,7 +10,12 @@ use Illuminate\Foundation\Auth\User;
 use Illuminate\Pagination\CursorPaginator as Paginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use Rushing\DataNav\Contracts\NavGateStage;
+use Rushing\DataNav\NavContext;
+use Rushing\DataNav\NavGate;
+use Rushing\DataNav\NavNode;
 use Rushing\PermissionCascade\Contracts\EntitlementResolver;
 use Rushing\PermissionCascade\PermissionCascadeServiceProvider;
 use Schemastud\Frame\Attributes\Summary;
@@ -119,12 +125,12 @@ class SectionOverviewTest extends TestCase
         ), by: self::class);
     }
 
-    private function flag(?array $entitlement = null, ?NavSeatLock $lock = null, string $href = '/operator/reports'): void
+    private function flag(?array $entitlement = null, ?NavSeatLock $lock = null, string $href = '/operator/reports', ?string $permission = null, ?array $static = null): void
     {
         $this->app->make(NavSectionRegistry::class)->register(new NavSection(
             key: 'reports', realm: 'operator', label: 'Reports', icon: 'ChartBar', href: $href, order: 20,
-            entitlement: $entitlement, permission: null, audience: NavAudience::Product,
-            static: [['title' => 'Static', 'href' => '/operator/ov-static', 'routeName' => 'ov-static.index']],
+            entitlement: $entitlement, permission: $permission, audience: NavAudience::Product,
+            static: $static ?? [['title' => 'Static', 'href' => '/operator/ov-static', 'routeName' => 'ov-static.index']],
             lock: $lock, overview: true,
         ), by: self::class);
 
@@ -283,6 +289,119 @@ class SectionOverviewTest extends TestCase
         $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
     }
 
+    public function test_a_stage_denying_a_section_token_with_no_gate_definition_refuses_seat_leaf_and_request(): void
+    {
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => ($node->meta['permission'] ?? null) !== 'ov.token'));
+        $this->flag(permission: 'ov.token');
+        $this->actingAs($this->staff());
+
+        $this->assertFalse(Gate::has('ov.token'));
+
+        $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+
+        $this->assertNull($this->seatNode($manifest));
+        $this->assertNotContains('operator-reports-overview.index', array_column($manifest['routeContext'], 'routeName'));
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    public function test_a_host_with_no_stage_and_an_undefined_token_does_not_start_refusing(): void
+    {
+        $this->flag(permission: 'ov.undefined');
+        $this->actingAs($this->staff());
+
+        $this->assertFalse(Gate::has('ov.undefined'));
+        $this->assertNotNull($this->seatNode($this->getJson('frame/manifest')->assertOk()->json()));
+        $this->getJson('frame/resources/operator-reports-overview')->assertOk();
+    }
+
+    public function test_a_gate_ability_under_a_token_gates_nothing_without_a_stage_as_on_the_rail(): void
+    {
+        Gate::define('ov.defined', fn (): bool => false);
+        $this->flag(permission: 'ov.defined');
+        $this->actingAs($this->staff());
+
+        $this->assertNotNull($this->seatNode($this->getJson('frame/manifest')->assertOk()->json()));
+        $this->getJson('frame/resources/operator-reports-overview')->assertOk();
+    }
+
+    public function test_a_stage_that_admits_the_token_admits_the_overview(): void
+    {
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => true));
+        $this->flag(permission: 'ov.token');
+        $this->actingAs($this->staff());
+
+        $this->assertNotNull($this->seatNode($this->getJson('frame/manifest')->assertOk()->json()));
+        $this->getJson('frame/resources/operator-reports-overview')->assertOk();
+    }
+
+    public function test_a_stage_denying_every_child_leaves_nothing_to_open(): void
+    {
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => ! str_starts_with((string) $node->routeName, 'ov-')));
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+
+        $this->assertNull($this->seatNode($manifest));
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    /** Closes every resource child, so the one static row decides. */
+    private function onlyTheStaticDecides(array $static): void
+    {
+        Gate::define('ov.open', fn (): bool => false);
+        Gate::define('ov.gated', fn (): bool => false);
+        $this->flag(static: [$static]);
+        $this->actingAs($this->staff());
+    }
+
+    public function test_an_unnamed_static_on_a_local_route_that_denies_the_reader_is_not_open(): void
+    {
+        Gate::define('ov.never', fn (): bool => false);
+        Route::get('ov-restricted', fn () => 'restricted')->middleware('can:ov.never');
+        app('router')->getRoutes()->refreshNameLookups();
+
+        $this->onlyTheStaticDecides(['title' => 'Restricted', 'href' => '/ov-restricted']);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    public function test_an_unnamed_static_on_a_local_route_that_admits_the_reader_is_open(): void
+    {
+        Gate::define('ov.always', fn (): bool => true);
+        Route::get('ov-allowed', fn () => 'allowed')->middleware('can:ov.always');
+        app('router')->getRoutes()->refreshNameLookups();
+
+        $this->onlyTheStaticDecides(['title' => 'Allowed', 'href' => '/ov-allowed']);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertOk();
+    }
+
+    public function test_an_unnamed_static_on_no_route_at_all_is_not_open(): void
+    {
+        $this->onlyTheStaticDecides(['title' => 'Nowhere', 'href' => '/ov-no-such-page']);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    public function test_an_external_static_counts_as_open_under_the_stated_rule_and_a_stage_can_still_refuse_it(): void
+    {
+        $this->onlyTheStaticDecides(['title' => 'Docs', 'href' => 'https://docs.example.test/reports']);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertOk();
+
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => $node->title !== 'Docs'));
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
+    public function test_a_fragment_static_goes_nowhere_and_is_not_open(): void
+    {
+        $this->onlyTheStaticDecides(['title' => 'Here', 'href' => '#here']);
+
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
+    }
+
     public function test_a_soft_locked_seat_stays_visible_and_locked_with_no_landing(): void
     {
         $this->flag(entitlement: ['reports.view'], lock: new NavSeatLock('Upgrade', 'plan'));
@@ -330,6 +449,17 @@ class SectionOverviewTest extends TestCase
         $this->actingAs($this->staff());
 
         $this->assertSame([], (new DashboardBacking('operator', 'reports'))->rows());
+    }
+}
+
+/** A host's nav gate stage, as tower's permission stage is: it reads the node and the context, and names no Gate ability. */
+class OvStage implements NavGateStage
+{
+    public function __construct(private Closure $decides) {}
+
+    public function allows(NavNode $node, NavContext $context): bool
+    {
+        return ($this->decides)($node);
     }
 }
 

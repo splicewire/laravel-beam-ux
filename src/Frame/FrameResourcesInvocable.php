@@ -4,9 +4,13 @@ namespace Splicewire\Beam\Ux\Frame;
 
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Http\Request;
+use Rushing\DataNav\InvocableNavExpander;
 use Rushing\DataNav\InvocableNavItem;
 use Rushing\DataNav\NavContext;
+use Rushing\DataNav\NavGate;
 use Rushing\DataNav\NavLink;
+use Rushing\DataNav\NavNode;
 use Rushing\Popcorn\Binding;
 use Rushing\Popcorn\Contracts\Invocable;
 use Schemastud\Frame\Contracts\ResourceRegistry;
@@ -17,6 +21,8 @@ use Splicewire\Beam\Particle\ListRouteName;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 use Splicewire\Beam\Realm\RealmResourceRegistry;
+use Splicewire\Beam\Ux\Ia\IaInvariants;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 /**
  * The Frame-resources contributor — the registered popcorn capability that yields a section's
@@ -116,9 +122,21 @@ class FrameResourcesInvocable implements Invocable
             ? []
             : $this->routes->hrefs($realm);
 
+        return ['items' => $this->childItems($section, $realm, $user, is_array($input['static'] ?? null) ? $input['static'] : [], $hrefs)];
+    }
+
+    /**
+     * The section's children as serialized nav items, in their one order, each carrying its resolved seat gate.
+     *
+     * @param  array<int, array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>  $static
+     * @param  array<string, string>  $hrefs  routeName => leaf href, from {@see RouteContextProjector::hrefs()}
+     * @return array<int, array<string, mixed>>
+     */
+    private function childItems(string $section, string $realm, ?Authenticatable $user, array $static, array $hrefs): array
+    {
         $children = [
             ...$this->resourceChildren($section, $realm, $user, $hrefs),
-            ...$this->staticChildren(is_array($input['static'] ?? null) ? $input['static'] : [], $hrefs),
+            ...$this->staticChildren($static, $hrefs),
         ];
 
         // ONE sort over both kinds — see the class docblock. Ordering keys on `navOrder` alone and
@@ -127,39 +145,37 @@ class FrameResourcesInvocable implements Invocable
         // static authored order) and an undeclared `navOrder` still trails.
         usort($children, fn (array $a, array $b): int => $a['order'] <=> $b['order']);
 
-        return ['items' => array_map(function (array $child) use ($realm): array {
+        return array_map(function (array $child) use ($realm): array {
             $link = $child['link'];
             $resolution = $this->seatGate->resolve((string) $link->routeName, $realm);
 
             return $resolution === null
                 ? $link->toArray()
                 : [...$link->toArray(), 'meta' => [SeatGate::META => $resolution]];
-        }, $children)];
+        }, $children);
     }
 
     /**
-     * Whether this reader's rail would hold anything under this section, without building the tree: the children
-     * {@see invoke()} would emit, less any naming a route the realm does not mount, which
-     * {@see FrameNavContribution::pruneUnbound()} would drop.
+     * Whether this reader's rail would hold something they can open under this section, without building the tree. It takes
+     * the same children {@see invoke()} emits, hydrated the way {@see InvocableNavExpander} hydrates them, and asks each of
+     * the host's nav gate stages through the same {@see NavGate::allows()} the rail is built with. A child must then be
+     * somewhere this reader can go, by {@see opens()}.
      *
      * @param  array<int, array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>  $static
      */
-    public function hasChildren(string $section, string $realm, ?Authenticatable $user, array $static): bool
+    public function hasChildren(string $section, string $realm, NavContext $context, array $static): bool
     {
         if ($this->realms->tryResolve($realm) === null) {
             return false;
         }
 
         $hrefs = $this->routes->hrefs($realm);
+        $stages = Container::getInstance()->make(NavGate::class);
 
-        foreach ($this->resourceChildren($section, $realm, $user, $hrefs) as $child) {
-            if (isset($hrefs[$child['link']->routeName])) {
-                return true;
-            }
-        }
+        foreach ($this->childItems($section, $realm, $context->user, $static, $hrefs) as $item) {
+            $node = NavNode::from($item);
 
-        foreach ($static as $row) {
-            if ($this->staticOpens($row['routeName'] ?? null, $realm, $user, $hrefs)) {
+            if ($stages->allows($node, $context) && $this->opens($node, $realm, $context->user, $hrefs)) {
                 return true;
             }
         }
@@ -168,24 +184,44 @@ class FrameResourcesInvocable implements Invocable
     }
 
     /**
-     * Whether a static row is something this reader can open. A row naming no route is a plain link. One naming a route
-     * must be mounted, and is then asked what the route context would ask: the resource's read gate, or the seat's gate
-     * for a standalone page. Reading the route context itself would re-enter the overview's own gate.
+     * Whether a child that cleared the stages is somewhere this reader can go.
+     *
+     * - **A named route** must be mounted in this realm, and is then asked what the route context would ask: the resource's
+     *   read gate, or the seat gate for a standalone page. Reading the route context itself would re-enter the overview's
+     *   own gate.
+     * - **An unnamed local href** must match a real route of this realm with a resolvable seat gate that admits the reader.
+     *   Anything less is not open: no route, a fallback-only match, another realm's entry route, or no declared gate.
+     * - **An external href** counts as open, because this host holds no gate for it. The stages above still judged it.
+     * - **Anything else** (an empty href or a bare fragment) goes nowhere and is not open.
      *
      * @param  array<string, string>  $hrefs
      */
-    private function staticOpens(?string $routeName, string $realm, ?Authenticatable $user, array $hrefs): bool
+    private function opens(NavNode $node, string $realm, ?Authenticatable $user, array $hrefs): bool
     {
-        if ($routeName === null) {
+        $routeName = $node->routeName;
+
+        if ($routeName !== null) {
+            return isset($hrefs[$routeName]) && $this->routeOpens($routeName, $realm, $user);
+        }
+
+        $href = $node->href;
+        $parts = is_string($href) ? parse_url($href) : false;
+
+        if ($parts !== false && (isset($parts['scheme']) || isset($parts['host']))) {
             return true;
         }
 
-        if (! isset($hrefs[$routeName])) {
-            return false;
-        }
+        $path = IaInvariants::internalPath($href);
 
+        return $path !== null && $this->localPathOpens($path, $realm, $user);
+    }
+
+    private function routeOpens(string $routeName, string $realm, ?Authenticatable $user): bool
+    {
         foreach ($this->particles->keysForRealm($realm) as $key) {
-            if (ListRouteName::of($this->particles->find($key)) === $routeName) {
+            $resource = $this->particles->find($key);
+
+            if ($resource !== null && ListRouteName::of($resource) === $routeName) {
                 return $this->resourceViewable($this->realmResources->apply($this->particles->definition($key, $realm), $realm), $user, $realm);
             }
         }
@@ -193,6 +229,28 @@ class FrameResourcesInvocable implements Invocable
         $resolution = $this->seatGate->resolve($routeName, $realm);
 
         return $resolution === null || $this->seatGate->allows($resolution, $user, $realm);
+    }
+
+    private function localPathOpens(string $path, string $realm, ?Authenticatable $user): bool
+    {
+        $container = Container::getInstance();
+        $root = $container->bound('request') ? $container->make('request')->getSchemeAndHttpHost() : '';
+
+        try {
+            $route = $container->make('router')->getRoutes()->match(Request::create($root.$path, 'GET'));
+        } catch (HttpExceptionInterface) {
+            return false;
+        }
+
+        $mount = $route->defaults['beamUxRealm'] ?? null;
+
+        if ($route->isFallback || (is_string($mount) && $mount !== $realm)) {
+            return false;
+        }
+
+        $resolution = $this->seatGate->resolveRoute($route, $realm);
+
+        return $resolution !== null && $this->seatGate->allows($resolution, $user, $realm);
     }
 
     /**

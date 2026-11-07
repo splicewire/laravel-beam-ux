@@ -4,6 +4,10 @@ namespace Splicewire\Beam\Ux\Frame;
 
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Container\Container;
+use Rushing\DataNav\NavContext;
+use Rushing\DataNav\NavGate;
+use Rushing\DataNav\NavLink;
 use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Realm\RealmRegistry;
@@ -14,8 +18,24 @@ use Splicewire\Beam\Realm\RealmRegistry;
  * section gets no seat and no overview" one rule: without it the overview's leaf stays bound, and a bound seat is not
  * pruned as an empty one is.
  *
- * It asks the rail's questions directly rather than reading the projected tree, because the projection admits this very
- * resource's leaf through this gate.
+ * ## The seat's gates are the host's nav gate stages
+ *
+ * A seat's tokens mean whatever the host's stages say they mean, so this asks those stages, through the same
+ * {@see NavGate::allows()} the rail is built with. With no stage a token gates nothing, on the rail and here alike. A host
+ * that defines a Gate ability under a token's name and registers no stage has not gated the seat. A defined
+ * `entitlement:` ability is the one exception, read through {@see NavSectionProjector::entitled()} as the seat's lock is.
+ *
+ * ## Why this cannot recurse
+ *
+ * It asks about the seat as a section header: `{key}.section`, carrying the seat's gate meta and no route's seat gate. Nothing
+ * a stage reads off that node leads back to the overview's resource. It reads the projected tree nowhere, because the
+ * projection admits this resource's leaf through this gate.
+ *
+ * ## What it cannot see
+ *
+ * A host that binds its own {@see \Schemastud\Frame\Contracts\FrameNavContributor} can build a richer context for its
+ * stages, and that port offers no way to ask for it. So this context is the actor, the request and the realm, plus the
+ * attributes of a build already open. A stage that needs more than that sees less here than on the rail.
  */
 class SectionOverviewGate
 {
@@ -24,6 +44,7 @@ class SectionOverviewGate
         private RealmRegistry $realms,
         private NavSectionProjector $seats,
         private FrameResourcesInvocable $children,
+        private Container $container,
     ) {}
 
     public function allows(?Authenticatable $user, NavSection $section): bool
@@ -32,9 +53,7 @@ class SectionOverviewGate
             return false;
         }
 
-        $gate = $this->gate->forUser($user);
-
-        if (! $gate->allows(RealmDashboard::abilityFor($section->realm, $this->realms))) {
+        if (! $this->gate->forUser($user)->allows(RealmDashboard::abilityFor($section->realm, $this->realms))) {
             return false;
         }
 
@@ -42,12 +61,25 @@ class SectionOverviewGate
             return false;
         }
 
-        // An undefined permission token denies at Gate and is ignored by a host with no permission stage, so it is read
-        // the way the nav reads it there: not configured is not denied.
-        if ($section->permission !== null && $this->gate->has($section->permission) && ! $gate->allows($section->permission)) {
+        $context = $this->context($user, $section->realm);
+        $header = NavLink::make(title: $section->label, href: $section->href, icon: $section->icon, routeName: $section->key.'.section')
+            ->withMeta($section->gateAfterLock() + [NavSectionProjector::CONTRIBUTED => true]);
+
+        if (! $this->container->make(NavGate::class)->allows($header, $context)) {
             return false;
         }
 
-        return $this->children->hasChildren($section->key, $section->realm, $user, $section->static);
+        return $this->children->hasChildren($section->key, $section->realm, $context, $section->static);
+    }
+
+    private function context(Authenticatable $user, string $realm): NavContext
+    {
+        $building = $this->container->bound(NavContext::class) ? $this->container->make(NavContext::class) : null;
+
+        return new NavContext(
+            user: $user,
+            request: $building?->request ?? ($this->container->bound('request') ? $this->container->make('request') : null),
+            attributes: ['realm' => $realm] + ($building?->attributes ?? []),
+        );
     }
 }
