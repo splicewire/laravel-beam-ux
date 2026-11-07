@@ -227,6 +227,11 @@ class StampShellCommand extends Command
                 .'with operator/authoring realm reach (os.enter composes from the operator grant); the Member is denied /operator.',
             'Prerequisites: beam.accounts.demo.seed_users (null = on outside production) and the teams estate migrated '
                 .'(beam-accounts estate not declared absent). The demo principals are BeamDemo users, never production staff.',
+            // Measured on the fresh `laravel new` host proof: without these two the seed failed (`roles.id` NOT NULL —
+            // the published permission schema is uuid-keyed and stock Spatie models generate no key).
+            'beam-accounts host steps the seed needs: publish spatie\'s permission config (vendor:publish --tag=permission-config) '
+                .'and bind its models to Splicewire\Beam\Accounts\Models\Role / Permission (uuid-keyed; the PermissionModelPairingAudit '
+                .'checks the pair), and give App\Models\User the HasRoles and Splicewire\Beam\Accounts\Concerns\BelongsToTeams traits.',
             'On a live estate grant your OWN staff team instead — Splicewire\Beam\Accounts\Teams\RealmReachGrant::toTeam($team), '
                 .'or TeamProvisioner::personalTeamWithFullReachFor($user). Which team or user is staff is the host\'s decision.',
         ]);

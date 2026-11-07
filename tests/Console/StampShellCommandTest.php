@@ -87,6 +87,14 @@ class StampShellCommandTest extends TestCase
             ->assertSuccessful();
     }
 
+    /** The fresh-host proof's seed failed (`roles.id` NOT NULL) until these host steps were done; the stamp names them. */
+    public function test_the_seeding_guidance_names_the_permission_pairing_and_user_traits(): void
+    {
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'operator'])
+            ->expectsOutputToContain('Splicewire\Beam\Accounts\Models\Role / Permission')
+            ->assertSuccessful();
+    }
+
     public function test_routes_are_printed_and_never_edited(): void
     {
         File::ensureDirectoryExists($this->host.'/routes');
