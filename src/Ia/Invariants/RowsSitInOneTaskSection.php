@@ -3,6 +3,8 @@
 namespace Splicewire\Beam\Ux\Ia\Invariants;
 
 use Splicewire\Beam\Dashboard\RealmDashboard;
+use Splicewire\Beam\Dashboard\SectionOverview;
+use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Ux\Ia\NavInvariant;
 
@@ -10,7 +12,7 @@ use Splicewire\Beam\Ux\Ia\NavInvariant;
  * **I3** (IA-10, UX-09): every operator-realm row sits under exactly one declared task section.
  *
  * A row is a node with an href and no children. It holds when exactly one of its ancestors is a seat the realm's
- * {@see NavSectionRegistry} declares (`{key}.section`), product or developer: the Developer zone's own node
+ * {@see NavSectionRegistry} declares (`{key}.section`, or its overview's route when it has one), product or developer: the Developer zone's own node
  * (`developer.section`) is the projector's container, not a declared seat, so a developer row counts its `ops`-like seat
  * once. The realm's dashboard leaf leads the rail on its own and is the one row allowed at the top level.
  *
@@ -40,7 +42,10 @@ class RowsSitInOneTaskSection implements NavInvariant
             return null;
         }
 
-        $declared = array_map(fn ($section): string => $section->key.'.section', $this->sections->for($realm));
+        $declared = array_merge(...array_map(fn (NavSection $section): array => [
+            $section->key.'.section',
+            SectionOverview::routeNameFor($realm, $section->key),
+        ], $this->sections->for($realm)) ?: [[]]);
         $seats = count(array_filter($ancestors, fn (array $a): bool => in_array($a['routeName'] ?? null, $declared, true)));
 
         return match ($seats) {

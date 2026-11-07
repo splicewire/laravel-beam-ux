@@ -138,6 +138,64 @@ class FrameResourcesInvocable implements Invocable
     }
 
     /**
+     * Whether this reader's rail would hold anything under this section, without building the tree: the children
+     * {@see invoke()} would emit, less any naming a route the realm does not mount, which
+     * {@see FrameNavContribution::pruneUnbound()} would drop.
+     *
+     * @param  array<int, array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>  $static
+     */
+    public function hasChildren(string $section, string $realm, ?Authenticatable $user, array $static): bool
+    {
+        if ($this->realms->tryResolve($realm) === null) {
+            return false;
+        }
+
+        $hrefs = $this->routes->hrefs($realm);
+
+        foreach ($this->resourceChildren($section, $realm, $user, $hrefs) as $child) {
+            if (isset($hrefs[$child['link']->routeName])) {
+                return true;
+            }
+        }
+
+        foreach ($static as $row) {
+            if ($this->staticOpens($row['routeName'] ?? null, $realm, $user, $hrefs)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a static row is something this reader can open. A row naming no route is a plain link. One naming a route
+     * must be mounted, and is then asked what the route context would ask: the resource's read gate, or the seat's gate
+     * for a standalone page. Reading the route context itself would re-enter the overview's own gate.
+     *
+     * @param  array<string, string>  $hrefs
+     */
+    private function staticOpens(?string $routeName, string $realm, ?Authenticatable $user, array $hrefs): bool
+    {
+        if ($routeName === null) {
+            return true;
+        }
+
+        if (! isset($hrefs[$routeName])) {
+            return false;
+        }
+
+        foreach ($this->particles->keysForRealm($realm) as $key) {
+            if (ListRouteName::of($this->particles->find($key)) === $routeName) {
+                return $this->resourceViewable($this->realmResources->apply($this->particles->definition($key, $realm), $realm), $user, $realm);
+            }
+        }
+
+        $resolution = $this->seatGate->resolve($routeName, $realm);
+
+        return $resolution === null || $this->seatGate->allows($resolution, $user, $realm);
+    }
+
+    /**
      * The resources that auto-attach into a section, ordered by `navOrder` (nulls
      * last) then label — each a child `NavLink` carrying the resource's icon +
      * routeName, **href derived from the leaf that `routeName` names**. Each resource is additionally

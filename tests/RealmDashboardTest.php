@@ -832,6 +832,23 @@ class RealmDashboardTest extends TestCase
 
         $this->assertNotContains('operator-dashboard.index', $routeNames);
     }
+
+    /**
+     * ADR-0222 decision 9: with no flagged seat, this host's dashboard and manifest are byte-identical. The files were captured
+     * from the source at 81bfcdd, before overviews existed. Do not regenerate them: a difference here is a change to what every
+     * unflagged host serves.
+     */
+    public function test_an_unflagged_dashboard_and_manifest_are_byte_identical_to_their_capture(): void
+    {
+        $before = fn (string $file): string => (string) file_get_contents(__DIR__.'/Fixtures/unflagged-dashboard-before/'.$file);
+
+        $this->actingAs($this->staff());
+        $this->assertSame($before('staff-rows.json'), $this->getJson('frame/resources/operator-dashboard')->assertOk()->getContent());
+        $this->assertSame($before('staff-manifest.json'), $this->getJson('frame/manifest')->assertOk()->getContent());
+
+        $this->actingAs($this->member());
+        $this->assertSame($before('member-manifest.json'), $this->getJson('frame/manifest')->assertOk()->getContent());
+    }
 }
 
 class DashGizmo extends Model

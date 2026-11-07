@@ -18,6 +18,8 @@ use Splicewire\Beam\Authorization\ResourceVisibility;
 use Splicewire\Beam\Dashboard\DashboardParticipation;
 use Splicewire\Beam\Dashboard\RailLeaves;
 use Splicewire\Beam\Dashboard\RealmDashboard;
+use Splicewire\Beam\Dashboard\SectionOverview;
+use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Particle\Backing\Unpaged;
 use Splicewire\Beam\Particle\ListRouteName;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
@@ -93,11 +95,18 @@ use Throwable;
  * A card's `href` is the leaf its resource's list route name names in {@see RouteContextProjector::hrefs()}
  * — the ONE derivation {@see FrameResourcesInvocable} also reads — so the card and the rail seat cannot
  * point at two different URLs. The summary payload itself carries no href (frame's socket is realm-blind).
+ *
+ * ## A section's overview is this same dashboard, confined (ADR-0222 decision 9)
+ *
+ * Carrying a `section`, it reads only that seat's subtree of the rail and only the resources of that section, under every
+ * rule above. A realm's dashboard instead draws each flagged seat as one tile and no cards from that section. With no
+ * flagged seat in the realm both new branches are empty, so an unflagged dashboard's output does not change.
  */
 class DashboardBacking implements Unpaged
 {
     public function __construct(
         public readonly string $realm,
+        public readonly ?string $section = null,
     ) {}
 
     /**
@@ -130,13 +139,19 @@ class DashboardBacking implements Unpaged
             return [];
         }
 
-        $rail = $this->rail($container);
-        $cards = $this->cards($container, $rail);
+        $items = $this->navItems($container);
+        $rail = RailLeaves::fromNavItems($this->scopedItems($container, $items));
+        $cards = $this->cards($container, $rail, $items);
         $rows = [...$cards, ...$this->tiles($rail, array_column($cards, 'href'))];
 
         // Nothing for this viewer: the one welcome row instead of an empty list — see DashboardWelcome.
         // A guest gets nothing (the dashboard's own gate refuses one before the socket reaches here).
         if ($rows === []) {
+            // An overview's own gate requires something to open, so an empty one has no first-run panel to offer.
+            if ($this->section !== null) {
+                return [];
+            }
+
             $actor = $this->actor($container);
 
             return $actor === null ? [] : [$container->make(DashboardWelcome::class)->row($actor)];
@@ -158,20 +173,22 @@ class DashboardBacking implements Unpaged
     }
 
     /**
+     * @param  array<int, array<string, mixed>>  $items  the realm's whole projected nav tree
      * @return list<DashboardCardRowData>
      */
-    private function cards(Container $container, RailLeaves $rail): array
+    private function cards(Container $container, RailLeaves $rail, array $items): array
     {
         $particles = $container->make(ParticleResourceRegistry::class);
         $visibility = $container->make(ResourceVisibility::class);
         $actor = $this->actor($container);
         $hrefs = $this->hrefs($container);
+        $confined = $this->confinedSections($container, $items);
 
         $cards = [];
         $seen = [];
 
         foreach ($particles->keysForRealm($this->realm) as $key) {
-            if (RealmDashboard::isKey($key, $this->realm) || ! $particles->find($key)?->isFramed()) {
+            if (RealmDashboard::isKey($key, $this->realm) || isset($confined['overviews'][$key]) || ! $particles->find($key)?->isFramed()) {
                 continue;
             }
 
@@ -189,6 +206,10 @@ class DashboardBacking implements Unpaged
 
             if ($href === null || isset($seen[$href])) {
                 continue; // the host mounts no list route for it — drop, never throw
+            }
+
+            if (! $this->inScope($definition, $href, $confined['rails'])) {
+                continue;
             }
 
             $context = DashboardParticipation::contextFor($definition, $rail, $href, $seat);
@@ -294,16 +315,18 @@ class DashboardBacking implements Unpaged
     }
 
     /**
-     * The realm's rail for this actor — every leaf of the contributed, gated, pruned navigation, in walk
-     * order. Read through the same contributor the manifest uses, so a tile exists exactly where a rail
-     * entry does, and a card's "seated" reading is the rail the actor sees. Empty when the realm has no
-     * navigation or it cannot be built (reported, not thrown: the cards that declare themselves survive).
+     * The realm's navigation for this actor — the contributed, gated, pruned tree, in walk order. Read through the same
+     * contributor the manifest uses, so a tile exists exactly where a rail entry does, and a card's "seated" reading is the
+     * rail the actor sees. Empty when the realm has no navigation or it cannot be built (reported, not thrown: the cards
+     * that declare themselves survive).
+     *
+     * @return array<int, array<string, mixed>>
      */
-    private function rail(Container $container): RailLeaves
+    private function navItems(Container $container): array
     {
         // A host with frame nav switched off binds no contributor: no rail, and nothing to report on every render (build.qa).
         if (! $container->bound(FrameNavContributor::class)) {
-            return new RailLeaves([]);
+            return [];
         }
 
         try {
@@ -311,10 +334,124 @@ class DashboardBacking implements Unpaged
         } catch (Throwable $e) {
             report($e);
 
-            return new RailLeaves([]);
+            return [];
         }
 
-        return RailLeaves::fromNavItems($nav['nav']['items'] ?? []);
+        return $nav['nav']['items'] ?? [];
+    }
+
+    /**
+     * What this page's rail is read from: an overview's seat's children, or, for a realm's dashboard, the tree with each
+     * flagged seat cut down to its own leaf, which draws it as one tile.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function scopedItems(Container $container, array $items): array
+    {
+        if ($this->section !== null) {
+            return $this->childrenOfSeat($items, SectionOverview::routeNameFor($this->realm, $this->section));
+        }
+
+        $routes = [];
+        foreach ($this->flagged($container) as $section) {
+            $routes[SectionOverview::routeNameFor($this->realm, $section)] = true;
+        }
+
+        return $routes === [] ? $items : $this->collapsed($items, $routes);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<string, true>  $routes
+     * @return array<int, array<string, mixed>>
+     */
+    private function collapsed(array $items, array $routes): array
+    {
+        return array_map(function (array $node) use ($routes): array {
+            $children = is_array($node['children'] ?? null) ? $node['children'] : [];
+
+            return [...$node, 'children' => isset($routes[$node['routeName'] ?? '']) ? [] : $this->collapsed($children, $routes)];
+        }, $items);
+    }
+
+    /**
+     * The children of the seat bound to this route, wherever it sits in the tree, or none.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function childrenOfSeat(array $items, string $route): array
+    {
+        foreach ($items as $node) {
+            $children = is_array($node['children'] ?? null) ? $node['children'] : [];
+
+            if (($node['routeName'] ?? null) === $route) {
+                return $children;
+            }
+
+            $found = $this->childrenOfSeat($children, $route);
+
+            if ($found !== []) {
+                return $found;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * The realm's flagged sections, as what a card must be checked against: each one's own rail and the overview keys,
+     * which draw no card on any page.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array{overviews: array<string, true>, rails: array<string, RailLeaves>}
+     */
+    private function confinedSections(Container $container, array $items): array
+    {
+        $confined = ['overviews' => [], 'rails' => []];
+
+        foreach ($this->flagged($container) as $section) {
+            $confined['overviews'][SectionOverview::keyFor($this->realm, $section)] = true;
+            $confined['rails'][$section] = RailLeaves::fromNavItems($this->childrenOfSeat($items, SectionOverview::routeNameFor($this->realm, $section)));
+        }
+
+        return $confined;
+    }
+
+    /**
+     * Whether a resource may draw a card on this page. An overview takes its own section's resources, and a realm's
+     * dashboard takes everything outside a flagged section. A resource belongs to a section by declaring it or by being
+     * in that seat's subtree, as a static child.
+     *
+     * @param  array<string, RailLeaves>  $rails  section key => that seat's rail
+     */
+    private function inScope(ResourceDefinition $definition, string $href, array $rails): bool
+    {
+        $in = fn (string $section): bool => $definition->nav->section === $section
+            || ($rails[$section] ?? null)?->find(ListRouteName::of($definition), $href) !== null;
+
+        if ($this->section !== null) {
+            return $in($this->section);
+        }
+
+        foreach (array_keys($rails) as $section) {
+            if ($in($section)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** @return list<string> the keys of the realm's flagged seats; empty on most hosts, which is what leaves them unchanged */
+    private function flagged(Container $container): array
+    {
+        if (! $container->bound(NavSectionRegistry::class)) {
+            return [];
+        }
+
+        return array_map(fn ($section): string => $section->key, SectionOverview::flagged($this->realm, $container->make(NavSectionRegistry::class)));
     }
 
     /**
@@ -327,7 +464,9 @@ class DashboardBacking implements Unpaged
      */
     private function tiles(RailLeaves $rail, array $cardHrefs): array
     {
-        $own = RealmDashboard::routeNameFor($this->realm);
+        $own = $this->section === null
+            ? RealmDashboard::routeNameFor($this->realm)
+            : SectionOverview::routeNameFor($this->realm, $this->section);
         $tiles = [];
         $seen = array_fill_keys($cardHrefs, true);
 

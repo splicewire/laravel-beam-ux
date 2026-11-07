@@ -9,6 +9,8 @@ use Schemastud\Frame\Registry\RouteContextEntry;
 use Splicewire\Beam\Authorization\ResourceVisibility;
 use Splicewire\Beam\Authorization\SeatGate;
 use Splicewire\Beam\Dashboard\RealmDashboard;
+use Splicewire\Beam\Dashboard\SectionOverview;
+use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 use Throwable;
@@ -303,7 +305,7 @@ class RouteContextProjector
         // The path may be pinned by host IA while the routeName stays the stem's — `routeName` is
         // documented as stable identity, so only the URL half moves.
         $path = $this->plan->resourcePaths[$key]
-            ?? ($realm !== '' && RealmDashboard::isKey($key, $realm) ? RealmDashboard::PATH : $stem);
+            ?? ($realm !== '' && RealmDashboard::isKey($key, $realm) ? RealmDashboard::PATH : $this->sectionOverviewPath($key, $realm) ?? $stem);
 
         $entries = [new RouteContextEntry(
             routeName: $listRoute,
@@ -370,5 +372,17 @@ class RouteContextProjector
         }
 
         return $entries;
+    }
+
+    /** A section overview's leaf mounts at its seat's own path (ADR-0222 decision 9); any other key has no answer here. */
+    private function sectionOverviewPath(string $key, string $realm): ?string
+    {
+        if ($realm === '' || ! str_ends_with($key, '-overview') || ! app()->bound(NavSectionRegistry::class)) {
+            return null;
+        }
+
+        $section = SectionOverview::sectionFor($key, $realm, app(NavSectionRegistry::class));
+
+        return $section === null ? null : SectionOverview::pathFor($section, $this->realms->resolve($realm)->routeBase);
     }
 }

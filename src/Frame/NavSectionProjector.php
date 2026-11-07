@@ -13,6 +13,7 @@ use Schemastud\Frame\Contracts\ResourceRegistry;
 use Splicewire\Beam\Authorization\ResourceVisibility;
 use Splicewire\Beam\Authorization\SeatGate;
 use Splicewire\Beam\Dashboard\RealmDashboard;
+use Splicewire\Beam\Dashboard\SectionOverview;
 use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
@@ -129,7 +130,8 @@ class NavSectionProjector
     {
         // Only walk the resource catalog when this realm HAS a dashboard — the leaf's href and the
         // static-row join below are the only two readers, and both are inert without one.
-        $hrefs = $this->particles->has(RealmDashboard::keyFor($realm)) && $this->realms->tryResolve($realm) !== null
+        $hrefs = ($this->particles->has(RealmDashboard::keyFor($realm)) || SectionOverview::flagged($realm, $this->sections) !== [])
+            && $this->realms->tryResolve($realm) !== null
             ? $this->hrefs($realm)
             : [];
 
@@ -146,7 +148,7 @@ class NavSectionProjector
         foreach ($this->sections->for($realm) as $section) {
             $static = $this->withoutTheLeafsOwnRow($section->static, $leafHref, $hrefs, $authored);
 
-            $entries[] = [$section->order, $section->key, $this->seat($section, $context?->user, $static), $section->audience];
+            $entries[] = [$section->order, $section->key, $this->seat($section, $context?->user, $static, $hrefs), $section->audience];
         }
 
         if ($authored !== null) {
@@ -388,10 +390,24 @@ class NavSectionProjector
      * {@see withoutTheLeafsOwnRow()} has already removed any row that duplicates the realm's dashboard
      * leaf. Everything else about the seat is untouched.
      *
+     * ## A seat with an overview lands on it (ADR-0222 decision 9)
+     *
+     * Its `routeName` is the overview's list route and its href is that leaf's, instead of `{key}.section` and the declared
+     * href. A bound route is what makes the console skip its section index for this node, and what lets
+     * {@see FrameNavContribution::pruneUnbound()} drop the seat when this reader's route context has no such leaf. A
+     * soft-locked seat keeps `{key}.section`: it must stay visible to a reader the overview refuses, and has no landing.
+     *
      * @param  list<array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>  $static
+     * @param  array<string, string>  $hrefs  routeName => leaf href, from {@see RouteContextProjector::hrefs()}
      */
-    private function seat(NavSection $section, ?Authenticatable $user, array $static): NavNode
+    private function seat(NavSection $section, ?Authenticatable $user, array $static, array $hrefs): NavNode
     {
+        $locked = $section->isSoftGated() && ! $this->entitled($section, $user);
+        $overview = $section->overview && ! $locked ? SectionOverview::routeNameFor($section->realm, $section->key) : null;
+        $href = $overview !== null ? $hrefs[$overview] ?? null : null;
+        $routeName = $href !== null ? $overview : $section->key.'.section';
+        $href ??= $section->href;
+
         $node = InvocableNavItem::make(
             title: $section->label,
             invocable: FrameResourcesInvocable::NAME,
@@ -400,10 +416,10 @@ class NavSectionProjector
                 'realm' => $section->realm,
                 'static' => $static,
             ],
-            href: $section->href,
-            match: trim($section->href, '/').'*',
+            href: $href,
+            match: trim($href, '/').'*',
             icon: $section->icon,
-            routeName: $section->key.'.section',
+            routeName: $routeName,
         );
 
         // A soft-gated seat the principal cannot reach: keep it, stamped with the wire-visible lock,
@@ -412,7 +428,7 @@ class NavSectionProjector
         //
         // `gate()`/`gateAfterLock()` already drop a null and keep an empty array, so "declared and
         // unsatisfiable" stays distinguishable from "never declared" all the way to the gate stage.
-        if ($section->isSoftGated() && ! $this->entitled($section, $user)) {
+        if ($locked) {
             return $node
                 ->withMeta($section->gateAfterLock() + [self::CONTRIBUTED => true])
                 ->locked($section->lock->reason, $section->lock->upsell);
@@ -446,7 +462,7 @@ class NavSectionProjector
      * a `Beam\Tenancy\Tenant`, neither of which exists at a bare beam host — referencing it from a
      * projector every beam host loads would fail container resolution at nav-build time.
      */
-    private function entitled(NavSection $section, ?Authenticatable $user): bool
+    public function entitled(NavSection $section, ?Authenticatable $user): bool
     {
         foreach ($section->entitlement ?? [] as $key) {
             $ability = self::ENTITLEMENT_ABILITY.$key;

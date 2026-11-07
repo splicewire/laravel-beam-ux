@@ -8,11 +8,15 @@ use Rushing\Popcorn\Concerns\Chained;
 use Splicewire\Beam\Accounts\Contracts\TeamContract;
 use Splicewire\Beam\Accounts\Facades\BeamAccounts;
 use Splicewire\Beam\Dashboard\RealmDashboard;
+use Splicewire\Beam\Dashboard\SectionOverview;
+use Splicewire\Beam\Nav\NavSection;
+use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Particle\ParticleResource;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Data\DashboardCardRowData;
+use Splicewire\Beam\Ux\Frame\SectionOverviewGate;
 use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
 use Throwable;
 
@@ -53,6 +57,13 @@ use Throwable;
  * actor to their own projection. An unknown realm is denied until its host explicitly defines the named
  * ability. The per-row {@see \Splicewire\Beam\Authorization\ResourceVisibility::listable()} filter inside
  * the backing is the dashboard's second gate.
+ *
+ * ## A flagged section gets the same resource, confined (ADR-0222 decision 9)
+ *
+ * The same two moments register one `{realm}-{section}-overview` per flagged {@see NavSection}, over the same backing with
+ * a section. A package that seats its section in its own boot chain, before this link, gets its leaf in time for a host's
+ * route file. A seat declared later gets it on `Application::booted()`, with the known limit above. The console's URL
+ * constraint is unaffected either way, because {@see \Splicewire\Beam\Ux\Frame\RealmConsoleSegments} reads seat hrefs too.
  */
 trait WiresRealmDashboards
 {
@@ -64,7 +75,11 @@ trait WiresRealmDashboards
         }
 
         $this->registerRealmDashboards();
-        $this->app->booted(fn () => $this->registerRealmDashboards());
+        $this->registerSectionOverviews();
+        $this->app->booted(function (): void {
+            $this->registerRealmDashboards();
+            $this->registerSectionOverviews();
+        });
     }
 
     /**
@@ -103,6 +118,56 @@ trait WiresRealmDashboards
                 showable: false,
                 frame: true,
             ), [$realm], by: 'splicewire/laravel-beam-ux');
+        }
+    }
+
+    /**
+     * One overview per flagged seat that has none yet. Idempotent, like the sweep above.
+     */
+    private function registerSectionOverviews(): void
+    {
+        if (! $this->app->bound(NavSectionRegistry::class)) {
+            return;
+        }
+
+        $sections = $this->app->make(NavSectionRegistry::class);
+        $registry = $this->app->make(ParticleResourceRegistry::class);
+
+        foreach (array_keys($this->app->make(RealmRegistry::class)->all()) as $realm) {
+            foreach (SectionOverview::flagged($realm, $sections) as $section) {
+                $key = SectionOverview::keyFor($realm, $section->key);
+
+                if ($registry->has($key)) {
+                    continue;
+                }
+
+                $this->defineSectionOverviewAbility($section);
+
+                $registry->register(new ParticleResource(
+                    key: $key,
+                    backing: new DashboardBacking($realm, $section->key),
+                    data: DashboardCardRowData::class,
+                    label: $section->label,
+                    icon: $section->icon,
+                    policy: SectionOverview::abilityFor($realm, $section->key),
+                    routeName: SectionOverview::routeNameFor($realm, $section->key),
+                    readOnly: true,
+                    editable: false,
+                    showable: false,
+                    frame: true,
+                ), [$realm], by: 'splicewire/laravel-beam-ux');
+            }
+        }
+    }
+
+    /** The gate an overview declares. A host may narrow it by defining the ability first. */
+    private function defineSectionOverviewAbility(NavSection $section): void
+    {
+        $gate = $this->app->make(Gate::class);
+        $ability = SectionOverview::abilityFor($section->realm, $section->key);
+
+        if (! $gate->has($ability)) {
+            $gate->define($ability, fn (?Authenticatable $user = null): bool => $this->app->make(SectionOverviewGate::class)->allows($user, $section));
         }
     }
 
