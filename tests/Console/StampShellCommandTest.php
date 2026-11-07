@@ -85,6 +85,39 @@ class StampShellCommandTest extends TestCase
             ->assertSuccessful();
     }
 
+    /**
+     * The stamped `app.css` deliberately declares no family `@source` lines: they are derived at build time by
+     * `familySources()` from `@schemastud/seam/vite`. A fresh `laravel new` host has no such plugin, so its
+     * family dist classes were never scanned (doctor `family @source coverage`: 17 of 17). The stamp prints the
+     * wiring, before Tailwind, and edits no Vite file (make-surface 02 owner-authorized follow-up).
+     */
+    public function test_the_guidance_prints_the_family_sources_vite_wiring_before_tailwind_and_edits_no_vite_file(): void
+    {
+        File::put($this->host.'/vite.config.ts', "export default {};\n");
+
+        $this->assertSame(0, \Illuminate\Support\Facades\Artisan::call('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site']));
+        $output = \Illuminate\Support\Facades\Artisan::output();
+
+        $import = strpos($output, "import { familySources } from '@schemastud/seam/vite';");
+        $plugin = strpos($output, 'familySources(),');
+        $tailwind = strpos($output, 'BEFORE tailwindcss()');
+
+        $this->assertNotFalse($import, $output);
+        $this->assertNotFalse($plugin, $output);
+        $this->assertNotFalse($tailwind, 'the registration must say it goes before tailwindcss()');
+        $this->assertLessThan($plugin, $import);
+        $this->assertSame("export default {};\n", File::get($this->host.'/vite.config.ts'));
+    }
+
+    public function test_the_family_sources_wiring_is_printed_for_every_surface_selection(): void
+    {
+        foreach (['account', 'operator', 'site,account,operator'] as $surfaces) {
+            $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => $surfaces, '--dry-run' => true])
+                ->expectsOutputToContain("import { familySources } from '@schemastud/seam/vite';")
+                ->assertSuccessful();
+        }
+    }
+
     /** The fresh-host proof's seed failed (`roles.id` NOT NULL) until these host steps were done; the stamp names them. */
     public function test_the_seeding_guidance_names_the_permission_pairing_and_user_traits(): void
     {

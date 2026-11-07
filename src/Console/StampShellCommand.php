@@ -104,6 +104,7 @@ class StampShellCommand extends Command
 
         $this->warnMissingPackages($base, $surfaces);
         $this->printRoutes($stamps, $surfaces);
+        $this->printFamilySources();
         $this->printSeeding($surfaces);
 
         return self::SUCCESS;
@@ -217,6 +218,25 @@ class StampShellCommand extends Command
                 $this->line('    '.$line);
             }
         }
+    }
+
+    /**
+     * The Vite wiring the stamped `app.css` relies on. That stub declares no family `@source` lines on purpose: the
+     * list is derived at build time by `familySources()` from `@schemastud/seam/vite`, which injects one `@source` per
+     * resolved family `dist` after the stylesheet's `@import 'tailwindcss'`. A fresh `laravel new` host has no such
+     * plugin, so every family dist class went unscanned (measured on the fresh-host proof: doctor
+     * `family @source coverage`, 17 of 17 not scanned). Printed for every selection, because the base stamps
+     * `app.css`; `vite.config.ts` is the host's file and is never edited. No static `@source` globs are invented —
+     * the plugin derives them.
+     */
+    private function printFamilySources(): void
+    {
+        $this->newLine();
+        // Worded without "stamped": a re-stamp asserts that word never appears unless a file was written.
+        $this->components->info('Scan the family packages — the shell stub resources/css/app.css derives its family @source list from '
+            .'@schemastud/seam/vite (a dependency of the family front-end). Add to vite.config.ts; nothing was edited:');
+        $this->line("    import { familySources } from '@schemastud/seam/vite';");
+        $this->line('    familySources(), // in defineConfig({ plugins: [...] }), BEFORE tailwindcss()');
     }
 
     /** @param list<string> $surfaces */
