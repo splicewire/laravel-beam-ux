@@ -64,10 +64,8 @@ class StampShellCommandTest extends TestCase
         $this->assertSame($stamps->navFor(['site', 'account', 'operator']), File::get($this->host.'/'.StampShellCommand::NAV));
         $this->assertStringContainsString('segment: /account', File::get($this->host.'/'.StampShellCommand::NAV));
 
-        $record = ShellStampParityAudit::readRecord($this->host.'/'.StampShellCommand::RECORD);
-        $this->assertSame(['site', 'account', 'operator'], $record['surfaces']);
-        $this->assertContains('resources/js/app.tsx', $record['files']);
-        $this->assertContains(StampShellCommand::NAV, $record['files']);
+        $this->assertSame(['site', 'account', 'operator'], $this->recorded('resources/js/app.tsx'));
+        $this->assertSame(['site', 'account', 'operator'], $this->recorded(StampShellCommand::NAV));
 
         $lint = new Process([PHP_BINARY, '-l', $this->host.'/app/Http/Middleware/HandleInertiaRequests.php'], env: ['XDEBUG_MODE' => 'off']);
         $lint->run();
@@ -129,7 +127,7 @@ class StampShellCommandTest extends TestCase
             ->assertSuccessful();
 
         $this->assertSame("/* the host's own theme */\n", File::get($this->host.'/resources/css/app.css'));
-        $this->assertNotContains('resources/css/app.css', ShellStampParityAudit::readRecord($this->host.'/'.StampShellCommand::RECORD)['files']);
+        $this->assertNull($this->recorded('resources/css/app.css'));
 
         $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site', '--force' => true])
             ->expectsOutputToContain('overwritten')
@@ -207,6 +205,102 @@ class StampShellCommandTest extends TestCase
         $this->assertStatuses([DoctorStatus::Pass], $this->audit());
     }
 
+    // ── a changed surface selection (make-surface 02 review, finding 2) ────────────────────────────
+    //
+    // The nav is composed from the selection, so the same target holds different bytes for `site` and for
+    // `site,account`. The record must say which stamp each file actually holds, or a correct stamp reads as drift.
+
+    public function test_a_changed_selection_with_force_restamps_the_nav_and_parity_stays_green(): void
+    {
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])->assertSuccessful();
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'account', '--force' => true])
+            ->expectsOutputToContain('overwritten')
+            ->assertSuccessful();
+
+        $this->assertStatuses([DoctorStatus::Pass], $this->audit());
+        $stamps = $this->app->make(ShellStamps::class);
+        $this->assertSame($stamps->navFor(['account']), File::get($this->host.'/'.StampShellCommand::NAV));
+        $this->assertSame(['account'], $this->recorded(StampShellCommand::NAV));
+    }
+
+    public function test_a_changed_selection_without_force_keeps_the_earlier_nav_stamp_and_parity_stays_green(): void
+    {
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])->assertSuccessful();
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site,account'])
+            ->expectsOutputToContain('the site stamp — --force to re-stamp it for site, account')
+            ->assertSuccessful();
+
+        $stamps = $this->app->make(ShellStamps::class);
+        $this->assertStatuses([DoctorStatus::Pass], $this->audit());
+        $this->assertSame($stamps->navFor(['site']), File::get($this->host.'/'.StampShellCommand::NAV));
+        $this->assertSame(['site'], $this->recorded(StampShellCommand::NAV));
+        // The base files are identical under both selections, so they now record the new one.
+        $this->assertSame(['site', 'account'], $this->recorded('resources/js/app.tsx'));
+
+        // And --force then moves the nav to the new selection, still green.
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site,account', '--force' => true])->assertSuccessful();
+        $this->assertStatuses([DoctorStatus::Pass], $this->audit());
+        $this->assertSame($stamps->navFor(['site', 'account']), File::get($this->host.'/'.StampShellCommand::NAV));
+        $this->assertSame(['site', 'account'], $this->recorded(StampShellCommand::NAV));
+    }
+
+    public function test_a_tailored_nav_still_warns_after_a_changed_selection(): void
+    {
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])->assertSuccessful();
+        File::append($this->host.'/'.StampShellCommand::NAV, "\nextra:\n  segment: /extra\n");
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site,account'])
+            ->expectsOutputToContain('tailored — --force to overwrite')
+            ->assertSuccessful();
+
+        $findings = $this->audit();
+        $this->assertStatuses([DoctorStatus::Warn], $findings);
+        $this->assertStringContainsString(StampShellCommand::NAV.' has drifted from its stub', $findings[0]->detail);
+    }
+
+    public function test_a_tailored_css_still_warns_after_a_changed_selection(): void
+    {
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])->assertSuccessful();
+        File::append($this->host.'/resources/css/app.css', "/* host brand */\n");
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'account'])
+            ->expectsOutputToContain('tailored — --force to overwrite')
+            ->assertSuccessful();
+
+        $findings = $this->audit();
+        $this->assertStatuses([DoctorStatus::Warn], $findings);
+        $this->assertStringContainsString('resources/css/app.css has drifted from its stub', $findings[0]->detail);
+    }
+
+    public function test_an_unchanged_repeat_after_a_changed_selection_writes_nothing(): void
+    {
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])->assertSuccessful();
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site,account'])->assertSuccessful();
+        $before = $this->tree();
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site,account'])
+            ->doesntExpectOutputToContain('recorded')
+            ->assertSuccessful();
+
+        $this->assertSame($before, $this->tree());
+        $this->assertStatuses([DoctorStatus::Pass], $this->audit());
+    }
+
+    /** A record written before per-file provenance (`{surfaces, files: [targets]}`) reads as one selection. */
+    public function test_an_earlier_record_format_reads_as_one_selection(): void
+    {
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site,account'])->assertSuccessful();
+        File::put($this->host.'/'.StampShellCommand::RECORD, json_encode([
+            'surfaces' => ['site', 'account'],
+            'files' => ['resources/beam-ux/nav.yml', 'resources/css/app.css'],
+        ]));
+
+        $this->assertStatuses([DoctorStatus::Pass], $this->audit());
+        $this->assertSame(['site', 'account'], $this->recorded(StampShellCommand::NAV));
+    }
+
     public function test_the_parity_audit_reports_a_stamped_file_that_was_removed(): void
     {
         $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])->assertSuccessful();
@@ -252,6 +346,12 @@ class StampShellCommandTest extends TestCase
 
         $this->assertCount(1, $steps);
         $this->assertSame(['splicewire:beam:ux:stamp-shell'], array_values($steps)[0]->commands);
+    }
+
+    /** @return list<string>|null the surface selection the record holds for this target */
+    private function recorded(string $target): ?array
+    {
+        return ShellStampParityAudit::readRecord($this->host.'/'.StampShellCommand::RECORD)[$target] ?? null;
     }
 
     /** @return list<Finding> */

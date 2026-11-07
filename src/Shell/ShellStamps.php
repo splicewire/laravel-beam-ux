@@ -20,6 +20,13 @@ namespace Splicewire\Beam\Ux\Shell;
  * `'*'` is the base every surface needs (the mount, the view, the tokens, the middleware). The rest are route lines
  * PRINTED for the host to paste, never edited into `routes/` — the same rule the generators keep.
  *
+ * ## The printed block works pasted as printed
+ * Laravel matches routes in registration order, and the site's `Route::beamUxSite()` registers a `{path}` catch-all
+ * that reserves only `api` and `_beam`. So a line registered after it is shadowed: the first fresh-host proof's
+ * `/account` reached the catch-all until its routes were reordered by hand (make-surface 02 review, finding 1). A
+ * catch-all is therefore declared `last`, and {@see routesFor()} orders the block so every `last` line follows every
+ * other surface's and tier's lines.
+ *
  * ## Tiers contribute
  * A tier package adds its own stamp file or route line for a surface through {@see file()} / {@see route()} from its
  * service provider (tower-shell's `Route::towerSpa()` is the named example). Contributions are additive and
@@ -33,11 +40,17 @@ class ShellStamps
     /** The base every surface stamps. */
     public const BASE = '*';
 
+    /** The nav data target: composed from the surface selection rather than copied from one stub. */
+    public const NAV = 'resources/beam-ux/nav.yml';
+
     /** @var array<string, array<string, string>> surface => [host-relative target => absolute stub path] */
     private array $files = [];
 
     /** @var array<string, list<string>> surface => printed route lines */
     private array $routes = [];
+
+    /** @var array<string, list<string>> surface => printed route lines that must follow every other line (a catch-all) */
+    private array $lastRoutes = [];
 
     /** @var array<string, list<string>> surface => nav.yml fragments (YAML mapping entries) */
     private array $nav = [];
@@ -52,9 +65,9 @@ class ShellStamps
         $stamps->file(self::BASE, 'resources/css/app.css', $stubs.'/app.css.stub');
         $stamps->file(self::BASE, 'resources/js/app.tsx', $stubs.'/app.tsx.stub');
 
-        // The public site: the packaged home page, then the entry renderer's catch-all, which must be LAST.
+        // The public site: the packaged home page, then the entry renderer's catch-all, printed after every other line.
         $stamps->route('site', "Route::inertia('/', 'site/home')->name('home');");
-        $stamps->route('site', "Route::beamUxSite('site/entry'); // LAST: its {path} catch-all takes every route registered after it");
+        $stamps->route('site', "Route::beamUxSite('site/entry');", last: true);
         $stamps->navEntry('site', "home:\n  segment: /\n  title: Home\n  type: page\n  realm: site");
 
         // The account shell: the packaged account home inside the host's auth group. beam-accounts mounts the
@@ -84,9 +97,14 @@ class ShellStamps
         return $this;
     }
 
-    public function route(string $surface, string $line): static
+    /** @param bool $last the line registers a catch-all, so it is printed after every other surface's and tier's lines */
+    public function route(string $surface, string $line, bool $last = false): static
     {
-        $this->routes[$surface][] = $line;
+        if ($last) {
+            $this->lastRoutes[$surface][] = $line;
+        } else {
+            $this->routes[$surface][] = $line;
+        }
 
         return $this;
     }
@@ -127,20 +145,48 @@ class ShellStamps
     }
 
     /**
+     * The printed route block, in paste order: each surface's lines in surface order, then every `last` line (the
+     * site's catch-all), so the block registers correctly when pasted exactly as printed.
+     *
      * @param  list<string>  $surfaces
-     * @return array<string, list<string>> surface => route lines, in surface order
+     * @return list<array{surface: string, last: bool, lines: list<string>}>
      */
     public function routesFor(array $surfaces): array
     {
-        $routes = [];
+        $groups = [];
 
-        foreach ($this->ordered($surfaces) as $surface) {
-            if (($this->routes[$surface] ?? []) !== []) {
-                $routes[$surface] = $this->routes[$surface];
+        foreach ([false, true] as $last) {
+            foreach ($this->ordered($surfaces) as $surface) {
+                $lines = ($last ? $this->lastRoutes : $this->routes)[$surface] ?? [];
+
+                if ($lines !== []) {
+                    $groups[] = ['surface' => $surface, 'last' => $last, 'lines' => $lines];
+                }
             }
         }
 
-        return $routes;
+        return $groups;
+    }
+
+    /**
+     * Every target a stamp of these surfaces owns and the bytes it writes there — the files plus the composed nav.
+     * The parity audit compares a recorded file with this for the selection it was recorded under.
+     *
+     * @param  list<string>  $surfaces
+     * @return array<string, string> host-relative target => content, sorted by target
+     */
+    public function contentsFor(array $surfaces): array
+    {
+        $contents = [];
+
+        foreach ($this->filesFor($surfaces) as $target => $stub) {
+            $contents[$target] = (string) file_get_contents($stub);
+        }
+
+        $contents[self::NAV] = $this->navFor($surfaces);
+        ksort($contents);
+
+        return $contents;
     }
 
     /**

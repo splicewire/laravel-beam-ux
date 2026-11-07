@@ -16,11 +16,17 @@ use Splicewire\Beam\Ux\Shell\ShellStamps;
  * file is KEPT unless `--force`. `--dry-run` reports the same decisions and writes nothing. So re-running the stamp
  * after a clean stamp reports every file `identical`, and a host's edits survive a re-run.
  *
- * ## The record
- * Each run (not `--dry-run`) records, in `resources/beam-ux/shell-stamp.json`, the surfaces stamped and every file that
- * is byte-for-byte its stub after the run. {@see ShellStampParityAudit} reads it: a recorded file that has since
- * drifted from its stub is reported (never rewritten). A file the host kept tailored is not recorded, because it was
- * never a stamp. The record is sorted and only rewritten when it changes, so an identical re-run writes nothing.
+ * ## The record: which stamp each file holds
+ * Each run (not `--dry-run`) records, in `resources/beam-ux/shell-stamp.json`, every file that is byte-for-byte its
+ * stub after the run, WITH the surface selection that stub belongs to. The selection matters because the nav is
+ * composed from it: `--surfaces=site` and `--surfaces=site,account` stamp different `nav.yml` bytes.
+ * {@see ShellStampParityAudit} compares each recorded file with its own selection's stub and reports a drift (never
+ * rewriting it).
+ *
+ * A file this run keeps keeps its earlier entry. That covers a tailored file, and an untouched stamp of an earlier
+ * selection that `--force` would replace. So a changed selection never reads as drift, and a real edit still does
+ * (make-surface 02 review, finding 2). A file the host tailored before its first stamp is never recorded. The record is
+ * sorted and only rewritten when it changes, so an identical re-run writes nothing.
  *
  * ## Staff reach is the PACKAGED seed flow
  * Ticket 02 asked for a packaged entitlement seeder. It exists: beam-accounts' `DemoTeamSeeder` (demo-gated,
@@ -42,7 +48,7 @@ class StampShellCommand extends Command
     public const RECORD = 'resources/beam-ux/shell-stamp.json';
 
     /** The nav data target, composed per surface rather than read from one stub. */
-    public const NAV = 'resources/beam-ux/nav.yml';
+    public const NAV = ShellStamps::NAV;
 
     /** @var array<string, list<string>> surface => composer packages it needs in the host */
     private const PACKAGES = [
@@ -68,7 +74,7 @@ class StampShellCommand extends Command
 
         $this->components->info(sprintf('Shell stamp for: %s%s', implode(', ', $surfaces), $dry ? ' (dry run — nothing is written)' : ''));
 
-        foreach ($this->expected($stamps, $surfaces) as $target => $content) {
+        foreach ($stamps->contentsFor($surfaces) as $target => $content) {
             $path = $base.'/'.$target;
 
             if (! $files->exists($path)) {
@@ -78,7 +84,7 @@ class StampShellCommand extends Command
             } elseif ($force) {
                 $status = $dry ? 'would overwrite' : 'overwritten';
             } else {
-                $this->components->twoColumnDetail($target, '<fg=yellow>kept</> tailored — --force to overwrite');
+                $this->components->twoColumnDetail($target, $this->kept($stamps, $target, (string) $files->get($path), $record[$target] ?? null, $surfaces));
 
                 continue;
             }
@@ -104,23 +110,20 @@ class StampShellCommand extends Command
     }
 
     /**
-     * Every target this stamp owns and the bytes it should hold.
+     * Why a file was kept: still the untouched stamp of an earlier selection, or the host's own tailoring.
      *
+     * @param  list<string>|null  $recorded  the selection the record holds for this file
      * @param  list<string>  $surfaces
-     * @return array<string, string>
      */
-    private function expected(ShellStamps $stamps, array $surfaces): array
+    private function kept(ShellStamps $stamps, string $target, string $current, ?array $recorded, array $surfaces): string
     {
-        $expected = [];
+        $earlier = $recorded === null ? null : ($stamps->contentsFor($recorded)[$target] ?? null);
 
-        foreach ($stamps->filesFor($surfaces) as $target => $stub) {
-            $expected[$target] = (string) file_get_contents($stub);
+        if ($earlier !== null && rtrim($current) === rtrim($earlier)) {
+            return sprintf('<fg=yellow>kept</> the %s stamp — --force to re-stamp it for %s', implode(', ', $recorded), implode(', ', $surfaces));
         }
 
-        $expected[self::NAV] = $stamps->navFor($surfaces);
-        ksort($expected);
-
-        return $expected;
+        return '<fg=yellow>kept</> tailored — --force to overwrite';
     }
 
     /** @return list<string>|null */
@@ -148,20 +151,23 @@ class StampShellCommand extends Command
     }
 
     /**
-     * @param  array{surfaces: list<string>, files: list<string>}  $previous
+     * A file this run left matching its stub now records this run's selection; every other entry is kept as it was.
+     *
+     * @param  array<string, list<string>>  $previous  target => the selection it was recorded under
      * @param  list<string>  $surfaces
      * @param  list<string>  $matching
      */
     private function writeRecord(Filesystem $files, string $base, array $previous, array $surfaces, array $matching): void
     {
-        $allSurfaces = array_values(array_filter(
-            ShellStamps::SURFACES,
-            fn ($s) => in_array($s, $previous['surfaces'], true) || in_array($s, $surfaces, true),
-        ));
-        $stamped = array_values(array_unique([...$previous['files'], ...$matching]));
-        sort($stamped);
+        $entries = $previous;
 
-        $json = json_encode(['surfaces' => $allSurfaces, 'files' => $stamped], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n";
+        foreach ($matching as $target) {
+            $entries[$target] = $surfaces;
+        }
+
+        ksort($entries);
+
+        $json = json_encode(['files' => (object) $entries], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n";
         $path = $base.'/'.self::RECORD;
 
         if ($files->exists($path) && $files->get($path) === $json) {
@@ -201,12 +207,13 @@ class StampShellCommand extends Command
         }
 
         $this->newLine();
-        $this->components->info('Mount it — the stamp declares, the host routes (paste into routes/web.php; nothing was edited):');
+        $this->components->info('Mount it — the stamp declares, the host routes. Paste this block, as printed, at the END of routes/web.php '
+            .'(after the host\'s own routes and requires); the site home replaces any \'/\' route the host already has. Nothing was edited:');
 
-        foreach ($routes as $surface => $lines) {
-            $this->line("    // {$surface}");
+        foreach ($routes as $group) {
+            $this->line('    // '.$group['surface'].($group['last'] ? ' — LAST: its {path} catch-all takes every route registered after it' : ''));
 
-            foreach ($lines as $line) {
+            foreach ($group['lines'] as $line) {
                 $this->line('    '.$line);
             }
         }
