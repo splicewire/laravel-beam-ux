@@ -1423,6 +1423,29 @@ class EntryPublicationTest extends TestCase
         $this->assertSame($porcelain, $at(['status', '--porcelain', '--untracked-files=all']));
     }
 
+    /** Ticket 27: when Git cannot answer whether a mirror path is ignored, recording fails closed rather than committing. */
+    public function test_an_unverifiable_ignore_check_refuses_recording(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $wrapper = $repo.'-git-without-check-ignore';
+        file_put_contents($wrapper, "#!/bin/sh\nfor a; do [ \"\$a\" = check-ignore ] && { echo 'fatal: check-ignore unavailable' >&2; exit 128; }; done\nexec git \"\$@\"\n");
+        chmod($wrapper, 0755);
+        config(['beam.ux.recording.git' => $wrapper]);
+        $base = $git(['rev-parse', 'HEAD']);
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $state = $this->publishDraftAs($entry, $author);
+
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release);
+        $this->assertNotSame('recorded', $receipt->state);
+        $this->assertSame('repository-state', $receipt->error);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+    }
+
     public function test_release_records_exact_member_and_preserves_real_index_then_no_change_republication(): void
     {
         [$repo, $git] = $this->recordingRepository();
