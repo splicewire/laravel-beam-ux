@@ -58,8 +58,11 @@ class ShellStamps
         $stamps->navEntry('site', "home:\n  segment: /\n  title: Home\n  type: page\n  realm: site");
 
         // The account shell: the packaged account home inside the host's auth group. beam-accounts mounts the
-        // settings and team routes itself (`register_routes`).
-        $stamps->route('account', "Route::inertia('account', 'account/home')->middleware(['auth', 'verified'])->name('account');");
+        // settings and team routes itself (`register_routes`). The seat-gate default is REQUIRED, not decoration: the
+        // stamped nav puts /account on the tenant rail, and IA invariant I6 refuses a rail route that "declares no
+        // resolvable seat gate" — measured on the fresh `laravel new` host proof, where its absence 500'd every
+        // signed-in page (`accountNav` is shared on each request). Open to members, as the starters' account routes are.
+        $stamps->route('account', "Route::inertia('account', 'account/home')->middleware(['auth', 'verified'])->name('account')->defaults(\\Splicewire\\Beam\\Authorization\\SeatGate::OPEN_TO_MEMBERS, true);");
         $stamps->navEntry('account', "account:\n  segment: /account\n  title: Account\n  type: page\n  realm: account");
 
         // The operator front-end: the realm console macro (its own home, its own manifest).

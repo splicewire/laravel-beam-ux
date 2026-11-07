@@ -76,6 +76,17 @@ class StampShellCommandTest extends TestCase
         $this->assertStringNotContainsString('@beamAnalytics', File::get($this->host.'/resources/views/app.blade.php'));
     }
 
+    /**
+     * The fresh `laravel new` host proof 500'd every signed-in page with IA invariant I6 ("route [account] declares no
+     * resolvable seat gate") while the printed account line lacked its seat-gate default.
+     */
+    public function test_the_printed_account_route_declares_its_seat_gate(): void
+    {
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'account'])
+            ->expectsOutputToContain('->defaults(\Splicewire\Beam\Authorization\SeatGate::OPEN_TO_MEMBERS, true);')
+            ->assertSuccessful();
+    }
+
     public function test_routes_are_printed_and_never_edited(): void
     {
         File::ensureDirectoryExists($this->host.'/routes');
