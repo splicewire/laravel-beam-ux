@@ -1361,6 +1361,91 @@ class EntryPublicationTest extends TestCase
         return [$repo, $git];
     }
 
+    public static function ignoredMirrorLayouts(): array
+    {
+        return [['fresh-clone'], ['worktree']];
+    }
+
+    /**
+     * Launch ticket 27: a host's suite fakes the mirror disk (Storage::fake), which puts it under Laravel's ignored
+     * storage/framework/testing/ INSIDE the checkout under test. Recording must never commit there, whether `.git` is a
+     * directory (a fresh clone: fleet6, Actions) or a file (a linked worktree); the skip is named on the receipt.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('ignoredMirrorLayouts')]
+    public function test_a_mirror_disk_git_ignores_is_never_recorded_and_the_receipt_says_why(string $layout): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        mkdir($repo.'/storage/framework/testing', 0777, true);
+        file_put_contents($repo.'/storage/framework/testing/.gitignore', "*\n!.gitignore\n");
+        $git(['add', '--', 'storage/framework/testing/.gitignore']);
+        $git(['commit', '-m', 'the Laravel skeleton ignores storage/framework/testing']);
+        $checkout = $repo;
+        if ($layout === 'worktree') {
+            $checkout = $repo.'-linked';
+            $git(['worktree', 'add', '-b', 'linked', $checkout]);
+            $this->assertFileExists($checkout.'/.git');
+            $this->assertDirectoryDoesNotExist($checkout.'/.git');
+        } else {
+            $this->assertDirectoryExists($repo.'/.git');
+        }
+        $at = function (array $args) use ($checkout): string {
+            $process = new \Symfony\Component\Process\Process(['git', ...$args], $checkout);
+            $process->mustRun();
+
+            return $process->getOutput();
+        };
+        $mirror = $checkout.'/storage/framework/testing/disks/beam-ux';
+        mkdir($mirror, 0777, true);
+        config(['filesystems.disks.recording-test.root' => $mirror]);
+        \Illuminate\Support\Facades\Storage::forgetDisk('recording-test');
+        $this->app->forgetInstance(\Splicewire\Beam\Ux\Storage\PlacedDiskMirror::class);
+        $this->app->forgetInstance(EntryPublication::class);
+        $head = $at(['rev-parse', 'HEAD']);
+        $refs = $at(['for-each-ref']);
+        $porcelain = $at(['status', '--porcelain', '--untracked-files=all']);
+
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $state = $this->publishDraftAs($entry, $author);
+
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version, 'publication is unaffected');
+        $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        $this->assertFileExists($mirror.'/'.$path, 'the mirror is still written');
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release);
+        $this->assertNotSame('recorded', $receipt->state);
+        $this->assertSame('mirror-ignored', $receipt->error, 'the skip is named where every recording refusal is');
+        $this->assertNull($receipt->sha);
+        $this->assertSame($head, $at(['rev-parse', 'HEAD']), 'HEAD of the repository under test is unchanged');
+        $this->assertSame($refs, $at(['for-each-ref']), 'no ref moved');
+        $this->assertSame($porcelain, $at(['status', '--porcelain', '--untracked-files=all']));
+    }
+
+    /** Ticket 27: when Git cannot answer whether a mirror path is ignored, recording fails closed rather than committing. */
+    public function test_an_unverifiable_ignore_check_refuses_recording(): void
+    {
+        [$repo, $git] = $this->recordingRepository();
+        $wrapper = $repo.'-git-without-check-ignore';
+        file_put_contents($wrapper, "#!/bin/sh\nfor a; do [ \"\$a\" = check-ignore ] && { echo 'fatal: check-ignore unavailable' >&2; exit 128; }; done\nexec git \"\$@\"\n");
+        chmod($wrapper, 0755);
+        config(['beam.ux.recording.git' => $wrapper]);
+        $base = $git(['rev-parse', 'HEAD']);
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn () => true);
+        (require __DIR__.'/../database/migrations/shared/create_beam_ux_release_recordings_table.php.stub')->up();
+        $state = $this->publishDraftAs($entry, $author);
+
+        $this->assertSame($state->headVersion, $entry->fresh()->published_version);
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
+        $receipt = app(\Splicewire\Beam\Ux\Recording\ReleaseRecording::class)->receipt($release);
+        $this->assertNotSame('recorded', $receipt->state);
+        $this->assertSame('repository-state', $receipt->error);
+        $this->assertSame($base, $git(['rev-parse', 'HEAD']));
+    }
+
     public function test_release_records_exact_member_and_preserves_real_index_then_no_change_republication(): void
     {
         [$repo, $git] = $this->recordingRepository();

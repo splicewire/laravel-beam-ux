@@ -156,6 +156,8 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         );
         $this->app->scoped(Bindings\RecordPageScope::class);
         $this->app->scoped(Components\ComponentScope::class);
+        // The Site map computes its site-wide snapshot and Redirect walks once per request (research 37, 37-T1).
+        $this->app->scoped(Sitemap\SiteMapIndex::class);
         $this->app->bind(PreviewGrantResolver::class, PreviewGrantService::class);
         // The docs-link seam's shipped default (registry-docs ticket 01, amended ruling 1): no docs
         // capability, no link — `urlFor()` answers null, never throws, never guesses. `bindIf` is the

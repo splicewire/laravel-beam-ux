@@ -106,6 +106,20 @@ class LocalGit
                 }
             }
         }
+        // A path Git ignores is never recorded: staging is plumbing (update-index --add), which bypasses ignore rules,
+        // and a host suite's faked mirror disk lives under Laravel's ignored storage/framework/testing/ inside the
+        // checkout under test, so recording it would commit test output into that history (launch ticket 27).
+        // check-ignore refuses the `literal` pathspec magic outright, and it parses its input (argv or --stdin alike) as
+        // pathspecs, so a path beginning with `:` is magic (`:(top)dir/x` answers for `dir/x`). Magic is read only at a
+        // pathspec's very start, so `./` makes it plain; measured for `:(top)`, `:!`, `:^`, `:/`, `:(exclude)` and `:x`.
+        $ignored = $this->process($this->root, ['check-ignore', '-q', '--', './'.$path], literal: false);
+        $exit = $ignored->run();
+        if ($exit === 0) {
+            throw new RecordingFailure('mirror-ignored', 'Git ignores this mirror path, so it is not recorded.');
+        }
+        if ($exit !== 1) {
+            throw new RecordingFailure('repository-state', 'Git ignore rules cannot be verified.');
+        }
 
         return $cursor;
     }
@@ -290,12 +304,12 @@ class LocalGit
         return trim($process->getOutput());
     }
 
-    private function process(string $cwd, array $args, array $env = [], ?string $input = null): Process
+    private function process(string $cwd, array $args, array $env = [], ?string $input = null, bool $literal = true): Process
     {
         // Explicitly clear inherited Git routing; hooks inherit only this operation's private routing.
-        $clean = array_fill_keys(['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE'], false);
+        $clean = array_fill_keys(['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'], false);
 
-        return new Process([config('beam.ux.recording.git', 'git'), '--literal-pathspecs', ...$args], $cwd, array_merge($clean, $env), $input, 30);
+        return new Process([config('beam.ux.recording.git', 'git'), ...($literal ? ['--literal-pathspecs'] : []), ...$args], $cwd, array_merge($clean, $env), $input, 30);
     }
 
     private function run(string $cwd, array $args, array $env = [], ?string $input = null, bool $trim = true): string

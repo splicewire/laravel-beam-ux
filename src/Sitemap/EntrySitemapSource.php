@@ -15,6 +15,9 @@ use Splicewire\Beam\Ux\Type\UxType;
  * supersedes the arm's `RouteSitemapSource` route-table heuristic with real
  * publish-state filtering.
  *
+ * The gates live in {@see SitemapEligibility}, the one predicate this feed yields from and the Site map reports
+ * (owner-review-20261102 research 37): the three below, then listing, a hidden ancestor and Record Page expansion.
+ *
  * The three gates:
  *
  *  1. **Route** — only a routable rendering has a public URL. `UxType::Page` is
@@ -42,72 +45,14 @@ class EntrySitemapSource implements LiveSitemapSource
     public function urls(): iterable
     {
         $base = $this->baseUrl->baseUrl();
-
-        // Route gate (coarse): only Page-typed entries are routable. The
-        // per-entry URL resolution + marking + entitlement gates run below.
-        $routing = ['id', 'slug', 'namespace', 'type', 'realm', 'realms', 'parent_id', 'segment',
-            'access', 'traverse', 'requirements', 'record_page', 'workflow_marking', 'workflow_version',
-            'schema_ref', 'format', 'residency_mode'];
-        $columns = array_values(array_intersect($routing, \Illuminate\Support\Facades\Schema::getColumnListing('beam_ux_entries')));
-        $all = BeamUxEntry::query()->select($columns)->where('type', UxType::Page->value)->get();
-        $resolver = app(\Splicewire\Beam\Ux\Containment\EntryPathResolver::class)->snapshot($all);
-        $entries = $all->filter(fn ($entry) => $entry->type === UxType::Page);
+        // One predicate decides, here and on the Site map (research 37): the gates are SitemapEligibility's.
+        $eligibility = new SitemapEligibility($this->published, $this->entitlement);
+        [$entries, $resolver] = SitemapEligibility::snapshot();
 
         foreach ($entries as $entry) {
-            if (! $this->routable($entry)) {
-                continue;
+            foreach ($eligibility->verdict($entry, $resolver)['urls'] as $url) {
+                yield Url::create($base.$url);
             }
-
-            if (! $this->published->isPublished($entry)) {
-                continue;
-            }
-
-            if (! $this->entitlement->isPublic($entry)) {
-                continue;
-            }
-
-            $chain = $resolver->ancestry($entry);
-            if ($chain === null || ! app(\Splicewire\Beam\Ux\Access\EntryAccessResolver::class)->canList(null, $chain)) {
-                continue;
-            }
-
-            // A hidden page hides the pages under it (ADR-0236 d8), so a page under one is not a URL that answers.
-            foreach ($chain as $node) {
-                if (! $this->published->isPublished($node)) {
-                    continue 2;
-                }
-            }
-
-            if (\Splicewire\Beam\Ux\Bindings\RecordPages::parameter($entry->segment) !== null) {
-                $request = \Illuminate\Http\Request::create('/');
-                $request->setUserResolver(fn () => null);
-                $pages = app(\Splicewire\Beam\Ux\Bindings\RecordPages::class);
-                foreach ($pages->records($entry, $request, BeamUxEntry::REALM_SITE) as $row) {
-                    $url = $pages->url($entry, $row);
-                    $resolved = $url === null ? null : $resolver->resolve($url);
-                    if ($resolved !== null && end($resolved)->getKey() === $entry->getKey()) {
-                        yield Url::create($base.$url);
-                    }
-                }
-
-                continue;
-            }
-            yield Url::create($base.$entry->url());
         }
-    }
-
-    /**
-     * The fine route gate: the entry must be a public page — a MEMBER of the public `site` realm
-     * (ADR-0165, the public content/URL plane), read from the flat `realms` list, NOT the primary
-     * `realm`. Reachability is membership: an entry primary in another realm but a member of `site`
-     * is site-reachable and belongs in the feed, while a `site`-primary entry whose `realms` omits
-     * `site` does not. An entry not in `site` is not public — its URL is gated or, on a satellite,
-     * not routed at all (sites-sweep P7: audiostud's sitemap listed the unrouted `/register`, an
-     * auth-realm page). This keeps the feed to public `site` pages; it does not by itself guarantee a
-     * 2xx (a public `site` page may still 302 signed-out — e.g. audiostud `/studio`).
-     */
-    private function routable(BeamUxEntry $entry): bool
-    {
-        return $entry->isReachableIn(BeamUxEntry::REALM_SITE);
     }
 }

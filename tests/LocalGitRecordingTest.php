@@ -170,6 +170,41 @@ class LocalGitRecordingTest extends TestCase
         }
     }
 
+    /**
+     * Ticket 27 review (orch-peer): a pathspec that begins with `:` is magic, so `check-ignore ':(top)dir/name.mdx'`
+     * answers for `dir/name.mdx` and calls an ignored file "not ignored" (exit 1). Every magic shape is checked
+     * literally: each file below is ignored, and a `:`-led path that is not ignored is still accepted.
+     */
+    public function test_an_ignored_path_that_looks_like_pathspec_magic_is_still_refused(): void
+    {
+        // orch-peer's exact reproduction: a root rule for the literal name, and a non-ignored counterpart.
+        file_put_contents($this->repo.'/.gitignore', "\\:(top)dir/name.mdx\n");
+        mkdir($this->repo.'/:(top)dir');
+        mkdir($this->repo.'/dir');
+        file_put_contents($this->repo.'/dir/name.mdx', "counterpart\n");
+        $shapes = ['(top)dir/name.mdx' => false, '!x/name.mdx' => true, '^x/name.mdx' => true, '/x/name.mdx' => true, '(exclude)x/name.mdx' => true, 'x/name.mdx' => true];
+        foreach ($shapes as $rest => $ownIgnore) {
+            $path = ':'.$rest;
+            if ($ownIgnore) {
+                @mkdir($this->repo.'/'.dirname($path), 0777, true);
+                file_put_contents($this->repo.'/'.dirname($path).'/.gitignore', "*\n");
+            }
+            file_put_contents($this->repo.'/'.$path, "ignored\n");
+        }
+        $git = new LocalGit($this->repo);
+        foreach (array_keys($shapes) as $rest) {
+            try {
+                $git->path(':'.$rest);
+                $this->fail(":{$rest} is ignored but was accepted for recording");
+            } catch (RecordingFailure $error) {
+                $this->assertSame('mirror-ignored', $error->reason, ":{$rest}");
+            }
+        }
+        $this->assertSame($this->repo.'/dir/name.mdx', $git->path('dir/name.mdx'), 'the non-ignored counterpart is accepted');
+        mkdir($this->repo.'/:plain');
+        $this->assertSame($this->repo.'/:plain/name.mdx', $git->path(':plain/name.mdx'), 'a colon-led path that is not ignored is accepted');
+    }
+
     public function test_paths_new_file_linked_gitfile_and_unsupported_states(): void
     {
         $git = new LocalGit($this->repo);
