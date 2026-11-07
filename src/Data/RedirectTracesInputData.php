@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Data;
 
+use Schemastud\DataSchemas\Attributes\Description;
 use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
@@ -11,6 +12,7 @@ use Splicewire\Beam\Data\BeamData;
 final class RedirectTracesInputData extends BeamData
 {
     public function __construct(
+        #[Description('Walk only this realm\'s Redirects (for example `site`); omitted, every realm\'s Redirects are walked.')]
         public ?string $realm = null,
     ) {}
 }
