@@ -38,6 +38,7 @@ class EntryAccessTest extends TestCase
         $this->createTables();
         // A migrated host: register-from-disk publishes through EntryPublication, which needs the version store and the pin
         // (ADR-0225 decision 2; disk-registered entries are born published).
+        \Splicewire\Beam\Ux\Tests\Fixtures\MigratedHostColumns::publishedVersion();
         (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_versions_table.php.stub')->up();
         (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_particles_table.php.stub')->up();
 

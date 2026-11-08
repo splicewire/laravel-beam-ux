@@ -817,6 +817,7 @@ class EntryPublicationTest extends TestCase
     /** A published parent page whose children carry the host's `recipe` Page Fields (ADR-0233 d4). */
     private function recipesParent(): BeamUxEntry
     {
+        \Splicewire\Beam\Ux\Tests\Fixtures\MigratedHostColumns::childFields();
         config(['beam.ux.page_fields' => ['recipe' => Fixtures\RecipeFields::class]]);
         $parent = $this->publishedPage(self::BODY_ONE);
         $parent->forceFill(['child_fields' => 'recipe', 'title' => 'Recipes'])->save();
