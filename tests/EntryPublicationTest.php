@@ -817,7 +817,6 @@ class EntryPublicationTest extends TestCase
     /** A published parent page whose children carry the host's `recipe` Page Fields (ADR-0233 d4). */
     private function recipesParent(): BeamUxEntry
     {
-        (require dirname(__DIR__).'/database/migrations/shared/add_child_fields_to_beam_ux_entries_table.php.stub')->up();
         config(['beam.ux.page_fields' => ['recipe' => Fixtures\RecipeFields::class]]);
         $parent = $this->publishedPage(self::BODY_ONE);
         $parent->forceFill(['child_fields' => 'recipe', 'title' => 'Recipes'])->save();
@@ -2225,7 +2224,6 @@ class EntryPublicationTest extends TestCase
         // read "links on", and no secret should outlive the links it signed.
         $entry = $this->publishedPage(self::BODY_ONE);
         [$service, $author, $reviewer] = $this->releaseFixture();
-        (require __DIR__.'/../database/migrations/shared/add_preview_links_to_beam_ux_releases_table.php.stub')->up();
         $release = $service->create($entry, 'Previewed', $author);
         $service->putMember($release, $entry->id, $entry->published_version, $author);
         $service->previewLinks($release, true, $author);
@@ -2519,7 +2517,7 @@ class EntryPublicationTest extends TestCase
             ]);
         }
         $this->runBeamWorkflowsMigrations();
-        foreach (['create_beam_ux_releases_table', 'add_origin_to_beam_ux_releases_table'] as $stub) {
+        foreach (['create_beam_ux_releases_table'] as $stub) {
             (require __DIR__."/../database/migrations/shared/{$stub}.php.stub")->up();
         }
         $author = new \Illuminate\Foundation\Auth\User;
@@ -3046,31 +3044,6 @@ class EntryPublicationTest extends TestCase
         } finally {
             ToggleUpdateEntryPolicy::$update = true;
         }
-    }
-
-    public function test_the_origin_alter_reaches_a_releases_table_made_by_the_earlier_create_and_is_idempotent(): void
-    {
-        // orch-peer HIGH on 980e865: `origin` arrives as its own ALTER stub, because editing the create reaches nothing
-        // already migrated. A table from the create alone gains the column, an existing Release reads as built, and a
-        // second run changes nothing. (A fresh install runs the same two stubs.)
-        Schema::dropIfExists('beam_ux_release_members');
-        Schema::dropIfExists('beam_ux_releases');
-        (require __DIR__.'/../database/migrations/shared/create_beam_ux_releases_table.php.stub')->up();
-        $this->assertFalse(Schema::hasColumn('beam_ux_releases', 'origin'));
-        DB::table('beam_ux_releases')->insert([
-            'id' => '00000000-0000-0000-0000-000000000001', 'title' => 'Earlier', 'realm' => 'site',
-            'created_by' => 'user:1', 'edited_by' => 'user:1', 'status' => 'draft',
-        ]);
-
-        $alter = __DIR__.'/../database/migrations/shared/add_origin_to_beam_ux_releases_table.php.stub';
-        (require $alter)->up();
-        (require $alter)->up();
-
-        $this->assertTrue(Schema::hasColumn('beam_ux_releases', 'origin'));
-        $this->assertSame(
-            \Splicewire\Beam\Ux\Release\ReleaseOrigin::Built,
-            \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail('00000000-0000-0000-0000-000000000001')->origin,
-        );
     }
 
     public function test_a_caller_cannot_claim_the_direct_origin(): void

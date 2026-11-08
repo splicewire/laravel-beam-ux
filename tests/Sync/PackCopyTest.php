@@ -28,7 +28,6 @@ class PackCopyTest extends AuthoredComponentNativeTestCase
     {
         parent::setUp();
         // Provenance (ADR-0215): `origin` and `asserted_hash`, which a pack copy stamps and a re-apply compares.
-        (require dirname(__DIR__, 2).'/database/migrations/shared/add_provenance_to_beam_ux_entries_table.php.stub')->up();
         // The default WriteGate delegates to the Laravel gate; a host grants its seed and sync actors their writes.
         Gate::define('create', fn ($user = null) => true);
         Gate::define('update', fn ($user = null) => true);

@@ -36,7 +36,6 @@ class CompileAndSeedTest extends TestCase
         $this->createTables();
         // A migrated host: disk registration and re-assertion publish through EntryPublication, which needs the version
         // store and the pin (ADR-0225 decision 2).
-        (require dirname(__DIR__).'/database/migrations/shared/add_published_version_to_beam_ux_entries_table.php.stub')->up();
         (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_versions_table.php.stub')->up();
         (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_particles_table.php.stub')->up();
 

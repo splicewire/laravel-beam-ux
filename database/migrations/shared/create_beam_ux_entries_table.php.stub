@@ -156,6 +156,29 @@ return new class extends Migration
 
                 $table->timestamps();
                 $table->softDeletes();
+
+                // migration-flatten 06 (02 rulings: fold): the columns six ALTERs used to add, appended in the order
+                // hasMigrations applied them and without ->after() (02 Q10), so a fresh install builds the same
+                // table, column for column, as the create-then-ALTERs chain did.
+                // was add_page_settings_to_beam_ux_entries_table
+                $table->text('seo_description')->nullable();
+                $table->text('seo_social_image')->nullable();
+                $table->text('seo_page_type')->nullable();
+                $table->text('seo_published_date')->nullable();
+                $table->timestamp('first_published_at')->nullable();
+                $table->timestamp('last_published_at')->nullable();
+                // was add_child_fields_to_beam_ux_entries_table (ADR-0233 d4)
+                $table->string('child_fields')->nullable();
+                // was add_record_page_to_beam_ux_entries_table
+                $table->json('record_page')->nullable();
+                // was add_component_kind_to_beam_ux_entries_table
+                $table->string('component_kind')->nullable();
+                // was add_component_names_to_beam_ux_entries_table (its unique index follows the table, below)
+                $table->string('component_name')->nullable();
+                $table->string('published_component_name')->nullable();
+                // was add_provenance_to_beam_ux_entries_table (DOCS-06 / ADR-0215)
+                $table->string('origin')->nullable()->index();
+                $table->string('asserted_hash')->nullable();
             })
             ->assert();
 
@@ -206,6 +229,14 @@ return new class extends Migration
             Schema::table('beam_ux_entries', function (Blueprint $table) {
                 $table->index('segment');
             });
+        }
+
+        // was add_component_names_to_beam_ux_entries_table: a component name is unique per realm, case-insensitively
+        // where the driver can index an expression; a plain unique elsewhere. `if not exists` keeps it convergent.
+        if (in_array($driver, ['sqlite', 'pgsql'], true)) {
+            DB::statement('create unique index if not exists beam_ux_component_name_unique on beam_ux_entries (realm, lower(component_name))');
+        } elseif (! $this->hasIndexOn(['realm', 'component_name'])) {
+            Schema::table('beam_ux_entries', fn (Blueprint $table) => $table->unique(['realm', 'component_name'], 'beam_ux_component_name_unique'));
         }
     }
 

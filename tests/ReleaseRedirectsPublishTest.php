@@ -31,7 +31,7 @@ class ReleaseRedirectsPublishTest extends AuthoredComponentNativeTestCase
         parent::setUp();
         (require dirname(__DIR__).'/database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
         $this->runBeamWorkflowsMigrations();
-        foreach (['create_beam_ux_releases_table', 'add_origin_to_beam_ux_releases_table'] as $stub) {
+        foreach (['create_beam_ux_releases_table'] as $stub) {
             (require dirname(__DIR__)."/database/migrations/shared/{$stub}.php.stub")->up();
         }
         Gate::before(fn () => true);

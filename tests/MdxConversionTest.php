@@ -54,9 +54,8 @@ class MdxConversionTest extends AuthoredComponentNativeTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        (require dirname(__DIR__).'/database/migrations/shared/add_provenance_to_beam_ux_entries_table.php.stub')->up();
         $this->runBeamWorkflowsMigrations();
-        foreach (['create_beam_ux_releases_table', 'add_origin_to_beam_ux_releases_table'] as $stub) {
+        foreach (['create_beam_ux_releases_table'] as $stub) {
             (require dirname(__DIR__)."/database/migrations/shared/{$stub}.php.stub")->up();
         }
         // An authenticated author may do anything here; nobody signed in may do nothing beyond what the package's own

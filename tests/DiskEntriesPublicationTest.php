@@ -221,7 +221,6 @@ class DiskEntriesPublicationTest extends TestCase
     private function assertFirstRegistrationAsBlocksIsPristine(?string $package, string $origin): void
     {
         // A host that holds blocks carries the page-settings columns (the excerpt lands in seo_description).
-        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
         $this->holdReflowingBlocks();
         file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: A guide\n---\n\nA paragraph the author\nhard-wrapped at a narrow width.\n\nA second paragraph.\n");
         app(RegisterEntriesFromDisk::class)->scan($this->root, package: $package);
@@ -254,9 +253,6 @@ class DiskEntriesPublicationTest extends TestCase
     /** A row as register-from-disk created it before ticket 10: its body lowered, its hash taken over the raw file. */
     private function bornUnstamped(?string $package = null, string $source = self::WRAPPED): BeamUxEntry
     {
-        if (! Schema::hasColumn('beam_ux_entries', 'seo_description')) {
-            (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
-        }
         $this->holdReflowingBlocks();
         file_put_contents($this->root.'/page/guide.mdx', $source);
         app(RegisterEntriesFromDisk::class)->scan($this->root, package: $package);
@@ -325,7 +321,6 @@ class DiskEntriesPublicationTest extends TestCase
     public function test_restamp_refuses_a_pristine_row(): void
     {
         $this->holdReflowingBlocks();
-        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
         file_put_contents($this->root.'/page/guide.mdx', self::WRAPPED);
         app(RegisterEntriesFromDisk::class)->scan($this->root);
         $before = $this->snapshot();
@@ -418,9 +413,6 @@ class DiskEntriesPublicationTest extends TestCase
     /** A row registered correctly (born pristine) on a host whose lens worked. */
     private function registeredPristine(string $slug = 'guide', string $source = self::WRAPPED): BeamUxEntry
     {
-        if (! Schema::hasColumn('beam_ux_entries', 'seo_description')) {
-            (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
-        }
         $this->holdReflowingBlocks();
         file_put_contents($this->root."/page/{$slug}.mdx", $source);
         app(RegisterEntriesFromDisk::class)->scan($this->root, package: 'acme/docs');
@@ -520,9 +512,6 @@ class DiskEntriesPublicationTest extends TestCase
 
         $host = getenv('BEAM_MDX_LENS_HOST') ?: null;
         $lens = $host !== null ? new \Splicewire\Beam\Mdx\Lens\NodeMdxLens('node', null, $host) : new ReflowingMdxLens;
-        if (! Schema::hasColumn('beam_ux_entries', 'seo_description')) {
-            (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
-        }
         $this->holdReflowingBlocks();
         $this->useLens($lens);
         @unlink($this->root.'/page/guide.mdx');
@@ -577,9 +566,6 @@ class DiskEntriesPublicationTest extends TestCase
     /** Stub rows seeded on a host whose lens worked, so each is born pristine; the shipped MDX is held as blocks. */
     private function seededStubs(string ...$slugs): void
     {
-        if (! Schema::hasColumn('beam_ux_entries', 'seo_description')) {
-            (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
-        }
         $this->holdReflowingBlocks();
         foreach ($slugs as $slug) {
             $row = $this->seedStub($slug);
@@ -738,7 +724,6 @@ class DiskEntriesPublicationTest extends TestCase
     public function test_a_blocks_mdx_page_takes_its_seo_fields_from_frontmatter_and_refuses_an_invalid_one(): void
     {
         // ADR-0233 d3: on a host that holds MDX as blocks, frontmatter is the page's settings, SEO fields included.
-        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
         $page = "---\ntitle: Handbook\ndescription: How the handbook works\npageType: Article\npublished_date: 2026-10-01\n---\n\n## From MDX\n";
         $invalid = "---\ntitle: Notes\npage_type: Blog\n---\n\n## From MDX\n";
         file_put_contents($this->root.'/page/legacy.mdx', $page);
@@ -767,7 +752,6 @@ class DiskEntriesPublicationTest extends TestCase
     {
         // This estate authors a page's summary as `excerpt` (WWW 28 files, the flagship 32, `description` in none), so
         // with `description` alone no page had a description, in its head or its Structured Data.
-        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
         $this->holdMdxAsBlocks();
         file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: What the guide covers\n---\n\n## From MDX\n");
         file_put_contents($this->root.'/page/both.mdx', "---\ntitle: Both\nexcerpt: The summary\ndescription: The description\n---\n\n## From MDX\n");
@@ -785,7 +769,6 @@ class DiskEntriesPublicationTest extends TestCase
     {
         // A page registered before its file's settings were read has none. The next scan (a host's seed) fills the
         // columns that are still empty, from the file, and never one that holds a value: an author's own stays.
-        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
         $this->holdMdxAsBlocks();
         file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: What the guide covers\npage_type: Article\n---\n\n## From MDX\n");
         file_put_contents($this->root.'/page/kept.mdx', "---\ntitle: Kept\nexcerpt: From the file\n---\n\n## From MDX\n");
@@ -809,7 +792,6 @@ class DiskEntriesPublicationTest extends TestCase
     {
         // A host fills its pages' settings in a GO, dry run first, with counts (orch-lead 22:06Z): the plan names each
         // page and the settings it would gain, writes nothing, and the scan reports what it filled.
-        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
         $this->holdMdxAsBlocks();
         file_put_contents($this->root.'/page/guide.mdx', "---\ntitle: Guide\nexcerpt: What the guide covers\npage_type: Article\n---\n\n## From MDX\n");
         file_put_contents($this->root.'/page/kept.mdx', "---\ntitle: Kept\nexcerpt: From the file\n---\n\n## From MDX\n");
@@ -837,7 +819,6 @@ class DiskEntriesPublicationTest extends TestCase
 
     public function test_a_blocks_mdx_page_keeps_the_frontmatter_keys_nothing_declares_in_its_registered_version(): void
     {
-        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
         $this->holdMdxAsBlocks();
         file_put_contents($this->root.'/page/recipe.mdx', "---\ntitle: Recipe\nnavOrder: 4\nschemaType: HowTo\naudience: cooks\n---\n\n## From MDX\n");
         file_put_contents($this->root.'/page/untitled.mdx', "---\naudience: cooks\n---\n\n## From MDX\n");
@@ -858,8 +839,6 @@ class DiskEntriesPublicationTest extends TestCase
     public function test_a_parent_file_declares_page_fields_and_its_childs_frontmatter_holds_them_typed(): void
     {
         // ADR-0233 d4: the parent's `childFields` names the host's class; the child's keys it declares are Page Fields.
-        (require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub')->up();
-        (require dirname(__DIR__).'/database/migrations/shared/add_child_fields_to_beam_ux_entries_table.php.stub')->up();
         config(['beam.ux.page_fields' => ['recipe' => Fixtures\RecipeFields::class]]);
         $this->holdMdxAsBlocks();
         mkdir($this->root.'/recipes/page', 0777, true);
@@ -1264,7 +1243,7 @@ class DiskEntriesPublicationTest extends TestCase
         // The shipped migrations, so the fixture is a migrated host (provenance included, which the re-assert path reads).
         $ux = dirname(__DIR__).'/database/migrations/shared/';
         $beam = dirname((new \ReflectionClass(BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/';
-        foreach (['create_beam_ux_entries_table', 'add_provenance_to_beam_ux_entries_table', 'add_published_version_to_beam_ux_entries_table'] as $stub) {
+        foreach (['create_beam_ux_entries_table'] as $stub) {
             (require $ux.$stub.'.php.stub')->up();
         }
         foreach (['create_beam_particles_table', 'create_beam_versions_table'] as $stub) {

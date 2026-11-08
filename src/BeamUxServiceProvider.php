@@ -112,39 +112,17 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             // destination. The old per-realm sitemap-anchor migration retired with ticket 03, in favor
             // of the `realms` fallback stack directly on `beam_ux_entries`.
             ->hasMigrations([
+                // migration-flatten 06 (02 rulings): every ALTER that used to follow these creates is folded into its
+                // create (in application order, 02 Q10) or deleted as a no-op on it; the one data migration
+                // (baseline_beam_ux_entry_publication_pins) is deleted too: EntryPublication::baseline() pins an entry on
+                // its first draft. The retired stems are declared in Doctor\BeamUxRetiredMigrationAudit.
                 'shared/create_beam_ux_entries_table',
-                'shared/add_requirements_to_beam_ux_entries_table',
-                // The publication pin (`published_version`). An ALTER beside the create because
-                // editing a `create_*` stub reaches nothing already migrated — a host that installed
-                // beam-ux before this pass gets the column from here, a fresh one from the create,
-                // and each no-ops for the other.
-                'shared/add_published_version_to_beam_ux_entries_table',
-                'shared/add_page_settings_to_beam_ux_entries_table',
-                // The Page Fields a parent declares for its child pages (ADR-0233 d4). Nullable, beside its siblings.
-                'shared/add_child_fields_to_beam_ux_entries_table',
-                'shared/add_record_page_to_beam_ux_entries_table',
-                'shared/add_component_kind_to_beam_ux_entries_table',
-                'shared/add_component_names_to_beam_ux_entries_table',
-                'shared/add_chrome_to_beam_ux_entries_table',
                 'shared/create_beam_ux_releases_table',
-                // A Release's provenance (`origin`: direct | built). An ALTER beside the create for the same reason
-                // as its siblings; existing Releases are `built`.
-                'shared/add_origin_to_beam_ux_releases_table',
-                // A Release's Preview Links (ADR-0232 d8): on/off and the secret they are signed with.
-                'shared/add_preview_links_to_beam_ux_releases_table',
                 // A site's Redirects (ADR-0236 d1): a row of their own, beside the entries they lead to.
                 'shared/create_beam_ux_redirects_table',
                 'shared/create_beam_ux_release_recordings_table',
                 'shared/create_beam_ux_preview_grants_table',
                 'shared/create_beam_ux_preview_open_nonces_table',
-                // The BASELINE (ADR-0225 decision 2; launch ticket 00, 2026-10-16): pins every already-written
-                // entry to its live body inside `migrate`, so the pin is never required-but-missing. A
-                // separate file because hosts that already ran the ALTER (or got the column from the create)
-                // will never run it again. Idempotent.
-                'shared/baseline_beam_ux_entry_publication_pins',
-                // Provenance columns (`origin`, `asserted_hash`) — DOCS-06 / ADR-0215. An ALTER beside
-                // the create for the same reason as its siblings; nullable, so it changes no existing row.
-                'shared/add_provenance_to_beam_ux_entries_table',
             ]);
     }
 
@@ -257,6 +235,11 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',
                 Doctor\RecordPageIsolationAudit::class,
+            );
+            // Published copies of migrations beam-ux has RETIRED (migration-flatten 06). Advisory.
+            $this->app->make(BeamDoctorManifest::class)->register(
+                'splicewire/laravel-beam-ux',
+                Doctor\BeamUxRetiredMigrationAudit::class,
             );
             $this->app->make(BeamDoctorManifest::class)->register(
                 'splicewire/laravel-beam-ux',

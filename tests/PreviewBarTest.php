@@ -20,8 +20,7 @@ class PreviewBarTest extends AuthoredComponentNativeTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        foreach (['create_beam_ux_preview_grants_table', 'create_beam_ux_releases_table', 'add_origin_to_beam_ux_releases_table',
-            'add_preview_links_to_beam_ux_releases_table'] as $stub) {
+        foreach (['create_beam_ux_preview_grants_table', 'create_beam_ux_releases_table'] as $stub) {
             (require dirname(__DIR__)."/database/migrations/shared/{$stub}.php.stub")->up();
         }
         \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);

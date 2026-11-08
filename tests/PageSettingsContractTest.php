@@ -96,12 +96,4 @@ class PageSettingsContractTest extends TestCase
         $this->assertSame(file_get_contents(__DIR__.'/Fixtures/page-settings.ts'), $generated);
     }
 
-    public function test_page_settings_migration_is_repeatable(): void
-    {
-        \Illuminate\Support\Facades\Schema::create('beam_ux_entries', fn ($table) => $table->id());
-        $migration = require dirname(__DIR__).'/database/migrations/shared/add_page_settings_to_beam_ux_entries_table.php.stub';
-        $migration->up();
-        $migration->up();
-        $this->assertTrue(\Illuminate\Support\Facades\Schema::hasColumns('beam_ux_entries', ['seo_description', 'seo_social_image', 'seo_page_type', 'seo_published_date', 'first_published_at', 'last_published_at']));
-    }
 }

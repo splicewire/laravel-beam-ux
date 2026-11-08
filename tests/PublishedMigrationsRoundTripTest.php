@@ -63,21 +63,4 @@ class PublishedMigrationsRoundTripTest extends TestCase
         }
     }
 
-    public function test_provenance_rollback_also_handles_an_absent_index_and_a_repeated_down(): void
-    {
-        Schema::create('beam_ux_entries', function (\Illuminate\Database\Schema\Blueprint $table): void {
-            $table->uuid('id')->primary();
-            $table->string('origin')->nullable();
-            $table->string('asserted_hash')->nullable();
-        });
-        try {
-            $migration = require dirname(__DIR__).'/database/migrations/shared/add_provenance_to_beam_ux_entries_table.php.stub';
-            $migration->down();
-            $migration->down();
-            $this->assertFalse(Schema::hasColumn('beam_ux_entries', 'origin'));
-            $this->assertFalse(Schema::hasColumn('beam_ux_entries', 'asserted_hash'));
-        } finally {
-            Schema::dropIfExists('beam_ux_entries');
-        }
-    }
 }

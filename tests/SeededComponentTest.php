@@ -18,7 +18,6 @@ class SeededComponentTest extends AuthoredComponentNativeTestCase
     {
         parent::setUp();
         // ADR-0215's provenance columns: a host without them keeps create-once, and nothing re-asserts.
-        (require dirname(__DIR__).'/database/migrations/shared/add_provenance_to_beam_ux_entries_table.php.stub')->up();
         \Illuminate\Support\Facades\Gate::define('create', fn ($user = null) => true);
         \Illuminate\Support\Facades\Gate::define('update', fn ($user = null) => true);
     }

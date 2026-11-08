@@ -23,7 +23,6 @@ class SeededMdxPageTest extends AuthoredComponentNativeTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        (require dirname(__DIR__).'/database/migrations/shared/add_provenance_to_beam_ux_entries_table.php.stub')->up();
         Gate::define('create', fn ($user = null) => true);
         Gate::define('update', fn ($user = null) => true);
         $this->lens = new SeedLens;

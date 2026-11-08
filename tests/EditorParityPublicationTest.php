@@ -279,7 +279,7 @@ class EditorParityPublicationTest extends TestCase
             'beam.ux.releases.publish_ability' => 'publish',
         ]);
         $this->runBeamWorkflowsMigrations();
-        foreach (['create_beam_ux_releases_table', 'add_origin_to_beam_ux_releases_table'] as $stub) {
+        foreach (['create_beam_ux_releases_table'] as $stub) {
             (require __DIR__."/../database/migrations/shared/{$stub}.php.stub")->up();
         }
         $author = (new \Illuminate\Foundation\Auth\User)->setKeyType('string')->forceFill(['id' => 'author']);

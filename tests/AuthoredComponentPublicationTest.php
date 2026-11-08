@@ -86,20 +86,6 @@ class AuthoredComponentPublicationTest extends AuthoredComponentNativeTestCase
         $this->assertNull($denied[0]->version);
     }
 
-    public function test_component_migration_leaves_legacy_rows_unchanged_and_the_new_kind_is_nullable(): void
-    {
-        $legacy = BeamUxEntry::create(['slug' => 'legacy-source', 'type' => 'component', 'format' => 'tsx']);
-        $before = $legacy->fresh()->getRawOriginal();
-        $migration = require dirname(__DIR__).'/database/migrations/shared/add_component_kind_to_beam_ux_entries_table.php.stub';
-        $migration->down();
-        $migration->up();
-        $after = $legacy->fresh()->getRawOriginal();
-        $this->assertNull($after['component_kind']);
-        unset($before['component_kind'], $after['component_kind']);
-        $this->assertSame($before, $after);
-        $this->assertSame('source', $legacy->fresh()->bodyKind()->value);
-    }
-
     public function test_publish_checks_the_fixed_release_graph_even_when_current_working_heads_are_acyclic(): void
     {
         $a = BeamUxEntry::create(['slug' => 'native-a', 'type' => 'component', 'format' => 'tsx', 'component_kind' => 'authored', 'realm' => 'site']);

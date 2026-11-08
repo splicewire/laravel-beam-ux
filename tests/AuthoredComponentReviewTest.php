@@ -507,23 +507,6 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
         $this->assertNotNull($entry->fresh()->deleted_at);
     }
 
-    public function test_new_name_migration_upgrades_an_already_installed_kind_stub(): void
-    {
-        $migration = require dirname(__DIR__).'/database/migrations/shared/add_component_names_to_beam_ux_entries_table.php.stub';
-        $migration->down();
-        $schema = (new BeamUxEntry)->getConnection()->getSchemaBuilder();
-        $this->assertTrue($schema->hasColumn('beam_ux_entries', 'component_kind'));
-        $this->assertFalse($schema->hasColumn('beam_ux_entries', 'component_name'));
-        $entry = $this->reviewComponent('old-host');
-        app(AuthoredComponents::class)->reserveName($entry, $this->body('OldHost'));
-        app(AuthoredComponents::class)->setPublishedName($entry, $this->body('OldHost'));
-        $this->assertNull($entry->getAttribute('published_component_name'));
-        $migration->up();
-        $migration->up();
-        $this->assertTrue($schema->hasColumn('beam_ux_entries', 'component_name'));
-        $this->assertNull($entry->fresh()->component_name);
-    }
-
     public function test_legacy_unreserved_duplicate_preserves_reservation_holders_profile_and_edit(): void
     {
         $pub = app(EntryPublication::class);
@@ -640,29 +623,6 @@ class AuthoredComponentReviewTest extends AuthoredComponentNativeTestCase
         $this->assertSame(2, $calls);
     }
 
-    public function test_name_migration_postgres_down_compiles_drop_index_not_constraint(): void
-    {
-        $connection = new \Illuminate\Database\PostgresConnection(fn () => throw new \RuntimeException('No database connection is allowed'), 'compile-only', '', ['driver' => 'pgsql']);
-        $connection->useDefaultSchemaGrammar();
-        $original = \Illuminate\Support\Facades\Schema::getFacadeRoot();
-        $schema = \Mockery::mock(\Illuminate\Database\Schema\Builder::class);
-        $schema->shouldReceive('hasTable')->with('beam_ux_entries')->once()->andReturnTrue();
-        $schema->shouldReceive('hasColumn')->with('beam_ux_entries', 'component_name')->once()->andReturnTrue();
-        $schema->shouldReceive('getConnection')->once()->andReturn($connection);
-        $sql = [];
-        $schema->shouldReceive('table')->once()->andReturnUsing(function ($table, $callback) use ($connection, &$sql) {
-            $blueprint = new \Illuminate\Database\Schema\Blueprint($connection, $table, $callback);
-            $sql = $blueprint->toSql();
-        });
-        \Illuminate\Support\Facades\Schema::swap($schema);
-        try {
-            (require dirname(__DIR__).'/database/migrations/shared/add_component_names_to_beam_ux_entries_table.php.stub')->down();
-        } finally {
-            \Illuminate\Support\Facades\Schema::swap($original);
-        }
-        $this->assertContains('drop index "beam_ux_component_name_unique"', $sql);
-        $this->assertStringNotContainsString('drop constraint', implode(' ', $sql));
-    }
 }
 
 class AuthoredComponentReviewTestCreatePolicy

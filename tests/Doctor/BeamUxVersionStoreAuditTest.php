@@ -93,14 +93,15 @@ class BeamUxVersionStoreAuditTest extends TestCase
         $this->assertSame(DoctorStatus::Fail, $this->auditStatus());
     }
 
-    public function test_written_entries_without_a_pin_warn_and_point_at_the_baseline_migration(): void
+    public function test_written_entries_without_a_pin_warn_and_point_at_the_first_draft_baseline(): void
     {
         $this->tables(column: true, versions: true);
         $this->mount('save-body');
         BeamUxEntry::create(['slug' => 'legacy', 'type' => UxType::Page->value, 'format' => 'tsx', 'realm' => 'site', 'particle_id' => (string) \Illuminate\Support\Str::uuid()]);
 
         $this->assertSame(DoctorStatus::Warn, $this->auditStatus());
-        $this->assertStringContainsString('baseline_beam_ux_entry_publication_pins', $this->auditDetail());
+        $this->assertStringContainsString('EntryPublication::baseline()', $this->auditDetail());
+        $this->assertStringNotContainsString('baseline_beam_ux_entry_publication_pins', $this->auditDetail(), 'the remedy must not name a retired migration');
     }
 
     public function test_mounted_ops_with_the_store_and_every_entry_pinned_pass(): void

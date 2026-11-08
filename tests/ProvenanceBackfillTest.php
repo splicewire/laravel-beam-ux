@@ -38,7 +38,6 @@ class ProvenanceBackfillTest extends TestCase
         (require $ux.'/database/migrations/shared/create_beam_ux_entries_table.php.stub')->up();
         // A migrated host: disk registration and re-assertion publish through EntryPublication, which needs the version
         // store and the pin (ADR-0225 decision 2).
-        (require dirname(__DIR__).'/database/migrations/shared/add_published_version_to_beam_ux_entries_table.php.stub')->up();
         (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_versions_table.php.stub')->up();
         (require dirname((new \ReflectionClass(\Splicewire\Beam\Models\BeamParticle::class))->getFileName(), 3).'/database/migrations/shared/create_beam_particles_table.php.stub')->up();
 
@@ -154,7 +153,6 @@ class ProvenanceBackfillTest extends TestCase
     private function migrate(): void
     {
         $ux = dirname((new \ReflectionClass(BeamUxEntry::class))->getFileName(), 3);
-        (require $ux.'/database/migrations/shared/add_provenance_to_beam_ux_entries_table.php.stub')->up();
     }
 
     /** A row created BEFORE the provenance migration: no origin column yet, so it stays null after it. */

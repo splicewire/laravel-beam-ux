@@ -22,6 +22,12 @@ return new class extends Migration
                 $table->uuid('workflow_version')->nullable();
                 $table->uuid('rollback_of')->nullable();
                 $table->timestamps();
+                // migration-flatten 06 (02 rulings: fold), appended in hasMigrations order without ->after() (02 Q10):
+                // was add_origin_to_beam_ux_releases_table (a Release's provenance: direct | built)
+                $table->string('origin')->default('built');
+                // was add_preview_links_to_beam_ux_releases_table (ADR-0232 d8)
+                $table->boolean('preview_links_enabled')->default(false);
+                $table->string('preview_link_secret', 64)->nullable();
             });
         }
         if (! Schema::hasTable('beam_ux_release_members')) {

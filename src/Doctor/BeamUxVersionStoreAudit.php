@@ -72,7 +72,9 @@ class BeamUxVersionStoreAudit implements DoctorAudit
 
         if ($pinless > 0) {
             return [Finding::warn(self::CHECK, "{$pinless} entr".($pinless === 1 ? 'y has' : 'ies have').' a body but no Publication Pin. '
-                .'Publish the `beam-ux-migrations` tag and migrate: `baseline_beam_ux_entry_publication_pins` pins each one to its live body.')];
+                .'Each is pinned to its live body the first time it is next drafted, saved or re-seeded (EntryPublication::baseline() '
+                .'on those paths). The baseline migration that used to pin them in bulk was retired by migration-flatten 06; a host '
+                .'still carrying such rows predates the flattened chain and is re-baselined (migration-flatten 04).')];
         }
 
         return [Finding::pass(self::CHECK, "beam-ux-entry ops [{$names}] are mounted and every written entry is pinned.")];
