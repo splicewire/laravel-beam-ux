@@ -25,6 +25,21 @@ class PublishedMigrationsRoundTripTest extends TestCase
         }
     }
 
+    /**
+     * Kept from ChromeColumnsMigrationTest when migration-flatten 06 retired its chrome/name ordering pins (02 Q7: a
+     * publication guard stays). package-tools loads vendor migrations when runsMigrations is true; beam-ux's ship
+     * publish-only, and StubMigrationsAudit does not read this property.
+     */
+    public function test_declared_migrations_are_publish_only_and_never_run_from_vendor(): void
+    {
+        $package = new Package;
+        $package->setBasePath(dirname(__DIR__).'/src');
+        (new BeamUxServiceProvider($this->app))->configurePackage($package);
+
+        $this->assertNotEmpty($package->migrationFileNames);
+        $this->assertFalse($package->runsMigrations);
+    }
+
     public function test_declared_migrations_migrate_rollback_and_migrate_again(): void
     {
         $package = new Package;
