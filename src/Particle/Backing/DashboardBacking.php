@@ -355,8 +355,9 @@ class DashboardBacking implements Unpaged
             return $this->seatSubtree($items, SectionOverview::routeNameFor($this->realm, $this->section));
         }
 
-        // A soft-locked seat keeps `{key}.section` and its children stay in the tree, so both of a flagged seat's names
-        // collapse here: the section is one destination on the realm's dashboard either way (review 03r2, Spec F1).
+        // A flagged seat is at most one destination on the realm's dashboard, under either of its names. A soft-locked
+        // seat keeps `{key}.section` and its children stay in the tree: collapsed it would be a tile linking past the lock,
+        // so a locked one draws nothing here and the rail alone shows the lock (review 03r2 Spec F1; charter ruling A2).
         $routes = [];
         foreach ($this->flagged($container) as $section) {
             $routes[SectionOverview::routeNameFor($this->realm, $section)] = true;
@@ -368,16 +369,25 @@ class DashboardBacking implements Unpaged
 
     /**
      * @param  array<int, array<string, mixed>>  $items
-     * @param  array<string, true>  $routes
+     * @param  array<string, true>  $routes  a flagged seat's names: each collapses to its own leaf, or goes when locked
      * @return array<int, array<string, mixed>>
      */
     private function collapsed(array $items, array $routes): array
     {
-        return array_map(function (array $node) use ($routes): array {
-            $children = is_array($node['children'] ?? null) ? $node['children'] : [];
+        $kept = [];
 
-            return [...$node, 'children' => isset($routes[$node['routeName'] ?? '']) ? [] : $this->collapsed($children, $routes)];
-        }, $items);
+        foreach ($items as $node) {
+            $flagged = isset($routes[$node['routeName'] ?? '']);
+
+            if ($flagged && ($node['locked'] ?? null) !== null) {
+                continue;
+            }
+
+            $children = is_array($node['children'] ?? null) ? $node['children'] : [];
+            $kept[] = [...$node, 'children' => $flagged ? [] : $this->collapsed($children, $routes)];
+        }
+
+        return $kept;
     }
 
     /**
