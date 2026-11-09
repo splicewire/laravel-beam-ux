@@ -617,6 +617,77 @@ class SectionOverviewTest extends TestCase
         $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
     }
 
+    /**
+     * Owner ruling 2026-11-09, the F3 shape: a host stage keyed on a leaf's route name takes that leaf off the projected rail,
+     * so its resource draws no card and no tile on the overview, nor on the realm's dashboard, though it is still listable.
+     */
+    public function test_a_stage_removing_a_declared_resources_leaf_leaves_it_no_card_or_tile_anywhere(): void
+    {
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => $node->routeName !== 'ov-sales.index'));
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        $overview = $this->ids('operator-reports-overview');
+        $dashboard = $this->ids('operator-dashboard');
+
+        $this->assertSame([], array_values(array_filter($overview, fn (string $id): bool => str_contains($id, 'ov-sales'))), 'overview');
+        $this->assertSame([], array_values(array_filter($dashboard, fn (string $id): bool => str_contains($id, 'ov-sales'))), 'realm dashboard');
+        $this->assertContains('summary:ov-costs', $overview, 'the rest of the section is untouched');
+    }
+
+    /** The same, for a resource seated only by the section's static row, which no `section:` names. */
+    public function test_a_stage_removing_a_static_seated_leaf_leaves_it_no_card_or_tile_anywhere(): void
+    {
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => $node->routeName !== 'ov-static.index'));
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        $overview = $this->ids('operator-reports-overview');
+        $dashboard = $this->ids('operator-dashboard');
+
+        $this->assertSame([], array_values(array_filter($overview, fn (string $id): bool => str_contains($id, 'ov-static'))), 'overview');
+        $this->assertSame([], array_values(array_filter($dashboard, fn (string $id): bool => str_contains($id, 'ov-static'))), 'realm dashboard');
+    }
+
+    /**
+     * Owner ruling 2026-11-09: a reader for whom every child is gated out has no seat on the projected rail, and opening the
+     * overview anyway gets an empty page, never the rows another reader sees.
+     */
+    public function test_a_reader_with_every_child_gated_out_has_no_seat_and_an_empty_overview(): void
+    {
+        $this->app->make(NavGate::class)->through(new OvReaderStage(
+            fn (NavNode $node, NavContext $context): bool => ! (($context->user?->getAuthIdentifier() === 8) && str_starts_with((string) $node->routeName, 'ov-')),
+        ));
+        $this->flag();
+
+        $this->actingAs($this->staff(id: 7));
+        $this->assertNotSame([], $this->ids('operator-reports-overview'), 'another reader sees the section');
+
+        $this->actingAs($this->staff(id: 8));
+        $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+
+        $this->assertNull($this->seatNode($manifest), 'no seat on the projected rail');
+        $this->assertSame([], $this->getJson('frame/resources/operator-reports-overview')->assertOk()->json('data'));
+    }
+
+    /** Owner ruling 2026-11-09: the overview's policy is the realm dashboard's ability and the entitlement lock, and asks no stage. */
+    public function test_the_overviews_policy_asks_no_nav_stage(): void
+    {
+        $this->app->make(NavGate::class)->through(new OvCountingStage);
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        Route::get('ov-policy-probe', function (): array {
+            OvCountingStage::$calls = 0;
+            $allowed = Gate::allows('section-overview.view.operator.reports');
+
+            return ['allowed' => $allowed, 'calls' => OvCountingStage::$calls];
+        });
+        app('router')->getRoutes()->refreshNameLookups();
+
+        $this->getJson('ov-policy-probe')->assertOk()->assertExactJson(['allowed' => true, 'calls' => 0]);
+    }
+
     public function test_a_soft_locked_seat_stays_visible_and_locked_with_no_landing(): void
     {
         $this->flag(entitlement: ['reports.view'], lock: new NavSeatLock('Upgrade', 'plan'));
@@ -738,6 +809,30 @@ class OvBareContributor implements FrameNavContributor
     public function contributeNav(?string $realm): ?array
     {
         return ['nav' => NavTree::make([])->toArray(), 'routeContext' => []];
+    }
+}
+
+/** A host stage that reads the context as well as the node. */
+class OvReaderStage implements NavGateStage
+{
+    public function __construct(private Closure $decides) {}
+
+    public function allows(NavNode $node, NavContext $context): bool
+    {
+        return ($this->decides)($node, $context);
+    }
+}
+
+/** Counts how often it is asked, and allows everything. */
+class OvCountingStage implements NavGateStage
+{
+    public static int $calls = 0;
+
+    public function allows(NavNode $node, NavContext $context): bool
+    {
+        self::$calls++;
+
+        return true;
     }
 }
 
