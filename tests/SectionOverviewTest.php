@@ -129,11 +129,11 @@ class SectionOverviewTest extends TestCase
         ), by: self::class);
     }
 
-    private function flag(?array $entitlement = null, ?NavSeatLock $lock = null, string $href = '/operator/reports', ?string $permission = null, ?array $static = null): void
+    private function flag(?array $entitlement = null, ?NavSeatLock $lock = null, string $href = '/operator/reports', ?string $permission = null, ?array $static = null, NavAudience $audience = NavAudience::Product): void
     {
         $this->app->make(NavSectionRegistry::class)->register(new NavSection(
             key: 'reports', realm: 'operator', label: 'Reports', icon: 'ChartBar', href: $href, order: 20,
-            entitlement: $entitlement, permission: $permission, audience: NavAudience::Product,
+            entitlement: $entitlement, permission: $permission, audience: $audience,
             static: $static ?? [['title' => 'Static', 'href' => '/operator/ov-static', 'routeName' => 'ov-static.index']],
             lock: $lock, overview: true,
         ), by: self::class);
@@ -492,6 +492,48 @@ class SectionOverviewTest extends TestCase
         $this->getJson('ov-policy-probe')->assertOk()->assertExactJson(['allowed' => true, 'calls' => 0]);
     }
 
+    /**
+     * Review 03r2 Spec F2: a static row resolves its href route-name-first, as the collector does, so its authored fallback
+     * href (here an unflagged resource's) excludes nothing the row does not actually seat.
+     */
+    public function test_a_static_rows_fallback_href_excludes_no_card_it_does_not_seat(): void
+    {
+        $this->flag(static: [['title' => 'Static', 'routeName' => 'ov-static.index', 'href' => '/operator/ov-gizmos']]);
+        $this->actingAs($this->staff());
+
+        $dashboard = $this->ids('operator-dashboard');
+
+        $this->assertContains('summary:ov-gizmos', $dashboard, 'the unflagged section keeps its card');
+        $this->assertNotContains('summary:ov-static', $dashboard, 'the row still seats the resource it names');
+    }
+
+    /** The other half of the collector's rule: a row naming no route is matched by its href. */
+    public function test_a_static_row_naming_no_route_is_matched_by_its_href(): void
+    {
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => $node->href !== '/operator/ov-static'));
+        $this->flag(static: [['title' => 'Static', 'href' => '/operator/ov-static']]);
+        $this->actingAs($this->staff());
+
+        $this->assertNotContains('summary:ov-static', $this->ids('operator-dashboard'));
+    }
+
+    /**
+     * Review 03r2 Standards F1: a flagged seat in the Developer zone keeps that classification on its overview, so its leaves
+     * draw neither cards nor tiles there, as ADR-0224 rules for every Developer leaf.
+     */
+    public function test_a_flagged_developer_seat_keeps_its_zone_on_its_overview(): void
+    {
+        $this->flag(audience: NavAudience::Developer);
+        $this->actingAs($this->staff());
+
+        $manifest = $this->getJson('frame/manifest')->assertOk()->json();
+        $zone = array_values(array_filter($manifest['nav']['items'], fn (array $node): bool => ($node['zone'] ?? null) === 'meta'));
+        $this->assertContains('operator-reports-overview.index', array_column($zone[0]['children'] ?? [], 'routeName'), 'the seat sits in the Developer zone');
+
+        $this->assertSame([], $this->getJson('frame/resources/operator-reports-overview')->assertOk()->json('data'));
+        $this->assertSame([], array_values(array_filter($this->ids('operator-dashboard'), fn (string $id): bool => str_contains($id, 'reports') || (str_contains($id, 'ov-') && ! str_contains($id, 'ov-gizmos')))));
+    }
+
     public function test_a_soft_locked_seat_stays_visible_and_locked_with_no_landing(): void
     {
         $this->flag(entitlement: ['reports.view'], lock: new NavSeatLock('Upgrade', 'plan'));
@@ -505,6 +547,16 @@ class SectionOverviewTest extends TestCase
         $this->assertSame('reports.section', $seat['routeName']);
         $this->assertNotNull($seat['locked']);
         $this->assertNotContains('operator-reports-overview.index', array_column($manifest['routeContext'], 'routeName'));
+
+        // Review 03r2 Spec F1: on the realm's dashboard the locked section is still one destination, not its children.
+        $section = array_values(array_filter(
+            $this->ids('operator-dashboard'),
+            fn (string $id): bool => str_contains($id, 'reports') || (str_contains($id, 'ov-') && ! str_contains($id, 'ov-gizmos')),
+        ));
+        $this->assertSame(['nav:reports.section'], $section);
+
+        // The lock's direct-request refusal is unchanged.
+        $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
     }
 
     public function test_a_host_may_narrow_the_overview_by_defining_its_ability_first(): void
