@@ -9,6 +9,8 @@ use Rushing\DataNav\NavRegistry;
 use Rushing\DataNav\NavTree;
 use Rushing\Popcorn\Registries\Exceptions\RegistryMiss;
 use Schemastud\Frame\Contracts\FrameNavContributor;
+use Splicewire\Beam\Dashboard\SectionOverview;
+use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 
 /**
@@ -40,7 +42,7 @@ use Splicewire\Beam\Realm\RealmRegistry;
  * What DOES throw is {@see RouteContextValidator}: a duplicate route name, an unbound nav seat or a
  * non-flat mount are grammar errors in the host's own plan, gettable right without knowing the host.
  */
-class FrameNavContribution implements FrameNavContributor, ProvidesNavContext
+class FrameNavContribution implements FrameNavContributor
 {
     public function __construct(
         protected RouteContextProjector $routes,
@@ -117,6 +119,11 @@ class FrameNavContribution implements FrameNavContributor, ProvidesNavContext
      *
      * A `*.section` node is left alone because the validator already exempts it — a section header
      * binds to no leaf, so it is never the unbound thing.
+     *
+     * A seat with an overview (ADR-0222 decision 9) is bound to its overview's leaf instead, so it is judged like any bound
+     * node, and then dropped like an empty section when gating has left it no child. This runs after the host's stages
+     * have gated every child, so it is the rail's own answer to "is there anything here for this reader", and nothing else
+     * asks it on the overview's behalf.
      */
     protected function pruneUnbound(array $routeContext, NavTree $nav): NavTree
     {
@@ -126,15 +133,16 @@ class FrameNavContribution implements FrameNavContributor, ProvidesNavContext
             $bound[$entry->routeName] = true;
         }
 
-        return NavTree::make($this->keepBound($nav->items, $bound));
+        return NavTree::make($this->keepBound($nav->items, $bound, $this->overviewRoutes()));
     }
 
     /**
      * @param  array<int, NavNode>  $nodes
      * @param  array<string, true>  $bound
+     * @param  array<string, true>  $overviews  the list route of every flagged seat's overview, which an empty seat is bound to
      * @return array<int, NavNode>
      */
-    private function keepBound(array $nodes, array $bound): array
+    private function keepBound(array $nodes, array $bound, array $overviews): array
     {
         $kept = [];
 
@@ -145,7 +153,7 @@ class FrameNavContribution implements FrameNavContributor, ProvidesNavContext
                 continue;
             }
 
-            $children = $this->keepBound($node->children, $bound);
+            $children = $this->keepBound($node->children, $bound, $overviews);
 
             // An EMPTY contributed seat is dropped. A package cannot know which realm its section
             // belongs to at a given host — realm membership is the host's `config/frame.realms` list,
@@ -158,7 +166,7 @@ class FrameNavContribution implements FrameNavContributor, ProvidesNavContext
             // Only a `*.section` seat, and only in a contributed tree — a HOST's empty section is
             // deliberate (the flagship's Calendar seat is a curated standalone page that attaches no
             // resources by design), and this method never runs over a host's navigation at all.
-            if ($children === [] && $name !== null && str_ends_with($name, '.section')) {
+            if ($children === [] && $name !== null && (str_ends_with($name, '.section') || isset($overviews[$name]))) {
                 continue;
             }
 
@@ -172,10 +180,27 @@ class FrameNavContribution implements FrameNavContributor, ProvidesNavContext
         return $kept;
     }
 
-    /** {@see ProvidesNavContext}: the context this contributor's stages get, through the same overridable method. */
-    public function navContextFor(string $realm): ?NavContext
+    /**
+     * The overview route of every flagged seat, in every realm. Route names carry the realm, so one set serves any tree.
+     *
+     * @return array<string, true>
+     */
+    private function overviewRoutes(): array
     {
-        return $this->context($realm);
+        if (! app()->bound(NavSectionRegistry::class)) {
+            return [];
+        }
+
+        $sections = app(NavSectionRegistry::class);
+        $routes = [];
+
+        foreach (array_keys($this->realms->all()) as $realm) {
+            foreach (SectionOverview::flagged($realm, $sections) as $section) {
+                $routes[SectionOverview::routeNameFor($realm, $section->key)] = true;
+            }
+        }
+
+        return $routes;
     }
 
     /**

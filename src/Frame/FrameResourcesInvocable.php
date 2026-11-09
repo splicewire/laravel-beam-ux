@@ -4,13 +4,9 @@ namespace Splicewire\Beam\Ux\Frame;
 
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Http\Request;
-use Rushing\DataNav\InvocableNavExpander;
 use Rushing\DataNav\InvocableNavItem;
 use Rushing\DataNav\NavContext;
-use Rushing\DataNav\NavGate;
 use Rushing\DataNav\NavLink;
-use Rushing\DataNav\NavNode;
 use Rushing\Popcorn\Binding;
 use Rushing\Popcorn\Contracts\Invocable;
 use Schemastud\Frame\Contracts\ResourceRegistry;
@@ -21,8 +17,6 @@ use Splicewire\Beam\Particle\ListRouteName;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 use Splicewire\Beam\Realm\RealmResourceRegistry;
-use Splicewire\Beam\Ux\Ia\IaInvariants;
-use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 /**
  * The Frame-resources contributor — the registered popcorn capability that yields a section's
@@ -122,21 +116,9 @@ class FrameResourcesInvocable implements Invocable
             ? []
             : $this->routes->hrefs($realm);
 
-        return ['items' => $this->childItems($section, $realm, $user, is_array($input['static'] ?? null) ? $input['static'] : [], $hrefs)];
-    }
-
-    /**
-     * The section's children as serialized nav items, in their one order, each carrying its resolved seat gate.
-     *
-     * @param  array<int, array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>  $static
-     * @param  array<string, string>  $hrefs  routeName => leaf href, from {@see RouteContextProjector::hrefs()}
-     * @return array<int, array<string, mixed>>
-     */
-    private function childItems(string $section, string $realm, ?Authenticatable $user, array $static, array $hrefs): array
-    {
         $children = [
             ...$this->resourceChildren($section, $realm, $user, $hrefs),
-            ...$this->staticChildren($static, $hrefs),
+            ...$this->staticChildren(is_array($input['static'] ?? null) ? $input['static'] : [], $hrefs),
         ];
 
         // ONE sort over both kinds — see the class docblock. Ordering keys on `navOrder` alone and
@@ -145,178 +127,14 @@ class FrameResourcesInvocable implements Invocable
         // static authored order) and an undeclared `navOrder` still trails.
         usort($children, fn (array $a, array $b): int => $a['order'] <=> $b['order']);
 
-        return array_map(function (array $child) use ($realm): array {
+        return ['items' => array_map(function (array $child) use ($realm): array {
             $link = $child['link'];
             $resolution = $this->seatGate->resolve((string) $link->routeName, $realm);
 
             return $resolution === null
                 ? $link->toArray()
                 : [...$link->toArray(), 'meta' => [SeatGate::META => $resolution]];
-        }, $children);
-    }
-
-    /**
-     * Whether this reader's rail would hold something they can open under this section, without building the tree. It takes
-     * the same children {@see invoke()} emits, hydrated the way {@see InvocableNavExpander} hydrates them, and asks each of
-     * the host's nav gate stages through the same {@see NavGate::allows()} the rail is built with. A child must then be
-     * somewhere this reader can go, by {@see opens()}.
-     *
-     * @param  array<int, array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>  $static
-     */
-    public function hasChildren(string $section, string $realm, NavContext $context, array $static): bool
-    {
-        if ($this->realms->tryResolve($realm) === null) {
-            return false;
-        }
-
-        $hrefs = $this->routes->hrefs($realm);
-        $stages = Container::getInstance()->make(NavGate::class);
-
-        foreach ($this->childItems($section, $realm, $context->user, $static, $hrefs) as $item) {
-            $node = NavNode::from($item);
-
-            if ($stages->allows($node, $context) && $this->opens($node, $realm, $context->user, $hrefs)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Whether a child that cleared the stages is somewhere this reader can go.
-     *
-     * - **A named route** must be mounted in this realm, and is then asked what the route context would ask: the resource's
-     *   read gate, or the seat gate for a standalone page. Reading the route context itself would re-enter the overview's
-     *   own gate.
-     * - **An unnamed local href,** whether written as a path or as an absolute or scheme-relative URL to this host's own
-     *   origin, must match a real route of this realm with a resolvable seat gate that admits the reader. Anything less is
-     *   not open: no route, a fallback-only match, another realm's entry route, or no declared gate.
-     * - **An http(s) or scheme-relative href to a genuinely different origin** counts as open, because this host holds no
-     *   gate for it. The stages above still judged it.
-     * - **Anything else** goes nowhere a reader can be admitted to, and is not open: an empty href, a bare fragment, another
-     *   scheme such as `mailto:`, or an absolute href when this host cannot say what its own origin is.
-     *
-     * @param  array<string, string>  $hrefs
-     */
-    private function opens(NavNode $node, string $realm, ?Authenticatable $user, array $hrefs): bool
-    {
-        $routeName = $node->routeName;
-
-        if ($routeName !== null) {
-            return isset($hrefs[$routeName]) && $this->routeOpens($routeName, $realm, $user);
-        }
-
-        $href = $node->href;
-        $parts = is_string($href) ? parse_url($href) : false;
-
-        if ($parts === false) {
-            return false;
-        }
-
-        if (isset($parts['host'])) {
-            if (! in_array(strtolower($parts['scheme'] ?? 'https'), ['http', 'https'], true)) {
-                return false;
-            }
-
-            $origins = $this->ownOrigins();
-
-            if ($origins === []) {
-                return false;
-            }
-
-            if (! in_array($this->origin($parts['host'], $parts['port'] ?? null), $origins, true)) {
-                return true;
-            }
-
-            $root = ($parts['scheme'] ?? 'https').'://'.$parts['host'].(isset($parts['port']) ? ':'.$parts['port'] : '');
-            $path = IaInvariants::internalPath($parts['path'] ?? '/') ?? '/';
-
-            return $this->localPathOpens($path, $realm, $user, $root);
-        }
-
-        if (isset($parts['scheme'])) {
-            return false;
-        }
-
-        $path = IaInvariants::internalPath($href);
-        $container = Container::getInstance();
-
-        return $path !== null && $this->localPathOpens($path, $realm, $user, $container->bound('request') ? $container->make('request')->getSchemeAndHttpHost() : '');
-    }
-
-    /**
-     * What counts as this host's own origin: the current request's, and `app.url`'s. With no request, as on the console, only
-     * `app.url` answers, and with neither the list is empty. Matching either sends a href through local admission, which is
-     * the stricter path, so a host served on two names is judged by its own routes on both.
-     *
-     * @return list<string>
-     */
-    private function ownOrigins(): array
-    {
-        $container = Container::getInstance();
-        $origins = [];
-
-        if ($container->bound('request')) {
-            $request = $container->make('request');
-            $origins[] = $this->origin($request->getHost(), $request->getPort());
-        }
-
-        $configured = $container->bound('config') ? $container->make('config')->get('app.url') : null;
-        $parts = is_string($configured) ? parse_url($configured) : false;
-
-        if ($parts !== false && isset($parts['host'])) {
-            $origins[] = $this->origin($parts['host'], $parts['port'] ?? null);
-        }
-
-        return array_values(array_unique($origins));
-    }
-
-    /**
-     * Host and non-default port. The scheme is left out on purpose: `http://` to a host served on `https://` is still this
-     * host's own route, and reading it as a different origin would wave it through as external.
-     */
-    private function origin(string $host, int|string|null $port): string
-    {
-        $port = (int) $port;
-
-        return strtolower($host).(in_array($port, [0, 80, 443], true) ? '' : ':'.$port);
-    }
-
-    private function routeOpens(string $routeName, string $realm, ?Authenticatable $user): bool
-    {
-        foreach ($this->particles->keysForRealm($realm) as $key) {
-            $resource = $this->particles->find($key);
-
-            if ($resource !== null && ListRouteName::of($resource) === $routeName) {
-                return $this->resourceViewable($this->realmResources->apply($this->particles->definition($key, $realm), $realm), $user, $realm);
-            }
-        }
-
-        $resolution = $this->seatGate->resolve($routeName, $realm);
-
-        return $resolution === null || $this->seatGate->allows($resolution, $user, $realm);
-    }
-
-    private function localPathOpens(string $path, string $realm, ?Authenticatable $user, string $root): bool
-    {
-        $container = Container::getInstance();
-
-        try {
-            $route = $container->make('router')->getRoutes()->match(Request::create($root.$path, 'GET'));
-        } catch (HttpExceptionInterface) {
-            return false;
-        }
-
-        $mount = $route->defaults['beamUxRealm'] ?? null;
-
-        if ($route->isFallback || (is_string($mount) && $mount !== $realm)) {
-            return false;
-        }
-
-        $resolution = $this->seatGate->resolveRoute($route, $realm);
-
-        return $resolution !== null && $this->seatGate->allows($resolution, $user, $realm);
+        }, $children)];
     }
 
     /**

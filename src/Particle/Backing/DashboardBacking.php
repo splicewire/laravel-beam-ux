@@ -19,6 +19,7 @@ use Splicewire\Beam\Dashboard\DashboardParticipation;
 use Splicewire\Beam\Dashboard\RailLeaves;
 use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Dashboard\SectionOverview;
+use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Particle\Backing\Unpaged;
 use Splicewire\Beam\Particle\ListRouteName;
@@ -98,8 +99,8 @@ use Throwable;
  *
  * ## A section's overview is this same dashboard, confined (ADR-0222 decision 9)
  *
- * Carrying a `section`, it reads only that seat's subtree of the rail and only the resources of that section, under every
- * rule above. A realm's dashboard instead draws each flagged seat as one tile and no cards from that section. With no
+ * Carrying a `section`, it reads only that seat's subtree of the projected rail, under every rule above: a card exists only
+ * for a resource whose leaf the host's own stages left in that subtree. With no seat on this reader's rail it is empty. A realm's dashboard instead draws each flagged seat as one tile and no cards from that section. With no
  * flagged seat in the realm both new branches are empty, so an unflagged dashboard's output does not change.
  */
 class DashboardBacking implements Unpaged
@@ -208,7 +209,7 @@ class DashboardBacking implements Unpaged
                 continue; // the host mounts no list route for it — drop, never throw
             }
 
-            if (! $this->inScope($definition, $href, $confined['rails'])) {
+            if (! $this->inScope($definition, $href, $confined)) {
                 continue;
             }
 
@@ -409,35 +410,46 @@ class DashboardBacking implements Unpaged
      */
     private function confinedSections(Container $container, array $items): array
     {
-        $confined = ['overviews' => [], 'rails' => []];
+        $confined = ['overviews' => [], 'rails' => [], 'statics' => []];
 
-        foreach ($this->flagged($container) as $section) {
-            $confined['overviews'][SectionOverview::keyFor($this->realm, $section)] = true;
-            $confined['rails'][$section] = RailLeaves::fromNavItems($this->childrenOfSeat($items, SectionOverview::routeNameFor($this->realm, $section)));
+        foreach ($this->flaggedSeats($container) as $section) {
+            $confined['overviews'][SectionOverview::keyFor($this->realm, $section->key)] = true;
+            $confined['rails'][$section->key] = RailLeaves::fromNavItems($this->childrenOfSeat($items, SectionOverview::routeNameFor($this->realm, $section->key)));
+            $confined['statics'][$section->key] = $section->static;
         }
 
         return $confined;
     }
 
     /**
-     * Whether a resource may draw a card on this page. An overview takes its own section's resources, and a realm's
-     * dashboard takes everything outside a flagged section. A resource belongs to a section by declaring it or by being
-     * in that seat's subtree, as a static child.
+     * Whether a resource may draw a card on this page (owner ruling 2026-11-09).
      *
-     * @param  array<string, RailLeaves>  $rails  section key => that seat's rail
+     * - **On an overview,** only a resource whose leaf the real projected rail put in this seat's subtree. A resource that
+     *   declares the section but whose leaf a host stage removed draws nothing, so the page shows exactly what the reader's
+     *   rail shows, and nothing here re-asks a stage.
+     * - **On a realm's dashboard,** anything outside a flagged section. A resource belongs to one by declaring it, by being
+     *   named in the seat's own static rows, or by sitting in the seat's projected subtree. The first two are declarations,
+     *   so a resource a stage took off the rail still stays off this page rather than reappearing as a loose card.
+     *
+     * @param  array{rails: array<string, RailLeaves>, statics: array<string, list<array<string, mixed>>>}  $confined
      */
-    private function inScope(ResourceDefinition $definition, string $href, array $rails): bool
+    private function inScope(ResourceDefinition $definition, string $href, array $confined): bool
     {
-        $in = fn (string $section): bool => $definition->nav->section === $section
-            || ($rails[$section] ?? null)?->find(ListRouteName::of($definition), $href) !== null;
+        $routeName = ListRouteName::of($definition);
 
         if ($this->section !== null) {
-            return $in($this->section);
+            return ($confined['rails'][$this->section] ?? null)?->find($routeName, $href) !== null;
         }
 
-        foreach (array_keys($rails) as $section) {
-            if ($in($section)) {
+        foreach ($confined['rails'] as $section => $rail) {
+            if ($definition->nav->section === $section || $rail->find($routeName, $href) !== null) {
                 return false;
+            }
+
+            foreach ($confined['statics'][$section] ?? [] as $row) {
+                if (($row['routeName'] ?? null) === $routeName || (isset($row['href']) && '/'.trim((string) $row['href'], '/') === '/'.trim($href, '/'))) {
+                    return false;
+                }
             }
         }
 
@@ -447,11 +459,17 @@ class DashboardBacking implements Unpaged
     /** @return list<string> the keys of the realm's flagged seats; empty on most hosts, which is what leaves them unchanged */
     private function flagged(Container $container): array
     {
+        return array_map(fn (NavSection $section): string => $section->key, $this->flaggedSeats($container));
+    }
+
+    /** @return list<NavSection> the realm's flagged seats */
+    private function flaggedSeats(Container $container): array
+    {
         if (! $container->bound(NavSectionRegistry::class)) {
             return [];
         }
 
-        return array_map(fn ($section): string => $section->key, SectionOverview::flagged($this->realm, $container->make(NavSectionRegistry::class)));
+        return SectionOverview::flagged($this->realm, $container->make(NavSectionRegistry::class));
     }
 
     /**
