@@ -534,6 +534,48 @@ class SectionOverviewTest extends TestCase
         $this->assertSame([], array_values(array_filter($this->ids('operator-dashboard'), fn (string $id): bool => str_contains($id, 'reports') || (str_contains($id, 'ov-') && ! str_contains($id, 'ov-gizmos')))));
     }
 
+    private function extend(): void
+    {
+        $this->app->make(NavSectionRegistry::class)->register(new NavSection(
+            key: 'reports', realm: 'operator', label: 'Reports, extended', icon: 'Box', href: '/operator/reports-extra', order: 30,
+            entitlement: null, permission: null, audience: NavAudience::Product,
+            static: [['title' => 'Extension row', 'href' => 'https://docs.example.test/reports']],
+        ), by: 'host');
+    }
+
+    /** @return list<string> the realm dashboard's rows for the reports section, by id */
+    private function reportsOnTheDashboard(): array
+    {
+        return array_values(array_filter(
+            $this->ids('operator-dashboard'),
+            fn (string $id): bool => str_contains($id, 'reports') || (str_contains($id, 'ov-') && ! str_contains($id, 'ov-gizmos')),
+        ));
+    }
+
+    /** Charter ruling 2026-11-09, A1: a host extends the package's flagged seat before the overviews are swept. */
+    public function test_an_unflagged_extension_registered_first_keeps_the_overview(): void
+    {
+        $this->extend();
+        $this->flag();
+        $this->actingAs($this->staff());
+
+        $this->assertTrue($this->app->make(ParticleResourceRegistry::class)->has('operator-reports-overview'), 'the overview registers');
+        $this->assertSame('operator-reports-overview.index', $this->seatNode($this->getJson('frame/manifest')->assertOk()->json())['routeName'], 'the seat lands on it');
+        $this->assertContains('summary:ov-sales', $this->ids('operator-reports-overview'));
+        $this->assertSame(['nav:operator-reports-overview.index'], $this->reportsOnTheDashboard(), 'the merged section is one destination');
+    }
+
+    /** The same extension arriving after the sweep, as a host provider booting later would. */
+    public function test_an_unflagged_extension_registered_later_keeps_the_seat_on_its_overview(): void
+    {
+        $this->flag();
+        $this->extend();
+        $this->actingAs($this->staff());
+
+        $this->assertSame('operator-reports-overview.index', $this->seatNode($this->getJson('frame/manifest')->assertOk()->json())['routeName']);
+        $this->assertSame(['nav:operator-reports-overview.index'], $this->reportsOnTheDashboard());
+    }
+
     public function test_a_soft_locked_seat_stays_visible_and_locked_with_no_landing(): void
     {
         $this->flag(entitlement: ['reports.view'], lock: new NavSeatLock('Upgrade', 'plan'));
@@ -548,12 +590,14 @@ class SectionOverviewTest extends TestCase
         $this->assertNotNull($seat['locked']);
         $this->assertNotContains('operator-reports-overview.index', array_column($manifest['routeContext'], 'routeName'));
 
-        // Review 03r2 Spec F1: on the realm's dashboard the locked section is still one destination, not its children.
+        // Charter ruling 2026-11-09, A2: on the realm's dashboard a seat that locks this reader out is no destination at all,
+        // not its children, and not a tile that would navigate past the lock. The rail alone shows the lock.
         $section = array_values(array_filter(
             $this->ids('operator-dashboard'),
             fn (string $id): bool => str_contains($id, 'reports') || (str_contains($id, 'ov-') && ! str_contains($id, 'ov-gizmos')),
         ));
-        $this->assertSame(['nav:reports.section'], $section);
+        $this->assertSame([], $section);
+        $this->assertContains('summary:ov-gizmos', $this->ids('operator-dashboard'), 'the rest of the dashboard is untouched');
 
         // The lock's direct-request refusal is unchanged.
         $this->getJson('frame/resources/operator-reports-overview')->assertForbidden();
