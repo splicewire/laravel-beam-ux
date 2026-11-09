@@ -33,6 +33,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * silence, and the corpus 404'd behind a set of URLs that looked right everywhere they were printed.
  * **A composed URL is not evidence of reachability.** Where reachability is what you need, round-trip
  * it — {@see \Splicewire\Beam\Ux\Doctor\BeamUxReachabilityAudit} does exactly that, host-wide.
+ *
+ * @api
  */
 class UrlResolver
 {

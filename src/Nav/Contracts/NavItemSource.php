@@ -15,6 +15,8 @@ use Splicewire\Beam\Ux\Nav\NoNavItemSource;
  *
  * `navItems()` may throw when the host's storage is absent (no table yet); the audit reads that as "no record-leaf
  * nav to validate", never as a failure.
+ *
+ * @api
  */
 interface NavItemSource
 {

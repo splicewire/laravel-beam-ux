@@ -116,15 +116,15 @@ use Splicewire\Beam\Write\ParticleWriter;
  * only reusing the *compliance* silo for a component's structural *namespace* was the category error. The
  * facet attachment on the entry is beam-ux's; `BeamSilo`/`BeamTag` are beam-taxonomy's (ADR-0092).
  *
- * **Access aspect (ADR-0212 — two conjunctive rights).** `traverse` + `access` are nullable any-of
+ * **Access aspect — two conjunctive rights (ADR-0212).** `traverse` + `access` are nullable any-of
  * token-list columns mirroring Unix's `x`/`r` split: `access` governs reading THIS entry's body,
  * `traverse` governs reaching THROUGH it to descendants (and being listed in nav). They compose
  * conjunctively up the containment chain, so inheritance falls out of conjunction rather than a second
- * lookup, and a subtree can only ever NARROW. The tokens are OPAQUE here (ADR-0092 — no host RBAC
- * vocabulary in a foundation package); the bound {@see EntryAccessGate} evaluates them, and
+ * lookup, and a subtree can only ever NARROW. The tokens are OPAQUE here — a foundation package carries
+ * no host RBAC vocabulary (ADR-0092); the bound {@see EntryAccessGate} evaluates them, and
  * {@see self::tokensFor()} is the read seam that keeps `null` (no declaration ⇒ inherit) distinct from
- * `[]` (declared-but-empty ⇒ deny). Note the permission could NOT live on the has-a particle: ADR-0209
- * §5 requires the gate to fire BEFORE the body is read, so a permission in the body would have to be
+ * `[]` (declared-but-empty ⇒ deny). Note the permission could NOT live on the has-a particle: the gate
+ * must fire BEFORE the body is read (ADR-0209 §5), so a permission in the body would have to be
  * read to decide whether the body may be read.
  *
  * **Draft schema inference (S9 — DRAFT, never final, ADR-0138).** A freshly-registered `component` is
@@ -146,6 +146,7 @@ use Splicewire\Beam\Write\ParticleWriter;
  *
  * @property list<string>|null $requirements Installed capabilities required to read this entry.
  * @property string|null $particle_id
+ * @api
  */
 #[UseCascadePolicy]
 class BeamUxEntry extends Model implements \Splicewire\Sync\Contracts\Syncable, WorkflowManaged

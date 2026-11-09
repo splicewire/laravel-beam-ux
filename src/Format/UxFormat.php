@@ -19,6 +19,8 @@ use Splicewire\Beam\Ux\Type\UxType;
  * actually makes that true (see its own docblock): `BodyCodec::format()` is typed to the INTERFACE, so
  * a host's own bespoke enum can satisfy it without ever touching this class. This enum is the
  * generated (or hand-curated, today) "known so far" set, not a ceiling — Tsx/Mdx/Css are the S1 seed.
+ *
+ * @api
  */
 #[TypeScript]
 enum UxFormat: string implements ProvidesEnumLabel, UxFormatCase

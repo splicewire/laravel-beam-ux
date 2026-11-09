@@ -14,8 +14,10 @@ namespace Splicewire\Beam\Ux\Docs;
  * beam-ux ships only the {@see NullDocsLinkResolver} default (`bindIf`, the host-bindings container
  * lane), so a host that installs beam-ux without `splicewire/laravel-beam-docs` — an audiostud-class
  * host — loses the links, not the pages. beam-docs supersedes the binding with a resolver that reads
- * the committed spine catalog and the entries table; per its ADR-0210 there is no docs registry to
- * read instead.
+ * the committed spine catalog and the entries table; beam-docs keeps no separate docs registry to
+ * read instead (beam-docs ADR-0210).
+ *
+ * @api
  */
 interface DocsLinkResolver
 {

@@ -21,6 +21,8 @@ use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
  * The frontmatter reader is deliberately flat `key: value`, the same tiny reader
  * {@see \Splicewire\Beam\Ux\Disk\RegisterEntriesFromDisk} carries, so the seed seam takes no dependency
  * on a YAML parser to read six scalars.
+ *
+ * @api
  */
 class StubContent
 {

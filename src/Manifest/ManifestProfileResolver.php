@@ -19,6 +19,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * placeable `#[NodeType]` components for the entry's realm: the {@see ManifestNodeSource} that
  * `beam.ux.manifest.realms.{realm}` names, else the app-wide bound one (the host that has not bound its realms keeps the
  * vocabulary it had). The palette, the inspector and the save all read this one profile.
+ *
+ * @api
  */
 final class ManifestProfileResolver
 {

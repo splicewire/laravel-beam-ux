@@ -12,7 +12,7 @@ use Splicewire\Beam\Ux\Preview\PreviewContext;
 use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 
 /**
- * Resolution plus the two gates, in **one place**, because ADR-0209 §5's uniform 404 is a property of
+ * Resolution plus the two gates, in **one place**, because the uniform 404 (ADR-0209 §5) is a property of
  * the whole triple rather than of any one part: an unresolvable path, an unpublished entry, and a
  * gate-denied entry must be indistinguishable, and they only stay indistinguishable if nothing can
  * answer one of the three questions on its own. The page renderer and the artifact stream both go
@@ -24,6 +24,8 @@ use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
  *
  * **No second traversal** (ADR-0212 §3): the chain the reverse walk produced is handed straight to
  * {@see EntryAccessResolver::canRender()}, which never queries.
+ *
+ * @api
  */
 class PublicEntryGate
 {
@@ -161,8 +163,8 @@ class PublicEntryGate
 
     /**
      * Whether a guest may read the chain: the renderer's own {@see EntryAccessResolver::canRender()}, asked for no
-     * actor, so the Page Head and the body can never disagree about who reads a page. ADR-0234 d3 composes only a title
-     * and `noindex` for a page a guest can't read. It is a different question from {@see isRestricted()} (caching): a
+     * actor, so the Page Head and the body can never disagree about who reads a page. For a page a guest can't read, the
+     * Page Head composes only a title and `noindex` (ADR-0234 d3). It is a different question from {@see isRestricted()} (caching): a
      * chain may declare a requirement every guest meets (an installed package) and still be public.
      *
      * @param  array<int, BeamUxEntry>  $chain

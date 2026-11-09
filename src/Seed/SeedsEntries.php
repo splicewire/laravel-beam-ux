@@ -12,8 +12,8 @@ use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
 
 /**
- * The shared "seed one page entry, with a body" step — what ADR-0210 §1 means by *a contribution is a
- * seed row*. Used by beam-ux's own docs seeder and available to any contributing package's, so a
+ * The shared "seed one page entry, with a body" step — the sense in which *a contribution is a seed
+ * row* (ADR-0210 §1). Used by beam-ux's own docs seeder and available to any contributing package's, so a
  * contributor writes a seeder, not an entry-creation-and-particle-write pipeline.
  *
  * **Create, never update** (ADR-0209 §11, ADR-0210 §6). The row is site-owned from the moment it exists
@@ -25,6 +25,8 @@ use Splicewire\Beam\Ux\Type\UxType;
  * class-string, so a contributor's seeder does not load until the seeder runs; when it does run on a
  * headless host with no `beam_ux_entries` table, it no-ops. This follows `BeamMarketServiceProvider`,
  * which depends on beam-ux traits while deliberately not force-booting beam-ux's provider.
+ *
+ * @api
  */
 trait SeedsEntries
 {

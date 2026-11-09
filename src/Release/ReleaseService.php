@@ -24,7 +24,11 @@ use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Control\TransitionResult;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
 
-/** ADR-0226: all writes are on the Release's connection and serialized by its row lock. */
+/**
+ * ADR-0226: all writes are on the Release's connection and serialized by its row lock.
+ *
+ * @api
+ */
 final class ReleaseService
 {
     /**

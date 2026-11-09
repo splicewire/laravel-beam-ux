@@ -12,6 +12,9 @@ use Splicewire\Beam\Workflows\Control\TransitionContext;
 use Splicewire\Beam\Workflows\Type\Concerns\WorkflowManaged as WorkflowManagedTrait;
 use Splicewire\Beam\Workflows\Type\Contracts\WorkflowManaged;
 
+/**
+ * @api
+ */
 class BeamUxRelease extends Model implements ParticipatesInWorkflowTransaction, WorkflowManaged
 {
     use HasUuids;

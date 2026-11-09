@@ -13,6 +13,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *
  * A contributor receives the entry, the containment chain the gate already walked (root first) and the actor, and
  * returns `prop => value`. It may not replace a core prop: those are the renderer's contract with every shell.
+ *
+ * @api
  */
 final class EntryPageProps
 {

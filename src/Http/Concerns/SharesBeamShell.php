@@ -52,6 +52,8 @@ use Throwable;
  *
  * Every projection degrades rather than taking the Inertia response down; `accountNav` catches only a
  * {@see RegistryMiss}, so an IA breach still surfaces outside production.
+ *
+ * @api
  */
 trait SharesBeamShell
 {

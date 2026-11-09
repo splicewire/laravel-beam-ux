@@ -20,6 +20,8 @@ use Schemastud\Frame\Realm\RealmDefinition;
  * deliberately no config-array form: a second grammar for the same lists would be vocabulary with
  * no consumer, and a `const` with a docblock is the only form in which *why* a resource sits where
  * it does survives at all — which, for these seven lists, is most of their value.
+ *
+ * @api
  */
 class RouteContextPlan
 {

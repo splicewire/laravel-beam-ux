@@ -65,6 +65,8 @@ use Splicewire\Beam\Write\PolicyWriteGate;
  * Explicit publication compiles the named snapshot before changing the pin or disk mirror
  * (ADR-0232 d7). Drafts compile at their own addresses and return compileError without losing
  * the saved body. System seed/registration keeps its existing pin-and-diagnostic contract.
+ *
+ * @api
  */
 class EntryPublication
 {

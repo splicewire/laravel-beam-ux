@@ -12,6 +12,8 @@ namespace Splicewire\Beam\Ux\Disk;
  *
  * The content root is configurable via `beam.ux.content_path` (default `resources/js/content`, matching a
  * Vite-served content dir); a null/absent file degrades to `null` (the caller renders its default).
+ *
+ * @api
  */
 class RawMdxReader
 {

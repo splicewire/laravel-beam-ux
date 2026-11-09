@@ -15,6 +15,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * binding) counts as published, a managed entry is published only at its published
  * marking. A host may re-bind this port to its own visibility policy; every consumer
  * follows with no source-side change.
+ *
+ * @api
  */
 interface EntryPublishGate
 {

@@ -18,6 +18,8 @@ use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
  * particle body — this returns `null`, and the client's `PageEditor` falls back to its own default
  * tree (`editor/defaults.ts`). An app-critical page (login) thus never blanks because its beam-ux row
  * is missing.
+ *
+ * @api
  */
 class EntryBody
 {

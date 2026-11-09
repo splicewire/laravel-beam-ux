@@ -6,7 +6,11 @@ use Splicewire\Beam\Facades\Particle;
 use Splicewire\Beam\Ux\Particle\EntryMakeEditableOp;
 use Splicewire\Beam\Ux\Particle\ResolvePageEntryRefOp;
 
-/** Called by the host inside its auth/verified group; every operation also declares ux.author. */
+/**
+ * Called by the host inside its auth/verified group; every operation also declares ux.author.
+ *
+ * @api
+ */
 final class EditorRoutes
 {
     public static function mount(

@@ -31,10 +31,10 @@ use Splicewire\Beam\Ux\Type\UxType;
  * several realms at once — the projector takes ONE realm at a time; a host renders several realms' navs
  * by calling `project()` once per realm.
  *
- * **This projection GATES (ADR-0212 §4) — it previously gated nothing at all.** It filtered on realm,
- * `type = page`, and non-null `segment`, and not even {@see EntryPublishGate}. Converting docs to
- * entries on top of that would leak every draft and gated title into the sidebar, defeating outright
- * the server-authoritative index app ADR-0122 named as a hard requirement. Two passes now run:
+ * **This projection GATES (ADR-0212 §4).** Filtering only on realm, `type = page`, and non-null
+ * `segment` — without even {@see EntryPublishGate} — would leak every draft and gated title into the
+ * sidebar, defeating outright the server-authoritative index that is a hard requirement (ADR-0122).
+ * Two passes run:
  *
  *  - **publish**, cheap-filtered into the query where the bound gate is the default marking one (it is
  *    a column, so the filter is free) and always re-asserted in memory through the bound port;
@@ -47,6 +47,8 @@ use Splicewire\Beam\Ux\Type\UxType;
  * host may cache, and the **gate pass runs live on every request**, so a revoked grant bites on the
  * next request with no stale-authorization window. That is why the actor is a per-call argument and
  * never constructor state.
+ *
+ * @api
  */
 class NavProjector
 {

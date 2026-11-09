@@ -20,6 +20,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * tenant tier of the `{canvas, shell, site}` cascade. Non-routable (like `Component`), but never
  * mountable in the visual editor's canvas the way a `Component` is — its body is theme TOKENS, not a
  * composable tree.
+ *
+ * @api
  */
 enum UxType: string
 {

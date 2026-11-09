@@ -10,11 +10,13 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * It is a port because beam-ux does not require Inertia — it is not in `composer.json`, and a headless
  * or API-only host that installs beam-ux for its authoring model has no business being forced into an
- * SPA adapter. Server-rendering the body to HTML in PHP was rejected outright: ADR-0122 requires that
- * guarded content never appear in server-rendered HTML, so it would force two divergent render paths.
+ * SPA adapter. Server-rendering the body to HTML in PHP was rejected outright: guarded content must never
+ * appear in server-rendered HTML (ADR-0122), so it would force two divergent render paths.
  *
  * The **page name is not this port's to choose** — no beam package ships a rendered page, so it arrives
  * as a mount-time argument from the host and travels through as a parameter.
+ *
+ * @api
  */
 interface EntryRenderer
 {

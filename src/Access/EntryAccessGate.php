@@ -11,9 +11,9 @@ use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 use Splicewire\Beam\Ux\Sitemap\EntrySitemapSource;
 
 /**
- * The **actor-aware** third entry gate (ADR-0212 §1) — the port that supplies the gate semantics
- * ADR-0209 §5 deferred. It joins {@see EntryPublishGate} and {@see EntryEntitlementGate} rather than
- * replacing either, and the decisive reason is in the signatures:
+ * The **actor-aware** third entry gate (ADR-0212 §1) — the port that decides whether a given reader
+ * may see an entry (ADR-0209 §5). It joins {@see EntryPublishGate} and {@see EntryEntitlementGate}
+ * rather than replacing either, and the decisive reason is in the signatures:
  *
  *  - `EntryPublishGate::isPublished(BeamUxEntry): bool` and `EntryEntitlementGate::isPublic(BeamUxEntry): bool`
  *    take **no actor** — they answer *"is this row crawlable by anyone?"*
@@ -31,11 +31,13 @@ use Splicewire\Beam\Ux\Sitemap\EntrySitemapSource;
  * correctly **absent from the sitemap** and correctly **renderable to a logged-in reader**.
  *
  * **Tokens are opaque to beam-ux** (ADR-0212 §5, ADR-0092): the columns store plain strings and this
- * package owns no RBAC vocabulary, exactly as ADR-0122 kept "gated" opaque in beam-mdx. beam-ux
+ * package owns no RBAC vocabulary, exactly as beam-mdx keeps "gated" opaque (ADR-0122). beam-ux
  * therefore cannot validate a token — that is the binding's {@see self::knows()} capability, consumed
  * by {@see RegisterEntriesFromDisk} at import and by the standing doctor check. At runtime an unknown
  * token already fails closed for free: under any-of, a token nothing satisfies never matches, so a typo
  * denies rather than admits — a lockout, which is loud and self-correcting, never a leak.
+ *
+ * @api
  */
 interface EntryAccessGate
 {

@@ -12,6 +12,8 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
  * exactly what d1 retires (`array_is_list` / `JsonDocShape::is` stop being discriminators). One input
  * serves each kind (d10): blocks a declared JsonDoc, source a `{ source }` write, a form a schema-checked
  * save.
+ *
+ * @api
  */
 #[TypeScript]
 enum BodyKind: string implements ProvidesEnumLabel

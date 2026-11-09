@@ -17,6 +17,8 @@ use Splicewire\Beam\Ux\Nav\Contracts\NavItemSource;
  *
  * Packaged from the five starters' identical `App\Sitemap\NavItem` (make-surface 01). A host hands its record leaf's
  * items to the audit through {@see NavItemSource}.
+ *
+ * @api
  */
 class NavItem extends Data
 {

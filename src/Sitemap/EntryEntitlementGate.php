@@ -13,6 +13,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * (e.g. behind `laravel-beam-commerce` plan entitlements) re-binds this port to
  * ask its own authority. The default binding ({@see PublicEntitlementGate}) treats
  * every entry as public — correct for a fully-open site and safe as a floor.
+ *
+ * @api
  */
 interface EntryEntitlementGate
 {

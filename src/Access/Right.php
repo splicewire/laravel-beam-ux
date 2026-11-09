@@ -11,8 +11,9 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *
  *  - {@see self::Traverse} — may this reader reach THROUGH this entry to its descendants, and see it
  *    in a projected nav. Evaluated at every ancestor position on the way to a target.
- *  - {@see self::Access} — may this reader read this entry's BODY. Retains app ADR-0122's `access:`
- *    meaning exactly, so frontmatter already carrying that key migrates with zero edits.
+ *  - {@see self::Access} — may this reader read this entry's BODY. Keeps the existing frontmatter
+ *    `access:` meaning exactly (ADR-0122), so frontmatter already carrying that key migrates with
+ *    zero edits.
  *
  * Two rights rather than one buys the **unlisted page**: `traverse` denied with `access` open yields
  * an entry reachable by direct link and absent from nav (hand a customer one guide) — which one right
@@ -23,6 +24,8 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * not merely a sidebar entry); `list` is grammatically wrong mid-chain (listing is done to a
  * container's children, traversal to a node); and "hide from nav" already exists structurally — the
  * {@see NavProjector} excludes null-`segment` entries as *unplaced*.
+ *
+ * @api
  */
 enum Right: string
 {

@@ -10,13 +10,15 @@ use Splicewire\Beam\Ux\Codec\BodyCodec;
  *
  * A row's `origin` records WHERE its body came from, and `asserted_hash` is the hash of the
  * title+body that origin last wrote. Together they let a reader tell a pristine row (still equal to
- * what its origin asserted) from an edited one — the precondition for DOC-5 precedence and the
- * `docs.diverged` audit. This class is the one place that spells the origin vocabulary, the
+ * what its origin asserted) from an edited one — the precondition for the origin precedence
+ * {@see rank()} defines (DOC-5) and the `docs.diverged` audit. This class is the one place that spells the origin vocabulary, the
  * precedence order, and the hash, so the seed path, the import path, and the audit agree.
  *
  * This class is pure: it only spells the origin vocabulary, the precedence order and the hash, and
  * mutates nothing. The pristine re-assert that acts on them lives in {@see Reasserter}; the
  * `docs.diverged` audit that merely reports a diverged row is genuinely report-only.
+ *
+ * @api
  */
 final class Provenance
 {
@@ -86,8 +88,8 @@ final class Provenance
 
     /**
      * The provenance columns to merge into a create — but ONLY when the schema carries them, so a
-     * host that has not run the DOCS-06 migration keeps working (the package's hasColumn-tolerance
-     * convention). Returns `[]` otherwise, and the create is unchanged.
+     * host that has not run the provenance-columns migration (DOCS-06) keeps working (the package's
+     * hasColumn-tolerance convention). Returns `[]` otherwise, and the create is unchanged.
      *
      * The hash here is the source as {@see asStored()} gives it, which is the stored form ONLY where the body
      * write is `codec->encode($source)`. A blocks-kind write lowers the source instead, and the lens's print of

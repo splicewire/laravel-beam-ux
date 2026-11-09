@@ -15,6 +15,9 @@ use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
 use Splicewire\Beam\Workflows\Data\WorkflowProjectionData;
 
+/**
+ * @api
+ */
 #[ParticleResource(key: 'beam-ux-release', backing: BeamUxRelease::class, input: false,
     label: 'Releases', group: 'Content', section: 'authoring', readOnly: true, policy: 'ux.author')]
 #[TypeScript, Title('Release')]

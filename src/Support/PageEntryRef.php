@@ -47,6 +47,8 @@ use Splicewire\Beam\Ux\Type\UxType;
  * its `artifact` (`{url, version}` — where to READ the compiled body). Both are things only the server
  * can know. `artifact` is null when the entry has never been authored, which the reader states as such
  * rather than telling a guest to run an artisan command.
+ *
+ * @api
  */
 class PageEntryRef
 {

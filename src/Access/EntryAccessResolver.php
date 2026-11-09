@@ -26,10 +26,12 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  * because rejecting would make a perfectly coherent Unix-shaped declaration an error; the doctor names
  * inert declarations instead ({@see \Splicewire\Beam\Ux\Doctor\BeamUxAccessAudit}).
  *
- * **No second traversal.** Both callers already hold the chain — ADR-0209's renderer from its reverse
- * walk, {@see NavProjector} from its single adjacency load — so every method here takes the chain it
+ * **No second traversal.** Both callers already hold the chain — the public renderer from its reverse
+ * walk (ADR-0209), {@see NavProjector} from its single adjacency load — so every method here takes the chain it
  * was handed, in the same root-first shape {@see UrlResolver::resolveChain()} consumes. This class
  * never queries.
+ *
+ * @api
  */
 class EntryAccessResolver
 {
@@ -64,9 +66,9 @@ class EntryAccessResolver
      *
      * Nav deliberately departs from a faithful Unix port, where `ls` on a readable directory names
      * every child regardless of the children's own modes. That behaviour — a node visible in the
-     * sidebar that 404s on click — would resurrect the titles leak ADR-0122 named as a hard
-     * requirement, and would make ADR-0209's uniform 404 a 404 that only sometimes means "not here".
-     * The upsell tease it would enable is a product feature ADR-0122 already deferred deliberately; it
+     * sidebar that 404s on click — would leak the titles of guarded pages, which must never happen
+     * (ADR-0122), and would make the uniform 404 a 404 that only sometimes means "not here" (ADR-0209).
+     * The upsell tease it would enable is a product feature deliberately left for later (ADR-0122); it
      * should arrive as itself, not as a side effect of nav semantics.
      *
      * The node's own `traverse` counts here (unlike {@see canRender}) because listing a node IS
