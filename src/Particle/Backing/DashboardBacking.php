@@ -148,7 +148,8 @@ class DashboardBacking implements Unpaged
         // Nothing for this viewer: the one welcome row instead of an empty list — see DashboardWelcome.
         // A guest gets nothing (the dashboard's own gate refuses one before the socket reaches here).
         if ($rows === []) {
-            // An overview's own gate requires something to open, so an empty one has no first-run panel to offer.
+            // The first-run panel is the realm's front door. An overview is one section's page, and empty means this
+            // reader's rail holds nothing in that section, so it offers no panel.
             if ($this->section !== null) {
                 return [];
             }
@@ -183,7 +184,7 @@ class DashboardBacking implements Unpaged
         $visibility = $container->make(ResourceVisibility::class);
         $actor = $this->actor($container);
         $hrefs = $this->hrefs($container);
-        $confined = $this->confinedSections($container, $items);
+        $confined = $this->confinedSections($container, $items, $hrefs);
 
         $cards = [];
         $seen = [];
@@ -351,12 +352,15 @@ class DashboardBacking implements Unpaged
     private function scopedItems(Container $container, array $items): array
     {
         if ($this->section !== null) {
-            return $this->childrenOfSeat($items, SectionOverview::routeNameFor($this->realm, $this->section));
+            return $this->seatSubtree($items, SectionOverview::routeNameFor($this->realm, $this->section));
         }
 
+        // A soft-locked seat keeps `{key}.section` and its children stay in the tree, so both of a flagged seat's names
+        // collapse here: the section is one destination on the realm's dashboard either way (review 03r2, Spec F1).
         $routes = [];
         foreach ($this->flagged($container) as $section) {
             $routes[SectionOverview::routeNameFor($this->realm, $section)] = true;
+            $routes[$section.'.section'] = true;
         }
 
         return $routes === [] ? $items : $this->collapsed($items, $routes);
@@ -377,24 +381,28 @@ class DashboardBacking implements Unpaged
     }
 
     /**
-     * The children of the seat bound to this route, wherever it sits in the tree, or none.
+     * The seat bound to this route with everything under it, and the path of ancestors down to it, or nothing.
+     *
+     * The ancestors are kept, each holding only that path, because a leaf's classification is inherited: a seat drawn in
+     * the Developer zone sits under `developer.section`, and {@see RailLeaves::fromNavItems()} marks its leaves Developer
+     * only by walking down from there. Selecting the bare children would make them product leaves on the overview
+     * (review 03r2, Standards F1). Ancestors and the seat have children, so none of them is a leaf. A seat with no
+     * children is one, and it is this overview's own route, which {@see tiles()} already leaves out.
      *
      * @param  array<int, array<string, mixed>>  $items
      * @return array<int, array<string, mixed>>
      */
-    private function childrenOfSeat(array $items, string $route): array
+    private function seatSubtree(array $items, string $route): array
     {
         foreach ($items as $node) {
-            $children = is_array($node['children'] ?? null) ? $node['children'] : [];
-
             if (($node['routeName'] ?? null) === $route) {
-                return $children;
+                return [$node];
             }
 
-            $found = $this->childrenOfSeat($children, $route);
+            $path = $this->seatSubtree(is_array($node['children'] ?? null) ? $node['children'] : [], $route);
 
-            if ($found !== []) {
-                return $found;
+            if ($path !== []) {
+                return [[...$node, 'children' => $path]];
             }
         }
 
@@ -406,16 +414,22 @@ class DashboardBacking implements Unpaged
      * which draw no card on any page.
      *
      * @param  array<int, array<string, mixed>>  $items
-     * @return array{overviews: array<string, true>, rails: array<string, RailLeaves>}
+     * @param  array<string, string>  $hrefs  routeName => leaf href, from {@see RouteContextProjector::hrefs()}
+     * @return array{overviews: array<string, true>, rails: array<string, RailLeaves>, statics: array<string, list<array{routeName: ?string, href: ?string}>>}
      */
-    private function confinedSections(Container $container, array $items): array
+    private function confinedSections(Container $container, array $items, array $hrefs): array
     {
         $confined = ['overviews' => [], 'rails' => [], 'statics' => []];
 
         foreach ($this->flaggedSeats($container) as $section) {
             $confined['overviews'][SectionOverview::keyFor($this->realm, $section->key)] = true;
-            $confined['rails'][$section->key] = RailLeaves::fromNavItems($this->childrenOfSeat($items, SectionOverview::routeNameFor($this->realm, $section->key)));
-            $confined['statics'][$section->key] = $section->static;
+            $confined['rails'][$section->key] = RailLeaves::fromNavItems($this->seatSubtree($items, SectionOverview::routeNameFor($this->realm, $section->key)));
+            $confined['statics'][$section->key] = array_map(fn (array $row): array => [
+                'routeName' => $row['routeName'] ?? null,
+                // The collector's rule: the mounted leaf of a named route, else the authored href. A stale fallback beside a
+                // mounted route names nothing this row seats (review 03r2, Spec F2).
+                'href' => (isset($row['routeName']) ? $hrefs[$row['routeName']] ?? null : null) ?? ($row['href'] ?? null),
+            ], $section->static);
         }
 
         return $confined;
@@ -431,7 +445,7 @@ class DashboardBacking implements Unpaged
      *   named in the seat's own static rows, or by sitting in the seat's projected subtree. The first two are declarations,
      *   so a resource a stage took off the rail still stays off this page rather than reappearing as a loose card.
      *
-     * @param  array{rails: array<string, RailLeaves>, statics: array<string, list<array<string, mixed>>>}  $confined
+     * @param  array{rails: array<string, RailLeaves>, statics: array<string, list<array{routeName: ?string, href: ?string}>>}  $confined
      */
     private function inScope(ResourceDefinition $definition, string $href, array $confined): bool
     {
@@ -447,7 +461,7 @@ class DashboardBacking implements Unpaged
             }
 
             foreach ($confined['statics'][$section] ?? [] as $row) {
-                if (($row['routeName'] ?? null) === $routeName || (isset($row['href']) && '/'.trim((string) $row['href'], '/') === '/'.trim($href, '/'))) {
+                if ($row['routeName'] === $routeName || ($row['href'] !== null && '/'.trim((string) $row['href'], '/') === '/'.trim($href, '/'))) {
                     return false;
                 }
             }
