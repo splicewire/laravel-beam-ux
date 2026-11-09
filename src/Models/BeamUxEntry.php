@@ -146,6 +146,7 @@ use Splicewire\Beam\Write\ParticleWriter;
  *
  * @property list<string>|null $requirements Installed capabilities required to read this entry.
  * @property string|null $particle_id
+ *
  * @api
  */
 #[UseCascadePolicy]
