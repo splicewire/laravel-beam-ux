@@ -14,9 +14,10 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
-use Splicewire\Beam\Ux\Recording\ReleaseRecording;
 use Splicewire\Beam\Ux\Redirect\RedirectService;
 use Splicewire\Beam\Ux\Redirect\ReleaseRedirects;
+use Splicewire\Beam\Ux\Release\Sinks\PublishSinkRegistry;
+use Splicewire\Beam\Ux\Release\Sinks\ReleaseProjection;
 use Splicewire\Beam\Ux\Support\EditorAuthorizer;
 use Splicewire\Beam\Ux\Type\UxType;
 use Splicewire\Beam\Workflows\Control\TransitionContext;
@@ -142,12 +143,15 @@ class EntryMemberKind implements ReleaseMemberKind
         // changes and written once its Take-downs are done.
         $redirects = app(ReleaseRedirects::class)->plan($prototype, $refs,
             $members->whereNull('version_id')->mapWithKeys(fn ($member) => [(string) $member->entry_id => $member->redirect_target])->all());
+        // The publish sinks (ADR-0243) freeze their projection where the recording always froze its receipt: once the
+        // versions are pinned, inside the transaction, before the Take-downs' lifecycle moves.
+        $sinks = app(PublishSinkRegistry::class);
         if ($refs !== []) {
             app(EntryPublication::class)->publishVersions($prototype, $refs, $actor instanceof Model ? $actor : null, $pins,
-                fn (array $prepared) => app(ReleaseRecording::class)->prepare($release, $prepared, $actor, $takedowns),
+                fn (array $prepared) => $sinks->project($release, new ReleaseProjection($this->kind(), $prepared, $takedowns), $actor),
                 leaveRedirects: false);
         } elseif ($takedowns !== []) {
-            app(ReleaseRecording::class)->prepare($release, [], $actor, $takedowns);
+            $sinks->project($release, new ReleaseProjection($this->kind(), [], $takedowns), $actor);
         }
         foreach ($members as $member) {
             if ($member->version_id === null) {

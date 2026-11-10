@@ -4,8 +4,10 @@ namespace Splicewire\Beam\Ux\Concerns;
 
 use Rushing\Popcorn\Concerns\Chained;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
+use Splicewire\Beam\Ux\Recording\GitRecordingSink;
 use Splicewire\Beam\Ux\Release\Kinds\EntryMemberKind;
 use Splicewire\Beam\Ux\Release\Kinds\ReleaseMemberKindRegistry;
+use Splicewire\Beam\Ux\Release\Sinks\PublishSinkRegistry;
 
 /**
  * One concern of {@see BeamUxServiceProvider}, contributed to its `register` chain by the trait that
@@ -25,5 +27,15 @@ trait WiresReleaseKinds
     protected function registerReleaseKinds(): void
     {
         $this->app->singleton(ReleaseMemberKindRegistry::class, fn () => (new ReleaseMemberKindRegistry)->register(new EntryMemberKind));
+    }
+
+    /**
+     * The {@see PublishSinkRegistry} (ADR-0243), seeded with `git`, the local recording (ADR-0226). A host replaces it or
+     * adds a sink on the same singleton.
+     */
+    #[Chained('register', order: 66)]
+    protected function registerPublishSinks(): void
+    {
+        $this->app->singleton(PublishSinkRegistry::class, fn () => (new PublishSinkRegistry)->register(new GitRecordingSink));
     }
 }

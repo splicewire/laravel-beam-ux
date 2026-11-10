@@ -1,0 +1,59 @@
+---
+title: Publish sinks
+segment: beam.ux.publish-sinks
+nav_order: 49
+excerpt: The projections a published Release reaches after commit, such as its Git recording.
+---
+
+# Publish sinks
+
+`beam.ux.publish-sinks` holds the **sinks** a published Release is projected to: a record of the
+publication outside its database. Each entry is a `PublishSink`, keyed by its name.
+
+{/* registry-facts:start — generated from the #[IsRegistry] declaration; regenerate it, do not edit between these markers. */}
+
+- **Root:** `beam.ux.publish-sinks`
+- **Entries:** `Splicewire\Beam\Ux\Release\Sinks\PublishSink`
+- **Duplicate keys:** Supersede — a later registration under a taken key replaces the earlier entry, in its place
+- **Population:** Optional — an empty registry is normal
+- **Order:** `49` (display order, ascending)
+- **Declared by:** `Splicewire\Beam\Ux\Release\Sinks\PublishSinkRegistry`
+
+{/* registry-facts:end */}
+
+<RegistryRegistrants root="beam.ux.publish-sinks" />
+
+## What a sink is, and is not
+
+The database pin is the publication, and it is not a sink. A sink is a projection of it:
+
+- It is called inside the publish transaction, once a member kind has published, with that kind's
+  `ReleaseProjection`. It freezes what it will project there.
+- It projects after commit, so nothing reaches a disk or a repository from a Release that rolled back.
+- It may fail. Each sink runs in its own savepoint and what it throws is contained, so a failed sink
+  never fails the publication. A sink records its own failure where its readers look.
+
+## What ships
+
+- `git` records the Release's mirror files in the local Git repository in one commit, through the
+  frozen recording receipt (ADR-0226). It projects entry members.
+
+## Adding or replacing a sink
+
+```php
+use Splicewire\Beam\Ux\Release\Sinks\PublishSinkRegistry;
+
+app(PublishSinkRegistry::class)->register(new AuditTrailSink);
+```
+
+Registering under a taken name replaces that sink, in its place.
+
+## Related registries
+
+- [`beam.ux.release-member-kinds`](beam.ux.release-member-kinds): the kinds whose projections reach
+  the sinks.
+
+## Going deeper
+
+ADR-0243 records the decision. The source is
+[`PublishSink`](https://github.com/splicewire/laravel-beam-ux/blob/main/src/Release/Sinks/PublishSink.php).
