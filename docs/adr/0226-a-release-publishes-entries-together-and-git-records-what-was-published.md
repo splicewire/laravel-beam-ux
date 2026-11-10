@@ -30,6 +30,8 @@ UI), for enterprise site editing where an author needs to see and schedule chang
    `@splicewire/beam-workflows`' `WorkflowActionForm`.
    *Amended by ADR-0232 decision 3 (2026-10-15): a member may instead be a Take-down, with no version. Its entry's
    `unpublish` transition fires when the Release publishes.*
+   *Amended by ADR-0243 decisions 1 and 2 (2026-11-09): a member has a kind. An entry is the `entry` kind; another
+   package registers its own, and the kind owns its subject's checks and publication.*
 2. **Publishing a Release moves every member's Publication Pin in one transaction,** then mirrors and compiles each
    member, as ADR-0225 decision 3 does for one entry.
    *Amended by ADR-0232 decisions 1, 2 and 7 (2026-10-15): publishing also writes each member's guest-facing fields to
@@ -42,6 +44,8 @@ UI), for enterprise site editing where an author needs to see and schedule chang
    **one commit** named for the Release, containing only its members' mirror files. The commit is built through a
    private index (`GIT_INDEX_FILE`), so a developer's staging area is never read or changed. Each published version
    records its commit SHA, and the versions panel shows it beside the row.
+   *Amended by ADR-0243 decisions 3 and 4 (2026-11-09): the recording is a publish sink, `git`, and each row of its
+   frozen receipt says its member's kind, ref and root.*
 4. **A failed commit doesn't fail the publish.** The database is the authority. If git refuses (no repo, rebase in
    progress, detached HEAD, a failing hook), the Release still publishes, its versions record "not committed", and the
    Files page offers **Commit now**.
@@ -55,6 +59,8 @@ UI), for enterprise site editing where an author needs to see and schedule chang
    the publish ability on every member. Approval is the Release's workflow. The commit has no ability of its own. A
    tenant gets Releases with tenant-owned sites, but never commits: the mirror is the host repo's, so it belongs to the
    central realm.
+   *Amended by ADR-0243 decision 2 (2026-11-09): authority adds up over every member through its kind. The tenant rule
+   is unchanged.*
 8. **A rollback is a new Release** of the earlier versions. It rolls forward, so git gets a revert-like commit and no
    history is rewritten. There is no separate git rollback.
 9. **Disk changes come back by hand, as drafts.** The Files page gains the state **differs from published**, which
