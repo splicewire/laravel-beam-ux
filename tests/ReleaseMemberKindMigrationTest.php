@@ -12,12 +12,35 @@ use Splicewire\Beam\Ux\Models\BeamUxRelease;
  * Release members have kinds (config-sections 04, ADR-0243). An existing install's members table, created by the
  * pre-change create stub (kept verbatim as a fixture), is upgraded by add_member_kind_to_beam_ux_release_members_table:
  * every member backfills to an `entry` addressed by its `entry_id`, `entry_id` becomes nullable, and a member of another
- * kind can then exist beside them. Runs on the suite's connection: SQLite here, where the nullable change rebuilds the
- * table, and pgsql under `test-full --pgsql`.
+ * kind can then exist beside them. Runs on the suite's SQLite, where the nullable change rebuilds the table, and on
+ * PostgreSQL when the caller names an isolated database in BEAM_UX_MIGRATION_PG_DATABASE (the seam
+ * PublishedMigrationsRoundTripTest uses: this package's suite does not run on pgsql, so `test-full --pgsql` cannot reach it).
  */
 class ReleaseMemberKindMigrationTest extends TestCase
 {
     private const ALTER = __DIR__.'/../database/migrations/shared/add_member_kind_to_beam_ux_release_members_table.php.stub';
+
+    protected function defineEnvironment($app): void
+    {
+        parent::defineEnvironment($app);
+        if (getenv('BEAM_UX_MIGRATION_PG_DATABASE')) {
+            $app['config']->set('database.default', 'migration_pg');
+            $app['config']->set('database.connections.migration_pg', [
+                'driver' => 'pgsql',
+                'host' => getenv('BEAM_UX_MIGRATION_PG_HOST') ?: '127.0.0.1',
+                'port' => getenv('BEAM_UX_MIGRATION_PG_PORT') ?: '5432',
+                'database' => getenv('BEAM_UX_MIGRATION_PG_DATABASE'),
+                'username' => getenv('BEAM_UX_MIGRATION_PG_USER') ?: 'postgres',
+                'password' => getenv('BEAM_UX_MIGRATION_PG_PASSWORD') ?: '',
+                'charset' => 'utf8', 'prefix' => '', 'search_path' => 'public',
+            ]);
+        }
+    }
+
+    public function test_the_connection_is_the_one_the_caller_asked_for(): void
+    {
+        $this->assertSame(getenv('BEAM_UX_MIGRATION_PG_DATABASE') ? 'pgsql' : 'sqlite', DB::connection()->getDriverName());
+    }
 
     protected function setUp(): void
     {
