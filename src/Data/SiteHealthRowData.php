@@ -7,7 +7,6 @@ use Rushing\DataFilters\Attributes\Sortable;
 use Rushing\DataFilters\Operators\Exact;
 use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\Column;
-use Schemastud\Frame\Attributes\Widget;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
@@ -37,8 +36,7 @@ class SiteHealthRowData extends BeamData
         public ?string $type,
         #[Column(label: 'Indexed', sort: 3), Filterable(ProjectedExact::class)]
         public bool $indexed,
-        #[Column(label: 'State', sort: 4), Filterable(ProjectedExact::class)]
-        #[Widget('badge', options: ['labels' => ['mirror-disabled' => 'Mirror disabled']])]
+        #[Column(widget: 'badge', label: 'State', sort: 4, options: ['labels' => ['mirror-disabled' => 'Mirror disabled']]), Filterable(ProjectedExact::class)]
         public string $state,
         #[Column(label: 'Routable', sort: 5)] public bool $routable,
         #[Column(label: 'Published', sort: 6)] public bool $published,

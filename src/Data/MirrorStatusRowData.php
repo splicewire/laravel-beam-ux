@@ -6,7 +6,6 @@ use Rushing\DataFilters\Attributes\Filterable;
 use Rushing\DataFilters\Attributes\Sortable;
 use Rushing\DataFilters\Operators\Exact;
 use Schemastud\Frame\Attributes\Column;
-use Schemastud\Frame\Attributes\Widget;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
@@ -75,8 +74,7 @@ class MirrorStatusRowData extends BeamData
         // a badge whose `mirror-disabled` value reads "Mirror disabled" while the WIRE value (what the host
         // filters/sorts on) stays the opaque `mirror-disabled` token — the operator page must not special-
         // case it. The other states humanize through the shared frame label policy.
-        #[Column(label: 'State', sort: 6), Filterable(ProjectedExact::class)]
-        #[Widget('badge', options: ['labels' => ['mirror-disabled' => 'Mirror disabled']])]
+        #[Column(widget: 'badge', label: 'State', sort: 6, options: ['labels' => ['mirror-disabled' => 'Mirror disabled']]), Filterable(ProjectedExact::class)]
         public string $state,
     ) {}
 

@@ -6,7 +6,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
-use Schemastud\Frame\Attributes\Widget;
+use Schemastud\Frame\Attributes\Column;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Ux\Data\MirrorStatusRowData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -96,18 +96,20 @@ class MirrorStatusRowDataTest extends TestCase
      * C02 (TC04): the DECLARATION owns the mirror-status display label. The `state` column is a badge
      * that supplies "Mirror disabled" for the `mirror-disabled` value, while the WIRE value the host
      * filters/sorts on stays the opaque `mirror-disabled` token — the operator page must not special-case
-     * it. Red before the `#[Widget('badge', …)]` declaration (no Widget attribute, no supplied label).
+     * it. The badge is the column's own kind (frame-foundation 27): `#[Column(widget: 'badge', options: …)]`, never a
+     * separate `#[Widget]` on a read row.
      */
     public function test_the_state_column_declares_the_mirror_disabled_display_label_while_the_wire_value_stays_opaque(): void
     {
-        $widgets = (new \ReflectionProperty(MirrorStatusRowData::class, 'state'))->getAttributes(Widget::class);
-        $this->assertNotEmpty($widgets, 'the State column must declare a Widget that owns its display labels');
+        $columns = (new \ReflectionProperty(MirrorStatusRowData::class, 'state'))->getAttributes(Column::class);
+        $this->assertNotEmpty($columns, 'the State column must declare its Column');
 
-        $widget = $widgets[0]->newInstance();
-        $this->assertSame('badge', $widget->name);
+        // `Column` names its widget (the column kind) as `bind`, inherited from `WidgetIn`.
+        $column = $columns[0]->newInstance();
+        $this->assertSame('badge', $column->bind, 'the State column must declare the badge kind on the Column itself');
         $this->assertSame(
             'Mirror disabled',
-            $widget->options['labels']['mirror-disabled'] ?? null,
+            $column->options['labels']['mirror-disabled'] ?? null,
             'MirrorStatusRowData must supply the "Mirror disabled" label for the mirror-disabled state',
         );
 
