@@ -64,6 +64,9 @@ class ShellStamps
         $stamps->file(self::BASE, 'resources/views/app.blade.php', $stubs.'/app.blade.php.stub');
         $stamps->file(self::BASE, 'resources/css/app.css', $stubs.'/app.css.stub');
         $stamps->file(self::BASE, 'resources/js/app.tsx', $stubs.'/app.tsx.stub');
+        // The host's registration of its generated resource map with frame (frame-foundation ruling 03 Q9/Q17): a `.ts`
+        // module, so a host with skipLibCheck still checks it, and the host's type test imports it by path.
+        $stamps->file(self::BASE, 'resources/js/frame-resource-map.ts', $stubs.'/frame-resource-map.ts.stub');
 
         // The public site: the packaged home page, then the entry renderer's catch-all, printed after every other line.
         $stamps->route('site', "Route::inertia('/', 'site/home')->name('home');");
