@@ -118,7 +118,8 @@ final class ReleaseService
             $member = $locked->members()->where('entry_id', $entryId)->first()
                 ?? (new BeamUxReleaseMember)->setConnection($locked->getConnectionName());
             $member->forceFill([
-                'release_id' => $locked->id, 'entry_id' => $entryId, 'version_id' => $ref,
+                'release_id' => $locked->id, 'member_kind' => BeamUxReleaseMember::KIND_ENTRY, 'member_ref' => $entryId,
+                'entry_id' => $entryId, 'version_id' => $ref,
                 'observed_pin' => $entry->published_version, 'observed_marking' => $entry->workflow_marking,
                 'redirect_target' => $redirectTarget,
             ])->save();
