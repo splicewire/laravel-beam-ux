@@ -47,6 +47,11 @@ class ProviderChainTest extends TestCase
         // resolves and before the storage/access links, none of which it touches.
         'registerFrameNav',
         'registerStorage',
+        // Added by config-sections 04 / ADR-0243, not part of the historical hand-written block: the Release member
+        // kinds and publish sinks registries (`WiresReleaseKinds`, orders 65 and 66). Each is a self-contained
+        // singleton that nothing else in this chain resolves at register time, so their place only has to be stable.
+        'registerReleaseKinds',
+        'registerPublishSinks',
         'registerAccess',
         'registerContainment',
         'registerSitemap',
@@ -149,7 +154,8 @@ class ProviderChainTest extends TestCase
         // Guards the dead-seam shape from the other side: a rename that unhooked every link would leave
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
-        $this->assertCount(14, $this->chain('register'));
+        // 13 historical links + config-sections 04's two (release kinds, publish sinks) + analytics-area 10's one.
+        $this->assertCount(16, $this->chain('register'));
         $this->assertCount(15, $this->chain('boot'));
     }
 
