@@ -157,6 +157,11 @@ It registers into registries `splicewire/laravel-beam` owns:
 
 It also registers into registries other packages own:
 
+- [`beam.analytics.areas`](https://github.com/splicewire/laravel-beam-analytics/blob/main/docs/registries/beam.analytics.areas.mdx),
+  owned by `splicewire/laravel-beam-analytics`: the **Site** area, `analytics-site`. It counts published pages, indexed
+  pages and published pages the sitemap leaves out from Sitemap health, the Redirects, and in Install scope the mirror
+  state from Site health, each figure the count its own list reports to the same reader and linking to that list where
+  this realm mounts it. Its gate is `analytics.view` and the diagnostics read ability (`beam-ux.diagnostics.view`).
 - [`beam.sitemap.sources`](https://github.com/splicewire/laravel-beam-sitemap/blob/main/docs/registries/beam.sitemap.sources.mdx),
   owned by `splicewire/laravel-beam-sitemap`: `EntrySitemapSource`, for published entries.
 - [`beam.workflows.blueprints`](https://github.com/splicewire/laravel-beam-workflows/blob/main/docs/registries/beam.workflows.blueprints.mdx),

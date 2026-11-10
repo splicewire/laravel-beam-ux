@@ -18,6 +18,7 @@ use Splicewire\Beam\Models\BeamParticle;
 use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Ux\Authorization\BeamUxEntryPolicy;
 use Splicewire\Beam\Ux\Concerns\WiresAccess;
+use Splicewire\Beam\Ux\Concerns\WiresAnalyticsArea;
 use Splicewire\Beam\Ux\Concerns\WiresCodecs;
 use Splicewire\Beam\Ux\Concerns\WiresCommands;
 use Splicewire\Beam\Ux\Concerns\WiresCompile;
@@ -78,6 +79,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
     use ChainsTraitMethods;
     use ScopesRegistrant;
     use WiresAccess;
+    use WiresAnalyticsArea;
     use WiresCodecs;
     use WiresCommands;
     use WiresCompile;
