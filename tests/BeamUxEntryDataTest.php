@@ -116,7 +116,7 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertSame(['authored', 'source', null], $schema['properties']['componentKind']['enum']);
         $this->assertNotContains('id', $schema['required']);
         $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $schema['properties']['type']['enum']);
-        $this->assertSame('combobox', $schema['properties']['realm']['x-stud-widget']);
+        $this->assertSame('combobox', $schema['properties']['realm']['x-widget']);
         $this->assertArrayHasKey('x-stud-resource-ref', $schema['properties']['parentId']);
     }
 
