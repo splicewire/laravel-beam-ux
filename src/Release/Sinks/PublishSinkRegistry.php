@@ -47,16 +47,33 @@ class PublishSinkRegistry implements Gated, Registry
     }
 
     /**
-     * Hand a kind's projection to every sink, in registration order. Each runs in its own savepoint on the Release's
-     * connection; what one throws is reported and contained, so neither the publication nor the next sink sees it.
+     * Hand a kind's projection to every sink, in registration order, and own both of a sink's phases ({@see PublishSink}):
+     *
+     *  - its freeze runs now, in its own savepoint on the Release's connection;
+     *  - the projection it returns is registered here, after commit, each in its own containment.
+     *
+     * What either phase throws is reported and contained, so neither the publication (whose pin is already committed
+     * when a projection runs) nor any other sink sees it. A Release that rolls back discards every projection unrun.
      */
     public function project(BeamUxRelease $release, ReleaseProjection $projection, Authenticatable $actor): void
     {
+        $connection = $release->getConnection();
         foreach ($this->sinks() as $sink) {
             try {
-                $release->getConnection()->transaction(fn () => $sink->project($release, $projection, $actor));
+                $deferred = $connection->transaction(fn () => $sink->project($release, $projection, $actor));
             } catch (\Throwable $failure) {
                 report($failure);
+
+                continue;
+            }
+            if ($deferred instanceof \Closure) {
+                $connection->afterCommit(static function () use ($deferred): void {
+                    try {
+                        $deferred();
+                    } catch (\Throwable $failure) {
+                        report($failure);
+                    }
+                });
             }
         }
     }

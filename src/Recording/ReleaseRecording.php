@@ -38,8 +38,12 @@ class ReleaseRecording
             ->first(['id', 'release_id', 'state', 'sha', 'no_change', 'error']);
     }
 
-    /** Called inside publication; optional projection failure is contained in its own savepoint. */
-    public function prepare(BeamUxRelease $release, array $prepared, Authenticatable $actor, array $takedowns = []): void
+    /**
+     * Called inside publication: freezes the receipt (an optional projection failure contained in its own savepoint) and
+     * returns the completion — mirror, Git, artifact retention — for the caller to run once the publication commits.
+     * {@see GitRecordingSink} hands it to the publish sinks registry, which runs it after commit and contains its failure.
+     */
+    public function prepare(BeamUxRelease $release, array $prepared, Authenticatable $actor, array $takedowns = []): \Closure
     {
         $manifest = [];
         $failure = null;
@@ -108,7 +112,8 @@ class ReleaseRecording
             // Without a durable receipt, completion may mirror but MUST NOT run Git.
         }
         $snapshot = clone $release;
-        $release->getConnection()->afterCommit(function () use ($snapshot, $prepared, $takedowns, $actor) {
+
+        return function () use ($snapshot, $prepared, $takedowns, $actor): void {
             try {
                 $this->complete($snapshot->fresh(), $prepared, $takedowns, $actor);
             } catch (\Throwable) {
@@ -122,7 +127,7 @@ class ReleaseRecording
                     // Retention failure is independent of publication/mirroring/recording.
                 }
             }
-        });
+        };
     }
 
     private function complete(BeamUxRelease $release, array $prepared, array $takedowns, Authenticatable $actor): void

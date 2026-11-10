@@ -27,11 +27,18 @@ publication outside its database. Each entry is a `PublishSink`, keyed by its na
 
 The database pin is the publication, and it is not a sink. A sink is a projection of it:
 
-- It is called inside the publish transaction, once a member kind has published, with that kind's
-  `ReleaseProjection`. It freezes what it will project there.
-- It projects after commit, so nothing reaches a disk or a repository from a Release that rolled back.
-- It may fail. Each sink runs in its own savepoint and what it throws is contained, so a failed sink
-  never fails the publication. A sink records its own failure where its readers look.
+A sink works in two phases, and the registry owns the boundary of both:
+
+- **Freeze.** `project()` is called inside the publish transaction, once a member kind has published,
+  with that kind's `ReleaseProjection`, in its own savepoint. The sink records there what it will
+  project. If it throws, its savepoint rolls back and the publication carries on.
+- **Project.** `project()` returns a closure (or null). The registry runs it once the publication
+  commits, never for a Release that rolled back. If it throws, the registry reports it and runs the
+  next sink's projection anyway; the publisher still gets its result.
+
+So a failed sink never fails the publication, and never stops another sink. A sink records its own
+failure where its readers look. A sink does not register its own after-commit work: that would run
+outside the registry's containment.
 
 ## What ships
 

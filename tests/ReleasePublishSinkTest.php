@@ -48,6 +48,8 @@ class ReleasePublishSinkTest extends AuthoredComponentNativeTestCase
         DB::table('users')->insert(['id' => 7, 'name' => 'Author']);
         $this->author = User::query()->findOrFail(7);
         ProbeSink::$seen = [];
+        ProbeSink::$projected = [];
+        ProjectionFailingSink::$attempts = 0;
     }
 
     public function test_the_registry_is_in_the_index_conforms_and_seeds_git(): void
@@ -61,7 +63,7 @@ class ReleasePublishSinkTest extends AuthoredComponentNativeTestCase
         $this->assertInstanceOf(GitRecordingSink::class, $sinks->resolve('git'));
     }
 
-    public function test_every_sink_sees_the_projection_and_a_failing_sink_fails_nothing(): void
+    public function test_every_sink_sees_the_projection_and_a_failing_freeze_fails_nothing(): void
     {
         app(PublishSinkRegistry::class)->register(new FailingSink)->register(new ProbeSink);
         $page = $this->draftPage('about');
@@ -71,16 +73,50 @@ class ReleasePublishSinkTest extends AuthoredComponentNativeTestCase
 
         $this->assertSame('published', $release->status, 'a failing sink never fails the publication');
         $this->assertSame($version, $page->fresh()->published_version, 'the pin is the publication');
-        $this->assertSame([['entry', [(string) $page->id], 0]], ProbeSink::$seen, 'the next sink still ran');
+        $this->assertSame([['entry', [(string) $page->id], 0]], ProbeSink::$seen, 'the next sink still froze');
         $this->assertSame(0, DB::table('beam_ux_releases')->where('title', 'written by a failed sink')->count(),
             'what a failing sink wrote rolled back with its savepoint, and only that');
+        $this->assertSame([[0, $version]], ProbeSink::$projected, 'and still projected, after commit');
+    }
+
+    /** Standards + Spec HIGH (04 amend): a projection that throws AFTER commit is contained by the registry too. */
+    public function test_a_projection_that_throws_after_commit_fails_neither_the_publication_nor_a_later_sink(): void
+    {
+        app(PublishSinkRegistry::class)->register(new ProjectionFailingSink)->register(new ProbeSink);
+        $page = $this->draftPage('about');
+        $version = $this->saveDraft($page);
+
+        $release = app(ReleaseService::class)->requestOne($page->fresh(), $version, $this->author);
+
+        $this->assertSame('published', $release->status, 'the publisher gets its result, not the projection\'s exception');
+        $this->assertSame($version, DB::table('beam_ux_entries')->where('id', $page->id)->value('published_version'), 'the pin is durable');
+        $this->assertSame(1, ProjectionFailingSink::$attempts, 'the failing projection did run, after commit');
+        $this->assertSame([[0, $version]], ProbeSink::$projected, 'the later sink still projected, outside any transaction, seeing the pin');
+    }
+
+    public function test_a_release_that_rolls_back_projects_nothing(): void
+    {
+        app(PublishSinkRegistry::class)->register(new ProbeSink);
+        $page = $this->draftPage('about');
+        $release = (new BeamUxRelease)->forceFill(['id' => (string) Str::uuid()]);
+
+        try {
+            DB::transaction(function () use ($release, $page) {
+                app(PublishSinkRegistry::class)->project($release, new ReleaseProjection('entry', [[$page, null, []]]), $this->author);
+                throw new \RuntimeException('a later member refused');
+            });
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertCount(1, ProbeSink::$seen, 'the sink froze inside the transaction');
+        $this->assertSame([], ProbeSink::$projected, 'and its projection was discarded with the rollback');
     }
 
     public function test_the_git_sink_records_entry_projections_alone(): void
     {
         $this->mock(ReleaseRecording::class)->shouldNotReceive('prepare');
 
-        (new GitRecordingSink)->project(new BeamUxRelease, new ReleaseProjection('config', ['mail' => 'v2']), $this->author);
+        $this->assertNull((new GitRecordingSink)->project(new BeamUxRelease, new ReleaseProjection('config', ['mail' => 'v2']), $this->author));
     }
 
     private function saveDraft(BeamUxEntry $page): string
@@ -95,7 +131,7 @@ class ReleasePublishSinkTest extends AuthoredComponentNativeTestCase
     }
 }
 
-/** Writes inside its savepoint, then throws. */
+/** Writes inside its savepoint, then throws while freezing. */
 class FailingSink implements PublishSink
 {
     public function name(): string
@@ -103,7 +139,7 @@ class FailingSink implements PublishSink
         return 'failing';
     }
 
-    public function project(BeamUxRelease $release, ReleaseProjection $projection, Authenticatable $actor): void
+    public function project(BeamUxRelease $release, ReleaseProjection $projection, Authenticatable $actor): ?\Closure
     {
         $release->getConnection()->table('beam_ux_releases')->where('id', $release->id)->update(['title' => 'written by a failed sink']);
 
@@ -111,19 +147,51 @@ class FailingSink implements PublishSink
     }
 }
 
-/** Records the kind, the published subjects and the withdrawn count it was handed. */
+/** Freezes cleanly, then its projection throws once the publication has committed. */
+class ProjectionFailingSink implements PublishSink
+{
+    public static int $attempts = 0;
+
+    public function name(): string
+    {
+        return 'projection-failing';
+    }
+
+    public function project(BeamUxRelease $release, ReleaseProjection $projection, Authenticatable $actor): ?\Closure
+    {
+        return function (): void {
+            self::$attempts++;
+
+            throw new \RuntimeException('optional projection failed after commit');
+        };
+    }
+}
+
+/**
+ * Records what it froze (the kind, the published subjects, the withdrawn count) and, when its projection runs, the
+ * transaction level and the first subject's committed pin as a fresh read sees it.
+ */
 class ProbeSink implements PublishSink
 {
     /** @var list<array{string, list<string>, int}> */
     public static array $seen = [];
+
+    /** @var list<array{int, ?string}> */
+    public static array $projected = [];
 
     public function name(): string
     {
         return 'probe';
     }
 
-    public function project(BeamUxRelease $release, ReleaseProjection $projection, Authenticatable $actor): void
+    public function project(BeamUxRelease $release, ReleaseProjection $projection, Authenticatable $actor): ?\Closure
     {
-        self::$seen[] = [$projection->kind, array_values(array_map(fn (array $item) => (string) $item[0]->id, $projection->published)), count($projection->withdrawn)];
+        $ids = array_values(array_map(fn (array $item) => (string) $item[0]->id, $projection->published));
+        self::$seen[] = [$projection->kind, $ids, count($projection->withdrawn)];
+
+        return function () use ($release, $ids): void {
+            $connection = $release->getConnection();
+            self::$projected[] = [$connection->transactionLevel(), $connection->table('beam_ux_entries')->where('id', $ids[0] ?? '')->value('published_version')];
+        };
     }
 }
