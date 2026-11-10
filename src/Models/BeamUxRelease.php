@@ -38,7 +38,21 @@ class BeamUxRelease extends Model implements ParticipatesInWorkflowTransaction, 
         return 'beam-ux-release';
     }
 
+    /**
+     * The Release's ENTRY members: page-editor entries, the only kind before config-sections 04. Scoped to that kind so
+     * every reader written against entries (the preview, readiness, redirect and file surfaces) keeps reading exactly
+     * what it read; publish, rollback, recording and the Release's own projection read {@see allMembers()}.
+     */
     public function members(): HasMany
+    {
+        // Scoped by `entry_id`, not `member_kind`: an entry member always has one and a member of any other kind never
+        // does, so the two scopes select the same rows — and this one also reads a members table that predates the
+        // kind columns (an install between deploy and migrate; a host or fixture that defines the table itself).
+        return $this->allMembers()->whereNotNull('entry_id');
+    }
+
+    /** Every member, whatever its kind (ADR-0243). */
+    public function allMembers(): HasMany
     {
         return $this->hasMany(BeamUxReleaseMember::class, 'release_id');
     }

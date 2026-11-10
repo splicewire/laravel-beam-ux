@@ -28,13 +28,19 @@ return new class extends Migration
             Schema::create('beam_ux_release_members', function (Blueprint $table) {
                 $table->uuid('id')->primary();
                 $table->uuid('release_id')->index();
-                $table->uuid('entry_id')->index();
+                // A member has a kind (config-sections 04): `entry` is a page-editor entry, addressed by `entry_id`
+                // as before; another kind addresses its subject by `member_ref` alone, so `entry_id` is nullable.
+                // An existing install reaches the same shape through add_member_kind_to_beam_ux_release_members_table.
+                $table->string('member_kind')->default('entry');
+                $table->string('member_ref')->nullable();
+                $table->uuid('entry_id')->nullable()->index();
                 $table->uuid('version_id')->nullable();
                 $table->uuid('observed_pin')->nullable();
                 $table->string('observed_marking')->nullable();
                 $table->string('redirect_target')->nullable();
                 $table->timestamps();
                 $table->unique(['release_id', 'entry_id']);
+                $table->unique(['release_id', 'member_kind', 'member_ref']);
             });
         }
     }

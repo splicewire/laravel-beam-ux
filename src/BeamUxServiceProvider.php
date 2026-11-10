@@ -136,6 +136,8 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 'shared/add_origin_to_beam_ux_releases_table',
                 // A Release's Preview Links (ADR-0232 d8): on/off and the secret they are signed with.
                 'shared/add_preview_links_to_beam_ux_releases_table',
+                // Release members have kinds (ADR-0243, config-sections 04): kind + ref, entry_id nullable, backfilled.
+                'shared/add_member_kind_to_beam_ux_release_members_table',
                 // A site's Redirects (ADR-0236 d1): a row of their own, beside the entries they lead to.
                 'shared/create_beam_ux_redirects_table',
                 'shared/create_beam_ux_release_recordings_table',
