@@ -52,6 +52,10 @@ class ProviderChainTest extends TestCase
         'registerSitemap',
         'registerDisk',
         'registerEntitlements',
+        // Added by analytics-area ticket 10, not part of the historical hand-written block: contributes the Site area to
+        // laravel-beam-analytics' area registry. Sequenced at 120, last, because it binds nothing the other links read; it
+        // must stay in the register chain, since laravel-beam-analytics resolves that registry while it boots.
+        'registerAnalyticsArea',
     ];
 
     /** `packageBooted()`'s hand-written block, verbatim — note it mixed `boot*` and `register*` prefixes. */
@@ -145,7 +149,7 @@ class ProviderChainTest extends TestCase
         // Guards the dead-seam shape from the other side: a rename that unhooked every link would leave
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
-        $this->assertCount(13, $this->chain('register'));
+        $this->assertCount(14, $this->chain('register'));
         $this->assertCount(15, $this->chain('boot'));
     }
 
