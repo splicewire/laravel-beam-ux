@@ -1,0 +1,64 @@
+---
+title: Release member kinds
+segment: beam.ux.release-member-kinds
+nav_order: 48
+excerpt: The kinds of subject a Release can hold, and what each one checks and publishes.
+---
+
+# Release member kinds
+
+`beam.ux.release-member-kinds` holds the **kinds** a Release member can be. Each entry is a
+`ReleaseMemberKind`, keyed by the `member_kind` its members store. beam-ux ships `entry`, a
+page-editor entry; a package whose subject a Release can publish registers its own kind.
+
+{/* registry-facts:start — generated from the #[IsRegistry] declaration; regenerate it, do not edit between these markers. */}
+
+- **Root:** `beam.ux.release-member-kinds`
+- **Entries:** `Splicewire\Beam\Ux\Release\Kinds\ReleaseMemberKind`
+- **Duplicate keys:** Reject — registering a taken key throws
+- **Population:** Optional — an empty registry is normal
+- **Order:** `48` (display order, ascending)
+- **Declared by:** `Splicewire\Beam\Ux\Release\Kinds\ReleaseMemberKindRegistry`
+
+{/* registry-facts:end */}
+
+<RegistryRegistrants root="beam.ux.release-member-kinds" />
+
+## What a kind owns
+
+The Release owns what every member shares: its row lock, its lifecycle, review, scheduling and
+Preview Links. A kind owns its subject:
+
+- how a member's `member_ref` resolves, and the refusal of a subject outside the Release's realm or
+  connection;
+- who may place, approve, publish and record it (`ReleaseAccess`: edit, publish, direct);
+- whether a member may join, and whether its subject moved after it joined;
+- what Publish does to its members, after every member of every kind has passed;
+- what a rollback Release selects for it.
+
+A member's `version_id` is the version the Release publishes, or null to withdraw the subject.
+
+## What ships
+
+- `entry` is a page-editor entry, addressed by its id (also stored as `entry_id`). A null version is
+  a Take-down, and only a Take-down carries a redirect target.
+
+## Adding a kind
+
+```php
+use Splicewire\Beam\Ux\Release\Kinds\ReleaseMemberKindRegistry;
+
+app(ReleaseMemberKindRegistry::class)->register(new ConfigOverrideMemberKind);
+```
+
+A taken key throws: stored members name their kind, so replacing one would change what existing
+rows mean. A Release holding a member of a kind no installed package provides refuses to advance.
+
+## Related registries
+
+- [The beam-ux entry cluster](beam.ux).
+
+## Going deeper
+
+ADR-0243 records the decision. The source is
+[`ReleaseMemberKind`](https://github.com/splicewire/laravel-beam-ux/blob/main/src/Release/Kinds/ReleaseMemberKind.php).
