@@ -31,7 +31,7 @@ class RegistryConformanceTest extends TestCase
     {
         $index = app(RegistryIndex::class);
 
-        foreach (['beam.ux.codecs', 'beam.ux.placements', 'beam.ux.storage-drivers', 'beam.ux.release-member-kinds'] as $root) {
+        foreach (['beam.ux.codecs', 'beam.ux.placements', 'beam.ux.storage-drivers', 'beam.ux.release-member-kinds', 'beam.ux.publish-sinks'] as $root) {
             $this->assertTrue($index->has($root), "`{$root}` was never described into the index.");
         }
 
