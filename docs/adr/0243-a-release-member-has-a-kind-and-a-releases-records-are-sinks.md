@@ -34,11 +34,15 @@ recorded become declared, registered seams.
    (`Reject`), because stored rows name it. `entry` is `EntryMemberKind`, lifted out of `ReleaseService` unchanged;
    Take-downs and Redirects stay inside it.
 3. **A Release's records are sinks.** A `PublishSink`, registered under `beam.ux.publish-sinks` by name, is a projection
-   of the publication outside the database. The database pin is the publication, and is not a sink. A sink is handed
-   each kind's `ReleaseProjection` inside the publish transaction, where it freezes what it will project, and it
-   projects after commit, so nothing reaches a disk or a repository from a Release that rolled back. A sink may fail:
-   each runs in its own savepoint and what it throws is contained, so a sink never fails a publication. `git` is the
-   local recording of ADR-0226 decisions 3 and 4, as `GitRecordingSink`, unchanged.
+   of the publication outside the database. The database pin is the publication, and is not a sink. A sink has two
+   phases, and the registry owns the boundary of both. It **freezes** inside the publish transaction: handed each
+   kind's `ReleaseProjection` in its own savepoint, it records what it will project. It **projects** after commit:
+   the freeze returns that work as a closure, and the registry runs it once the publication commits, so nothing
+   reaches a disk or a repository from a Release that rolled back. A sink may fail in either phase, and the registry
+   contains it there: a failed freeze rolls back its savepoint alone, and a failed projection is reported while the
+   next sink's still runs. A sink never fails a publication or stops another sink, and it never registers its own
+   after-commit work, which would run outside that containment. `git` is the local recording of ADR-0226 decisions 3
+   and 4, as `GitRecordingSink`: the recording freezes its receipt and returns its completion, unchanged.
 4. **A recording row says its kind, ref and root.** Every manifest row in the frozen receipt carries the member's kind,
    its ref, and the root its `path` is relative to; an entry row's root is the mirror disk's. A receipt frozen before
    this decision reads as entry rows under the mirror disk, exactly as completion and retry read it before, so it still
