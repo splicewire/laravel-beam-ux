@@ -8,6 +8,7 @@ use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Ux\Manifest\EntryResidency;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
+use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseRecording;
 use Splicewire\Beam\Ux\Placement\PlacementResolver;
 use Splicewire\Beam\Ux\Release\ReleaseService;
@@ -57,7 +58,7 @@ class ReleaseRecording
                     throw new RecordingFailure('manifest', 'The Release mirror manifest is too large or contains duplicate paths.');
                 }
                 $seen[strtolower($absolute)] = true;
-                $manifest[] = ['entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
+                $manifest[] = [...self::entryRow($entry, $disk), 'entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
                     'codec' => $entry->codec()::class, 'path' => $path, 'absolute' => $absolute,
                     'mode' => is_file($absolute) && is_executable($absolute) ? '100755' : '100644',
                     'bytes' => base64_encode($bytes), 'sha256' => hash('sha256', $bytes)];
@@ -72,7 +73,7 @@ class ReleaseRecording
                         throw new RecordingFailure('mirror-drift', 'A moved page\'s old mirror differs from its published bytes.');
                     }
                     $seen[strtolower($old)] = true;
-                    $manifest[] = ['action' => 'delete', 'move' => true, 'entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
+                    $manifest[] = [...self::entryRow($entry, $disk), 'action' => 'delete', 'move' => true, 'entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
                         'codec' => $moved['codec'], 'path' => $moved['path'], 'absolute' => $old,
                         'mode' => is_executable($old) ? '100755' : '100644',
                         'bytes' => base64_encode($moved['bytes']), 'sha256' => hash('sha256', $moved['bytes'])];
@@ -89,7 +90,7 @@ class ReleaseRecording
                     throw new RecordingFailure('mirror-drift', 'A Take-down mirror differs from the currently published bytes.');
                 }
                 $seen[strtolower($absolute)] = true;
-                $manifest[] = ['action' => 'delete', 'entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
+                $manifest[] = [...self::entryRow($entry, $disk), 'action' => 'delete', 'entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
                     'codec' => $entry->codec()::class, 'path' => $path, 'absolute' => $absolute,
                     'mode' => is_executable($absolute) ? '100755' : '100644',
                     'bytes' => base64_encode($bytes), 'sha256' => hash('sha256', $bytes)];
@@ -138,12 +139,13 @@ class ReleaseRecording
             try {
                 $this->authorize($release, $actor);
                 $receipt = $this->receipt($release);
-                if ($receipt === null || $receipt->state === 'unavailable' || count(self::memberFiles($receipt->manifest)) !== $release->members()->count()) {
+                $rows = $receipt === null ? [] : $this->rows($receipt->manifest);
+                if ($receipt === null || $receipt->state === 'unavailable' || count(self::memberFiles($rows)) !== $release->members()->count()) {
                     throw new RecordingFailure('unavailable', 'No durable recording receipt is available.');
                 }
                 $git = new LocalGit($this->disk()->path(''));
                 $lock = $git->lock();
-                foreach ($receipt->manifest as $file) {
+                foreach ($rows as $file) {
                     $this->contained($this->disk()->path(''), $file['path']);
                     $git->relative($file['absolute']);
                 }
@@ -290,6 +292,43 @@ class ReleaseRecording
     }
 
     /**
+     * What every manifest row says of itself (ADR-0243): the member's kind, its ref, and the root its `path` is
+     * relative to. An entry row's root is the mirror disk's.
+     *
+     * @return array{kind: string, ref: string, root: string}
+     */
+    private static function entryRow(BeamUxEntry $entry, \Illuminate\Contracts\Filesystem\Filesystem $disk): array
+    {
+        return ['kind' => BeamUxReleaseMember::KIND_ENTRY, 'ref' => (string) $entry->id, 'root' => $disk->path('')];
+    }
+
+    /**
+     * A receipt's rows, each with its kind, ref and root. A receipt frozen before rows carried them holds entry rows
+     * only, under the mirror disk, so a row without them reads as `entry`, its ref its `entryId`, its root the disk's:
+     * exactly what completion and retry assumed of it before. Local recording verifies entry rows under the mirror disk;
+     * a row of another kind, or under another root, refuses rather than being read as an entry.
+     *
+     * @param  list<array<string, mixed>>  $manifest
+     * @return list<array<string, mixed>>
+     */
+    private function rows(array $manifest): array
+    {
+        $root = $this->disk()->path('');
+
+        return array_map(function (array $file) use ($root): array {
+            $file += ['kind' => BeamUxReleaseMember::KIND_ENTRY, 'ref' => (string) ($file['entryId'] ?? ''), 'root' => $root];
+            if ($file['kind'] !== BeamUxReleaseMember::KIND_ENTRY) {
+                throw new RecordingFailure('unavailable', 'This Release has no supported frozen recording receipt.');
+            }
+            if ($file['root'] !== $root) {
+                throw new RecordingFailure('path', 'The mirror disk no longer matches this frozen receipt.');
+            }
+
+            return $file;
+        }, $manifest);
+    }
+
+    /**
      * The manifest's one file per member: a File Language move adds its old path's deletion beside it.
      *
      * @param  list<array<string, mixed>>  $manifest
@@ -309,7 +348,7 @@ class ReleaseRecording
             throw new RecordingFailure('unavailable', 'This Release has no supported frozen recording receipt.');
         }
         $disk = $this->disk();
-        foreach ($receipt->manifest as $file) {
+        foreach ($this->rows($receipt->manifest) as $file) {
             $this->contained($disk->path(''), $file['path']);
             if ($disk->path($file['path']) !== $file['absolute']) {
                 throw new RecordingFailure('path', 'The mirror disk no longer matches this frozen receipt.');
@@ -357,9 +396,10 @@ class ReleaseRecording
     {
         $this->authorize($release, $actor);
         $row = $this->receipt($release);
-        $members = $row === null ? [] : self::memberFiles($row->manifest);
-        $moves = $row === null ? [] : array_values(array_filter($row->manifest, fn (array $file) => ($file['move'] ?? false) === true));
-        if ($row === null || $row->state === 'unavailable' || $row->manifest === []
+        $rows = $row === null ? [] : $this->rows($row->manifest);
+        $members = self::memberFiles($rows);
+        $moves = array_values(array_filter($rows, fn (array $file) => ($file['move'] ?? false) === true));
+        if ($row === null || $row->state === 'unavailable' || $rows === []
             || count($members) !== $release->members()->count()
             || count(array_unique(array_column($members, 'entryId'))) !== count($members)
             || count(array_unique(array_column($moves, 'entryId'))) !== count($moves)
@@ -372,7 +412,7 @@ class ReleaseRecording
             throw new RecordingFailure('recovery-required', 'The saved recording belongs to a different repository or branch.');
         }
         $manifest = [];
-        foreach ($row->manifest as $file) {
+        foreach ($rows as $file) {
             $entry = BeamUxEntry::on($release->getConnectionName())->findOrFail($file['entryId']);
             $member = $release->members()->where('entry_id', $entry->id)->first();
             $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
