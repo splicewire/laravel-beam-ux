@@ -2,14 +2,16 @@
 
 The beam-ux authoring package (`Splicewire\Beam\Ux\*`) — the beam-tier authoring/orchestration UX layer over beam-core.
 
-## Mounting a second realm's console (`Route::beamRealmConsole()`)
+## Mounting a realm's console (`Route::beamRealmConsole()`)
 
-The tenant console is the host's root mount. A realm with its own route base (`operator` at `/operator`, a
-package realm such as `exec` at `/exec`) gets its console from one line, above `Route::beamUxSite()`:
+Mount a realm's projected console before `Route::beamUxSite()`:
 
 ```php
+Route::beamRealmConsole('tenant', ['auth', 'verified']);
 Route::beamRealmConsole('exec', ['auth', 'verified']);
 ```
+
+A realm with its own route base (`operator` at `/operator`, `exec` at `/exec`) gets these routes:
 
 | route | path | what |
 |---|---|---|
@@ -17,12 +19,44 @@ Route::beamRealmConsole('exec', ['auth', 'verified']);
 | `{realm}.frame.manifest` | `{base}/frame/manifest` | `FrameManifestController` with `defaults('realm', $realm)` |
 | `{realm}.frame.console` | `{base}/{frameRoute}` | the `frame/console` page with `{realm, basename, manifestUrl}` |
 
+A realm mounted at `/`, such as `tenant`, gets `frame.console` at `{frameRoute}` with `[]` page props. It uses
+frame's existing unscoped manifest and registers no home redirect or manifest route. Keep the host's own named
+`dashboard` route. The `site` realm uses the public entry renderer and has no console; a second root console is
+refused by name.
+
 - The middleware is yours, plus `can:{ability}` for the realm's own gate (`RealmGateAbility::for()`), so the
   console is never a softer door than its dashboard. A realm that gates nothing gets no `can:`.
 - `{frameRoute}` is constrained to the first segments of every leaf the realm projects and every nav seat
-  declared for it. Nothing is written down; a projector failure mounts no console.
-- `page:` names another page component (default `frame/console`); `home: false` leaves the front door to you.
-- The page renders through the `EntryRenderer` port (Inertia by default). A realm mounted at `/` is refused.
+  declared for it. A projector failure mounts no console.
+- `page:` names another page component (default `frame/console`). `home: null` defaults to a redirect for a
+  prefixed realm and no redirect for a root realm. `home: false` skips the redirect; `home: true` at `/` throws.
+- The page renders through the `EntryRenderer` port (Inertia by default).
+- A console mounted after an overlapping `beamUxSite()` catch-all throws, naming the call and earlier route.
+  An undomained mount overlaps every domain; two distinct explicit domains may coexist.
+
+## Mounting the home page (`Route::beamUxHome()`)
+
+The host opts in to its home route; installing beam-ux claims no homepage. Remove or replace an existing `/`
+route before mounting:
+
+```php
+Route::beamUxHome(
+    page: 'site/home',
+    slug: 'home',
+    realm: 'site',
+    name: 'home',
+);
+// Other host routes and console mounts go here.
+Route::beamUxSite('site/entry'); // last
+```
+
+The macro returns the `GET /` route, backed by `HomeEntryController` and `ResolvePreviewContext`, rendering
+through `EntryRenderer`. It shares the page entry, intake forms, page head and Preview bar; a Preview selects
+its own saved body and ancestry, and a home taken down there answers 404.
+
+`beamUxHome()` and `beamUxSite(claimRoot: true)` refuse an existing `GET /` on the same effective domain and
+prefix, naming it. Distinct explicit-domain roots stay legal. A home mounted after an overlapping site catch-all
+also throws by name. The shell stamp prints these mount calls and leaves `routes/` to the host.
 
 ## Serving entries publicly (`Route::beamUxSite()`)
 
@@ -47,7 +81,9 @@ a mount argument with no default. The macro registers two routes:
 
 The catch-all goes last because Laravel matches in registration order — a package that auto-registered
 it would silently claim every unmatched URL in your app. Not calling the macro is the off switch: beam-ux
-stays headless-installable and gains no public surface.
+stays headless-installable and gains no public surface. Register the home and console mounts first: either
+throws by name if an earlier site catch-all would take its URLs. Keep the last-line ordering for other host routes
+and routes registered later by another provider.
 
 ```php
 Route::beamUxSite(

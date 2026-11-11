@@ -214,7 +214,7 @@ class StampShellCommand extends Command
 
         $this->newLine();
         $this->components->info('Mount it — the stamp declares, the host routes. Paste this block, as printed, at the END of routes/web.php '
-            .'(after the host\'s own routes and requires); the site home replaces any \'/\' route the host already has. Nothing was edited:');
+            .'(after the host\'s own routes and requires); remove or replace your existing \'/\' route before pasting this block; the stamp never edits routes/:');
 
         foreach ($routes as $group) {
             $this->line('    // '.$group['surface'].($group['last'] ? ' — LAST: its {path} catch-all takes every route registered after it' : ''));

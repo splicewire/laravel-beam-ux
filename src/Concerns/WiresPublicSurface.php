@@ -15,15 +15,16 @@ use Splicewire\Beam\Ux\Http\Controllers\PreviewLinkController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewReleaseController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewStartController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewSwitchController;
-use Splicewire\Beam\Ux\Http\Controllers\TenantPreviewReleaseController;
 use Splicewire\Beam\Ux\Http\Controllers\PreviewViewAsMeController;
 use Splicewire\Beam\Ux\Http\Controllers\PublicEntryController;
+use Splicewire\Beam\Ux\Http\Controllers\TenantPreviewReleaseController;
 use Splicewire\Beam\Ux\Http\EntryPageProps;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
 use Splicewire\Beam\Ux\Http\InertiaEntryRenderer;
 use Splicewire\Beam\Ux\Http\Middleware\ResolvePreviewContext;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Routing\SiteCatchAll;
 use Splicewire\Beam\Ux\Sitemap\EntryPublishGate;
 
 /**
@@ -113,6 +114,10 @@ trait WiresPublicSurface
             bool $withTenantPreviewOpen = false,
         ): void {
             /** @var Router $this */
+            if ($claimRoot) {
+                SiteCatchAll::refuseRoot($this, 'Route::beamUxSite(claimRoot: true)');
+            }
+
             $artifactRoot ??= config('beam.ux.site.artifact_root', 'beam/ux/artifacts');
             $routeName ??= config('beam.ux.route_name', 'beam.ux.');
             // COMPOSED, never replaced (api-surface-coherence 134, ruled by 142): the package baseline,

@@ -60,6 +60,22 @@ class StampShellPrintedRoutesTest extends TestCase
         $this->assertSame('beam.ux.site.show', $this->reach('/about-us'));
     }
 
+    public function test_the_four_surface_block_prints_the_ruled_mount_calls_in_order(): void
+    {
+        $block = $this->printedBlock('site,account,operator,os');
+        $this->assertSame([
+            "Route::beamUxHome('site/home');",
+            "Route::inertia('account', 'account/home')->middleware(['auth', 'verified'])->name('account')->defaults(\\Splicewire\\Beam\\Authorization\\SeatGate::OPEN_TO_MEMBERS, true);",
+            "Route::beamRealmConsole('tenant', ['auth', 'verified']);",
+            "Route::beamRealmConsole('operator', ['auth', 'verified']);",
+            "Route::inertia('os', 'os')->middleware(['auth', 'verified', 'can:entitlement:os.enter'])->name('os.shell');",
+            "Route::beamUxSite('site/entry');",
+        ], $this->routeLines($block));
+        $this->register($block);
+        $this->assertSame('home', $this->reach('/'));
+        $this->assertSame('frame.console', $this->reach('/dashboard'));
+    }
+
     public function test_the_site_catch_all_is_the_last_printed_line_and_tier_lines_come_before_it(): void
     {
         $this->app->make(ShellStamps::class)->route('operator', 'Route::towerSpa();');
@@ -75,7 +91,7 @@ class StampShellPrintedRoutesTest extends TestCase
         $block = $this->printedBlock('site');
         $this->register($block);
 
-        $this->assertSame(["Route::inertia('/', 'site/home')->name('home');", "Route::beamUxSite('site/entry');"], $this->routeLines($block));
+        $this->assertSame(["Route::beamUxHome('site/home');", "Route::beamUxSite('site/entry');"], $this->routeLines($block));
         $this->assertSame('home', $this->reach('/'));
         $this->assertSame('beam.ux.site.show', $this->reach('/about-us'));
     }

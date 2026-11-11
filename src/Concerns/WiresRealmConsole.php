@@ -14,6 +14,7 @@ use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Data\Pages\RealmConsolePageData;
 use Splicewire\Beam\Ux\Frame\RealmConsoleSegments;
 use Splicewire\Beam\Ux\Http\EntryRenderer;
+use Splicewire\Beam\Ux\Routing\SiteCatchAll;
 
 /**
  * One concern of {@see BeamUxServiceProvider}: the `Route::beamRealmConsole()` macro, which mounts a second
@@ -47,7 +48,7 @@ use Splicewire\Beam\Ux\Http\EntryRenderer;
  * realm a host provider registers in its own `boot()` gets its dashboard leaf too late for the route file (the
  * known limit {@see WiresRealmDashboards} documents), so register such a realm in `register()`.
  *
- * A realm mounted at `/` (tenant, site) is refused: its console is the host's root mount, not a prefixed one.
+ * A root realm mounts only its console, using frame's manifest and no page props. The site realm has no console.
  */
 trait WiresRealmConsole
 {
@@ -62,18 +63,30 @@ trait WiresRealmConsole
             string $realm,
             array $middleware = ['auth', 'verified'],
             string $page = 'frame/console',
-            bool $home = true,
+            ?bool $home = null,
         ): void {
             /** @var Router $this */
             $router = $this;
             $base = trim(app(RealmRegistry::class)->resolve($realm)->routeBase, '/');
 
-            if ($base === '') {
-                throw new InvalidArgumentException(
-                    "Route::beamRealmConsole('{$realm}'): the realm is mounted at '/', so its console is the host's root "
-                    .'mount, not a prefixed one. Mount it in the route file as the tenant console is.'
-                );
+            if ($realm === 'site') {
+                throw new InvalidArgumentException("Route::beamRealmConsole('site'): the site realm's root is the public entry renderer, Route::beamUxSite(); it has no console.");
             }
+
+            if ($base === '') {
+                SiteCatchAll::refuseAfter($router, "Route::beamRealmConsole('{$realm}')");
+                if ($home === true) {
+                    throw new InvalidArgumentException("Route::beamRealmConsole('{$realm}', home: true): the realm is mounted at '/', whose home is the site's (Route::beamUxHome()).");
+                }
+
+                foreach ($router->getRoutes()->getRoutes() as $route) {
+                    if ($route->getName() === 'frame.console') {
+                        throw new InvalidArgumentException("Route::beamRealmConsole('{$realm}'): a root console is already registered (frame.console).");
+                    }
+                }
+            }
+
+            $home ??= $base !== '';
 
             $ability = RealmGateAbility::for($realm, app(RealmRegistry::class));
 
@@ -81,7 +94,20 @@ trait WiresRealmConsole
                 $middleware[] = "can:{$ability}";
             }
 
+            if ($base === '') {
+                $segments = RealmConsoleSegments::for($realm, '');
+                if ($segments !== []) {
+                    $router->get('{frameRoute}', fn () => app(EntryRenderer::class)->render($page, []))
+                        ->middleware($middleware)
+                        ->where('frameRoute', '('.implode('|', array_map(fn (string $s): string => preg_quote($s, '/'), $segments)).')(\/[^\/]+)?')
+                        ->name('frame.console');
+                }
+
+                return;
+            }
+
             $router->middleware($middleware)->prefix($base)->group(function () use ($router, $realm, $base, $page, $home): void {
+                SiteCatchAll::refuseAfter($router, "Route::beamRealmConsole('{$realm}')");
                 if ($home) {
                     // The realm's front door lands on its dashboard leaf. Behind the same gate as the console it
                     // redirects into, so the door is never softer than the room.

@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Tests\Console;
 
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -47,6 +48,16 @@ class StampShellCommandTest extends TestCase
         File::deleteDirectory($this->host);
 
         parent::tearDown();
+    }
+
+    public function test_the_route_paste_note_requires_removing_an_existing_home(): void
+    {
+        Artisan::call('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site,account']);
+        $output = Artisan::output();
+        $this->assertStringContainsString("remove or replace your existing '/' route before pasting this block", $output);
+        $this->assertStringContainsString('the stamp never edits routes/', $output);
+        $this->assertStringContainsString("Route::beamUxHome('site/home');", $output);
+        $this->assertStringContainsString("Route::beamRealmConsole('tenant', ['auth', 'verified']);", $output);
     }
 
     public function test_a_stamp_writes_the_base_and_the_nav_records_them_and_prints_routes_and_seeding(): void

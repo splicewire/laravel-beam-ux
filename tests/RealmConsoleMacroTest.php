@@ -122,11 +122,89 @@ class RealmConsoleMacroTest extends TestCase
         $this->assertNull($this->named($router, 'operator.frame.console'));
     }
 
-    public function test_a_realm_mounted_at_the_root_is_refused(): void
+    public function test_a_root_realm_mounts_only_its_projected_console_without_props(): void
+    {
+        $this->seat('tenant', 'people', '/people');
+        $router = $this->router();
+        $router->beamRealmConsole('tenant', ['auth', 'verified']);
+        $console = $this->named($router, 'frame.console');
+
+        $this->assertNotNull($console);
+        $this->assertSame('{frameRoute}', $console->uri());
+        $this->assertSame(['auth', 'verified'], $console->middleware());
+        $this->assertStringContainsString('people', $console->wheres['frameRoute']);
+        $this->assertNull($this->named($router, 'tenant.home'));
+        $this->assertNull($this->named($router, 'tenant.frame.manifest'));
+        $this->assertCount(1, $router->getRoutes());
+        $this->app->instance(EntryRenderer::class, new class implements EntryRenderer
+        {
+            public function render(string $page, array $props): Response
+            {
+                return response()->json(['page' => $page, 'props' => $props]);
+            }
+        });
+        $response = ($console->getAction('uses'))();
+        $this->assertSame(['page' => 'frame/console', 'props' => []], json_decode($response->getContent(), true));
+    }
+
+    public function test_the_site_realm_has_no_console(): void
     {
         $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Route::beamRealmConsole('site'): the site realm's root");
+        $this->router()->beamRealmConsole('site');
+    }
 
-        $this->router()->beamRealmConsole('tenant', ['auth']);
+    public function test_a_root_realm_cannot_claim_the_sites_home(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Route::beamRealmConsole('tenant', home: true)");
+        $this->router()->beamRealmConsole('tenant', home: true);
+    }
+
+    public function test_a_second_root_console_is_refused(): void
+    {
+        $router = $this->router();
+        $this->seat('tenant', 'people', '/people');
+        $router->beamRealmConsole('tenant');
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('a root console is already registered (frame.console)');
+        $router->beamRealmConsole('tenant');
+    }
+
+    public function test_a_failed_root_projection_mounts_nothing(): void
+    {
+        $this->app->bind(RouteContextProjector::class, fn () => throw new \RuntimeException('projector down'));
+        $router = $this->router();
+        $router->beamRealmConsole('tenant');
+        $this->assertCount(0, $router->getRoutes());
+    }
+
+    public function test_a_root_console_registered_after_the_site_is_refused_by_name(): void
+    {
+        $this->refuseConsoleAfterSite('tenant');
+    }
+
+    public function test_an_undomained_console_overlaps_an_earlier_domain_specific_site(): void
+    {
+        $router = $this->router();
+        $router->domain('one.invalid')->group(fn () => $router->beamUxSite('site/entry', routeName: 'one.'));
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Route::beamRealmConsole('tenant'): Route::beamUxSite() is already registered (one.site.show, '{path}')");
+        $router->beamRealmConsole('tenant');
+    }
+
+    public function test_a_prefixed_console_registered_after_the_site_is_refused_by_name(): void
+    {
+        $this->refuseConsoleAfterSite('operator');
+    }
+
+    private function refuseConsoleAfterSite(string $realm): void
+    {
+        $router = $this->router();
+        $router->beamUxSite('site/entry');
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Route::beamRealmConsole('{$realm}'): Route::beamUxSite() is already registered (beam.ux.site.show, '{path}')");
+        $router->beamRealmConsole($realm);
     }
 
     public function test_the_home_redirects_to_the_dashboard_and_the_console_renders_the_three_props(): void
