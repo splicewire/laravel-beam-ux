@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Tests\Console;
 
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Rushing\Doctor\DoctorStatus;
 use Rushing\Doctor\Finding;
 use Splicewire\Beam\Install\BeamInstallManifest;
@@ -85,28 +86,136 @@ class StampShellCommandTest extends TestCase
             ->assertSuccessful();
     }
 
-    /**
-     * The stamped `app.css` deliberately declares no family `@source` lines: they are derived at build time by
-     * `familySources()` from `@schemastud/seam/vite`. A fresh `laravel new` host has no such plugin, so its
-     * family dist classes were never scanned (doctor `family @source coverage`: 17 of 17). The stamp prints the
-     * wiring, before Tailwind, and edits no Vite file (make-surface 02 owner-authorized follow-up).
-     */
-    public function test_the_guidance_prints_the_family_sources_vite_wiring_before_tailwind_and_edits_no_vite_file(): void
+    public function test_a_laravel_shaped_vite_config_gains_the_two_lines_once_before_tailwind(): void
     {
-        File::put($this->host.'/vite.config.ts', "export default {};\n");
+        foreach (["\n", "\r\n"] as $ending) {
+            $config = str_replace("\n", $ending, File::get(dirname(__DIR__).'/Fixtures/vite/laravel-new.vite.config.ts'));
+            File::put($this->host.'/vite.config.ts', $config);
+            $expected = str_replace(
+                ["import { defineConfig, lazyPlugins } from 'vite-plus';".$ending, '        tailwindcss(),'],
+                ["import { defineConfig, lazyPlugins } from 'vite-plus';".$ending."import { familySources } from '@schemastud/seam/vite';".$ending, '        familySources(),'.$ending.'        tailwindcss(),'],
+                $config,
+            );
 
-        $this->assertSame(0, \Illuminate\Support\Facades\Artisan::call('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site']));
-        $output = \Illuminate\Support\Facades\Artisan::output();
+            $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])
+                ->expectsOutputToContain('wired — familySources() before tailwindcss()')
+                ->doesntExpectOutputToContain('BEFORE tailwindcss()')
+                ->assertSuccessful();
 
-        $import = strpos($output, "import { familySources } from '@schemastud/seam/vite';");
-        $plugin = strpos($output, 'familySources(),');
-        $tailwind = strpos($output, 'BEFORE tailwindcss()');
+            $this->assertSame($expected, File::get($this->host.'/vite.config.ts'));
+            $this->assertNull($this->recorded('vite.config.ts'));
+            $before = $this->tree();
 
-        $this->assertNotFalse($import, $output);
-        $this->assertNotFalse($plugin, $output);
-        $this->assertNotFalse($tailwind, 'the registration must say it goes before tailwindcss()');
-        $this->assertLessThan($plugin, $import);
-        $this->assertSame("export default {};\n", File::get($this->host.'/vite.config.ts'));
+            $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])
+                ->expectsOutputToContain('already wired')
+                ->doesntExpectOutputToContain('stamped')
+                ->doesntExpectOutputToContain('BEFORE tailwindcss()')
+                ->assertSuccessful();
+
+            $this->assertSame($before, $this->tree());
+        }
+    }
+
+    /** @param array<string, string> $configs */
+    #[DataProvider('unreadableViteConfigs')]
+    public function test_a_vite_config_it_cannot_read_is_left_byte_identical_and_the_guidance_prints(array $configs): void
+    {
+        foreach ($configs as $path => $config) {
+            File::put($this->host.'/'.$path, $config);
+        }
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site', '--force' => true])
+            ->expectsOutputToContain('not edited — paste the two lines below')
+            ->expectsOutputToContain("import { familySources } from '@schemastud/seam/vite';")
+            ->expectsOutputToContain('familySources(), // in defineConfig({ plugins: [...] }), BEFORE tailwindcss()')
+            ->assertSuccessful();
+
+        foreach ($configs as $path => $config) {
+            $this->assertSame($config, File::get($this->host.'/'.$path));
+            $this->assertNull($this->recorded($path));
+        }
+    }
+
+    /** @return iterable<string, array{array<string, string>}> */
+    public static function unreadableViteConfigs(): iterable
+    {
+        $config = (string) file_get_contents(dirname(__DIR__).'/Fixtures/vite/laravel-new.vite.config.ts');
+        yield 'no tailwind' => [['vite.config.ts' => "export default {};\n"]];
+        yield 'two calls' => [['vite.config.ts' => str_replace('        tailwindcss(),', "        tailwindcss(),\n        tailwindcss(),", $config)]];
+        yield 'inline plugins' => [['vite.config.ts' => "import tailwindcss from '@tailwindcss/vite';\nexport default { plugins: [laravel(), tailwindcss()] };\n"]];
+        yield 'tailwind options' => [['vite.config.ts' => str_replace('tailwindcss(),', 'tailwindcss({}),', $config)]];
+        yield 'no tailwind import' => [['vite.config.ts' => str_replace("import tailwindcss from '@tailwindcss/vite';\n", '', $config)]];
+        yield 'two configs' => [['vite.config.ts' => $config, 'vite.config.js' => $config]];
+        yield 'tailwind continues boolean expression' => [['vite.config.ts' => str_replace('        tailwindcss(),', "        cond &&\n        tailwindcss(),", $config)]];
+        yield 'tailwind continues ternary expression' => [['vite.config.ts' => str_replace('        tailwindcss(),', "        cond ? laravel() :\n        tailwindcss(),", $config)]];
+        yield 'tailwind nested in another call' => [['vite.config.ts' => str_replace('        tailwindcss(),', "        wrap(\n        tailwindcss(),\n        ),", $config)]];
+        yield 'import trailing multiline comment' => [['vite.config.ts' => str_replace("from 'vite-plus';\n", "from 'vite-plus'; /* host note\ncontinued */\n", $config)]];
+    }
+
+    public function test_a_config_already_carrying_family_sources_is_left_alone(): void
+    {
+        $config = File::get(dirname(__DIR__).'/Fixtures/vite/beam-starter.vite.config.ts');
+        File::put($this->host.'/vite.config.ts', $config);
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site', '--force' => true])
+            ->expectsOutputToContain('already wired')
+            ->doesntExpectOutputToContain('BEFORE tailwindcss()')
+            ->assertSuccessful();
+
+        $this->assertSame($config, File::get($this->host.'/vite.config.ts'));
+        $this->assertNull($this->recorded('vite.config.ts'));
+    }
+
+    public function test_dry_run_reports_would_wire_and_writes_no_vite_file(): void
+    {
+        $config = File::get(dirname(__DIR__).'/Fixtures/vite/laravel-new.vite.config.ts');
+        File::put($this->host.'/vite.config.mts', $config);
+        $before = $this->tree();
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site', '--dry-run' => true])
+            ->expectsOutputToContain('would wire')
+            ->doesntExpectOutputToContain('BEFORE tailwindcss()')
+            ->assertSuccessful();
+
+        $this->assertSame($before, $this->tree());
+    }
+
+    public function test_a_comment_only_family_sources_mention_is_not_wiring(): void
+    {
+        $this->assertUncertainViteConfig("// familySources() from @schemastud/seam/vite\n".File::get(dirname(__DIR__).'/Fixtures/vite/laravel-new.vite.config.ts'));
+    }
+
+    public function test_an_unused_family_sources_import_is_not_wiring(): void
+    {
+        $this->assertUncertainViteConfig("import { familySources } from '@schemastud/seam/vite';\n".File::get(dirname(__DIR__).'/Fixtures/vite/laravel-new.vite.config.ts'));
+    }
+
+    public function test_a_block_commented_tailwind_line_is_not_an_anchor(): void
+    {
+        $config = File::get(dirname(__DIR__).'/Fixtures/vite/laravel-new.vite.config.ts');
+        $this->assertUncertainViteConfig(str_replace('        tailwindcss(),', "/*\n        tailwindcss(),\n*/", $config));
+    }
+
+    public function test_a_family_sources_call_in_a_string_is_not_wiring(): void
+    {
+        $config = File::get(dirname(__DIR__).'/Fixtures/vite/laravel-new.vite.config.ts');
+        $this->assertUncertainViteConfig("import { familySources } from '@schemastud/seam/vite';\nconst note = 'familySources()';\n".$config);
+    }
+
+    public function test_a_family_sources_call_outside_the_plugins_array_is_not_wiring(): void
+    {
+        $config = File::get(dirname(__DIR__).'/Fixtures/vite/laravel-new.vite.config.ts');
+        $this->assertUncertainViteConfig("import { familySources } from '@schemastud/seam/vite';\nfamilySources();\n".$config);
+    }
+
+    private function assertUncertainViteConfig(string $config): void
+    {
+        File::put($this->host.'/vite.config.ts', $config);
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])
+            ->expectsOutputToContain('not edited — paste the two lines below')
+            ->expectsOutputToContain('BEFORE tailwindcss()')
+            ->assertSuccessful();
+        $this->assertSame($config, File::get($this->host.'/vite.config.ts'));
     }
 
     public function test_the_family_sources_wiring_is_printed_for_every_surface_selection(): void

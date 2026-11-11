@@ -6,10 +6,15 @@ use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use Splicewire\Beam\Ux\Doctor\ShellStampParityAudit;
 use Splicewire\Beam\Ux\Shell\ShellStamps;
+use Splicewire\Beam\Ux\Shell\ViteFamilySources;
 
 /**
  * `splicewire:beam:ux:stamp-shell` — stamps the host-owned shell files for the front-end surfaces a host adopts, prints
  * the route lines and the staff-seeding call, and never edits `routes/` (make-surface ticket 02).
+ *
+ * The one recognised host Vite config gains the family Tailwind source plugin once, anchored before
+ * tailwindcss(). Uncertain syntax stays byte-identical with guidance. This host config is never recorded
+ * in shell-stamp.json and routes/ stays print-only.
  *
  * ## Copy-once, the `stamp-auth` way
  * An absent file is stamped; a file identical to its stub (trailing whitespace aside) is left untouched; a tailored
@@ -104,7 +109,7 @@ class StampShellCommand extends Command
 
         $this->warnMissingPackages($base, $surfaces);
         $this->printRoutes($stamps, $surfaces);
-        $this->printFamilySources();
+        $this->wireFamilySources($files, $base, $dry);
         $this->printSeeding($surfaces);
 
         return self::SUCCESS;
@@ -220,19 +225,31 @@ class StampShellCommand extends Command
         }
     }
 
-    /**
-     * The Vite wiring the stamped `app.css` relies on. That stub declares no family `@source` lines on purpose: the
-     * list is derived at build time by `familySources()` from `@schemastud/seam/vite`, which injects one `@source` per
-     * resolved family `dist` after the stylesheet's `@import 'tailwindcss'`. A fresh `laravel new` host has no such
-     * plugin, so every family dist class went unscanned (measured on the fresh-host proof: doctor
-     * `family @source coverage`, 17 of 17 not scanned). Printed for every selection, because the base stamps
-     * `app.css`; `vite.config.ts` is the host's file and is never edited. No static `@source` globs are invented —
-     * the plugin derives them.
-     */
-    private function printFamilySources(): void
+    /** Wire the measured Laravel shape, or leave every host config untouched and print the paste guidance. */
+    private function wireFamilySources(Filesystem $files, string $base, bool $dry): void
     {
+        $configs = array_values(array_filter(
+            array_map(fn (string $extension): string => $base.'/vite.config.'.$extension, ['ts', 'mts', 'js', 'mjs']),
+            fn (string $path): bool => $files->isFile($path),
+        ));
+        $path = count($configs) === 1 ? array_pop($configs) : null;
+        $result = $path !== null ? (new ViteFamilySources)->wire($files->get($path)) : ['status' => 'unreadable', 'contents' => ''];
         $this->newLine();
-        // Worded without "stamped": a re-stamp asserts that word never appears unless a file was written.
+        if ($path !== null && $result['status'] === 'already') {
+            $this->components->twoColumnDetail(basename($path), 'already wired');
+
+            return;
+        }
+        if ($path !== null && $result['status'] === 'wired') {
+            if (! $dry) {
+                $files->put($path, $result['contents']);
+            }
+            $this->components->twoColumnDetail(basename($path), $dry ? 'would wire' : 'wired — familySources() before tailwindcss()');
+
+            return;
+        }
+
+        $this->components->info('not edited — paste the two lines below');
         $this->components->info('Scan the family packages — the shell stub resources/css/app.css derives its family @source list from '
             .'@schemastud/seam/vite (a dependency of the family front-end). Add to vite.config.ts; nothing was edited:');
         $this->line("    import { familySources } from '@schemastud/seam/vite';");
