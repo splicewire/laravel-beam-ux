@@ -59,10 +59,12 @@ final class SiteDestinations
      */
     public function rows(string $key, array $filter = []): ?array
     {
-        $realm = $this->realm();
-        if ($realm === null || ! $this->frame->has($key) || ! $this->particles->has($key)) {
+        if (! $this->frame->has($key) || ! $this->particles->has($key)) {
             return null;
         }
+
+        $realm = $this->realm();
+        $this->requireViewer($realm);
 
         $request = request();
         $read = Request::create('/', 'GET', $filter === [] ? [] : ['filter' => $filter]);
@@ -77,6 +79,24 @@ final class SiteDestinations
                 ->index($resource->toResourceDefinition(), []));
         } catch (AuthorizationException|HttpExceptionInterface) {
             return null;
+        }
+    }
+
+    /**
+     * analytics-area 19 (charter shape, 2026-11-12): every read here is the viewer's own list, in the realm this request serves, so
+     * with no signed-in viewer or no realm there is no answer to give. Say so BEFORE the authorizer, whose refusal is caught to
+     * null in {@see rows()} and would read as a card with nothing to show: an AuthorizationException, which the doctor's
+     * dashboard-tier audit classes as UNKNOWN ("verify with a permitted signed-in actor"). A signed-in viewer the page refuses
+     * still reads null.
+     *
+     * @phpstan-assert string $realm
+     *
+     * @throws AuthorizationException
+     */
+    private function requireViewer(?string $realm): void
+    {
+        if (request()->user() === null || $realm === null) {
+            throw new AuthorizationException('The Site area reads each page as its viewer in a realm; with no signed-in viewer or realm it cannot be read.');
         }
     }
 
