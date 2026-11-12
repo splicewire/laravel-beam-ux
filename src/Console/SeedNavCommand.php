@@ -53,19 +53,22 @@ class SeedNavCommand extends Command
                 $provisionedRoots[$realm] = true;
             }
 
-            BeamUxEntry::updateOrCreate(
-                ['slug' => $row['slug'], 'namespace' => $namespace],
-                [
-                    'type' => $row['type'],
-                    'realm' => $realm,
-                    'realms' => [$realm],
-                    'parent_id' => null,
-                    'segment' => $row['segment'],
-                    'title' => $row['title'],
-                    // Preserve an explicit authored order; else the derived display sequence.
-                    'nav_order' => $row['nav_order'] ?? $order,
-                ],
-            );
+            $attributes = ['slug' => $row['slug'], 'namespace' => $namespace];
+            $values = [
+                'type' => $row['type'],
+                'realm' => $realm,
+                'realms' => [$realm],
+                'parent_id' => null,
+                'segment' => $row['segment'],
+                'title' => $row['title'],
+                // Preserve an explicit authored order; else the derived display sequence.
+                'nav_order' => $row['nav_order'] ?? $order,
+            ];
+            $entry = BeamUxEntry::firstOrCreate($attributes, array_merge($values, BeamUxEntry::publishedMarkingAttributes()));
+            // Re-seeding navigation must not publish an author's existing draft or archived page.
+            if (! $entry->wasRecentlyCreated) {
+                $entry->fill($values)->save();
+            }
 
             $title = $row['title'] ?? $row['slug'];
             $this->line("  <info>✓</info> {$title}  <comment>{$row['segment']}</comment>  ({$row['slug']}) <fg=gray>[{$realm}]</>");

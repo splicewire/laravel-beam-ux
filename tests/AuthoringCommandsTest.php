@@ -96,6 +96,48 @@ class AuthoringCommandsTest extends TestCase
         $this->assertNotNull(BeamUxEntry::query()->where('namespace', 'realms')->where('slug', 'account')->first());
     }
 
+    public function test_new_nav_pages_are_published_under_an_opted_in_page_workflow(): void
+    {
+        Schema::table('beam_ux_entries', function (Blueprint $table): void {
+            $table->string('workflow_marking')->nullable();
+            $table->uuid('workflow_version')->nullable();
+        });
+        (require __DIR__.'/../vendor/splicewire/laravel-beam-workflows/database/migrations/tenant/create_workflow_definition_tables.php.stub')->up();
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        Config::set('beam.ux.namespace', 'demo');
+        Config::set('beam.ux.nav', [
+            'dashboard' => ['segment' => '/dashboard', 'title' => 'Dashboard', 'type' => 'page', 'realm' => 'account'],
+        ]);
+
+        $this->artisan('splicewire:beam:ux:seed-nav')->assertSuccessful();
+
+        $entry = BeamUxEntry::query()->where('namespace', 'demo')->where('slug', 'dashboard')->firstOrFail();
+        $this->assertSame('published', $entry->workflow_marking);
+        $this->assertTrue(app(\Splicewire\Beam\Ux\Sitemap\EntryPublishGate::class)->isPublished($entry));
+    }
+
+    public function test_nav_reseed_keeps_an_existing_explicit_draft_marking(): void
+    {
+        Schema::table('beam_ux_entries', function (Blueprint $table): void {
+            $table->string('workflow_marking')->nullable();
+            $table->uuid('workflow_version')->nullable();
+        });
+        (require __DIR__.'/../vendor/splicewire/laravel-beam-workflows/database/migrations/tenant/create_workflow_definition_tables.php.stub')->up();
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        Config::set('beam.ux.namespace', 'demo');
+        Config::set('beam.ux.nav', [
+            'dashboard' => ['segment' => '/dashboard', 'title' => 'Updated dashboard', 'type' => 'page', 'realm' => 'account'],
+        ]);
+        $entry = BeamUxEntry::create(['slug' => 'dashboard', 'namespace' => 'demo', 'type' => 'page', 'realm' => 'account', 'workflow_marking' => 'draft']);
+
+        $this->artisan('splicewire:beam:ux:seed-nav')->assertSuccessful();
+
+        $entry->refresh();
+        $this->assertSame('draft', $entry->workflow_marking);
+        $this->assertSame('Updated dashboard', $entry->title);
+        $this->assertFalse(app(\Splicewire\Beam\Ux\Sitemap\EntryPublishGate::class)->isPublished($entry));
+    }
+
     public function test_seed_nav_fails_when_the_declared_source_resolves_no_rows(): void
     {
         Config::set('beam.ux.namespace', 'demo');
