@@ -55,6 +55,12 @@ class StampShellCommand extends Command
     /** The nav data target, composed per surface rather than read from one stub. */
     public const NAV = ShellStamps::NAV;
 
+    /** The stamped resource map, which imports {@see self::FRAME_RESOURCES} as `@/generated/frame-resources`. */
+    public const FRAME_RESOURCE_MAP = 'resources/js/frame-resource-map.ts';
+
+    /** The module `splicewire:beam:generate:client` writes; the map's import target. */
+    public const FRAME_RESOURCES = 'resources/js/generated/frame-resources.ts';
+
     /** @var array<string, list<string>> surface => composer packages it needs in the host */
     private const PACKAGES = [
         ShellStamps::BASE => ['inertiajs/inertia-laravel', 'splicewire/laravel-beam-ux'],
@@ -103,6 +109,8 @@ class StampShellCommand extends Command
             $this->components->twoColumnDetail($target, $status === 'identical' ? '<fg=gray>identical</>' : "<fg=green>{$status}</>");
         }
 
+        $this->placeFrameResourcesPlaceholder($files, $base, $dry);
+
         if (! $dry) {
             $this->writeRecord($files, $base, $record, $surfaces, $matching);
         }
@@ -113,6 +121,41 @@ class StampShellCommand extends Command
         $this->printSeeding($surfaces);
 
         return self::SUCCESS;
+    }
+
+    /**
+     * A fresh host has the map but not the module it imports, which only `splicewire:beam:generate:client` writes, so its
+     * tsc fails TS2307 (frame-foundation 59, ruling option c). Every selection stamps or keeps the map (it is BASE), so
+     * when the module is absent, write an empty `FrameResources` placeholder in the generator's shape and tell the host to
+     * generate. An existing module, real
+     * or placeholder, is never written: the generator overwrites the placeholder on its first run. The placeholder is the
+     * generator's file, not a stub, so it is never recorded for the parity audit.
+     */
+    private function placeFrameResourcesPlaceholder(Filesystem $files, string $base, bool $dry): void
+    {
+        $module = $base.'/'.self::FRAME_RESOURCES;
+        $placeholder = (string) $files->get(dirname(__DIR__, 2).'/stubs/shell/frame-resources.placeholder.ts.stub');
+        if ($files->exists($module)) {
+            if (rtrim((string) $files->get($module)) === rtrim($placeholder)) {
+                $this->components->twoColumnDetail(self::FRAME_RESOURCES, '<fg=yellow>placeholder present</>');
+                $this->printGenerateLine();
+            }
+
+            return;
+        }
+
+        if (! $dry) {
+            $files->ensureDirectoryExists(dirname($module));
+            $files->put($module, $placeholder);
+        }
+
+        $this->components->twoColumnDetail(self::FRAME_RESOURCES, $dry ? '<fg=green>would write placeholder</>' : '<fg=green>placeholder written</>');
+        $this->printGenerateLine();
+    }
+
+    private function printGenerateLine(): void
+    {
+        $this->line("    Run `php artisan splicewire:beam:generate:client` to replace it with this host's typed resource map.");
     }
 
     /**

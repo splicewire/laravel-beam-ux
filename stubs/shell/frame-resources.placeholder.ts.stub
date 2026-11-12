@@ -1,0 +1,2 @@
+// GENERATED placeholder, written by `splicewire:beam:ux:stamp-shell` because this host has not run `splicewire:beam:generate:client` yet. That command overwrites this file with the host's resource map — do not edit.
+export interface FrameResources {}
