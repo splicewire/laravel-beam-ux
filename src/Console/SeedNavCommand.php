@@ -15,8 +15,11 @@ use Splicewire\Beam\Ux\Nav\NavSource;
  * never a bespoke command. A fresh site whose page files carry `segment`/`realm`/`nav_order` frontmatter
  * seeds its nav with NO bespoke PHP — the derivation carries it.
  *
- * Idempotent (`updateOrCreate` keyed by slug + namespace): re-running restamps realm/segment/
- * title/order without duplicating.
+ * New rows are born published through the column-tolerant publishedMarkingAttributes helper.
+ * Re-running restamps realm/segment/title/order without duplicating or changing an existing marking.
+ * Legacy null markings remain uninitialized/hidden on a workflow-managed host: an authorized operator
+ * reviews and publishes those rows through the normal workflow API, rather than seed-nav guessing
+ * whether an existing page was intended to stay a draft.
  *
  * The command name mirrors the package tree (ADR-0167): vendor `splicewire` · tier `beam` ·
  * package-path `ux` · verb `seed-nav`.
