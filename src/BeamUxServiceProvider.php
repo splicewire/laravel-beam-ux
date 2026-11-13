@@ -234,6 +234,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
         // UX-08c: the read ability the Developer-zone diagnostics declare (who may update entries; Root passes).
         DiagnosticsAbility::define();
+        // analytics-area 20: the Site area's ability, `site.edit` in tenant scope (failing closed) and DiagnosticsAbility on the
+        // install side.
+        Analytics\SiteAreaAbility::define();
 
         // `BeamUxEntry` binds its authoring-API authorization HERE, in the package that owns the model
         // (api-surface-coherence 147; the shape 135 landed for beam's `Hook`). Until this line existed

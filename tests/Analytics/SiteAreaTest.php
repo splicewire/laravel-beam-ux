@@ -6,7 +6,7 @@ use Splicewire\Beam\Analytics\Areas\AnalyticsAreaRegistry;
 use Splicewire\Beam\Analytics\Areas\AreaDefinition;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Ux\Analytics\SiteArea;
-use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
+use Splicewire\Beam\Ux\Analytics\SiteAreaAbility;
 
 /**
  * The Site area (analytics-area ticket 10), through the frame socket in the operator realm (Install scope): beam-ux
@@ -23,7 +23,8 @@ class SiteAreaTest extends SiteAreaTestCase
         $this->assertSame('splicewire/laravel-beam-ux', $areas->registrantOf('site'));
         $this->assertNotContains(SiteArea::class, AnalyticsAreaRegistry::PACKAGE, 'the analytics package does not ship it');
         $this->assertFalse((new AnalyticsAreaRegistry($this->app))->has('site'), 'a registry that missed the contribution has no Site area');
-        $this->assertSame(['entitlement:analytics.view', DiagnosticsAbility::NAME], AreaDefinition::of(SiteArea::class)->requires(), 'the gate is analytics.view AND the diagnostics read ability');
+        // analytics-area 20: the area's own ability is SiteAreaAbility (site.edit in tenant scope; DiagnosticsAbility here, Install).
+        $this->assertSame(['entitlement:analytics.view', SiteAreaAbility::NAME], AreaDefinition::of(SiteArea::class)->requires(), 'the gate is analytics.view AND the Site area ability');
         $this->assertTrue($this->app->make(ParticleResourceRegistry::class)->has('analytics-site'));
     }
 

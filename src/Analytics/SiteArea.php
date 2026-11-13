@@ -24,12 +24,15 @@ use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
  *  - Redirects = the Redirects list;
  *  - Mirror state = Site health per `filter[state]=…`.
  *
- * A list this viewer may not read here draws no figure. The area's own gate narrows the section to beam-ux's
- * diagnostics read ability ({@see DiagnosticsAbility}), the ability Site health and Sitemap health already declare.
+ * A list this viewer may not read here draws no figure. The area's own gate is {@see SiteAreaAbility} (analytics-area 20): in
+ * tenant scope the host's tenant site-editing ability, `site.edit`, failing closed where the host does not define it; in install
+ * scope beam-ux's diagnostics read ability ({@see DiagnosticsAbility}), the ability Site health and Sitemap health already
+ * declare. In tenant scope a reader may pass the area yet read none of those diagnostics pages, and then draws none of their
+ * figures.
  *
  * Scaffolded by `splicewire:beam:analytics:make-area SiteArea` (ticket 10), then filled in.
  */
-#[Area(key: 'site', label: 'Site', icon: 'Globe', order: 30, ability: DiagnosticsAbility::NAME)]
+#[Area(key: 'site', label: 'Site', icon: 'Globe', order: 30, ability: SiteAreaAbility::NAME)]
 final class SiteArea implements AnalyticsArea
 {
     public const SITEMAP_HEALTH = 'beam-ux-sitemap-health';
