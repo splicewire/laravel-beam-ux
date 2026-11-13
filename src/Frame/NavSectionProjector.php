@@ -289,8 +289,10 @@ class NavSectionProjector
 
     /**
      * A seat's static rows with each title in the request's language (localization 11; ruling 01 §3): keyed by the row's
-     * route name (`<ns>::nav.routes.<a/b>.title`) in the namespace of the seat's registrant. A row with no route name
-     * has no identity, so its literal stands (`localization.unkeyable` reports it).
+     * route name (`<ns>::nav.routes.<a/b>.title`) in the namespace of the seat that CONTRIBUTED the row
+     * ({@see NavSection::staticRowRegistrant()}; REVIEW-B7 U2). In a merged seat that's the joining seat's, never the
+     * header's; the header label stays with the header seat. A row with no route name has no identity, so its literal
+     * stands (`localization.unkeyable` reports it).
      *
      * @return list<array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>
      */
@@ -298,11 +300,13 @@ class NavSectionProjector
     {
         $shell = self::shell();
 
-        return array_map(
-            static fn (array $row): array => ($row['title'] ?? '') === '' ? $row
-                : ['title' => $shell->navRouteTitle($row['routeName'] ?? null, $section->registrant(), $row['title'])] + $row,
-            $section->static,
-        );
+        $rows = [];
+        foreach ($section->static as $i => $row) {
+            $rows[] = ($row['title'] ?? '') === '' ? $row
+                : ['title' => $shell->navRouteTitle($row['routeName'] ?? null, $section->staticRowRegistrant($i), $row['title'])] + $row;
+        }
+
+        return $rows;
     }
 
     private static function shell(): ShellText

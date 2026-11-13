@@ -3,13 +3,16 @@
 namespace Splicewire\Beam\Ux\Frame;
 
 use Illuminate\Http\Request;
+use Rushing\DataNav\InvocableNavItem;
 use Rushing\DataNav\NavContext;
 use Rushing\DataNav\NavNode;
 use Rushing\DataNav\NavRegistry;
 use Rushing\DataNav\NavTree;
 use Rushing\Popcorn\Registries\Exceptions\RegistryMiss;
+use Rushing\Popcorn\Registries\RecordsRegistrants;
 use Schemastud\Frame\Contracts\FrameNavContributor;
 use Splicewire\Beam\Dashboard\SectionOverview;
+use Splicewire\Beam\Localization\ShellText;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 
@@ -90,10 +93,47 @@ class FrameNavContribution implements FrameNavContributor
     protected function navigation(string $realm, ?NavContext $context = null): NavTree
     {
         try {
-            return $this->navigations->build($realm, $context ?? $this->context($realm));
+            $tree = $this->navigations->build($realm, $context ?? $this->context($realm));
         } catch (RegistryMiss) {
             return NavTree::make([]);
         }
+
+        // A package-projected navigation's text is already resolved ({@see NavSectionProjector}).
+        if ($this->navigations->tryResolve($realm) instanceof DeclaredSectionNavigation) {
+            return $tree;
+        }
+
+        // A code-authored navigation (a host's own NavRegistry tree, or a package's) resolves its page titles here, at
+        // emit, under the namespace of whoever registered it (REVIEW-B7 U1; ruling 01 §3: pages by their authoring code,
+        // so a host's are host keys).
+        $registry = $this->navigations->unfiltered();
+        $registrant = $registry instanceof RecordsRegistrants ? $registry->registrantOf($realm) : null;
+
+        return NavTree::make(self::localizedNodes($tree->items, $registrant, app(ShellText::class)));
+    }
+
+    /**
+     * Each authored node's title, keyed by its route name (`nav.routes.<a/b>.title` in the registrant's namespace); a node
+     * with no route name keeps its literal. An invocable item's own title is the author's, but its CHILDREN are what
+     * its invocable expanded into (resource leaves, persisted entries): those carry their own text and are never
+     * re-keyed or re-presented here.
+     *
+     * @param  array<int, NavNode>  $nodes
+     * @return array<int, NavNode>
+     */
+    private static function localizedNodes(array $nodes, ?string $registrant, ShellText $shell): array
+    {
+        return array_map(static function (NavNode $node) use ($registrant, $shell): NavNode {
+            $copy = clone $node;
+            if ($node->title !== '') {
+                $copy->title = $shell->navRouteTitle($node->routeName, $registrant, $node->title);
+            }
+            if (! $node instanceof InvocableNavItem) {
+                $copy->children = self::localizedNodes($node->children, $registrant, $shell);
+            }
+
+            return $copy;
+        }, $nodes);
     }
 
     /**

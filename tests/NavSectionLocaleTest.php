@@ -15,7 +15,8 @@ use Splicewire\Beam\Ux\Frame\NavSectionProjector;
  * localization 11 — the frame nav's declared text reads in the request's language (ruling 01 §3):
  *
  * - a section header is `<ns>::nav.sections.<key>.label`, `<ns>` the registrant of the seat that supplied the header;
- * - a static row's title is `<ns>::nav.routes.<a/b>.title` by its route name, in the same namespace; a row with no route
+ * - a static row's title is `<ns>::nav.routes.<a/b>.title` by its route name, in the namespace of the seat that
+ *   contributed the row (REVIEW-B7 U2; a merged seat's joining rows are in ReviewB7AmendNavTest); a row with no route
  *   name has no identity and keeps its literal;
  * - the Developer zone's header is beam-ux's own `beam-ux::nav.routes.developer/section.title`.
  */
