@@ -14,6 +14,7 @@ use Splicewire\Beam\Authorization\ResourceVisibility;
 use Splicewire\Beam\Authorization\SeatGate;
 use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Dashboard\SectionOverview;
+use Splicewire\Beam\Localization\ShellText;
 use Splicewire\Beam\Nav\NavAudience;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
@@ -146,7 +147,7 @@ class NavSectionProjector
         $authored = null;
 
         foreach ($this->sections->for($realm) as $section) {
-            $static = $this->withoutTheLeafsOwnRow($section->static, $leafHref, $hrefs, $authored);
+            $static = $this->withoutTheLeafsOwnRow(self::localizedRows($section), $leafHref, $hrefs, $authored);
 
             $entries[] = [$section->order, $section->key, $this->seat($section, $context?->user, $static, $hrefs), $section->audience];
         }
@@ -189,7 +190,8 @@ class NavSectionProjector
         }
 
         if ($meta !== []) {
-            $primary[] = NavLink::make(title: 'Developer', icon: 'Code', routeName: self::DEVELOPER_SEAT)
+            // localization 11: beam-ux's own header, keyed by its route (`beam-ux::nav.routes.developer/section.title`).
+            $primary[] = NavLink::make(title: self::shell()->navRouteTitle(self::DEVELOPER_SEAT, 'splicewire/laravel-beam-ux', 'Developer'), icon: 'Code', routeName: self::DEVELOPER_SEAT)
                 ->inZone('meta')
                 ->stamped(active: false, activeTrail: false, children: $meta);
         }
@@ -274,6 +276,7 @@ class NavSectionProjector
         $clone = clone $leaf;
 
         if (($authored['title'] ?? '') !== '') {
+            // Resolved with its seat ({@see localizedRows()}): the leaf wears the host's own word, in the request's language.
             $clone->title = $authored['title'];
         }
 
@@ -282,6 +285,29 @@ class NavSectionProjector
         }
 
         return $clone;
+    }
+
+    /**
+     * A seat's static rows with each title in the request's language (localization 11; ruling 01 §3): keyed by the row's
+     * route name (`<ns>::nav.routes.<a/b>.title`) in the namespace of the seat's registrant. A row with no route name
+     * has no identity, so its literal stands (`localization.unkeyable` reports it).
+     *
+     * @return list<array{title: string, href: string, icon?: string, routeName?: string, navOrder?: int}>
+     */
+    private static function localizedRows(NavSection $section): array
+    {
+        $shell = self::shell();
+
+        return array_map(
+            static fn (array $row): array => ($row['title'] ?? '') === '' ? $row
+                : ['title' => $shell->navRouteTitle($row['routeName'] ?? null, $section->registrant(), $row['title'])] + $row,
+            $section->static,
+        );
+    }
+
+    private static function shell(): ShellText
+    {
+        return app(ShellText::class);
     }
 
     /** One spelling for a client path, so `/dashboard`, `dashboard` and `/dashboard/` compare equal. */
@@ -367,7 +393,10 @@ class NavSectionProjector
             $definition->nav->navOrder ?? 0,
             $key,
             NavLink::make(
-                title: $definition->nav->label !== '' ? $definition->nav->label : RealmDashboard::LABEL,
+                // The definition's label is already resolved (localization 08). Beam's dashboard constant is beam's text,
+                // keyed by the leaf's route in beam's namespace (localization 11).
+                title: $definition->nav->label !== '' ? $definition->nav->label
+                    : self::shell()->navRouteTitle($routeName, 'splicewire/laravel-beam', RealmDashboard::LABEL),
                 href: $href,
                 match: trim($href, '/'),
                 icon: $definition->nav->icon,
@@ -408,8 +437,10 @@ class NavSectionProjector
         $routeName = $href !== null ? $overview : $section->key.'.section';
         $href ??= $section->href;
 
+        // localization 11 (ruling 01 §3): the header's label is keyed in the namespace of the seat that supplied it, and
+        // carries no realm. Its static rows were resolved before the dashboard-leaf dedupe ({@see localizedRows()}).
         $node = InvocableNavItem::make(
-            title: $section->label,
+            title: self::shell()->navSectionLabel($section->key, $section->registrant(), $section->label),
             invocable: FrameResourcesInvocable::NAME,
             input: [
                 'section' => $section->key,
