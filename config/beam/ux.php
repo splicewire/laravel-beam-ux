@@ -30,9 +30,12 @@ return [
     | the transport is now two id-addressed particle OPERATIONS on the
     | `beam-ux-entry` resource, mounted by the host with `Route::particleOp()`).
     | ADR-0214 originally deleted these keys with the macro; that was amended
-    | after measuring who else reads them, and neither is a mount prefix now:
+    | after measuring who else reads them:
     |
-    |  - `api_root` is read by beam core's PUBLISHED Scribe stub
+    |  - `api_root` is the package's mount root again (ADR-0243, owner-review-20261112
+    |    13d): `Routing\UxRoutes::mount()` registers the editor surface under it, inside
+    |    the host's boundary, beside the legacy `EditorRoutes::mount()` call (until 16).
+    |  - `api_root` is also read by beam core's PUBLISHED Scribe stub
     |    (`splicewire/laravel-beam/stubs/scribe/scribe.php`) to derive the OpenAPI
     |    extraction include-list — asserted by `ScribeOutputContractAudit`, pinned
     |    by `PublishedScribeStubTest`, documented in ADR-0211. Three hosts carry

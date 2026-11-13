@@ -188,8 +188,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
         // Merge `config('beam.ux.*')`. Both keys OUTLIVED the retired `Route::beamUxEntries()` macro
         // they were introduced for (ADR-0214 §6, as amended): `api_root` positions beam core's Scribe
-        // OpenAPI extraction window, `route_name` names the public-entry artifact route
-        // ({@see Concerns\WiresPublicSurface}). Neither is a mount prefix any more.
+        // OpenAPI extraction window and, since owner-review-20261112 13d (ADR-0243), is again the root
+        // `Routing\UxRoutes::mount()` registers the editor surface under; `route_name` names the public-entry
+        // artifact route ({@see Concerns\WiresPublicSurface}).
         $this->mergeConfigFrom(__DIR__.'/../config/beam/ux.php', 'beam.ux');
 
         // The package's own prefixes reach every READER of the host's reservation list, not only this package's catch-all

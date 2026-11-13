@@ -9,7 +9,11 @@ Generic resource writes cannot bypass the command service.
 `EditorRoutes::mount()` mounts the existing entry operations plus `create-release`
 and the Release index/show/command routes. Its optional second argument chooses
 the Release URI. The default Inertia transport uses `/beam-ux-releases`.
-Other hosts inject a matching transport. The package-owned `ReleasePanel` accepts
+Other hosts inject a matching transport. `Routing\UxRoutes::mount()` takes the same
+arguments and registers the same routes at the package root, `beam.ux.api_root`
+(default `beam/ux`), with names in the `beam.ux.` stem (ADR-0243); a host calls it
+inside its boundary beside the legacy call until ticket 16 of owner-review-20261112.
+The package-owned `ReleasePanel` accepts
 the server projection, saved-version choices, and that command transport.
 
 The editor publish operation creates a Release of one and returns it on the
