@@ -12,11 +12,16 @@ use Splicewire\Beam\Ux\Analytics\AnalyticsError;
 use Splicewire\Beam\Ux\Bindings\BindingError;
 use Splicewire\Beam\Ux\Components\ComponentError;
 use Splicewire\Beam\Ux\Containment\PageError;
+use Splicewire\Beam\Ux\Files\FileConflict;
+use Splicewire\Beam\Ux\Files\FileError;
+use Splicewire\Beam\Ux\Files\FileOperation;
 use Splicewire\Beam\Ux\Filters\FilterError;
 use Splicewire\Beam\Ux\JsonDoc\SourceError;
 use Splicewire\Beam\Ux\Localization\CodedConflictHttpException;
 use Splicewire\Beam\Ux\Localization\DiagnosedValidationException;
 use Splicewire\Beam\Ux\Publish\EntryError;
+use Splicewire\Beam\Ux\Recording\RecordingError;
+use Splicewire\Beam\Ux\Recording\RecordingFailure;
 use Splicewire\Beam\Ux\Redirect\RedirectError;
 use Splicewire\Beam\Ux\Release\ReleaseError;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
@@ -36,7 +41,8 @@ class BeamUxSweepTest extends TestCase
     private function cases(): array
     {
         return [...ComponentError::cases(), ...RedirectError::cases(), ...BindingError::cases(), ...PageError::cases(),
-            ...EntryError::cases(), ...SourceError::cases(), ...ReleaseError::cases(), ...AnalyticsError::cases(), ...FilterError::cases()];
+            ...EntryError::cases(), ...SourceError::cases(), ...ReleaseError::cases(), ...AnalyticsError::cases(), ...FilterError::cases(),
+            ...RecordingError::cases(), ...FileError::cases()];
     }
 
     private function pseudo(): void
@@ -81,7 +87,7 @@ class BeamUxSweepTest extends TestCase
         $catalog = $this->app->make(KeyCatalog::class)->byKey();
         $this->pseudo();
 
-        foreach (['dashboard' => 8, 'analytics' => 5] as $group => $count) {
+        foreach (['dashboard' => 8, 'analytics' => 5, 'files' => 9, 'recording' => 17] as $group => $count) {
             $lines = KeyCatalog::flatten((array) require dirname(__DIR__).'/lang/en/'.$group.'.php');
             $this->assertCount($count, $lines);
             foreach ($lines as $item => $english) {
@@ -102,6 +108,36 @@ class BeamUxSweepTest extends TestCase
         $this->assertInstanceOf(CodedValidationException::class, $diagnosed);
         $this->assertSame('SyntaxError at 3:7', $diagnosed->diagnostic);
         $this->assertSame(['source' => ['The TSX source could not be converted to blocks.']], $diagnosed->errors());
+    }
+
+    /** The recording/file families: the exception keeps its raw English, and the response emit is localized and coded. */
+    public function test_a_file_conflict_keeps_its_raw_english_and_its_emit_answers_with_the_coded_localized_message(): void
+    {
+        $english = FileError::MdxFileInvalid->defaultMessage();
+        $this->pseudo();
+        $conflict = new FileConflict('invalid', FileError::MdxFileInvalid, 422);
+        $this->assertSame($english, $conflict->getMessage(), 'the exception message is the raw declared English, never pseudo-marked');
+
+        foreach ([422 => 'inspection', 409 => null, 503 => null] as $status => $field) {
+            Route::post('/sweep-23/file-'.$status, fn () => FileOperation::run(fn () => throw new FileConflict('invalid', FileError::MdxFileInvalid, $status)));
+            $body = $this->postJson('/sweep-23/file-'.$status)->assertStatus($status)->json();
+            if ($field !== null) {
+                $this->assertTrue(PseudoLocale::isMarked($body['errors'][$field][0]), (string) $body['errors'][$field][0]);
+                $this->assertSame(['file_mdx_invalid'], $body['codes'][$field]);
+            } else {
+                $this->assertTrue(PseudoLocale::isMarked($body['message']), (string) $body['message']);
+                $this->assertSame('file_mdx_invalid', $body['code']);
+            }
+        }
+    }
+
+    public function test_a_recording_failure_keeps_its_reason_diagnostic_and_raw_english(): void
+    {
+        $failure = new RecordingFailure('git-failed', RecordingError::GitFailedLocalGitRecordingFailed, 'index-lock', 128, ['detail' => 'index-lock, exit 128']);
+
+        $this->assertSame('Local Git recording failed (index-lock, exit 128).', $failure->getMessage(), 'byte-identical to the old concatenation');
+        $this->assertSame(['git-failed', 'index-lock:128'], [$failure->reason, $failure->diagnostic()]);
+        $this->assertSame(RecordingError::GitFailedLocalGitRecordingFailed, $failure->error);
     }
 
     /** One refusal per changed endpoint family, rendered by the framework's handler: the wire snapshot. */

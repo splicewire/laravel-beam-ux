@@ -59,7 +59,7 @@ class ReleaseRecording
                 $this->contained($disk->path(''), $path);
                 $size += strlen($bytes);
                 if ($size > 4194304 || isset($seen[strtolower($absolute)])) {
-                    throw new RecordingFailure('manifest', 'The Release mirror manifest is too large or contains duplicate paths.');
+                    throw new RecordingFailure('manifest', RecordingError::ManifestReleaseMirrorManifestTooLargeOr);
                 }
                 $seen[strtolower($absolute)] = true;
                 $manifest[] = [...self::entryRow($entry, $disk), 'entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
@@ -74,7 +74,7 @@ class ReleaseRecording
                     $size += strlen($moved['bytes']);
                     if ($size > 4194304 || isset($seen[strtolower($old)]) || ! is_file($old)
                         || hash_file('sha256', $old) !== hash('sha256', $moved['bytes'])) {
-                        throw new RecordingFailure('mirror-drift', 'A moved page\'s old mirror differs from its published bytes.');
+                        throw new RecordingFailure('mirror-drift', RecordingError::MirrorDriftMovedPagesOldMirrorDiffersFrom);
                     }
                     $seen[strtolower($old)] = true;
                     $manifest[] = [...self::entryRow($entry, $disk), 'action' => 'delete', 'move' => true, 'entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
@@ -91,7 +91,7 @@ class ReleaseRecording
                 $size += strlen($bytes);
                 if ($size > 4194304 || isset($seen[strtolower($absolute)]) || ! is_file($absolute)
                     || hash_file('sha256', $absolute) !== hash('sha256', $bytes)) {
-                    throw new RecordingFailure('mirror-drift', 'A Take-down mirror differs from the currently published bytes.');
+                    throw new RecordingFailure('mirror-drift', RecordingError::MirrorDriftTakeDownMirrorDiffersFromCurrently);
                 }
                 $seen[strtolower($absolute)] = true;
                 $manifest[] = [...self::entryRow($entry, $disk), 'action' => 'delete', 'entryId' => (string) $entry->id, 'versionId' => (string) $version->id,
@@ -146,7 +146,7 @@ class ReleaseRecording
                 $receipt = $this->receipt($release);
                 $rows = $receipt === null ? [] : $this->rows($receipt->manifest);
                 if ($receipt === null || $receipt->state === 'unavailable' || count(self::memberFiles($rows)) !== $release->members()->count()) {
-                    throw new RecordingFailure('unavailable', 'No durable recording receipt is available.');
+                    throw new RecordingFailure('unavailable', RecordingError::UnavailableNoDurableRecordingReceiptAvailable);
                 }
                 $git = new LocalGit($this->disk()->path(''));
                 $lock = $git->lock();
@@ -173,21 +173,21 @@ class ReleaseRecording
                     if (isset($preparedIds[(string) $entry->getKey()])) {
                         if ($current === null || $current->published_version !== (string) $version->id
                             || $current->workflow_marking !== $entry->workflow_marking) {
-                            throw new RecordingFailure('superseded', 'A newer publication superseded this mirror completion.');
+                            throw new RecordingFailure('superseded', RecordingError::SupersededNewerPublicationSupersededMirrorCompletion);
                         }
                     } elseif ($current === null || $current->published_version !== (string) $version->id
                         || $current->workflow_marking === BeamUxEntry::MARKING_PUBLISHED) {
-                        throw new RecordingFailure('superseded', 'A newer publication superseded this Take-down completion.');
+                        throw new RecordingFailure('superseded', RecordingError::SupersededNewerPublicationSupersededTakeDownCompletion);
                     }
                 }
                 $diskName = config('beam.ux.storage.mirror_disk');
                 $disk = is_string($diskName) && $diskName !== '' ? Storage::disk($diskName) : null;
                 if ($disk === null) {
-                    throw new RecordingFailure('mirror-disabled', 'No mirror disk is enabled.');
+                    throw new RecordingFailure('mirror-disabled', RecordingError::MirrorDisabledNoMirrorDiskEnabled);
                 }
                 $local = config('filesystems.disks.'.$diskName.'.driver') === 'local';
                 if ($takedowns !== [] && ! $local) {
-                    throw new RecordingFailure('mirror-disabled', 'Take-down recording needs an enabled local mirror disk.');
+                    throw new RecordingFailure('mirror-disabled', RecordingError::MirrorDisabledTakeDownRecordingNeedsEnabledLocal);
                 }
                 foreach ($allMembers as $member) {
                     if (! isset($preparedIds[(string) $member[0]->getKey()])) {
@@ -203,11 +203,11 @@ class ReleaseRecording
                         $this->relativeParts($path);
                     }
                     if (! app(PlacedDiskMirror::class)->mirror($entry, $path, $body)) {
-                        throw new RecordingFailure('mirror', 'A Release mirror could not be completed.');
+                        throw new RecordingFailure('mirror', RecordingError::MirrorReleaseMirrorCouldNotCompleted);
                     }
                     $actual = $disk->get($path);
                     if ($actual !== app(PlacedDiskMirror::class)->bytes($entry, $body)) {
-                        throw new RecordingFailure('mirror', 'A Release mirror did not match its published snapshot.');
+                        throw new RecordingFailure('mirror', RecordingError::MirrorReleaseMirrorDidNotMatchPublished);
                     }
                 }
                 $this->completeMoves($release, $disk, $local, $preparedIds, $allMembers);
@@ -224,16 +224,16 @@ class ReleaseRecording
                         $file = collect($receipt?->manifest ?? [])->first(fn (array $item) => ($item['action'] ?? null) === 'delete'
                             && $item['entryId'] === (string) $entry->id);
                         if ($file === null) {
-                            throw new RecordingFailure('manifest', 'The Take-down is missing its frozen mirror receipt.');
+                            throw new RecordingFailure('manifest', RecordingError::ManifestTakeDownMissingFrozenMirrorReceipt);
                         }
                         $path = $file['path'];
                         $this->mirrorContained($disk->path(''), $path);
                         if (! is_file($disk->path($path)) || hash_file('sha256', $disk->path($path)) !== $file['sha256']
                             || (is_executable($disk->path($path)) ? '100755' : '100644') !== $file['mode']) {
-                            throw new RecordingFailure('mirror-drift', 'A Take-down mirror differs from the frozen published bytes.');
+                            throw new RecordingFailure('mirror-drift', RecordingError::MirrorDriftTakeDownMirrorDiffersFromFrozen);
                         }
                         if (! $disk->delete($path) || $disk->exists($path)) {
-                            throw new RecordingFailure('mirror', 'A Take-down mirror could not be removed.');
+                            throw new RecordingFailure('mirror', RecordingError::MirrorTakeDownMirrorCouldNotRemoved);
                         }
                     }
                     $receipt?->forceFill(['state' => 'mirror-deleted'])->save();
@@ -284,10 +284,10 @@ class ReleaseRecording
             $this->mirrorContained($disk->path(''), $file['path']);
             if (! is_file($disk->path($file['path'])) || hash_file('sha256', $disk->path($file['path'])) !== $file['sha256']
                 || (is_executable($disk->path($file['path'])) ? '100755' : '100644') !== $file['mode']) {
-                throw new RecordingFailure('mirror-drift', 'A moved page\'s old mirror differs from the frozen published bytes.');
+                throw new RecordingFailure('mirror-drift', RecordingError::MirrorDriftMovedPagesOldMirrorDiffersFrom2);
             }
             if (! app(PlacedDiskMirror::class)->remove($file['path']) || $disk->exists($file['path'])) {
-                throw new RecordingFailure('mirror', 'A moved page\'s old mirror could not be removed.');
+                throw new RecordingFailure('mirror', RecordingError::MirrorMovedPagesOldMirrorCouldNot);
             }
             $deleted = true;
         }
@@ -323,10 +323,10 @@ class ReleaseRecording
         return array_map(function (array $file) use ($root): array {
             $file += ['kind' => BeamUxReleaseMember::KIND_ENTRY, 'ref' => (string) ($file['entryId'] ?? ''), 'root' => $root];
             if ($file['kind'] !== BeamUxReleaseMember::KIND_ENTRY) {
-                throw new RecordingFailure('unavailable', 'This Release has no supported frozen recording receipt.');
+                throw new RecordingFailure('unavailable', RecordingError::UnavailableReleaseHasNoSupportedFrozenRecording);
             }
             if ($file['root'] !== $root) {
-                throw new RecordingFailure('path', 'The mirror disk no longer matches this frozen receipt.');
+                throw new RecordingFailure('path', RecordingError::PathMirrorDiskNoLongerMatchesFrozen);
             }
 
             return $file;
@@ -350,13 +350,13 @@ class ReleaseRecording
         $this->authorize($release, $actor);
         $receipt = $this->receipt($release);
         if ($receipt === null || $receipt->state === 'unavailable' || $receipt->manifest === []) {
-            throw new RecordingFailure('unavailable', 'This Release has no supported frozen recording receipt.');
+            throw new RecordingFailure('unavailable', RecordingError::UnavailableReleaseHasNoSupportedFrozenRecording);
         }
         $disk = $this->disk();
         foreach ($this->rows($receipt->manifest) as $file) {
             $this->contained($disk->path(''), $file['path']);
             if ($disk->path($file['path']) !== $file['absolute']) {
-                throw new RecordingFailure('path', 'The mirror disk no longer matches this frozen receipt.');
+                throw new RecordingFailure('path', RecordingError::PathMirrorDiskNoLongerMatchesFrozen);
             }
         }
         $git = new LocalGit($disk->path(''));
@@ -380,19 +380,19 @@ class ReleaseRecording
             $active = $tenancy->isActive();
             $unknownSplit = $tenancy->isMultiTenant() && $tenancy->centralConnection() === null;
         } catch (\Throwable) {
-            throw new RecordingFailure('tenancy', 'The tenancy context cannot be verified.');
+            throw new RecordingFailure('tenancy', RecordingError::TenancyTenancyContextCannotVerified);
         }
         if ($active || $unknownSplit) {
-            throw new RecordingFailure('tenancy', 'Local recording is unavailable while tenancy is active.');
+            throw new RecordingFailure('tenancy', RecordingError::TenancyLocalRecordingUnavailableWhileTenancyActive);
         }
         $probe = (new BeamUxEntry)->setConnection($release->getConnectionName());
         if (! app(EntryResidency::class)->isCentralResident($probe)) {
-            throw new RecordingFailure('tenancy', 'The Release is not proven central-resident.');
+            throw new RecordingFailure('tenancy', RecordingError::TenancyReleaseNotProvenCentralResident);
         }
         foreach ($release->members()->get() as $member) {
             $entry = BeamUxEntry::on($release->getConnectionName())->find($member->entry_id);
             if ($entry === null || ! app(EntryResidency::class)->isCentralResident($entry)) {
-                throw new RecordingFailure('tenancy', 'Every Release member must be proven central-resident.');
+                throw new RecordingFailure('tenancy', RecordingError::TenancyEveryReleaseMemberMustProvenCentral);
             }
         }
     }
@@ -409,12 +409,12 @@ class ReleaseRecording
             || count(array_unique(array_column($members, 'entryId'))) !== count($members)
             || count(array_unique(array_column($moves, 'entryId'))) !== count($moves)
             || array_diff(array_column($moves, 'entryId'), array_column($members, 'entryId')) !== []) {
-            throw new RecordingFailure('unavailable', 'This Release has no supported frozen recording receipt.');
+            throw new RecordingFailure('unavailable', RecordingError::UnavailableReleaseHasNoSupportedFrozenRecording);
         }
         $git->assertSupported();
         $identity = ['root' => $git->root, 'directory' => $git->directory, 'common' => $git->common];
         if ($row->getRawOriginal('repository') !== null && ($row->repository !== $identity || $row->branch !== $git->branch)) {
-            throw new RecordingFailure('recovery-required', 'The saved recording belongs to a different repository or branch.');
+            throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredSavedRecordingBelongsDifferentRepositoryOr);
         }
         $manifest = [];
         foreach ($rows as $file) {
@@ -428,14 +428,14 @@ class ReleaseRecording
             if ($member === null || ($moving
                 ? $member->version_id !== $file['versionId'] || $placed
                 : ($deleting ? $member->version_id !== null : $member->version_id !== $file['versionId']) || ! $placed)) {
-                throw new RecordingFailure('manifest', 'Release membership or mirror placement no longer matches its frozen receipt.');
+                throw new RecordingFailure('manifest', RecordingError::ManifestReleaseMembershipOrMirrorPlacementNo);
             }
             $file['path'] = $git->relative($file['absolute']);
             if ($deleting) {
                 $old = base64_decode($file['bytes'] ?? '', true);
                 if ($old === false || hash('sha256', $old) !== $file['sha256']
                     || ! $git->baseFileMatches($row->base ?? $git->head(), $file['path'], $file['sha256'], $file['mode'])) {
-                    throw new RecordingFailure('mirror-drift', 'The Git worktree file differs from the published Take-down bytes.');
+                    throw new RecordingFailure('mirror-drift', RecordingError::MirrorDriftGitWorktreeFileDiffersFromPublished);
                 }
             }
             $manifest[] = $file;
@@ -443,12 +443,12 @@ class ReleaseRecording
         if ($row->sha !== null) {
             if ($row->no_change) {
                 if ($git->baseTree($row->sha) !== $row->tree || ! $git->reachable($row->sha)) {
-                    throw new RecordingFailure('recovery-required', 'The saved no-change Git result is no longer reachable.');
+                    throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredSavedNoChangeGitResultNo);
                 }
             } else {
                 $git->verify($row->sha, $row->base, $row->tree, $manifest, $row->id);
                 if (! $git->reachable($row->sha)) {
-                    throw new RecordingFailure('recovery-required', 'The recorded Git result is no longer reachable.');
+                    throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredRecordedGitResultNoLongerReachable);
                 }
             }
 
@@ -465,23 +465,23 @@ class ReleaseRecording
             $path = $git->path($file['path']);
             if (($file['action'] ?? null) === 'delete') {
                 if (file_exists($path)) {
-                    throw new RecordingFailure('mirror-drift', 'A Take-down path reappeared after its frozen deletion.');
+                    throw new RecordingFailure('mirror-drift', RecordingError::MirrorDriftTakeDownPathReappearedAfterFrozen);
                 }
                 if ($row->state === 'failed' && ! str_starts_with((string) $row->error, 'mirror-deleted:')) {
-                    throw new RecordingFailure('mirror-drift', 'An absent Take-down path is not proven to have been removed by this Release.');
+                    throw new RecordingFailure('mirror-drift', RecordingError::MirrorDriftAbsentTakeDownPathNotProven);
                 }
 
                 continue;
             }
             if (! is_file($path) || hash_file('sha256', $path) !== $file['sha256']
                 || (is_executable($path) ? '100755' : '100644') !== $file['mode']) {
-                throw new RecordingFailure('mirror-drift', 'A file differs from this Release. Resolve the file explicitly before recording.');
+                throw new RecordingFailure('mirror-drift', RecordingError::MirrorDriftFileDiffersFromReleaseResolveFile);
             }
         }
         if ($row->preparation !== null) {
             if (! is_file($row->preparation.'/HEAD')
                 || trim((string) file_get_contents($row->preparation.'/HEAD')) !== $row->base) {
-                throw new RecordingFailure('recovery-required', 'An unsaved or missing Git preparation needs explicit recovery; no second commit was attempted.');
+                throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredUnsavedOrMissingGitPreparationNeeds);
             }
         }
         // With no saved/orphan candidate, a failed hook created no commit. A new serialized
@@ -512,10 +512,10 @@ class ReleaseRecording
         $git->verify($row->candidate, $row->base, $row->tree, $manifest, $row->id);
         if (! $git->reachable($row->candidate)) {
             if ($row->installation_started) {
-                throw new RecordingFailure('recovery-required', 'Installation started but the saved candidate is not reachable. No second installation was attempted.');
+                throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredInstallationStartedButSavedCandidateNot);
             }
             if ($git->head() !== $row->base) {
-                throw new RecordingFailure('recovery-required', 'The branch moved without the saved recording. No second commit was attempted.');
+                throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredBranchMovedWithoutSavedRecordingNo);
             }
             $row->forceFill(['installation_started' => true])->save();
             $git->install($row->candidate, $row->base);
@@ -550,7 +550,7 @@ class ReleaseRecording
     {
         $name = config('beam.ux.storage.mirror_disk');
         if (! is_string($name) || config('filesystems.disks.'.$name.'.driver') !== 'local') {
-            throw new RecordingFailure('mirror-disabled', 'Local recording needs an enabled local mirror disk.');
+            throw new RecordingFailure('mirror-disabled', RecordingError::MirrorDisabledLocalRecordingNeedsEnabledLocalMirror);
         }
 
         return Storage::disk($name);
@@ -563,16 +563,16 @@ class ReleaseRecording
         $parts = $this->relativeParts($path);
         $cursor = rtrim($root, '/');
         if (! str_starts_with($cursor, '/')) {
-            throw new RecordingFailure('path', 'The configured mirror root must be absolute.');
+            throw new RecordingFailure('path', RecordingError::PathConfiguredMirrorRootMustAbsolute);
         }
         $missing = [];
         while (($canonical = realpath($cursor)) === false) {
             if (is_link($cursor) || $cursor === dirname($cursor)) {
-                throw new RecordingFailure('path', 'The configured mirror root cannot be resolved.');
+                throw new RecordingFailure('path', RecordingError::PathConfiguredMirrorRootCannotResolved);
             }
             $part = basename($cursor);
             if ($part === '.' || $part === '..') {
-                throw new RecordingFailure('path', 'The configured mirror root cannot be resolved.');
+                throw new RecordingFailure('path', RecordingError::PathConfiguredMirrorRootCannotResolved);
             }
             $missing[] = $part;
             $cursor = dirname($cursor);
@@ -587,7 +587,7 @@ class ReleaseRecording
             $resolved = realpath($cursor);
             if ((is_link($cursor) && $resolved === false)
                 || ($resolved !== false && $resolved !== $canonical && ! str_starts_with($resolved, $canonical.'/'))) {
-                throw new RecordingFailure('path', 'A resolved mirror path leaves its configured root.');
+                throw new RecordingFailure('path', RecordingError::PathResolvedMirrorPathLeavesConfiguredRoot);
             }
         }
     }
@@ -597,20 +597,20 @@ class ReleaseRecording
         $cursor = '';
         foreach (explode('/', trim($root, '/')) as $part) {
             if ($part === '' || $part === '.' || $part === '..') {
-                throw new RecordingFailure('path', 'The mirror root must be a canonical local directory.');
+                throw new RecordingFailure('path', RecordingError::PathMirrorRootMustCanonicalLocalDirectory);
             }
             $cursor .= '/'.$part;
             if (is_link($cursor)) {
-                throw new RecordingFailure('path', 'Symlink mirror roots cannot be recorded.');
+                throw new RecordingFailure('path', RecordingError::PathSymlinkMirrorRootsCannotRecorded);
             }
         }
         foreach ($this->relativeParts($path) as $part) {
             $cursor .= '/'.$part;
             if (is_link($cursor)) {
-                throw new RecordingFailure('path', 'Symlink mirror paths cannot be recorded.');
+                throw new RecordingFailure('path', RecordingError::PathSymlinkMirrorPathsCannotRecorded);
             }
             if (is_dir($cursor) && file_exists($cursor.'/.git')) {
-                throw new RecordingFailure('path', 'Nested Git worktrees cannot be mirror members.');
+                throw new RecordingFailure('path', RecordingError::PathNestedGitWorktreesCannotMirrorMembers);
             }
         }
     }
@@ -618,12 +618,12 @@ class ReleaseRecording
     private function relativeParts(string $path): array
     {
         if ($path === '' || str_contains($path, "\0") || str_contains($path, '\\') || str_starts_with($path, '/') || preg_match('/^[a-zA-Z]:/', $path)) {
-            throw new RecordingFailure('path', 'The mirror path is not a contained regular file.');
+            throw new RecordingFailure('path', RecordingError::PathMirrorPathNotContainedRegularFile);
         }
         $parts = explode('/', $path);
         foreach ($parts as $part) {
             if ($part === '' || $part === '.' || $part === '..' || strtolower($part) === '.git') {
-                throw new RecordingFailure('path', 'The mirror path is not a contained regular file.');
+                throw new RecordingFailure('path', RecordingError::PathMirrorPathNotContainedRegularFile);
             }
         }
 

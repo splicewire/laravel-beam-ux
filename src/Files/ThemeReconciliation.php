@@ -42,7 +42,7 @@ class ThemeReconciliation
     public function inspect(BeamUxReleaseMember $member, Authenticatable $actor): FileInspectionData
     {
         $entry = $this->entry($member, $actor);
-        $data = new FileInspectionData($member->id, $entry->getAttribute('id'), 'unsupported', 'This file cannot be reconciled.');
+        $data = new FileInspectionData($member->id, $entry->getAttribute('id'), 'unsupported', __('beam-ux::files.inspection.unsupported'));
         try {
             [$entry, $state, $target, $published] = $this->context($entry);
             $data->workingHeadVersion = $state->headVersion;
@@ -60,21 +60,21 @@ class ThemeReconciliation
             $data->localSource = $file['bytes'] !== null && mb_check_encoding($file['bytes'], 'UTF-8') ? mb_strcut($file['bytes'], 0, 20000, 'UTF-8') : null;
             if (! $file['exists']) {
                 $data->state = 'missing';
-                $data->message = 'The local file is missing. Restore creates only the current published bytes.';
+                $data->message = __('beam-ux::files.inspection.missing');
                 $data->canRestore = $this->mayRestore($entry, $actor);
             } elseif ($file['bytes'] === $published) {
                 $data->state = 'unchanged';
-                $data->message = 'The local file matches the current published version.';
+                $data->message = __('beam-ux::files.inspection.unchanged');
             } else {
                 $this->decodeFile($entry, $file['bytes'], $this->pinnedBody($entry));
                 $data->state = 'differs';
-                $data->message = 'The local file differs from the current published version. Take it as a draft deliberately.';
+                $data->message = __('beam-ux::files.inspection.differs');
                 $data->canTake = true;
                 $data->canRemirror = $this->mayRestore($entry, $actor);
             }
         } catch (FileConflict $failure) {
             $data->state = in_array($failure->reason, ['invalid', 'valid-empty-outside-import'], true) ? $failure->reason : 'unsupported';
-            $data->message = $failure->getMessage();
+            $data->message = $failure->error?->message($failure->params) ?? $failure->getMessage();
         }
 
         $batchItems = $this->takeAllSnapshot($member, $actor);
@@ -95,13 +95,13 @@ class ThemeReconciliation
             [$locked, $state, $target] = $this->context($locked);
             $file = $this->check($input, $state, $target);
             if (! $file['exists']) {
-                throw new FileConflict('file-moved', 'The local file is missing. Nothing was imported.');
+                throw new FileConflict('file-moved', FileError::FileMovedLocalFileMissingNothingWasImported);
             }
             [$body, $settings] = $this->decodeFile($locked, $file['bytes'], $this->pinnedBody($locked));
             $this->sameTarget($locked, $target);
             $again = $this->files->read($target);
             if ($again !== $file) {
-                throw new FileConflict('file-moved', 'The local file changed during validation. Nothing was imported. Reload comparison.');
+                throw new FileConflict('file-moved', FileError::FileMovedLocalFileChangedDuringValidationNothing);
             }
             $draft = app(EntryPublication::class)->draftFromBase($locked, $body, $input->expectedHeadVersion,
                 $this->isMdx($locked) || MdxPageFile::applies($locked) ? 'Taken from canonical local MDX file' : ($this->isTsxBlocks($locked) ? 'Taken from local TSX file as blocks' : 'Taken from local Theme file'),
@@ -113,7 +113,7 @@ class ThemeReconciliation
                     $locked->getAttribute('id'), $draft->headVersion, $draft->publishedVersion, $diagnostic);
             }
 
-            return new FileReconcileResultData('drafted', 'Draft saved. The published version and local file are unchanged.', $locked->getAttribute('id'), $draft->headVersion, $draft->publishedVersion);
+            return new FileReconcileResultData('drafted', __('beam-ux::files.result.drafted'), $locked->getAttribute('id'), $draft->headVersion, $draft->publishedVersion);
         });
     }
 
@@ -129,14 +129,14 @@ class ThemeReconciliation
             $file = $this->check($input, $state, $target);
             if ($file['exists']) {
                 if ($file['bytes'] === $published) {
-                    return new FileReconcileResultData('unchanged', 'The local file already matches the published version. Nothing changed.', $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
+                    return new FileReconcileResultData('unchanged', __('beam-ux::files.result.unchanged'), $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
                 }
-                throw new FileConflict('file-exists', 'A different local file exists. Preserve or move it before restoring a missing published file. Nothing was overwritten.');
+                throw new FileConflict('file-exists', FileError::FileExistsDifferentLocalFileExistsPreserveOr);
             }
             $this->sameTarget($locked, $target);
             $this->files->create($target, $published);
 
-            return new FileReconcileResultData('restored', 'The missing published file was restored. Draft, history and Git are unchanged.', $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
+            return new FileReconcileResultData('restored', __('beam-ux::files.result.restored'), $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
         });
     }
 
@@ -151,26 +151,26 @@ class ThemeReconciliation
             [$locked, $state, $target, $published] = $this->context($locked);
             $file = $this->check($input, $state, $target);
             if (! $file['exists']) {
-                throw new FileConflict('file-moved', 'The local file is missing. Use Restore after a fresh comparison.');
+                throw new FileConflict('file-moved', FileError::FileMovedLocalFileMissingUseRestoreAfter);
             }
             if ($file['bytes'] === $published) {
-                return new FileReconcileResultData('unchanged', 'The local file already matches the published version. Nothing changed.', $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
+                return new FileReconcileResultData('unchanged', __('beam-ux::files.result.unchanged'), $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
             }
             $this->sameTarget($locked, $target);
             $again = $this->files->read($target);
             if ($again !== $file) {
-                throw new FileConflict('file-moved', 'The local file changed during validation. Nothing was overwritten. Reload comparison.');
+                throw new FileConflict('file-moved', FileError::FileMovedLocalFileChangedDuringValidationNothing2);
             }
             $this->files->replace($target, $published, $file);
 
-            return new FileReconcileResultData('remirrored', 'The local file was replaced with the current published version. Draft and history are unchanged.', $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
+            return new FileReconcileResultData('remirrored', __('beam-ux::files.result.remirrored'), $locked->getAttribute('id'), $state->headVersion, $state->publishedVersion);
         });
     }
 
     public function takeAll(BeamUxReleaseMember $anchor, Authenticatable $actor, FileBatchReconcileInputData $input): FileBatchReconcileResultData
     {
         if (! $input->confirmed) {
-            throw new FileConflict('confirmation', 'Explicit confirmation of the inspected batch is required.', 422);
+            throw new FileConflict('confirmation', FileError::ConfirmationExplicitConfirmationInspectedBatchRequired, 422);
         }
         $this->entry($anchor, $actor);
         $release = BeamUxRelease::on($anchor->getConnectionName())->findOrFail($anchor->release_id);
@@ -179,14 +179,14 @@ class ThemeReconciliation
         usort($provided, fn (array $left, array $right): int => strcmp($left['memberId'], $right['memberId']));
         $expectedTokens = array_map(fn (array $item): array => array_diff_key($item, ['path' => true]), $expected);
         if (count($expected) < 1 || $provided !== $expectedTokens) {
-            throw new FileConflict('file-moved', 'The Files changed since the batch comparison. Nothing was taken. Reload comparison.');
+            throw new FileConflict('file-moved', FileError::FileMovedFilesChangedSinceBatchComparisonNothing);
         }
 
         return $release->getConnection()->transaction(function () use ($anchor, $actor, $release, $expected, $provided) {
             $members = BeamUxReleaseMember::on($release->getConnectionName())
                 ->where('release_id', $release->id)->whereIn('id', array_column($provided, 'memberId'))->get()->keyBy('id');
             if ($members->count() !== count($provided)) {
-                throw new FileConflict('member-moved', 'A Release member changed since comparison. Nothing was taken.');
+                throw new FileConflict('member-moved', FileError::MemberMovedReleaseMemberChangedSinceComparisonNothing);
             }
             $entries = [];
             foreach ($provided as $item) {
@@ -206,24 +206,24 @@ class ThemeReconciliation
                     $item['expectedFileExists'], $item['expectedFileSha256'], $item['fingerprint'], true);
                 $file = $this->check($token, $state, $target);
                 if (! $file['exists']) {
-                    throw new FileConflict('file-moved', 'A local file is missing. Nothing was taken. Reload comparison.');
+                    throw new FileConflict('file-moved', FileError::FileMovedLocalFileMissingNothingWasTaken);
                 }
                 [$body, $settings] = $this->decodeFile($locked, $file['bytes'], $this->pinnedBody($locked));
                 $drafts[] = [$locked, $body, $settings, $token, $target, $file];
             }
             if ($this->takeAllSnapshot($anchor, $actor) !== $expected) {
-                throw new FileConflict('file-moved', 'The Files changed during batch validation. Nothing was taken. Reload comparison.');
+                throw new FileConflict('file-moved', FileError::FileMovedFilesChangedDuringBatchValidationNothing);
             }
             $results = [];
             foreach ($drafts as [$entry, $body, $settings, $token, $target, $file]) {
                 if ($this->files->target($entry) !== $target || $this->files->read($target) !== $file) {
-                    throw new FileConflict('file-moved', 'A local file changed during batch validation. Nothing was taken. Reload comparison.');
+                    throw new FileConflict('file-moved', FileError::FileMovedLocalFileChangedDuringBatchValidation);
                 }
                 $draft = app(EntryPublication::class)->draftFromBase($entry, $body, $token->expectedHeadVersion,
                     'Taken from local file as part of a confirmed batch', $actor instanceof \Illuminate\Database\Eloquent\Model ? $actor : null, $settings);
                 $diagnostic = $draft->compileError === null ? null : FileDraftDiagnosticData::compileFailed();
                 $results[] = new FileReconcileResultData($diagnostic === null ? 'drafted' : 'drafted-with-compile-error',
-                    $diagnostic?->message ?? 'Draft saved. The published version and local file are unchanged.',
+                    $diagnostic?->message ?? __('beam-ux::files.result.drafted'),
                     $entry->getAttribute('id'), $draft->headVersion, $draft->publishedVersion, $diagnostic);
             }
 
@@ -285,7 +285,7 @@ class ThemeReconciliation
             if ($failure->reason !== 'tenancy') {
                 throw $failure;
             }
-            throw new \Illuminate\Auth\Access\AuthorizationException('Local file reconciliation requires verified central residency with no active tenancy.');
+            throw new \Splicewire\Beam\Localization\CodedAuthorizationException(FileError::ReconciliationNeedsCentralResidency);
         }
         $entry = BeamUxEntry::on($member->getConnectionName())->findOrFail($member->entry_id);
         app(ReleaseService::class)->authorizeFileEdit($entry, $actor, $restore);
@@ -298,11 +298,11 @@ class ThemeReconciliation
     {
         if (! $this->isMdx($entry) && ! MdxPageFile::applies($entry) && ! $this->isTsxBlocks($entry)
             && ($entry->getAttribute('type') !== UxType::Theme || $entry->codec()::class !== CssBodyCodec::class)) {
-            throw new FileConflict('unsupported', 'Only canonical Theme/CSS, body-only Page/MDX, block-body Page/MDX, or block-body Page/TSX with its native codec is supported here.', 422);
+            throw new FileConflict('unsupported', FileError::UnsupportedOnlyCanonicalThemeCssBodyOnly, 422);
         }
         $state = app(EntryPublication::class)->state($entry);
         if ($state->headVersion === null || $state->publishedVersion === null) {
-            throw new FileConflict('unsupported', 'A valid existing working head and published pin are required.', 422);
+            throw new FileConflict('unsupported', FileError::UnsupportedValidExistingWorkingHeadAndPublished, 422);
         }
         $body = $this->pinnedBody($entry);
         $published = $this->published($entry, $body);
@@ -314,7 +314,7 @@ class ThemeReconciliation
             app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
         }
         if (strlen($published) > LocalThemeFile::LIMIT || ! mb_check_encoding($published, 'UTF-8')) {
-            throw new FileConflict('unsupported', 'The published representation is not bounded UTF-8.', 422);
+            throw new FileConflict('unsupported', FileError::UnsupportedPublishedRepresentationNotBoundedUtf8, 422);
         }
 
         return [$entry, $state, $this->files->target($entry), $published];
@@ -338,7 +338,7 @@ class ThemeReconciliation
             return $entry->codec()->decode($body);
         }
         if (! JsonDocShape::is($body)) {
-            throw new FileConflict('unsupported', 'This MDX page still holds its source. Its host converts it to blocks once (ADR-0233 d9) before the Files action reads it.', 422);
+            throw new FileConflict('unsupported', FileError::UnsupportedMdxPageStillHoldsSourceHost, 422);
         }
 
         return app(PlacedDiskMirror::class)->bytes($entry, $body);
@@ -356,7 +356,7 @@ class ThemeReconciliation
     private function decodeMdxPageFile(BeamUxEntry $entry, string $bytes, array $published): array
     {
         if (strlen($bytes) > CanonicalMdx::LIMIT || ! mb_check_encoding($bytes, 'UTF-8') || str_contains($bytes, "\r")) {
-            throw new FileConflict('invalid', 'MDX import requires bounded UTF-8 with LF line endings.', 422);
+            throw new FileConflict('invalid', FileError::InvalidMdxImportRequiresBoundedUtf82, 422);
         }
         $file = MdxPageFile::read($bytes);
         $served = MdxPageFile::settingsOf($entry);
@@ -371,7 +371,11 @@ class ThemeReconciliation
             }
             $body = app(SourceToBlocks::class)->convert($file['body'], $published, app(ManifestProfileResolver::class)->resolve($entry), UxFormat::Mdx);
         } catch (ValidationException $failure) {
-            throw new FileConflict('invalid', (string) (collect($failure->errors())->flatten()->first() ?? 'The MDX page file is not valid.'), 422);
+            // The first error is already keyed upstream: passed through with this code, English unchanged.
+            $first = collect($failure->errors())->flatten()->first();
+            throw is_string($first)
+                ? new FileConflict('invalid', FileError::InvalidDetail, 422, ['detail' => $first])
+                : new FileConflict('invalid', FileError::MdxFileInvalid, 422);
         }
 
         return [$body, $settings];
@@ -396,7 +400,7 @@ class ThemeReconciliation
         }
         if ($this->isTsxBlocks($entry)) {
             if (strlen($bytes) > LocalThemeFile::LIMIT || ! mb_check_encoding($bytes, 'UTF-8')) {
-                throw new FileConflict('invalid', 'TSX source must be bounded UTF-8 text.', 422);
+                throw new FileConflict('invalid', FileError::InvalidTsxSourceMustBoundedUtf8, 422);
             }
             try {
                 $body = app(SourceToBlocks::class)->convert($bytes, app(CanvasBodyGuard::class)->workingHead($entry),
@@ -404,8 +408,8 @@ class ThemeReconciliation
                 app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
 
                 return [$body, null];
-            } catch (\Illuminate\Validation\ValidationException $failure) {
-                throw new FileConflict('invalid', 'The TSX file could not be lowered to an admitted block document.', 422);
+            } catch (ValidationException $failure) {
+                throw new FileConflict('invalid', FileError::InvalidTsxFileCouldNotLoweredAdmitted, 422);
             }
         }
 
@@ -419,7 +423,7 @@ class ThemeReconciliation
             : app(VersionStore::class)->version($entry->versionable(), $entry->getAttribute('published_version'));
         $body = $version?->snapshot['payload'] ?? null;
         if (! is_array($body)) {
-            throw new FileConflict('unsupported', 'The current published snapshot cannot be verified.', 422);
+            throw new FileConflict('unsupported', FileError::UnsupportedCurrentPublishedSnapshotCannotVerified, 422);
         }
 
         return $body;
@@ -431,20 +435,20 @@ class ThemeReconciliation
     private function check(FileReconcileInputData $input, \Splicewire\Beam\Ux\Data\EntryPublicationData $state, array $target): array
     {
         if (! $input->confirmed) {
-            throw new FileConflict('confirmation', 'Explicit confirmation of this inspection is required.', 422);
+            throw new FileConflict('confirmation', FileError::ConfirmationExplicitConfirmationInspectionRequired, 422);
         }
         if ($state->headVersion !== $input->expectedHeadVersion) {
-            throw new FileConflict('head-moved', 'The working head changed since inspection. Nothing changed. Reload comparison.');
+            throw new FileConflict('head-moved', FileError::HeadMovedWorkingHeadChangedSinceInspectionNothing);
         }
         if ($state->publishedVersion !== $input->expectedPublishedVersion) {
-            throw new FileConflict('pin-moved', 'The published version changed since inspection. Nothing changed. Reload comparison.');
+            throw new FileConflict('pin-moved', FileError::PinMovedPublishedVersionChangedSinceInspectionNothing);
         }
         if (! hash_equals($target['fingerprint'], $input->fingerprint)) {
-            throw new FileConflict('placement-moved', 'The codec or file placement changed since inspection. Reload comparison.');
+            throw new FileConflict('placement-moved', FileError::PlacementMovedCodecOrFilePlacementChangedSince);
         }
         $file = $this->files->read($target);
         if ($file['exists'] !== $input->expectedFileExists || $file['hash'] !== $input->expectedFileSha256) {
-            throw new FileConflict('file-moved', 'The local file changed since inspection. Nothing changed. Reload comparison.');
+            throw new FileConflict('file-moved', FileError::FileMovedLocalFileChangedSinceInspectionNothing);
         }
 
         return $file;
@@ -454,7 +458,7 @@ class ThemeReconciliation
     private function sameTarget(BeamUxEntry $entry, array $target): void
     {
         if ($this->files->target($entry) !== $target) {
-            throw new FileConflict('placement-moved', 'The local file placement changed during inspection. Nothing changed.');
+            throw new FileConflict('placement-moved', FileError::PlacementMovedLocalFilePlacementChangedDuringInspection);
         }
     }
 

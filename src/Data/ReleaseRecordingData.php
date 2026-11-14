@@ -36,27 +36,27 @@ final class ReleaseRecordingData extends BeamData
         }
         $status = $release->status !== 'published' ? 'not-published' : ($row?->state ?? 'unavailable');
         $message = match ($status) {
-            'not-published' => 'Publication has not completed.',
-            'recorded' => $row?->no_change ? 'Files already matched the parent commit; no new commit was created.' : 'Recorded locally.',
-            'pending' => 'Recording is pending. Files can safely resume this same attempt.',
-            'mirror-deleted' => 'The Release removed its mirror file and is finishing the same local Git attempt.',
-            'recovery-required' => 'The recording result needs verification. Files can resume the saved attempt; no second commit is guessed.',
+            'not-published' => __('beam-ux::recording.status.not-published'),
+            'recorded' => $row?->no_change ? __('beam-ux::recording.status.recorded-no-change') : __('beam-ux::recording.status.recorded'),
+            'pending' => __('beam-ux::recording.status.pending'),
+            'mirror-deleted' => __('beam-ux::recording.status.mirror-deleted'),
+            'recovery-required' => __('beam-ux::recording.status.recovery-required'),
             'failed' => match ($row?->error) {
-                'mirror-drift' => 'A file differs from this Release. Resolve it explicitly before retrying.',
-                'superseded' => 'A newer publication superseded this mirror completion.',
-                'tenancy' => 'Local recording is unavailable for this tenancy context.',
-                'mirror', 'completion' => 'Publication succeeded. A mirror could not be completed or verified; no whole-Release Git commit was installed.',
-                'path' => 'A mirror path could not be verified as a contained regular file.',
-                default => 'Publication succeeded. Local recording failed; check mirror, Git, signing and hooks before retrying.',
+                'mirror-drift' => __('beam-ux::recording.status.failed.mirror-drift'),
+                'superseded' => __('beam-ux::recording.status.failed.superseded'),
+                'tenancy' => __('beam-ux::recording.status.failed.tenancy'),
+                'mirror', 'completion' => __('beam-ux::recording.status.failed.mirror'),
+                'path' => __('beam-ux::recording.status.failed.path'),
+                default => __('beam-ux::recording.status.failed.default'),
             },
             'unavailable' => match ($row?->error) {
-                'mirror-drift' => 'The published file differs from its mirror. The unknown mirror content was left untouched.',
-                'mirror-disabled' => 'Local recording needs an enabled local mirror disk.',
-                'path' => 'A mirror path could not be verified as a contained regular file.',
-                'manifest' => 'A complete bounded recording manifest could not be frozen; no Git commit was attempted.',
-                default => 'No supported local recording receipt is available for this Release.',
+                'mirror-drift' => __('beam-ux::recording.status.unavailable.mirror-drift'),
+                'mirror-disabled' => __('beam-ux::recording.status.unavailable.mirror-disabled'),
+                'path' => __('beam-ux::recording.status.unavailable.path'),
+                'manifest' => __('beam-ux::recording.status.unavailable.manifest'),
+                default => __('beam-ux::recording.status.unavailable.default'),
             },
-            default => 'No supported local recording receipt is available for this Release.',
+            default => __('beam-ux::recording.status.unavailable.default'),
         };
 
         return new self($release->id, $status, $row?->sha, $row?->no_change ?? false, $allowed, $message);

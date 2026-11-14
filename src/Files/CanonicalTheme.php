@@ -15,16 +15,16 @@ class CanonicalTheme
     public function decode(string $bytes, array $published): array
     {
         if (! mb_check_encoding($bytes, 'UTF-8') || strlen($bytes) > LocalThemeFile::LIMIT) {
-            throw new FileConflict('invalid', 'Theme source must be bounded UTF-8 text.', 422);
+            throw new FileConflict('invalid', FileError::InvalidThemeSourceMustBoundedUtf8, 422);
         }
         $codec = new CssBodyCodec;
         try {
             $body = $codec->encode($bytes);
             if ($codec->decode($body) !== $bytes) {
-                throw new FileConflict('invalid', 'Use the exact generated Theme token format; malformed, duplicate or unrepresented source cannot be imported.', 422);
+                throw new FileConflict('invalid', FileError::InvalidUseExactGeneratedThemeTokenFormat, 422);
             }
             if ($body === []) {
-                throw new FileConflict('valid-empty-outside-import', 'This is a valid empty Theme representation. Clearing tokens is outside this key-preserving import.', 422);
+                throw new FileConflict('valid-empty-outside-import', FileError::ValidEmptyOutsideImportValidEmptyThemeRepresentationClearingTokens, 422);
             }
             $before = $this->leaves($published);
             $after = $this->leaves($body);
@@ -33,7 +33,7 @@ class CanonicalTheme
             sort($keys);
             sort($newKeys);
             if ($keys !== $newKeys) {
-                throw new FileConflict('invalid', 'Import must preserve every published token and namespace.', 422);
+                throw new FileConflict('invalid', FileError::InvalidImportMustPreserveEveryPublishedToken, 422);
             }
             $schema = ['type' => 'object', 'properties' => [
                 'canvas' => ThemeSchemas::canvas(), 'shell' => ThemeSchemas::shell(), 'site' => ThemeSchemas::site(),
@@ -45,23 +45,23 @@ class CanonicalTheme
                 [$namespace, $property] = array_pad(explode('.', $key, 2), 2, '');
                 $declared = $schema['properties'][$namespace]['properties'][$property] ?? [];
                 if (($declared['type'] ?? null) !== 'string' || ($declared['format'] ?? null) !== 'color') {
-                    throw new FileConflict('unsupported', 'Only existing Theme color leaves can change; other leaves must stay unchanged.', 422);
+                    throw new FileConflict('unsupported', FileError::UnsupportedOnlyExistingThemeColorLeavesCan, 422);
                 }
                 if (! is_string($value) || ! preg_match('/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/D', $value)) {
-                    throw new FileConflict('invalid', 'Changed Theme colors must use a supported hexadecimal color.', 422);
+                    throw new FileConflict('invalid', FileError::InvalidChangedThemeColorsMustUseSupported, 422);
                 }
             }
             // Retained extension namespaces are compared above and never stripped. The three owning
             // declared Theme namespaces validate in full, including the shell hidden by the editor.
             if (! app(AcceptanceGate::class)->accepts($body, $schema)) {
-                throw new FileConflict('invalid', 'The complete Theme body does not satisfy its declared schema.', 422);
+                throw new FileConflict('invalid', FileError::InvalidCompleteThemeBodyDoesNotSatisfy, 422);
             }
 
             return $body;
         } catch (FileConflict $failure) {
             throw $failure;
         } catch (\InvalidArgumentException|\RuntimeException $error) {
-            throw new FileConflict('invalid', 'The Theme source could not be decoded and validated.', 422);
+            throw new FileConflict('invalid', FileError::InvalidThemeSourceCouldNotDecodedAnd, 422);
         }
     }
 

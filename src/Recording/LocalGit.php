@@ -33,22 +33,22 @@ class LocalGit
     {
         if ($this->run($this->root, ['rev-parse', '--is-bare-repository']) !== 'false'
             || $this->run($this->root, ['symbolic-ref', '-q', 'HEAD']) !== $this->branch) {
-            throw new RecordingFailure('repository-state', 'Recording needs the original attached local branch.');
+            throw new RecordingFailure('repository-state', RecordingError::RepositoryStateRecordingNeedsOriginalAttachedLocalBranch);
         }
         $this->head();
         foreach (['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'BISECT_LOG', 'rebase-merge', 'rebase-apply', 'index.lock', 'HEAD.lock', 'config.worktree'] as $marker) {
             if (file_exists($this->directory.'/'.$marker)) {
-                throw new RecordingFailure('repository-state', 'Finish the current Git operation before recording.');
+                throw new RecordingFailure('repository-state', RecordingError::RepositoryStateFinishCurrentGitOperationBeforeRecording);
             }
         }
         foreach (['extensions.worktreeConfig', 'core.splitIndex', 'core.sparseCheckout'] as $key) {
             $value = $this->optional(['config', '--bool', $key]);
             if ($value !== '' && $value !== 'false') {
-                throw new RecordingFailure('unsupported-config', 'This Git worktree configuration is not supported for recording.');
+                throw new RecordingFailure('unsupported-config', RecordingError::UnsupportedConfigGitWorktreeConfigurationNotSupportedFor);
             }
         }
         if (glob($this->directory.'/sharedindex.*') !== []) {
-            throw new RecordingFailure('unsupported-index', 'Split indexes are not supported for recording.');
+            throw new RecordingFailure('unsupported-index', RecordingError::UnsupportedIndexSplitIndexesNotSupportedForRecording);
         }
     }
 
@@ -57,7 +57,7 @@ class LocalGit
     {
         $handle = fopen($this->common.'/beam-ux-recording.lock', 'c');
         if ($handle === false || ! flock($handle, LOCK_EX)) {
-            throw new RecordingFailure('lock', 'The local recording lock is unavailable.');
+            throw new RecordingFailure('lock', RecordingError::LockLocalRecordingLockUnavailable);
         }
 
         return $handle;
@@ -69,30 +69,30 @@ class LocalGit
         $parts = explode('/', $path);
         if ($path === '' || str_contains($path, "\0") || str_contains($path, '\\')
             || preg_match('/^[a-zA-Z]:/', $path) || str_starts_with($path, '/')) {
-            throw new RecordingFailure('path', 'A Release mirror path is not a contained regular file.');
+            throw new RecordingFailure('path', RecordingError::PathReleaseMirrorPathNotContainedRegular);
         }
         $cursor = $this->root;
         foreach ($parts as $part) {
             if ($part === '' || $part === '.' || $part === '..' || strtolower($part) === '.git') {
-                throw new RecordingFailure('path', 'A Release mirror path is not a contained regular file.');
+                throw new RecordingFailure('path', RecordingError::PathReleaseMirrorPathNotContainedRegular);
             }
             if (is_dir($cursor)) {
                 $names = scandir($cursor);
                 if ($names === false) {
-                    throw new RecordingFailure('path', 'The mirror path spelling cannot be verified.');
+                    throw new RecordingFailure('path', RecordingError::PathMirrorPathSpellingCannotVerified);
                 }
                 $this->assertCasePaths([$part], $names);
             }
             $cursor .= '/'.$part;
             if (is_dir($cursor) && file_exists($cursor.'/.git')) {
-                throw new RecordingFailure('path', 'Nested Git worktrees cannot be recorded as member files.');
+                throw new RecordingFailure('path', RecordingError::PathNestedGitWorktreesCannotRecordedAs);
             }
             if (is_link($cursor) || (file_exists($cursor) && ! is_dir($cursor) && $cursor !== $this->root.'/'.$path)) {
-                throw new RecordingFailure('path', 'Symlink or non-directory mirror ancestors cannot be recorded.');
+                throw new RecordingFailure('path', RecordingError::PathSymlinkOrNonDirectoryMirrorAncestors);
             }
         }
         if (file_exists($cursor) && ! is_file($cursor)) {
-            throw new RecordingFailure('path', 'Only regular mirror files can be recorded.');
+            throw new RecordingFailure('path', RecordingError::PathOnlyRegularMirrorFilesCanRecorded);
         }
         $this->assertCasePaths([$path], $this->treePaths($this->head()));
         $this->assertCasePaths([$path], explode("\0", $this->run($this->root, ['ls-files', '-z'], [], null, false)));
@@ -102,7 +102,7 @@ class LocalGit
             if (str_starts_with($row, '160000 ') && str_contains($row, "\t")) {
                 $submodule = explode("\t", $row, 2)[1];
                 if ($path === $submodule || str_starts_with($path, $submodule.'/')) {
-                    throw new RecordingFailure('path', 'Submodule mirrors cannot be recorded.');
+                    throw new RecordingFailure('path', RecordingError::PathSubmoduleMirrorsCannotRecorded);
                 }
             }
         }
@@ -115,10 +115,10 @@ class LocalGit
         $ignored = $this->process($this->root, ['check-ignore', '-q', '--', './'.$path], literal: false);
         $exit = $ignored->run();
         if ($exit === 0) {
-            throw new RecordingFailure('mirror-ignored', 'Git ignores this mirror path, so it is not recorded.');
+            throw new RecordingFailure('mirror-ignored', RecordingError::MirrorIgnoredGitIgnoresMirrorPathSoNot);
         }
         if ($exit !== 1) {
-            throw new RecordingFailure('repository-state', 'Git ignore rules cannot be verified.');
+            throw new RecordingFailure('repository-state', RecordingError::RepositoryStateGitIgnoreRulesCannotVerified);
         }
 
         return $cursor;
@@ -127,7 +127,7 @@ class LocalGit
     public function relative(string $absolute): string
     {
         if (! str_starts_with($absolute, $this->root.'/')) {
-            throw new RecordingFailure('path', 'All Release mirrors must belong to one Git worktree.');
+            throw new RecordingFailure('path', RecordingError::PathAllReleaseMirrorsMustBelongOne);
         }
         $relative = substr($absolute, strlen($this->root) + 1);
         $this->path($relative);
@@ -153,7 +153,7 @@ class LocalGit
             }
             $bytes = base64_decode($file['bytes'], true);
             if ($bytes === false || hash('sha256', $bytes) !== $file['sha256']) {
-                throw new RecordingFailure('manifest', 'The frozen recording manifest is invalid.');
+                throw new RecordingFailure('manifest', RecordingError::ManifestFrozenRecordingManifestInvalid);
             }
             $blob = $this->run($this->root, ['hash-object', '-w', '--stdin'], $env, $bytes);
             $this->run($this->root, ['update-index', '--add', '--cacheinfo', $file['mode'].','.$blob.','.$file['path']], $env);
@@ -177,33 +177,33 @@ class LocalGit
         $matching = $this->run($this->root, ['log', '--all', '--format=%H', '--fixed-strings', '--grep=Beam-UX-Recording: '.$identity]);
         foreach (array_filter(explode("\n", $matching)) as $match) {
             if ($match !== $sha) {
-                throw new RecordingFailure('recovery-required', 'More than one Git candidate claims this recording identity.');
+                throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredMoreThanOneGitCandidateClaims);
             }
         }
         if ($this->run($this->root, ['show', '-s', '--format=%P', $sha]) !== $base
             || $this->run($this->root, ['rev-parse', $sha.'^{tree}']) !== $tree
             || ! in_array('Beam-UX-Recording: '.$identity, explode("\n", $this->run($this->root, ['show', '-s', '--format=%B', $sha])), true)) {
-            throw new RecordingFailure('recovery-required', 'The saved Git candidate does not match this recording.');
+            throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredSavedGitCandidateDoesNotMatch);
         }
         $paths = array_column($manifest, 'path');
         $changed = $this->run($this->root, ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', $sha], [], null, false);
         foreach (array_filter(explode("\0", $changed), fn ($path) => $path !== '') as $path) {
             if (! in_array($path, $paths, true)) {
-                throw new RecordingFailure('recovery-required', 'A Git hook changed files outside this Release.');
+                throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredGitHookChangedFilesOutsideRelease);
             }
         }
         foreach ($manifest as $file) {
             $entry = $this->run($this->root, ['ls-tree', $sha, '--', $file['path']]);
             if (($file['action'] ?? null) === 'delete') {
                 if ($entry !== '') {
-                    throw new RecordingFailure('recovery-required', 'A Git hook restored a frozen Take-down member.');
+                    throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredGitHookRestoredFrozenTakeDown);
                 }
 
                 continue;
             }
             $blob = $this->run($this->root, ['show', $sha.':'.$file['path']], [], null, false);
             if (hash('sha256', $blob) !== $file['sha256'] || ! str_starts_with($entry, $file['mode'].' blob ')) {
-                throw new RecordingFailure('recovery-required', 'A Git hook changed a frozen Release member.');
+                throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredGitHookChangedFrozenReleaseMember);
             }
         }
     }
@@ -213,7 +213,7 @@ class LocalGit
         $process = $this->process($this->root, ['merge-base', '--is-ancestor', $sha, $this->branch]);
         $exit = $process->run();
         if ($exit > 1) {
-            throw new RecordingFailure('recovery-required', 'The recorded Git result cannot be verified.');
+            throw new RecordingFailure('recovery-required', RecordingError::RecoveryRequiredRecordedGitResultCannotVerified);
         }
 
         return $exit === 0;
@@ -251,7 +251,7 @@ class LocalGit
     private function environment(string $work, string $base): array
     {
         if (! is_dir($work) && ! mkdir($work, 0700, true) && ! is_dir($work)) {
-            throw new RecordingFailure('preparation', 'Local recording preparation is unavailable.');
+            throw new RecordingFailure('preparation', RecordingError::PreparationLocalRecordingPreparationUnavailable);
         }
         if (! file_exists($work.'/HEAD')) {
             file_put_contents($work.'/HEAD', $base."\n");
@@ -285,7 +285,7 @@ class LocalGit
                 $folded = strtolower($prefix);
                 foreach (array_keys($spellings[$folded] ?? []) as $spelling) {
                     if ((string) $spelling !== $prefix) {
-                        throw new RecordingFailure('path', 'A Release mirror path has a case-colliding file or ancestor.');
+                        throw new RecordingFailure('path', RecordingError::PathReleaseMirrorPathHasCaseColliding);
                     }
                 }
                 $spellings[$folded][$prefix] = true;
@@ -298,7 +298,7 @@ class LocalGit
         $process = $this->process($this->root, $args);
         $exit = $process->run();
         if ($exit > 1) {
-            throw new RecordingFailure('repository-state', 'Git configuration cannot be verified.');
+            throw new RecordingFailure('repository-state', RecordingError::RepositoryStateGitConfigurationCannotVerified);
         }
 
         return trim($process->getOutput());
@@ -322,7 +322,8 @@ class LocalGit
             $started = $process?->isStarted() ?? false;
             $diagnostic = $this->diagnosticClass($started ? $process->getErrorOutput() : '');
             $status = $started ? $process->getExitCode() : null;
-            throw new RecordingFailure('git-failed', 'Local Git recording failed ('.$diagnostic.($status === null ? '' : ', exit '.$status).').', $diagnostic, $status);
+            throw new RecordingFailure('git-failed', RecordingError::GitFailedLocalGitRecordingFailed, $diagnostic, $status,
+                ['detail' => $diagnostic.($status === null ? '' : ', exit '.$status)]);
         }
 
         return $trim ? trim($process->getOutput()) : $process->getOutput();

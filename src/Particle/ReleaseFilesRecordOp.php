@@ -6,7 +6,6 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Particle\ActionAffordance;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
@@ -28,18 +27,25 @@ final class ReleaseFilesRecordOp
         }
         $input = ReleaseRecordInputData::validateAndCreate($request->all());
         if ($input->releaseId !== $model->release_id) {
-            throw ValidationException::withMessages(['releaseId' => 'The selected Release must contain this addressed file.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('releaseId', \Splicewire\Beam\Ux\Recording\RecordingError::ReleaseMustContainFile);
         }
         $release = BeamUxRelease::on($model->getConnectionName())->findOrFail($input->releaseId);
         try {
             app(ReleaseRecording::class)->retry($release, $actor);
         } catch (RecordingFailure $failure) {
-            throw ValidationException::withMessages(['releaseId' => $failure->getMessage()]);
+            // The response emit (coord-lead ruling (a)): the failure's case, localized, with its code; its reason and
+            // diagnostic stay raw. A failure built from a string (none today) keeps its text only as the diagnostic.
+            throw $failure->error === null
+                ? \Splicewire\Beam\Ux\Localization\DiagnosedValidationException::diagnosed('releaseId', \Splicewire\Beam\Ux\Recording\RecordingError::DidNotComplete, $failure)
+                : \Splicewire\Beam\Localization\CodedValidationException::for('releaseId', $failure->error, $failure->params);
         }
 
         $result = ReleaseRecordingData::project($release->fresh(), $actor);
         if ($result->status !== 'recorded') {
-            throw ValidationException::withMessages(['releaseId' => $result->message ?? 'The local recording did not complete.']);
+            // The status line is already keyed (ReleaseRecordingData); it travels with its code.
+            throw $result->message === null
+                ? \Splicewire\Beam\Localization\CodedValidationException::for('releaseId', \Splicewire\Beam\Ux\Recording\RecordingError::DidNotComplete)
+                : \Splicewire\Beam\Localization\CodedValidationException::for('releaseId', \Splicewire\Beam\Ux\Recording\RecordingError::NotRecorded, ['detail' => $result->message]);
         }
 
         return $result;

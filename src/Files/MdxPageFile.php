@@ -103,7 +103,7 @@ final class MdxPageFile
     public static function read(string $bytes): array
     {
         if (! str_starts_with($bytes, "---\n")) {
-            throw new FileConflict('invalid', 'An MDX page file begins with its page settings as a frontmatter header (ADR-0233 d3).', 422);
+            throw new FileConflict('invalid', FileError::InvalidMdxPageFileBeginsWithPage, 422);
         }
         $parsed = app(FrontmatterParser::class)->parse($bytes);
         $declared = [];

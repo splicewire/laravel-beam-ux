@@ -17,7 +17,9 @@ final class FileDraftDiagnosticData extends BeamData
 
     public static function compileFailed(): self
     {
-        return new self(FileDraftDiagnosticCode::CompileFailed,
-            'Draft retained; compilation failed. Published content is unchanged. Review the draft before publication.');
+        // Keyed (localization 23); outside a booted application (no translator) the declared English stands.
+        return new self(FileDraftDiagnosticCode::CompileFailed, function_exists('app') && app()->bound('translator')
+            ? (string) __('beam-ux::files.diagnostic.compile_failed')
+            : 'Draft retained; compilation failed. Published content is unchanged. Review the draft before publication.');
     }
 }

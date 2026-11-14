@@ -26,7 +26,7 @@ final class FilesRecordingReadPolicy implements ResourceReadPolicy
 
         $route = $request->route();
         if (! $route instanceof Route) {
-            return Response::deny('Files recording requires an addressed release member.');
+            return Response::deny(RecordingError::AddressedMemberRequired->message(), RecordingError::AddressedMemberRequired->code());
         }
 
         $controller = $route->getControllerClass();
@@ -38,6 +38,6 @@ final class FilesRecordingReadPolicy implements ResourceReadPolicy
 
         return $route->getActionMethod() === 'show' && is_string($id) && $id !== ''
             ? $authority
-            : Response::deny('Files recording requires an addressed release member.');
+            : Response::deny(RecordingError::AddressedMemberRequired->message(), RecordingError::AddressedMemberRequired->code());
     }
 }
