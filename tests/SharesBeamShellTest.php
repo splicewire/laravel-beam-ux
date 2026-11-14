@@ -149,6 +149,50 @@ class SharesBeamShellTest extends TestCase
         $this->assertArrayHasKey('initial', $changed['localization'], 'a changed hash is a new key, so the catalog is resent');
     }
 
+    /**
+     * localization 16 amend (B11-U1): inertia-laravel v2 (still inside the ^2.0|^3.0 range) has no `once`. On an adapter
+     * without it, `initial` is an ordinary prop: no once call is made, and the catalog is delivered synchronously on the
+     * first load and on every visit, an except-once header included, since v2 cannot exclude it. v3 keeps the once-prop
+     * (above).
+     */
+    public function test_an_adapter_without_once_gets_the_initial_catalog_as_an_ordinary_synchronous_prop(): void
+    {
+        config(['beam.localization.client_catalog' => __DIR__.'/Fixtures/Localization/discovered-catalog.json']);
+        $this->app->forgetScopedInstances();
+        $v3 = \Inertia\Inertia::getFacadeRoot();
+        // A v2-shaped factory: it forwards everything the shell reads, and has no `once` (v2.0.10's ResponseFactory has none).
+        \Inertia\Inertia::swap(new class($v3)
+        {
+            public function __construct(private object $factory) {}
+
+            public function __call(string $method, array $arguments): mixed
+            {
+                if ($method === 'once') {
+                    throw new \BadMethodCallException('Method Inertia\ResponseFactory::once does not exist.');
+                }
+
+                return $this->factory->{$method}(...$arguments);
+            }
+        });
+        try {
+            $shared = (new SharesBeamShellHost)->share($this->request());
+        } finally {
+            \Inertia\Inertia::swap($v3);
+        }
+
+        $this->assertInstanceOf(\Splicewire\Beam\Localization\Client\Data\ClientCatalogData::class, $shared['localization']['initial']);
+        foreach ([[], ['X-Inertia' => 'true', 'X-Inertia-Except-Once-Props' => 'beam.catalog:http://localhost:en::'.$shared['localization']['address']->hash]] as $headers) {
+            $request = Request::create('/');
+            foreach ($headers as $name => $value) {
+                $request->headers->set($name, $value);
+            }
+            [$props] = (new \Inertia\PropsResolver($request, 'Page'))->resolve(['localization' => $shared['localization']], []);
+            $initial = $props['localization']['initial'];
+            $initial = is_array($initial) ? $initial : $initial->toArray();
+            $this->assertSame('Save', $initial['messages']['schemastud-ui::messages.save']['text'], 'delivered synchronously on every visit');
+        }
+    }
+
     public function test_a_guest_gets_no_account_rail_and_no_account_shell(): void
     {
         $this->app->bind(AccountShellProvider::class, fn () => throw new \RuntimeException('a guest must not reach the provider'));

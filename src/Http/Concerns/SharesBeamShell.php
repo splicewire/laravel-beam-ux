@@ -110,7 +110,12 @@ trait SharesBeamShell
      * `beam.catalog:{host}:{locale}:{realm}:{hash}`). `initial` is null without a valid discovered catalog. The client
      * then renders compiled English, which never counts as coverage.
      *
-     * @return array{address: \Splicewire\Beam\Localization\Client\Data\ClientCatalogAddressData, initial: \Inertia\OnceProp}
+     * B11-U1: `once` exists only from inertia-laravel v3, and the supported range is ^2.0|^3.0. Where the installed adapter
+     * has no `once`, `initial` is an ORDINARY prop: still delivered synchronously with the first and SSR render, but sent
+     * on every response, since v2 has no once-exclusion. Where `once` exists, the once-prop and its exclusion are used.
+     * The adapter floor is not narrowed.
+     *
+     * @return array{address: \Splicewire\Beam\Localization\Client\Data\ClientCatalogAddressData, initial: mixed}
      */
     protected function localization(Request $request): array
     {
@@ -120,8 +125,16 @@ trait SharesBeamShell
 
         return [
             'address' => $address,
-            'initial' => Inertia::once(fn () => $bootstrap->initial)->as($key),
+            'initial' => static::inertiaSupportsOnce() ? Inertia::once(fn () => $bootstrap->initial)->as($key) : $bootstrap->initial,
         ];
+    }
+
+    /** Whether the installed Inertia adapter offers `once` props (inertia-laravel v3+), asked of the bound factory. */
+    protected static function inertiaSupportsOnce(): bool
+    {
+        $factory = Inertia::getFacadeRoot();
+
+        return is_object($factory) && method_exists($factory, 'once');
     }
 
     /**
