@@ -146,7 +146,7 @@ class EntryPublication
             }
             $before = $this->state($locked);
             if ($before->headVersion !== $baseVersion) {
-                throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('The editor base version has moved. Reload or explicitly save your changes against the new base.');
+                throw new \Splicewire\Beam\Ux\Localization\CodedConflictHttpException(EntryError::EditorBaseMoved);
             }
 
             $unauthored = $before->headVersion === null && $before->versions === []
@@ -156,7 +156,7 @@ class EntryPublication
                 && $before->publishedVersion === null;
             if (! $unauthored && ($before->headVersion === null || (! $unpublishedComponent && ($before->publishedVersion === null
                 || ! array_filter($before->versions, fn ($version) => $version->id === $before->publishedVersion))))) {
-                throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('This entry has history but no valid Publication Pin. Repair its pin before editing.');
+                throw new \Splicewire\Beam\Ux\Localization\CodedConflictHttpException(EntryError::PublicationPinInvalid);
             }
             if ($unauthored) {
                 $this->initializeBaseline($locked, mirror: true);
@@ -248,15 +248,15 @@ class EntryPublication
             foreach ($refs as $id => $ref) {
                 $entry = $entries->get($id);
                 if ($entry === null) {
-                    throw ValidationException::withMessages(['release' => 'A Release entry no longer exists.']);
+                    throw \Splicewire\Beam\Localization\CodedValidationException::for('release', \Splicewire\Beam\Ux\Release\ReleaseError::EntryMissing);
                 }
                 if ($expectedPins !== null && (! array_key_exists($id, $expectedPins) || $this->publishedVersionId($entry) !== $expectedPins[$id])) {
-                    throw ValidationException::withMessages(['release' => 'A publication pin moved. Rebase or drop that Release member before publishing.']);
+                    throw \Splicewire\Beam\Localization\CodedValidationException::for('release', \Splicewire\Beam\Ux\Release\ReleaseError::PinMoved);
                 }
                 $particle = $this->particle($entry);
                 $version = $particle === null ? null : $this->versions->version($particle, $ref);
                 if ($version === null || ! is_array($version->snapshot['payload'] ?? null)) {
-                    throw ValidationException::withMessages(['ref' => 'The named version does not belong to this entry or has no valid body snapshot.']);
+                    throw \Splicewire\Beam\Localization\CodedValidationException::for('ref', EntryError::VersionNotOfEntry);
                 }
                 $body = $version->snapshot['payload'];
                 $change = $this->assertVersionPublishable($entry, $version, $refs);
@@ -284,7 +284,7 @@ class EntryPublication
                         actor: $actor === null ? null : 'user:'.$actor->getKey(),
                     ));
                     if (! $result->applied) {
-                        throw ValidationException::withMessages(['publish' => 'The entry lifecycle refused the publish transition.']);
+                        throw \Splicewire\Beam\Localization\CodedValidationException::for('publish', EntryError::PublishRefused);
                     }
                     $entry->refresh();
                     $this->applyPageSettings($entry, $version, validateUrl: false);
@@ -343,7 +343,7 @@ class EntryPublication
     {
         $this->assertStorable($entry, $body);
         if ($pageSettings !== null && $entry->type !== \Splicewire\Beam\Ux\Type\UxType::Page) {
-            throw ValidationException::withMessages(['pageSettings' => 'Only pages have page settings.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings', \Splicewire\Beam\Ux\Containment\PageError::SettingsOnlyPages);
         }
         if ($pageSettings !== null) {
             $pageSettings = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->settings($entry, $pageSettings);
@@ -352,10 +352,10 @@ class EntryPublication
             // the parent it names declares (a draft that moves the page answers to its new parent), and an unclaimed
             // key may name nothing declared (d3).
             if ($pageSettings->fileLanguage !== null && ! \Splicewire\Beam\Ux\Format\FileLanguage::allows($entry, $pageSettings->fileLanguage)) {
-                throw ValidationException::withMessages(['pageSettings.fileLanguage' => "This page cannot be written in {$pageSettings->fileLanguage} on this host (ADR-0233 d5)."]);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings.fileLanguage', \Splicewire\Beam\Ux\Containment\PageError::FileLanguageUnwritableAdr, ['language' => (string) $pageSettings->fileLanguage]);
             }
             if ($pageSettings->childFields !== null && \Splicewire\Beam\Ux\Containment\PageFields::named($pageSettings->childFields) === null) {
-                throw ValidationException::withMessages(['pageSettings.childFields' => 'No host class or tenant registered schema declares these Page Fields.']);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings.childFields', \Splicewire\Beam\Ux\Containment\PageError::ChildFieldsUndeclared);
             }
             $class = \Splicewire\Beam\Ux\Containment\PageFields::forParent($entry, $pageSettings->parentId);
             $pageSettings->fields = \Splicewire\Beam\Ux\Containment\PageFields::check($class, $pageSettings->fields);
@@ -460,9 +460,7 @@ class EntryPublication
             $version = $particle === null ? null : $this->versions->version($particle, $ref);
 
             if ($particle === null || $version === null) {
-                throw ValidationException::withMessages([
-                    'ref' => "No version [{$ref}] belongs to this entry; there is nothing to restore.",
-                ]);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('ref', EntryError::VersionNotFound, ['ref' => (string) $ref]);
             }
 
             // ADR-0227 d1 — a restore must not bring code into a tenant entry: guard the version's body BEFORE
@@ -612,7 +610,7 @@ class EntryPublication
                 $this->initializeBaseline($locked, mirror: true);
             } else {
                 if ($this->particle($locked) === null) {
-                    throw ValidationException::withMessages(['body' => 'This entry references a missing particle. Repair its binding before saving.']);
+                    throw \Splicewire\Beam\Localization\CodedValidationException::for('body', EntryError::ParticleMissing);
                 }
                 $this->baseline($locked, mirror: true);
             }
@@ -684,15 +682,7 @@ class EntryPublication
         $format = $entry->getAttribute('format');
         $format = is_object($format) && property_exists($format, 'value') ? (string) $format->value : (string) $format;
 
-        throw ValidationException::withMessages([
-            'body' => sprintf(
-                'This entry is authored as %s source, which cannot carry a canvas document. Saving one '.
-                'here would replace the source with an empty file. Edit it as %s source, or change the '.
-                "entry's format first.",
-                $format,
-                $format,
-            ),
-        ]);
+        throw \Splicewire\Beam\Localization\CodedValidationException::for('body', EntryError::SourceFormatNoCanvas, ['format' => $format]);
     }
 
     /**
@@ -740,7 +730,7 @@ class EntryPublication
                 \Splicewire\Beam\Ux\Codec\CssBodyCodec::responsiveCss($body);
             }
         } catch (\InvalidArgumentException $e) {
-            throw ValidationException::withMessages(['body' => $e->getMessage()]);
+            throw \Splicewire\Beam\Ux\Localization\DiagnosedValidationException::diagnosed('body', EntryError::BodyUnpreparable, $e);
         }
 
         app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reserveName($entry, $body);
@@ -852,7 +842,7 @@ class EntryPublication
     {
         $body = $version->snapshot['payload'] ?? null;
         if (! is_array($body)) {
-            throw ValidationException::withMessages(['ref' => 'The named version has no valid body snapshot.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('ref', EntryError::VersionSnapshotInvalid);
         }
         // System registration/seed retains its established pin + diagnostic contract. EP-10
         // changes explicit publication, not boot-time availability of shipped entries.
@@ -916,7 +906,7 @@ class EntryPublication
         $format = $entry->format instanceof \Splicewire\Beam\Ux\Format\UxFormat ? $entry->format->value : $entry->getAttribute('format');
         if ($data->fileLanguage !== null) {
             if (! \Splicewire\Beam\Ux\Format\FileLanguage::allows($entry, $data->fileLanguage)) {
-                throw ValidationException::withMessages(['pageSettings.fileLanguage' => "This page cannot be written in {$data->fileLanguage} on this host."]);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings.fileLanguage', \Splicewire\Beam\Ux\Containment\PageError::FileLanguageUnwritable, ['language' => (string) $data->fileLanguage]);
             }
             if ($data->fileLanguage !== $format) {
                 $entry->forceFill(['format' => $data->fileLanguage]);
@@ -926,7 +916,7 @@ class EntryPublication
         if (Schema::connection($entry->getConnectionName())->hasColumn('beam_ux_entries', 'child_fields')) {
             $entry->forceFill(['child_fields' => $data->childFields]);
         } elseif ($data->childFields !== null) {
-            throw ValidationException::withMessages(['pageSettings.childFields' => 'Migrate beam-ux (add_child_fields_to_beam_ux_entries_table) before a page declares Page Fields.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings.childFields', \Splicewire\Beam\Ux\Containment\PageError::ChildFieldsMigrationMissing);
         }
     }
 

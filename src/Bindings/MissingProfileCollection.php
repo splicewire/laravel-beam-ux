@@ -2,16 +2,19 @@
 
 namespace Splicewire\Beam\Ux\Bindings;
 
-use Illuminate\Validation\ValidationException;
+use Splicewire\Beam\Localization\CodedValidationException;
 
-/** Absence from the explicit offer only. Authorization, query and registry failures keep their own type. */
-final class MissingProfileCollection extends ValidationException
+/**
+ * Absence from the explicit offer only. Authorization, query and registry failures keep their own type. Still a
+ * ValidationException (through CodedValidationException), carrying `binding_collection_not_offered` (localization 23).
+ */
+final class MissingProfileCollection extends CodedValidationException
 {
     public readonly string $collection;
 
     public static function named(string $name): self
     {
-        $error = self::withMessages(['repeat.collection' => 'The Collection is not offered by this Manifest Profile.']);
+        $error = self::for('repeat.collection', BindingError::CollectionNotOffered);
         $error->collection = $name;
 
         return $error;

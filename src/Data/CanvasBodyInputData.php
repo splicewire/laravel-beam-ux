@@ -53,7 +53,7 @@ class CanvasBodyInputData extends BeamData
             throw $error;
         } catch (\Throwable) {
             // Use the declared union's constructors, including nested arms; no parallel node schema.
-            throw ValidationException::withMessages(['body' => 'This document has a node the canvas editor cannot read.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('body', \Splicewire\Beam\Ux\JsonDoc\SourceError::CanvasNodeUnreadable);
         }
     }
 

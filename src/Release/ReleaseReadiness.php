@@ -40,10 +40,10 @@ final class ReleaseReadiness
         $members = $release->members()->orderBy('entry_id')->get();
         $blockers = $notes = [];
         if ($members->isEmpty()) {
-            $blockers[] = new Item('empty', null, 'An empty Release cannot advance.');
+            $blockers[] = new Item('empty', null, ReleaseError::Empty->message());
         }
         if ($this->releases->awaitsReview($release)) {
-            $blockers[] = new Item('review', null, 'This Release requires approval before publication.',
+            $blockers[] = new Item('review', null, ReleaseError::ApprovalRequired->message(),
                 match ($release->status) {
                     'draft' => ['submit'], 'in_review' => ['approve'], default => []
                 });
@@ -56,7 +56,7 @@ final class ReleaseReadiness
             try {
                 $entry = $this->releases->entry($release, $id);
             } catch (ModelNotFoundException) {
-                $blockers[] = new Item('missing', $id, 'A Release entry no longer exists.', ['drop']);
+                $blockers[] = new Item('missing', $id, ReleaseError::EntryMissing->message(), ['drop']);
 
                 continue;
             } catch (ValidationException $refused) {
@@ -65,7 +65,7 @@ final class ReleaseReadiness
                 continue;
             }
             if ($this->releases->memberMoved($entry, $member)) {
-                $blockers[] = new Item('stale', $id, 'A publication pin or marking moved. Rebase or drop that member.', ['rebase', 'drop']);
+                $blockers[] = new Item('stale', $id, ReleaseError::PinOrMarkingMoved->message(), ['rebase', 'drop']);
 
                 continue;
             }
@@ -127,7 +127,7 @@ final class ReleaseReadiness
             $notes[] = new Item('redirect-replaced', $replaced['entryId'], "This page takes {$replaced['path']}, so Publish removes the Redirect there.");
         }
         foreach ($redirects['staysHidden'] as $hidden) {
-            $notes[] = new Item('stays-hidden', $hidden, 'This page stays hidden after Publish: a page above it is hidden.', ['open']);
+            $notes[] = new Item('stays-hidden', $hidden, ReleaseError::StaysHidden->message(), ['open']);
         }
 
         return new ReleaseReadinessData($blockers === [], $blockers, $notes);

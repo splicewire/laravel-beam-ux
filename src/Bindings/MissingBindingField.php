@@ -2,13 +2,16 @@
 
 namespace Splicewire\Beam\Ux\Bindings;
 
-use Illuminate\Validation\ValidationException;
+use Splicewire\Beam\Localization\CodedValidationException;
 
-/** A missing property, distinct from a malformed schema/reference or any other declaration failure. */
-final class MissingBindingField extends ValidationException
+/**
+ * A missing property, distinct from a malformed schema/reference or any other declaration failure. Still a
+ * ValidationException (through CodedValidationException), carrying `binding_field_undeclared` (localization 23).
+ */
+final class MissingBindingField extends CodedValidationException
 {
     public static function named(string $path): self
     {
-        return self::withMessages(['body' => 'The field ['.$path.'] is not declared by the offered Collection.']);
+        return self::for('body', BindingError::FieldUndeclaredByCollection, ['path' => $path]);
     }
 }

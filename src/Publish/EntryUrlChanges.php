@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\Publish;
 
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /** ADR-0232 d2: validate the final graph, not each intermediate move. EP-15 supplies a batch. */
@@ -13,7 +12,7 @@ final class EntryUrlChanges
     {
         $problem = $this->problems($context, $changes)[0] ?? null;
         if ($problem !== null) {
-            $this->refuse($problem['message']);
+            $this->refuse($problem['error']);
         }
     }
 
@@ -22,7 +21,8 @@ final class EntryUrlChanges
      * report (ADR-0232 d11) lists them all, reading without locks.
      *
      * @param  array<string, array{parentId: ?string, segment: ?string}>  $changes
-     * @return list<array{entryId: string, message: string}>
+     * @return list<array{entryId: string, message: string, error: \Splicewire\Beam\Ux\Containment\PageError}> `message` keyed in the request's language; `error`
+     *                                                                                                         is its coded case (internal; readiness reads `message`)
      */
     public function problems(BeamUxEntry $context, array $changes, bool $lock = true): array
     {
@@ -32,7 +32,7 @@ final class EntryUrlChanges
         $problems = [];
         foreach ($changes as $id => $change) {
             if (! $entries->has($id)) {
-                $problems[] = ['entryId' => (string) $id, 'message' => 'A changed entry does not exist.'];
+                $problems[] = self::problem((string) $id, \Splicewire\Beam\Ux\Containment\PageError::ChangedEntryMissing);
 
                 continue;
             }
@@ -59,7 +59,7 @@ final class EntryUrlChanges
             while ($node !== null) {
                 if (isset($seen[$node->id])) {
                     if (isset($affected[$entry->id])) {
-                        $problems[] = ['entryId' => (string) $entry->id, 'message' => 'The proposed page parents contain a cycle.'];
+                        $problems[] = self::problem((string) $entry->id, \Splicewire\Beam\Ux\Containment\PageError::ParentCycle);
 
                         continue 2;
                     }
@@ -74,7 +74,7 @@ final class EntryUrlChanges
                 if ($parent === null || ($parent->published_version === null && ! array_key_exists($parent->id, $changes)
                     && ! $this->isCanonicalStructuralRoot($parent, $entry))) {
                     if (isset($affected[$entry->id])) {
-                        $problems[] = ['entryId' => (string) $entry->id, 'message' => 'A page cannot publish under a missing or never-published parent.'];
+                        $problems[] = self::problem((string) $entry->id, \Splicewire\Beam\Ux\Containment\PageError::ParentUnpublished);
 
                         continue 2;
                     }
@@ -92,7 +92,7 @@ final class EntryUrlChanges
                 $url = $realm.':'.$path;
                 if (isset($urls[$url]) && (isset($affected[$entry->id]) || isset($affected[$urls[$url]]))) {
                     // Named after the page that moved, which is the one to fix.
-                    $problems[] = ['entryId' => (string) (isset($affected[$entry->id]) ? $entry->id : $urls[$url]), 'message' => 'The proposed pages would share a URL.'];
+                    $problems[] = self::problem((string) (isset($affected[$entry->id]) ? $entry->id : $urls[$url]), \Splicewire\Beam\Ux\Containment\PageError::UrlShared);
 
                     continue;
                 }
@@ -124,8 +124,14 @@ final class EntryUrlChanges
         return app(\Splicewire\Beam\Ux\Sitemap\EntryPublishGate::class)->isPublished($root);
     }
 
-    private function refuse(string $message): never
+    /** @return array{entryId: string, message: string, error: \Splicewire\Beam\Ux\Containment\PageError} */
+    private static function problem(string $entryId, \Splicewire\Beam\Ux\Containment\PageError $error): array
     {
-        throw ValidationException::withMessages(['pageSettings.parentId' => $message]);
+        return ['entryId' => $entryId, 'message' => $error->message(), 'error' => $error];
+    }
+
+    private function refuse(\Splicewire\Beam\Ux\Containment\PageError $error): never
+    {
+        throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings.parentId', $error);
     }
 }

@@ -45,7 +45,7 @@ class EntryWorkflowTransitionOp
         if ($input->transition === 'unpublish') {
             $workflow = app(WorkflowActuator::class);
             if (! in_array('unpublish', $workflow->available($model), true)) {
-                return new TransitionResult([], 'unpublish', false, ['Take-down is not available from this entry state.']);
+                return new TransitionResult([], 'unpublish', false, [\Splicewire\Beam\Ux\Release\ReleaseError::TakeDownUnavailable->message()]);
             }
             if (! $actor instanceof \Illuminate\Contracts\Auth\Authenticatable) {
                 throw new \Illuminate\Auth\Access\AuthorizationException;

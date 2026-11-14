@@ -2,8 +2,6 @@
 
 namespace Splicewire\Beam\Ux\Analytics;
 
-use Illuminate\Validation\ValidationException;
-
 /**
  * ADR-0234 decision 13: a save (and a Publish) checks every block's Click Event name against the Event Vocabulary the
  * Manifest Profile serves as `x-events`, as a Repeat's Collection is checked against `x-collections`. It walks children,
@@ -27,9 +25,7 @@ final class ClickEventGuard
             }
             $name = $node['clickEvent']['name'] ?? null;
             if ($name !== null && ! isset($declared[$name])) {
-                throw ValidationException::withMessages([
-                    'clickEvent.name' => "The Click Event [{$name}] is not in this Manifest Profile's Event Vocabulary.",
-                ]);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('clickEvent.name', AnalyticsError::ClickEventUnknown, ['name' => $name]);
             }
             $this->walk($node['children'] ?? [], $declared);
             foreach ($node['slots'] ?? [] as $slot) {

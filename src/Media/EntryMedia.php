@@ -5,7 +5,6 @@ namespace Splicewire\Beam\Ux\Media;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Ux\Media\Data\EntryImageData;
 use Splicewire\Beam\Ux\Media\Data\EntryImageLibraryData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -62,7 +61,7 @@ final class EntryMedia
         $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp', 'image/avif' => 'avif'];
         // Inspect bytes, never trust a filename or browser Content-Type. SVG/HTML and remote URLs are not uploads.
         if (! isset($extensions[$mime]) || $file->getSize() > 8 * 1024 * 1024) {
-            throw ValidationException::withMessages(['file' => 'Choose a JPEG, PNG, GIF, WebP or AVIF image up to 8 MiB.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('file', \Splicewire\Beam\Ux\Publish\EntryError::ImageInvalid);
         }
         $media = EntryMediaOwner::forEntry($entry)->addMedia($file)->usingName($file->getClientOriginalName())->usingFileName((string) \Illuminate\Support\Str::uuid().'.'.$extensions[$mime])->toMediaCollection('entry-images');
 

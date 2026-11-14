@@ -170,9 +170,8 @@ final class CanvasBodyGuard
         } catch (ValidationException $e) {
             throw $e;
         } catch (\Throwable $e) {
-            throw ValidationException::withMessages([
-                'body' => 'This document has a node the canvas editor cannot read ('.$e->getMessage().').',
-            ]);
+            // The parser's own text stays a :detail parameter, so the English is byte-identical (coord-lead ruling (b)).
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('body', SourceError::CanvasNodeUnreadableDetail, ['detail' => $e->getMessage()]);
         }
     }
 
@@ -195,8 +194,6 @@ final class CanvasBodyGuard
             return;
         }
 
-        throw ValidationException::withMessages([
-            'body' => 'This entry holds blocks, not code (ADR-0227 decision 1): a body that is not a canvas document is source, and source is refused here.',
-        ]);
+        throw \Splicewire\Beam\Localization\CodedValidationException::for('body', SourceError::BlocksNotCode);
     }
 }

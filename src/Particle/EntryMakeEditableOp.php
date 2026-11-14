@@ -27,7 +27,7 @@ final class EntryMakeEditableOp
         $publication->requireVersionStore();
         $compileError = DB::transaction(function () use ($input, $publication) {
             $namespace = config('beam.ux.namespace', 'starter');
-            abort_if(BeamUxEntry::withTrashed()->where('namespace', $namespace)->where('slug', $input->slug)->exists(), 409, 'This page already has an entry.');
+            throw_if(BeamUxEntry::withTrashed()->where('namespace', $namespace)->where('slug', $input->slug)->exists(), new \Splicewire\Beam\Ux\Localization\CodedConflictHttpException(\Splicewire\Beam\Ux\Publish\EntryError::PageEntryExists));
             // The unique namespace/slug key also refuses concurrent creation. No existing row is written.
             $entry = BeamUxEntry::create(['namespace' => $namespace, 'slug' => $input->slug,
                 'type' => UxType::Page, 'format' => 'tsx', 'title' => $input->slug]);

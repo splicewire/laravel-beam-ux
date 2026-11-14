@@ -3,11 +3,9 @@
 namespace Splicewire\Beam\Ux\Preview;
 
 use Carbon\CarbonImmutable;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
@@ -34,7 +32,7 @@ final class TenantPreviewOpenCapability
 
         $actorToken = app(ReleaseService::class)->actorTokenFor($actor);
         if (! str_starts_with($actorToken, 'tenant-model:')) {
-            throw new AuthorizationException('A tenant Preview requires a tenant-bound actor.');
+            throw new \Splicewire\Beam\Localization\CodedAuthorizationException(\Splicewire\Beam\Ux\Publish\EntryError::TenantPreviewActorRequired);
         }
 
         [$routeName, $routeParameters] = $this->tenantOpenRouteParameters();
@@ -110,7 +108,7 @@ final class TenantPreviewOpenCapability
         $tenancy = app(TenancyContext::class);
         $tenantId = $tenancy->isActive() ? $tenancy->currentTenantId() : null;
         if (! $tenancy->isMultiTenant() || $tenantId === null) {
-            throw new AuthorizationException('A tenant Preview requires an initialized tenant.');
+            throw new \Splicewire\Beam\Localization\CodedAuthorizationException(\Splicewire\Beam\Ux\Publish\EntryError::TenantPreviewUninitialized);
         }
 
         return (string) $tenantId;
@@ -122,7 +120,7 @@ final class TenantPreviewOpenCapability
         $tenant = function_exists('tenant') ? tenant() : null;
         $siteHost = is_object($tenant) && method_exists($tenant, 'siteHost') ? $tenant->siteHost() : null;
         if (! is_string($siteHost) || $siteHost === '') {
-            throw new ModelNotFoundException('Tenant Site Host is not configured.');
+            throw new ModelNotFoundException(\Splicewire\Beam\Ux\Publish\EntryError::TenantHostUnconfigured->message());
         }
 
         foreach (Route::getRoutes() as $route) {
@@ -147,6 +145,6 @@ final class TenantPreviewOpenCapability
             return [$name, ['tenant' => $tenantLabel]];
         }
 
-        throw new ModelNotFoundException('Tenant Site Host Preview route is not mounted.');
+        throw new ModelNotFoundException(\Splicewire\Beam\Ux\Publish\EntryError::TenantPreviewUnmounted->message());
     }
 }

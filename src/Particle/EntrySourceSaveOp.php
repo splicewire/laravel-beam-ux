@@ -4,7 +4,6 @@ namespace Splicewire\Beam\Ux\Particle;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
 use Splicewire\Beam\Ux\Body\BodyKind;
@@ -110,10 +109,7 @@ class EntrySourceSaveOp
             return;
         }
 
-        throw ValidationException::withMessages([
-            'source' => 'A hosted-site (tenant-owned) entry holds blocks, not source: a source body is code '
-                .'and is refused here (ADR-0227 decision 1, ADR-0233 decision 6).',
-        ]);
+        throw \Splicewire\Beam\Localization\CodedValidationException::for('source', \Splicewire\Beam\Ux\JsonDoc\SourceError::HostedSourceRefused);
     }
 
     private static function bodyFromSource(BeamUxEntry $entry, string $source): mixed
@@ -124,12 +120,7 @@ class EntrySourceSaveOp
             // tsx (and mdx where the host holds MDX as blocks): lowered to a JsonDoc through its Lens (d9).
             BodyKind::Blocks => self::lowerToBlocks($entry, $source),
             // a theme (Form) has no source editor.
-            default => throw ValidationException::withMessages([
-                'source' => sprintf(
-                    'This entry declares a %s body, which has no source editor. Edit it through its own input.',
-                    $entry->bodyKind()->value,
-                ),
-            ]),
+            default => throw \Splicewire\Beam\Localization\CodedValidationException::for('source', \Splicewire\Beam\Ux\JsonDoc\SourceError::NoSourceEditor, ['kind' => $entry->bodyKind()->value]),
         };
     }
 

@@ -6,18 +6,19 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Authorization\ResourceReadGuard;
 use Splicewire\Beam\Collections\CollectionRecordData;
 use Splicewire\Beam\Collections\CollectionRelations;
 use Splicewire\Beam\Collections\CollectionSchemaResolver;
 use Splicewire\Beam\Collections\StandaloneRecordQuery;
+use Splicewire\Beam\Localization\CodedValidationException;
 use Splicewire\Beam\Particle\ParticleFrameResourceHandler;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Read\ReadContext;
 use Splicewire\Beam\Ux\Canvas\ViewGateFilter;
 use Splicewire\Beam\Ux\Data\RepeatRecordsData;
 use Splicewire\Beam\Ux\JsonDoc\NodeChildren;
+use Splicewire\Beam\Ux\Localization\DiagnosedValidationException;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Preview\PreviewContext;
 
@@ -62,7 +63,7 @@ final class BindingResolver
             if (isset($node['repeat'])) {
                 $id = $node['id'] ?? null;
                 if (! is_string($id) || $id === '' || isset($out[$id])) {
-                    throw ValidationException::withMessages(['repeat' => 'A Repeat requires a unique block id.']);
+                    throw CodedValidationException::for('repeat', BindingError::RepeatIdRequired);
                 }
                 $out[$id] = $this->records($node, $entry, $request, $realm);
                 if ($out[$id]->records === []) {
@@ -85,11 +86,11 @@ final class BindingResolver
         }
         $query = $repeat['query'] ?? [];
         if (! is_array($query) || array_diff(array_keys($query), ['filter', 'sort', 'limit', 'filterVariant', 'ids'])) {
-            throw ValidationException::withMessages(['repeat.query' => 'Unknown saved query field.']);
+            throw CodedValidationException::for('repeat.query', BindingError::RepeatQueryFieldUnknown);
         }
         $limit = $query['limit'] ?? 25;
         if (! is_int($limit) || $limit < 1 || $limit > 100) {
-            throw ValidationException::withMessages(['repeat.query.limit' => 'The Repeat limit must be between 1 and 100.']);
+            throw CodedValidationException::for('repeat.query.limit', BindingError::RepeatLimitRange);
         }
         try {
             $query = app(BindingFieldEvolution::class)->query($source, $query, $entry);
@@ -99,10 +100,10 @@ final class BindingResolver
         try {
             $selection = RepeatQueryData::from($query)->ids;
         } catch (\InvalidArgumentException|\TypeError $refusal) {
-            throw ValidationException::withMessages(['repeat.query.ids' => $refusal->getMessage()]);
+            throw DiagnosedValidationException::diagnosed('repeat.query.ids', BindingError::RepeatSelectionInvalid, $refusal);
         }
         if ($selection !== null && ! isset($source->address['collection'])) {
-            throw ValidationException::withMessages(['repeat.query.ids' => 'Record selections require a registered Collection source.']);
+            throw CodedValidationException::for('repeat.query.ids', BindingError::RecordSelectionNeedsCollection);
         }
         unset($query['limit'], $query['ids']);
         $context = null;
@@ -110,7 +111,7 @@ final class BindingResolver
         // Duplicate creates new parameter bags. Never let a browser's filter or address override the saved declaration.
         if ($source->parentEntryId !== null) {
             if ($query !== []) {
-                throw ValidationException::withMessages(['repeat.query' => 'This child-page source does not declare filters or sorts.']);
+                throw CodedValidationException::for('repeat.query', BindingError::ChildSourceNoFilters);
             }
             $rows = array_slice(app(ChildPageRecords::class)->read($source->parentEntryId, $realm, $request->user()), ($page - 1) * $limit, $limit + 1);
         } else {
@@ -160,7 +161,7 @@ final class BindingResolver
             return $records;
         }
         if (! isset($source->address['collection'])) {
-            throw ValidationException::withMessages(['repeat.relation' => 'Nested Repeat requires an owner-declared Collection relation.']);
+            throw CodedValidationException::for('repeat.relation', BindingError::NestedRepeatNeedsRelation);
         }
         $definition = app(CollectionSchemaResolver::class)->resolve($source->address['collection']);
         if (! $enriched && $rows !== []) {
@@ -176,12 +177,12 @@ final class BindingResolver
             $relation = is_string($repeat['relation'] ?? null) ? $repeat['relation'] : '';
             $edge = $definition->relations()[$relation] ?? null;
             if ($edge === null || ! $edge['many'] || isset($repeat['collection'])) {
-                throw ValidationException::withMessages(['repeat.relation' => 'Nested Repeat must name a declared to-many relation.']);
+                throw CodedValidationException::for('repeat.relation', BindingError::NestedRepeatToManyRequired);
             }
             $query = $repeat['query'] ?? [];
             $limit = $query['limit'] ?? 25;
             if (! is_array($query) || array_diff(array_keys($query), ['limit']) || ! is_int($limit) || $limit < 1 || $limit > 100) {
-                throw ValidationException::withMessages(['repeat.query' => 'A relation Repeat accepts only a limit between 1 and 100.']);
+                throw CodedValidationException::for('repeat.query', BindingError::RelationRepeatLimitRange);
             }
             $page = max(1, min(10000, (int) $request->query('repeat_'.$id, 1)));
             $flat = $windows = [];
@@ -213,13 +214,13 @@ final class BindingResolver
             if (isset($node['repeat'])) {
                 $id = $node['id'] ?? null;
                 if (! is_string($id) || $id === '' || isset($out[$id])) {
-                    throw ValidationException::withMessages(['repeat' => 'A nested Repeat requires a unique block id.']);
+                    throw CodedValidationException::for('repeat', BindingError::NestedRepeatIdRequired);
                 }
                 $out[$id] = $node;
             } else {
                 foreach ($this->nestedRepeats(NodeChildren::of($node)) as $id => $repeat) {
                     if (isset($out[$id])) {
-                        throw ValidationException::withMessages(['repeat' => 'A nested Repeat requires a unique block id.']);
+                        throw CodedValidationException::for('repeat', BindingError::NestedRepeatIdRequired);
                     }
                     $out[$id] = $repeat;
                 }

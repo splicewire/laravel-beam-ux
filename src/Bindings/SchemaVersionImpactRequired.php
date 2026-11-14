@@ -9,6 +9,6 @@ final class SchemaVersionImpactRequired extends RuntimeException
 {
     public function __construct(public readonly SchemaVersionImpactData $impact)
     {
-        parent::__construct('Review the published pages affected by these dropped fields before freezing this version.');
+        parent::__construct(BindingError::SchemaVersionImpactReview->message());
     }
 }

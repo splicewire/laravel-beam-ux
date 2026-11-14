@@ -2,7 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Bindings;
 
-use Illuminate\Validation\ValidationException;
+use Splicewire\Beam\Localization\CodedValidationException;
 use Splicewire\Beam\Schema\SchemaId;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 
@@ -25,7 +25,7 @@ final class SchemaBindingImpact
             $property = $address === null ? [] : ($schema['properties'][$address] ?? []);
             if (! array_key_exists('x-beam-collection', $schema)
                 || ($property['type'] ?? null) !== 'string' || ($property['x-beam-unique'] ?? false) !== true) {
-                throw ValidationException::withMessages(['schema' => 'Rebind the published Record Page before dropping its URL field or removing its unique-string declaration.']);
+                throw CodedValidationException::for('schema', BindingError::RebindBeforeDrop);
             }
         }
         $dropped = [];

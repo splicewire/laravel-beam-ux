@@ -76,7 +76,7 @@ class CompileEntryBody
             $version = app(\Rushing\Versioning\Contracts\VersionStore::class)->version($entry->particle, (string) $pin);
             $body = $version?->snapshot['payload'] ?? null;
             if (! is_array($body)) {
-                throw CompilationFailed::for($entry, 'The publication pin has no valid body snapshot.');
+                throw CompilationFailed::for($entry, \Splicewire\Beam\Ux\Publish\EntryError::PinSnapshotInvalid->message());
             }
             $path = $this->forVersion($entry, (string) $version->id, $body, $force);
             if ($prune) {

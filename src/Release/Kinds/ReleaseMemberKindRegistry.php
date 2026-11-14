@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\Release\Kinds;
 
-use Illuminate\Validation\ValidationException;
 use Rushing\Popcorn\Registries\Authorizer;
 use Rushing\Popcorn\Registries\BasicRegistry;
 use Rushing\Popcorn\Registries\Gated;
@@ -53,7 +52,7 @@ class ReleaseMemberKindRegistry implements Gated, Registry
     {
         $found = $this->entries->tryResolve($kind);
         if (! $found instanceof ReleaseMemberKind) {
-            throw ValidationException::withMessages(['release' => "This Release holds a member of kind `{$kind}`, which no installed package provides."]);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('release', \Splicewire\Beam\Ux\Release\ReleaseError::MemberKindUnknown, ['kind' => $kind]);
         }
 
         return $found;

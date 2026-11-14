@@ -7,7 +7,8 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Validation\ValidationException;
+use Splicewire\Beam\Localization\CodedError;
+use Splicewire\Beam\Localization\CodedValidationException;
 use Splicewire\Beam\Ux\Bindings\RecordPages;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Data\RedirectInputData;
@@ -35,18 +36,18 @@ final class RedirectService
 
         $path = RedirectPaths::normalize($input->path);
         if ($path === null) {
-            $this->refuse('path', 'A Redirect starts from a path on this site, like /old-page.');
+            $this->refuse('path', RedirectError::PathRequired);
         }
         if (RedirectPaths::reserved($path)) {
-            $this->refuse('path', "The site never receives {$path}, so a Redirect there could never answer.");
+            $this->refuse('path', RedirectError::PathNeverReceived, ['path' => $path]);
         }
         if ($this->answers($path, $realm)) {
-            $this->refuse('path', "A page answers {$path}, and a page always wins.");
+            $this->refuse('path', RedirectError::PathIsPage, ['path' => $path]);
         }
         $taken = BeamUxRedirect::on($connection)->where('realm', $realm)->where('path', $path)->where('match', $input->match)
             ->when($redirect->exists, fn ($q) => $q->whereKeyNot($redirect->getKey()))->exists();
         if ($taken) {
-            $this->refuse('path', "A Redirect already starts from {$path}.");
+            $this->refuse('path', RedirectError::PathTaken, ['path' => $path]);
         }
 
         $redirect->forceFill(['realm' => $realm, 'target_entry_id' => null, 'target_collection' => null,
@@ -54,14 +55,14 @@ final class RedirectService
         match ($input->targetKind) {
             'page' => $this->targetPage($redirect, $input->target, $realm, $actor),
             'path' => $redirect->forceFill(['target_path' => RedirectPaths::normalize($input->target)
-                ?? $this->refuse('target', 'Name a path on this site, like /new-page.')]),
+                ?? $this->refuse('target', RedirectError::TargetPathRequired)]),
             'address' => $redirect->forceFill(['target_url' => $this->address($input->target)]),
             'record' => $this->targetRecord($redirect, $input->target),
         };
 
         $candidate = (clone $redirect)->forceFill(['path' => $path, 'match' => $input->match, 'target_kind' => $input->targetKind]);
         if ($this->reachesItself($candidate, $realm, $connection)) {
-            $this->refuse('target', 'This Redirect would lead back to itself.');
+            $this->refuse('target', RedirectError::TargetLoops);
         }
 
         $who = (string) $actor->getAuthIdentifier();
@@ -188,7 +189,7 @@ final class RedirectService
             $page = null;
         }
         if ($page === null) {
-            $this->refuse('target', 'No page has that URL. Name the page by its current URL.');
+            $this->refuse('target', RedirectError::TargetPageUnknown);
         }
         if (($ability = $this->publishAbility()) !== null) {
             Gate::forUser($actor)->authorize($ability, $page);
@@ -201,7 +202,7 @@ final class RedirectService
     {
         [$collection, $id] = array_pad(explode(':', $target, 2), 2, '');
         if ($collection === '' || $id === '') {
-            $this->refuse('target', 'Name a Record as collection:id.');
+            $this->refuse('target', RedirectError::TargetRecordFormat);
         }
         $redirect->forceFill(['target_collection' => $collection, 'target_record_id' => $id]);
     }
@@ -210,7 +211,7 @@ final class RedirectService
     {
         $scheme = parse_url($target, PHP_URL_SCHEME);
         if (filter_var($target, FILTER_VALIDATE_URL) === false || ! in_array($scheme, ['http', 'https'], true)) {
-            $this->refuse('target', 'Name an address on another site, starting https://.');
+            $this->refuse('target', RedirectError::TargetExternalHttps);
         }
 
         return $target;
@@ -255,8 +256,9 @@ final class RedirectService
         return is_string($ability) && $ability !== '' ? $ability : null;
     }
 
-    private function refuse(string $field, string $message): never
+    /** @param  array<string, scalar>  $params */
+    private function refuse(string $field, CodedError $error, array $params = []): never
     {
-        throw ValidationException::withMessages([$field => $message]);
+        throw CodedValidationException::for($field, $error, $params);
     }
 }

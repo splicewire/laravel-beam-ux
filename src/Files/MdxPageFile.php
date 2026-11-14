@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\Files;
 
-use Illuminate\Validation\ValidationException;
 use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Mdx\Frontmatter\FrontmatterParser;
 use Splicewire\Beam\Ux\Body\BodyKind;
@@ -140,7 +139,7 @@ final class MdxPageFile
             try {
                 $fields['recordPage'] = json_decode($fields['recordPage'], true, flags: JSON_THROW_ON_ERROR);
             } catch (\JsonException) {
-                throw ValidationException::withMessages(['pageSettings.recordPage' => 'The Record Page declaration must be a JSON object.']);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings.recordPage', \Splicewire\Beam\Ux\Bindings\BindingError::RecordPageNotObject);
             }
         }
         $class = PageFields::forChild($entry);
@@ -166,7 +165,7 @@ final class MdxPageFile
         }
         foreach ($keys as $key => $value) {
             if (preg_match('/[\r\n]/', $value) === 1 || trim($value, " \t\"'") !== $value) {
-                throw ValidationException::withMessages(["pageSettings.{$key}" => 'An MDX page prints its settings as frontmatter, which carries one line per value without surrounding spaces or quotes (ADR-0233 d3).']);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for("pageSettings.{$key}", \Splicewire\Beam\Ux\Containment\PageError::FrontmatterValueUnprintable);
             }
         }
     }

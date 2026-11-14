@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\JsonDoc;
 
-use Illuminate\Validation\ValidationException;
 use Symfony\Component\Process\Exception\ProcessFailedException;
 use Symfony\Component\Process\Process;
 
@@ -44,7 +43,7 @@ final class NodeTsxLens implements ProfiledTsxLens
         $script = $this->script ?? __DIR__.'/../../resources/lens/tsx-to-blocks.mjs';
 
         if (! is_file($script)) {
-            throw ValidationException::withMessages(['source' => "the TSX lens script is missing at [{$script}]."]);
+            throw \Splicewire\Beam\Ux\Localization\DiagnosedValidationException::diagnosed('source', SourceError::TsxLensFailed, "the TSX lens script is missing at [{$script}].");
         }
 
         $root = $this->workingDirectory ?? base_path();
@@ -61,13 +60,14 @@ final class NodeTsxLens implements ProfiledTsxLens
             $process->mustRun();
         } catch (ProcessFailedException $e) {
             // stderr carries the lens's own diagnostic (a TSX syntax error, a missing host dependency).
-            throw ValidationException::withMessages(['source' => trim($process->getErrorOutput()) ?: $e->getMessage()]);
+            // The lens's own output is the diagnostic, never rendered (coord-lead ruling (b)).
+            throw \Splicewire\Beam\Ux\Localization\DiagnosedValidationException::diagnosed('source', SourceError::TsxLensFailed, trim($process->getErrorOutput()) ?: $e->getMessage());
         }
 
         $decoded = json_decode($process->getOutput(), true);
 
         if (! is_array($decoded) || ! is_array($decoded['doc'] ?? null)) {
-            throw ValidationException::withMessages(['source' => 'the TSX lens returned no doc.']);
+            throw \Splicewire\Beam\Ux\Localization\DiagnosedValidationException::diagnosed('source', SourceError::TsxLensFailed, 'the TSX lens returned no doc.');
         }
 
         /** @var array<int, array<string, mixed>> */

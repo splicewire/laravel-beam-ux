@@ -3,8 +3,9 @@
 namespace Splicewire\Beam\Ux\Components;
 
 use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
 use Rushing\Versioning\Contracts\VersionStore;
+use Splicewire\Beam\Localization\CodedError;
+use Splicewire\Beam\Localization\CodedValidationException;
 use Splicewire\Beam\Ux\Codec\JsonDocShape;
 use Splicewire\Beam\Ux\JsonDoc\NodeChildren;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -47,7 +48,7 @@ class AuthoredComponents
         $item = app(\Splicewire\Beam\Ux\Storage\StorageDriverResolver::class)
             ->resolveOnEntryConnection($entry)->read((string) $entry->particle_id);
         if ($item === null) {
-            $this->refuse('A component dependency has no readable Working Head.');
+            $this->refuse(ComponentError::DependencyUnreadable);
         }
 
         return $scope->documents[$key] = $item->body;
@@ -60,7 +61,7 @@ class AuthoredComponents
         }
         $body = app(VersionStore::class)->version($entry->particle, $ref)?->snapshot['payload'] ?? null;
         if (! is_array($body)) {
-            $this->refuse('A component version has no readable body snapshot.');
+            $this->refuse(ComponentError::VersionUnreadable);
         }
 
         return $body;
@@ -88,15 +89,15 @@ class AuthoredComponents
     {
         if (count($body) !== 1 || ($body[0]['kind'] ?? null) !== 'block' || ! is_string($body[0]['name'] ?? null)
             || ! is_array($body[0]['component'] ?? null)) {
-            $this->refuse('An Authored Component requires one root block and its declared interface.');
+            $this->refuse(ComponentError::RootRequired);
         }
         try {
             $definition = ComponentDefinitionData::from($body[0]['component']);
         } catch (\Throwable $failure) {
-            $this->refuse('The component interface is invalid: '.$failure->getMessage());
+            $this->refuse(ComponentError::InterfaceInvalid, ['detail' => $failure->getMessage()]);
         }
         if ($definition->name === null) {
-            $this->refuse('The component name must be saved with its interface.');
+            $this->refuse(ComponentError::NameWithInterface);
         }
 
         return $definition;
@@ -109,7 +110,7 @@ class AuthoredComponents
         $nodes = array_column($profile['nodes'], null, 'name');
         $root = $nodes[$body[0]['name']] ?? null;
         if ($root === null) {
-            $this->refuse('The component root must be a node in its realm profile.');
+            $this->refuse(ComponentError::RootNotNode);
         }
         $slots = [];
         $this->slots($body, $nodes, $profile['doc']['admitsChildCategories'] ?? null, $slots);
@@ -117,7 +118,7 @@ class AuthoredComponents
         foreach ($slots as $name => $categories) {
             if ($name !== 'children') {
                 if (in_array($name, array_map(fn ($prop) => $prop->name, $definition->props), true)) {
-                    $this->refuse('A component prop and Slot cannot share a name.');
+                    $this->refuse(ComponentError::PropSlotNameClash);
                 }
                 $named[] = ['name' => $name, 'admitsChildCategories' => $categories];
             }
@@ -139,16 +140,16 @@ class AuthoredComponents
                 $name = 'children';
                 foreach ($node['props'] ?? [] as $prop) {
                     if (($prop['name'] ?? null) !== 'name' || ($prop['kind'] ?? null) !== 'string') {
-                        $this->refuse('A Slot accepts only its literal name.');
+                        $this->refuse(ComponentError::SlotLiteralName);
                     }
                     $name = $prop['value'];
                 }
                 \Splicewire\Beam\Ux\JsonDoc\ComponentReference::assert($name);
                 if ($name !== 'children' && in_array($name, ComponentPropData::RUNTIME_PROPS, true)) {
-                    $this->refuse('A Slot cannot replace a component runtime channel.');
+                    $this->refuse(ComponentError::SlotRuntimeChannel);
                 }
                 if (array_key_exists($name, $slots)) {
-                    $this->refuse('A component must declare each Slot only once.');
+                    $this->refuse(ComponentError::SlotDeclaredTwice);
                 }
                 $slots[$name] = $parentAdmits;
             }
@@ -250,7 +251,7 @@ class AuthoredComponents
             $component = $node['name'];
             foreach ($profile['nodes'] as $existing) {
                 if ($existing['name'] === $component && ! ($existing['x-authored-component'] ?? false)) {
-                    $this->refuse('A registered component already uses this name.');
+                    $this->refuse(ComponentError::NameRegistered);
                 }
             }
             $profile['nodes'] = array_values(array_filter($profile['nodes'], fn ($existing) => $existing['name'] !== $component));
@@ -259,7 +260,7 @@ class AuthoredComponents
             $slots = [];
             $this->slots($body, array_column($profile['nodes'], null, 'name'), null, $slots);
             if (array_keys($slots) !== ['children']) {
-                $this->refuse('A blocks layout or template requires exactly one unnamed Slot.');
+                $this->refuse(ComponentError::LayoutUnnamedSlot);
             }
             $component = 'BeamChrome';
             $profile['nodes'][] = ['name' => $component, 'attrsSchema' => ['type' => 'object', 'additionalProperties' => false], 'admitsChildCategories' => null];
@@ -311,10 +312,10 @@ class AuthoredComponents
             $oldName = $previous === [] ? null : $this->definition($previous)->name;
             $ownsOldName = $entry->getAttribute('component_name') !== null || $entry->getAttribute('published_version') !== null;
             if ($ownsOldName && $oldName !== null && $oldName !== $name && $this->usedBy($entry, $oldName) !== []) {
-                $this->refuse('A component in use cannot be renamed.');
+                $this->refuse(ComponentError::RenameInUse);
             }
             if (array_key_exists($name, $byName) && ($byName[$name] === null || (string) $byName[$name]->getKey() !== (string) $entry->getKey())) {
-                $this->refuse('Component names must be unique in their realm.');
+                $this->refuse(ComponentError::NameNotUnique);
             }
             if ($publishing) {
                 // A pending rename cannot release its still-visible Pin name. The existing publication
@@ -331,7 +332,7 @@ class AuthoredComponents
                         $otherName = $other->getAttribute('published_version') === null ? null : $other->getAttribute('published_component_name');
                     }
                     if (is_string($otherName) && strcasecmp($otherName, $name) === 0) {
-                        $this->refuse('Published component names must be unique in their realm. Publish the rename first or in the same Release.');
+                        $this->refuse(ComponentError::PublishedNameNotUnique);
                     }
                 }
             }
@@ -340,7 +341,7 @@ class AuthoredComponents
         $visit = function (BeamUxEntry $owner, array $doc, array $path) use (&$visit, $byName, $entry, $body, $publishing, $refs, $registered): void {
             $id = (string) $owner->getKey();
             if (isset($path[$id]) || count($path) >= 64) {
-                $this->refuse('Components cannot contain a cycle.');
+                $this->refuse(ComponentError::Cycle);
             }
             $path[$id] = true;
             foreach ($this->names($doc) as $name) {
@@ -349,17 +350,17 @@ class AuthoredComponents
                 }
                 $target = $byName[$name] ?? null;
                 if ($target === null || ! $this->canRead($target, request()->user())) {
-                    $this->refuse('A referenced component is unavailable in this realm.');
+                    $this->refuse(ComponentError::ReferenceUnavailable);
                 }
                 $targetId = (string) $target->getKey();
                 if ($publishing) {
                     $ref = array_key_exists($targetId, $refs) ? $refs[$targetId] : $target->getAttribute('published_version');
                     if ($ref === null) {
-                        $this->refuse('Publish the component '.$name.' first, or include it in the same Release.');
+                        $this->refuse(ComponentError::PublishDependencyFirst, ['name' => $name]);
                     }
                     $next = $this->version($target, (string) $ref);
                     if ($this->definition($next)->name !== $name) {
-                        $this->refuse('Publish the renamed component first, or include its matching version in the same Release.');
+                        $this->refuse(ComponentError::PublishRenameFirst);
                     }
                 } else {
                     $next = $targetId === (string) $entry->getKey() ? $body : $this->working($target);
@@ -432,7 +433,7 @@ class AuthoredComponents
                 || str_contains(strtolower($failure->getMessage()), 'deadlock')
                 || str_contains(strtolower($failure->getMessage()), 'serialization failure')
                 || str_contains(strtolower($failure->getMessage()), 'lock wait timeout')) {
-                $this->refuse('The component reservation conflicted. Retry the save against the current head.');
+                $this->refuse(ComponentError::ReservationConflicted);
             }
             throw $failure;
         }
@@ -452,12 +453,12 @@ class AuthoredComponents
             ->where(fn ($query) => $query->whereRaw('LOWER(component_name) = ?', [strtolower($name)])
                 ->orWhereRaw('LOWER(published_component_name) = ?', [strtolower($name)]))->exists();
         if ($taken) {
-            $this->refuse('Component names must be unique in their realm; this name is taken.');
+            $this->refuse(ComponentError::NameTaken);
         }
         try {
             $entry->forceFill(['component_name' => $name])->save();
         } catch (\Illuminate\Database\UniqueConstraintViolationException) {
-            $this->refuse('Component names must be unique in their realm; this name is taken.');
+            $this->refuse(ComponentError::NameTaken);
         }
     }
 
@@ -470,7 +471,7 @@ class AuthoredComponents
         $name = $this->definition($body)->name;
         if ($entry->newQuery()->where('realm', $entry->realm)->whereKeyNot($entry->getKey())
             ->whereNotNull('published_version')->whereRaw('LOWER(published_component_name) = ?', [strtolower($name)])->exists()) {
-            $this->refuse('Cannot restore: published component name '.$name.' conflicts with another published component. Rename the conflicting component first.');
+            $this->refuse(ComponentError::RestoreNameConflict, ['name' => $name]);
         }
     }
 
@@ -538,9 +539,10 @@ class AuthoredComponents
         return array_values(array_unique($diagnostics));
     }
 
-    private function refuse(string $message): never
+    /** @param  array<string, scalar>  $params */
+    private function refuse(CodedError $error, array $params = []): never
     {
-        throw ValidationException::withMessages(['body' => $message]);
+        throw CodedValidationException::for('body', $error, $params);
     }
 
     public function names(array $body): array
@@ -583,7 +585,7 @@ class AuthoredComponents
                 continue;
             }
             if (isset($node['component']) && (! $rootAllowed || count($nodes) !== 1 || $index !== 0)) {
-                $this->refuse('A component interface belongs only to the sole Authored Component root.');
+                $this->refuse(ComponentError::InterfaceOnlyOnRoot);
             }
             $this->assertDefinitionPlacement(NodeChildren::of($node), false);
             $this->assertDefinitionPlacement($node['repeat']['empty'] ?? [], false);

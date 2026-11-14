@@ -330,9 +330,9 @@ class BeamUxEntry extends Model implements \Splicewire\Sync\Contracts\Syncable, 
             $components = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class);
             if ($components->authored($entry)
                 && ($users = $components->usedBy($entry)) !== []) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    'component' => 'This component is used by entries: '.implode(', ', $users),
-                ]);
+                // The entry names are authored content: a parameter, never keyed (ruling 04).
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('component',
+                    \Splicewire\Beam\Ux\Components\ComponentError::InUse, ['entries' => implode(', ', $users)]);
             }
         });
         static::creating(function (BeamUxEntry $entry): void {

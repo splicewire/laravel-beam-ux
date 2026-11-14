@@ -6,7 +6,6 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
 use Splicewire\Beam\Particle\OperationKind;
@@ -37,11 +36,11 @@ final class EntryPreviewOp
             ? null
             : app(VersionStore::class)->version($model->particle, $input->versionId);
         if ($version === null) {
-            throw ValidationException::withMessages(['versionId' => 'Choose a saved version of this entry.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('versionId', \Splicewire\Beam\Ux\Publish\EntryError::PreviewVersionRequired);
         }
         $payload = $version->snapshot['payload'] ?? null;
         if (! is_array($payload)) {
-            throw ValidationException::withMessages(['versionId' => 'Choose a saved version with a valid body snapshot.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('versionId', \Splicewire\Beam\Ux\Publish\EntryError::PreviewVersionInvalid);
         }
         $artifacts = app(EntryArtifactStore::class);
         if (! $artifacts->hasVersion($model, (string) $version->id)) {

@@ -29,7 +29,7 @@ class EntryBlocksSaveOp extends EntryBodySaveOp
     {
         /** @var BeamUxEntry $model */
         if ($model->bodyKind() !== BodyKind::Blocks) {
-            throw ValidationException::withMessages(['body' => 'save-blocks requires a blocks-kind entry.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('body', \Splicewire\Beam\Ux\Publish\EntryError::BlocksKindRequired);
         }
         try {
             $input = CanvasBodyInputData::validateAndCreate($request->all());
@@ -37,7 +37,7 @@ class EntryBlocksSaveOp extends EntryBodySaveOp
             throw $error;
         } catch (\Throwable) {
             // As in CanvasBodyGuard, malformed morph arms are client errors, not hydration 500s.
-            throw ValidationException::withMessages(['body' => 'This document has a node the canvas editor cannot read.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('body', \Splicewire\Beam\Ux\JsonDoc\SourceError::CanvasNodeUnreadable);
         }
 
         return parent::persistBody($model, $input->toArray()['body']);

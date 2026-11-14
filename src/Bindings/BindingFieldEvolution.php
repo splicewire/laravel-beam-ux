@@ -87,7 +87,7 @@ final class BindingFieldEvolution
         try {
             return $this->walk($body, $sources, $scope, $histories);
         } catch (InvalidArgumentException|\TypeError $e) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['body' => $e->getMessage()]);
+            throw \Splicewire\Beam\Ux\Localization\DiagnosedValidationException::diagnosed('body', BindingError::BodyBindingsUncheckable, $e);
         }
     }
 

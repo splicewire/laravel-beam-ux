@@ -113,7 +113,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             'slug' => ['required', 'string', 'max:255', $slug],
             'realm' => ['required', 'string', function (string $attribute, mixed $value, Closure $fail): void {
                 if (! Gate::allows("ux.{$value}.author")) {
-                    $fail('You are not entitled to author entries in this realm.');
+                    $fail(\Splicewire\Beam\Ux\Publish\EntryError::RealmNotEntitled->message());
                 }
             }],
             'parentId' => ['bail', 'nullable', 'uuid', 'exists:beam_ux_entries,id'],
@@ -176,19 +176,17 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
     {
         $current = self::currentEntry();
         if ($this->componentKind !== null && $this->type !== 'component') {
-            throw \Illuminate\Validation\ValidationException::withMessages(['componentKind' => 'Only a component declares an authored or source kind.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('componentKind', \Splicewire\Beam\Ux\Publish\EntryError::ComponentKindOnlyComponent);
         }
         if ($this->componentKind !== null && $current?->particle_id !== null
             && $this->componentKind !== ($current->getAttribute('component_kind')?->value ?? 'source')) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['componentKind' => 'A component with a body cannot change its declared kind.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('componentKind', \Splicewire\Beam\Ux\Publish\EntryError::ComponentKindLocked);
         }
         if ($current?->type === \Splicewire\Beam\Ux\Type\UxType::Page) {
             $format = $this->fileLanguage === null ? $current->getAttribute('format') : \Splicewire\Beam\Ux\Format\UxFormat::tryFrom($this->fileLanguage);
             foreach (['title' => $this->title, 'parent_id' => $this->parentId, 'segment' => $this->segment, 'nav_order' => $this->navOrder, 'format' => $format] as $column => $value) {
                 if ($current->getAttribute($column) !== $value) {
-                    throw \Illuminate\Validation\ValidationException::withMessages([
-                        'pageSettings' => 'Edit page settings in the editor and publish their version.',
-                    ]);
+                    throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings', \Splicewire\Beam\Ux\Containment\PageError::SettingsEditorOnly);
                 }
             }
 
@@ -223,7 +221,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         $choices = \Splicewire\Beam\Ux\Format\FileLanguage::choices($probe);
         if ($choices === []) {
             if ($this->fileLanguage !== null) {
-                throw \Illuminate\Validation\ValidationException::withMessages(['fileLanguage' => 'A Hosted site\'s pages have no File Language (ADR-0233 d6).']);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('fileLanguage', \Splicewire\Beam\Ux\Containment\PageError::HostedNoFileLanguage);
             }
 
             return \Splicewire\Beam\Ux\Format\UxFormat::Tsx->value;
@@ -232,7 +230,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             return \Splicewire\Beam\Ux\Format\FileLanguage::defaultFor($probe, $this->parentId);
         }
         if (! in_array($this->fileLanguage, $choices, true)) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['fileLanguage' => "This host does not write pages in {$this->fileLanguage}."]);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('fileLanguage', \Splicewire\Beam\Ux\Containment\PageError::FileLanguageUnsupported, ['language' => (string) $this->fileLanguage]);
         }
 
         return $this->fileLanguage;
@@ -242,7 +240,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
     private function withoutFileLanguage(): array
     {
         if ($this->fileLanguage !== null) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['fileLanguage' => 'Only a page chooses its File Language here.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('fileLanguage', \Splicewire\Beam\Ux\Containment\PageError::FileLanguageOnlyPages);
         }
 
         return [];

@@ -63,7 +63,7 @@ final class EntryPageSettingsData extends BeamData
             'fileLanguage' => ['nullable', 'string', 'in:tsx,mdx'],
             'childFields' => ['nullable', 'string', static function (string $attribute, mixed $value, \Closure $fail): void {
                 if ($value !== null && \Splicewire\Beam\Ux\Containment\PageFields::named((string) $value) === null) {
-                    $fail('No host class or tenant registered schema declares these Page Fields.');
+                    $fail(\Splicewire\Beam\Ux\Containment\PageError::ChildFieldsUndeclared->message());
                 }
             }],
             'recordPage' => ['nullable', 'array:collection,field,titleField,descriptionField,socialImageField'],
@@ -73,7 +73,7 @@ final class EntryPageSettingsData extends BeamData
             'unclaimed' => ['array', static function (string $attribute, mixed $value, \Closure $fail): void {
                 foreach (is_array($value) ? array_keys($value) : [] as $key) {
                     if (! is_string($key) || preg_match('/^[a-z0-9]+(?:_[a-z0-9]+)*$/D', $key) !== 1) {
-                        $fail('An unclaimed frontmatter key is a snake_case name.');
+                        $fail(\Splicewire\Beam\Ux\Containment\PageError::UnclaimedKeyNotSnake->message());
                     } elseif (in_array($key, self::reservedFrontmatterKeys(), true)) {
                         $fail("The unclaimed key [{$key}] is declared, so it cannot be kept as unclaimed.");
                     }

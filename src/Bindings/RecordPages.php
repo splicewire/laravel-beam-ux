@@ -6,8 +6,8 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Collections\CollectionSchemaResolver;
+use Splicewire\Beam\Localization\CodedValidationException;
 use Splicewire\Beam\Particle\ParticleFrameResourceHandler;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Ux\Data\EntryPageSettingsData;
@@ -53,32 +53,32 @@ final class RecordPages
         $parameter = self::parameter($settings->segment);
         if ($declaration === null) {
             if ($parameter !== null || str_contains($settings->segment ?? '', '{')) {
-                $this->refuse('A parameter segment needs a Record Page declaration.');
+                $this->refuse(BindingError::ParameterSegmentNeedsRecordPage);
             }
 
             return;
         }
         if ($parameter !== $declaration->field) {
-            $this->refuse('The segment must be exactly {field} for the declared unique field.');
+            $this->refuse(BindingError::SegmentMustBeField);
         }
         if (! Schema::connection($entry->getConnectionName())->hasColumn('beam_ux_entries', 'record_page')) {
-            $this->refuse('Migrate beam-ux before saving a Record Page.');
+            $this->refuse(BindingError::RecordPagesMigrationMissing);
         }
         $source = $this->profiles->require($entry, $declaration->collection);
         $stem = $source->address['collection'] ?? null;
         if (! is_string($stem) || $source->parentEntryId !== null) {
-            $this->refuse('A Record Page requires an offered schema Collection.');
+            $this->refuse(BindingError::RecordPageNeedsCollection);
         }
         $definition = app(CollectionSchemaResolver::class)->resolve($stem);
         // Same native schema anchor as Collection unique writes; serialize this Collection, never the whole entries table.
         $connection = $entry->getConnection();
         if (! $connection->getSchemaBuilder()->hasTable(\Splicewire\Beam\Facades\Beam::table('schemas'))) {
-            $this->refuse('Record Pages require a registered database schema anchor.');
+            $this->refuse(BindingError::RecordPagesNeedAnchor);
         }
         $anchors = $connection->table(\Splicewire\Beam\Facades\Beam::table('schemas'))
             ->where('schema_name', $definition->stem())->orderBy('version')->orderBy('id')->lockForUpdate()->get();
         if ($anchors->isEmpty()) {
-            $this->refuse('Record Pages require a registered database schema anchor.');
+            $this->refuse(BindingError::RecordPagesNeedAnchor);
         }
         // A publisher may have waited behind registration. Use the locked current artifact, not
         // the pre-lock resolver memo or a repeatable-read snapshot of the previous version.
@@ -95,14 +95,14 @@ final class RecordPages
         }
         $property = $definition->properties()[$declaration->field] ?? [];
         if (($property['type'] ?? null) !== 'string' || ! in_array($declaration->field, $definition->uniqueFields(), true)) {
-            $this->refuse('The URL field must be a declared unique string field of the Collection.');
+            $this->refuse(BindingError::UrlFieldNotUniqueString);
         }
         if (! $definition->hasPublicRead() || ! in_array($declaration->field, $definition->publicFieldNames(), true)) {
-            $this->refuse('The Record Page URL field must be included in the Collection Public Read projection.');
+            $this->refuse(BindingError::UrlFieldNotPublic);
         }
         foreach ([$declaration->titleField, $declaration->descriptionField, $declaration->socialImageField] as $field) {
             if ($field !== null && ($definition->properties()[$field]['type'] ?? null) !== 'string') {
-                $this->refuse('Title and SEO bindings must name declared string fields.');
+                $this->refuse(BindingError::SeoBindingsNeedStringFields);
             }
         }
         $others = $this->candidates($entry, $settings)->with('particle')->orderBy('id')->get();
@@ -118,13 +118,13 @@ final class RecordPages
             }
             foreach ($reservations as $reservation) {
                 if (($reservation['parentId'] ?? null) === $settings->parentId && self::parameter($reservation['segment'] ?? null) !== null) {
-                    $this->refuse('A parent may have only one parameter child.');
+                    $this->refuse(BindingError::ParentOneParameterChild);
                 }
                 $otherDeclaration = $reservation['recordPage'] ?? null;
                 if (is_array($otherDeclaration)) {
                     $otherSource = $this->profiles->sources($other)[$otherDeclaration['collection'] ?? ''] ?? null;
                     if (($otherSource?->address['collection'] ?? null) === $stem) {
-                        $this->refuse('A Collection may have only one Record Page per site.');
+                        $this->refuse(BindingError::CollectionOneRecordPage);
                     }
                 }
             }
@@ -141,7 +141,7 @@ final class RecordPages
         $ids = $this->lockIds($entry, $settings);
         $entry->newQuery()->whereKey($ids)->orderBy('id')->lockForUpdate()->get();
         if ($ids !== $this->lockIds($entry, $settings)) {
-            throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException('Record Page declarations changed while acquiring locks. Retry against the current state.');
+            throw new \Splicewire\Beam\Ux\Localization\CodedConflictHttpException(BindingError::RecordPagesChanged);
         }
         // assertSettings() takes the schema anchor AFTER these entry locks, as publication does.
         // It re-reads declarations after serialization; no predicate/range lock is used there.
@@ -297,8 +297,9 @@ final class RecordPages
         return $memo->matches[$key] = count($matches) === 1 ? $matches[0] : null;
     }
 
-    private function refuse(string $message): never
+    /** @param  array<string, scalar>  $params */
+    private function refuse(BindingError $error, array $params = []): never
     {
-        throw ValidationException::withMessages(['pageSettings.recordPage' => $message]);
+        throw CodedValidationException::for('pageSettings.recordPage', $error, $params);
     }
 }

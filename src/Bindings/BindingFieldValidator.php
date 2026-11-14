@@ -2,7 +2,8 @@
 
 namespace Splicewire\Beam\Ux\Bindings;
 
-use Illuminate\Validation\ValidationException;
+use Splicewire\Beam\Localization\CodedValidationException;
+use Splicewire\Beam\Ux\Localization\DiagnosedValidationException;
 
 /** ADR-0229 d3/d11/d13. The offer's owner-generated schema is the only field vocabulary. */
 final class BindingFieldValidator
@@ -35,7 +36,7 @@ final class BindingFieldValidator
                 } elseif (isset($repeat['relation']) && ! isset($repeat['collection']) && $scope !== null && $relation !== null) {
                     $current = $relation($scope, $repeat['relation']);
                 } else {
-                    $this->refuse('A Repeat must name an offered Collection or a declared relation in its outer Record.');
+                    $this->refuse(BindingError::RepeatSourceUnresolved);
                 }
                 if ($current === null && $missingSource !== null) {
                     $missingSource($node, $at);
@@ -47,7 +48,7 @@ final class BindingFieldValidator
                     throw MissingProfileCollection::named($repeat['collection']);
                 }
                 if ($current === null) {
-                    $this->refuse('The Repeat source is not offered by this Manifest Profile.');
+                    $this->refuse(BindingError::RepeatSourceNotOffered);
                 }
                 // The empty subtree replaces the Repeat, so it has the enclosing scope, not a nonexistent Record.
                 $this->walk($repeat['empty'] ?? [], $offers, $scope, $relation, $visit, $missingSource, $at.'/repeat/empty', $context);
@@ -72,7 +73,7 @@ final class BindingFieldValidator
             $types = (array) ($field['type'] ?? []);
             if ($types === [] || array_diff($types, ['string', 'integer', 'number', 'boolean', 'null'])
                 || in_array($field['format'] ?? null, ['markdown', 'mdx', 'blockdoc', 'jsondoc'], true)) {
-                $this->refuse('A text binding takes plain fields only; rich fields require a declared rich-field component.');
+                $this->refuse(BindingError::TextBindingPlainOnly);
             }
         }
         foreach ($node['props'] ?? [] as $prop) {
@@ -80,20 +81,20 @@ final class BindingFieldValidator
                 $field = $this->field($prop['value'] ?? null, $scope, $missing);
                 $name = $prop['name'] ?? '';
                 if (in_array(strtolower($name), ['dangerouslysetinnerhtml', 'srcdoc'], true) || preg_match('/^on/i', $name)) {
-                    $this->refuse('A binding cannot target an executable attribute or a raw HTML sink.');
+                    $this->refuse(BindingError::UnsafeTarget);
                 }
                 $format = $field['format'] ?? null;
                 if (in_array($format, ['markdown', 'blockdoc', 'jsondoc', 'mdx'], true)) {
                     $renderer = ['markdown' => 'RichMarkdown', 'blockdoc' => 'RichBlockdoc'][$format] ?? null;
                     if ($renderer === null || ($node['name'] ?? null) !== $renderer || $name !== 'content') {
-                        $this->refuse('A rich field requires its matching safe content component; MDX is never a rich field.');
+                        $this->refuse(BindingError::RichFieldComponentRequired);
                     }
                 }
                 $attrs = $entries[$node['name'] ?? '']['attrsSchema'] ?? null;
                 if (is_array($attrs)) {
                     $target = $attrs['properties'][$prop['name'] ?? ''] ?? ($attrs['additionalProperties'] ?? true);
                     if ($target === false || (is_array($target) && ! \Splicewire\Beam\Ux\Manifest\SchemaCompatibility::fits($field, $target))) {
-                        $this->refuse('The binding field does not fit the declared attribute ['.($prop['name'] ?? '?').'].');
+                        $this->refuse(BindingError::AttributeMismatch, ['attribute' => (string) ($prop['name'] ?? '?')]);
                     }
                 }
             }
@@ -114,14 +115,14 @@ final class BindingFieldValidator
         try {
             FieldPath::assert($path);
         } catch (\InvalidArgumentException $e) {
-            $this->refuse($e->getMessage());
+            throw DiagnosedValidationException::diagnosed('body', BindingError::FieldPathInvalid, $e);
         }
         if ($scope === null) {
-            $this->refuse('A Field Binding needs a Record in scope.');
+            $this->refuse(BindingError::FieldBindingNeedsRecord);
         }
         if ($path === 'url') {
             if (($scope['hasRecordPage'] ?? false) !== true) {
-                $this->refuse('This Collection has no Record Page; a binding to url is unavailable (ADR-0229 d11).');
+                $this->refuse(BindingError::UrlBindingNeedsRecordPage);
             }
 
             return ['type' => 'string', 'format' => 'uri'];
@@ -149,7 +150,7 @@ final class BindingFieldValidator
         while (isset($schema['$ref'])) {
             $ref = $schema['$ref'];
             if (! is_string($ref) || ! str_starts_with($ref, '#/') || isset($seen[$ref])) {
-                $this->refuse('A binding field schema must have a resolvable local reference.');
+                $this->refuse(BindingError::FieldSchemaRefUnresolvable);
             }
             $seen[$ref] = true;
             $target = $root;
@@ -158,7 +159,7 @@ final class BindingFieldValidator
                 $target = is_array($target) ? ($target[$part] ?? null) : null;
             }
             if (! is_array($target)) {
-                $this->refuse('A binding field schema reference is missing.');
+                $this->refuse(BindingError::FieldSchemaRefMissing);
             }
             unset($schema['$ref']);
             $schema = [...$target, ...$schema];
@@ -167,8 +168,9 @@ final class BindingFieldValidator
         return $schema;
     }
 
-    private function refuse(string $message): never
+    /** @param  array<string, scalar>  $params */
+    private function refuse(BindingError $error, array $params = []): never
     {
-        throw ValidationException::withMessages(['body' => $message]);
+        throw CodedValidationException::for('body', $error, $params);
     }
 }

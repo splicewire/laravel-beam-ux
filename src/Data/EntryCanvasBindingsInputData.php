@@ -52,7 +52,7 @@ final class EntryCanvasBindingsInputData extends BeamData
         $body = $values['body'] ?? [];
         $json = json_encode($body, JSON_INVALID_UTF8_SUBSTITUTE);
         if ($json === false || strlen($json) > self::MAX_BODY_BYTES) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['body' => 'A live preview body may be at most 256 KiB.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('body', \Splicewire\Beam\Ux\Publish\EntryError::PreviewBodyTooLarge);
         }
         $stack = is_array($body) ? array_values($body) : [];
         $count = 0;
@@ -63,7 +63,7 @@ final class EntryCanvasBindingsInputData extends BeamData
             }
             if (isset($node['repeat'])) {
                 if (++$count > self::MAX_ROOT_REPEATS) {
-                    throw \Illuminate\Validation\ValidationException::withMessages(['body' => 'A live preview may resolve at most 20 root Repeats.']);
+                    throw \Splicewire\Beam\Localization\CodedValidationException::for('body', \Splicewire\Beam\Ux\Publish\EntryError::PreviewRepeatsTooMany);
                 }
                 // An empty subtree can resolve at this level; Record-scoped children are not root reads.
                 $children = is_array($node['repeat']['empty'] ?? null) ? $node['repeat']['empty'] : [];

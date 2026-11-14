@@ -6,7 +6,6 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Validation\ValidationException;
 use Rushing\PermissionCascade\Policies\ConfiguredModelPolicy;
 use Rushing\Versioning\Contracts\VersionStore;
 use Splicewire\Beam\Ux\Compile\CompileEntryBody;
@@ -48,7 +47,7 @@ class EntryMemberKind implements ReleaseMemberKind
     {
         $entry = BeamUxEntry::on($release->getConnectionName())->findOrFail($ref);
         if ($entry->realm !== $release->realm) {
-            $this->refuse('Release members must belong to its realm and connection.');
+            $this->refuse(\Splicewire\Beam\Ux\Release\ReleaseError::MembersOutsideRealm);
         }
 
         return $entry;
@@ -96,7 +95,7 @@ class EntryMemberKind implements ReleaseMemberKind
             foreach ($removed as $removedId) {
                 $target = $this->subject($release, $removedId);
                 if ($member->redirect_target === $target->id || $member->redirect_target === $target->url()) {
-                    $this->refuse('A redirect target cannot be taken down in the same Release.');
+                    $this->refuse(\Splicewire\Beam\Ux\Release\ReleaseError::RedirectTargetTakenDown);
                 }
             }
             // ADR-0236 d4, EP-31 ruling 4: the target is live once the Release publishes, so not under a page it hides.
@@ -107,7 +106,7 @@ class EntryMemberKind implements ReleaseMemberKind
             $refs = $members->whereNotNull('version_id')->mapWithKeys(fn ($m) => [(string) $m->entry_id => (string) $m->version_id])->all();
             $takedowns = $members->whereNull('version_id')->mapWithKeys(fn ($m) => [(string) $m->entry_id => $m->redirect_target])->all();
             if ($target === null || ! $planner->liveAfter($prototype, $refs, $takedowns, $target)) {
-                $this->refuse('The Take-down redirect target must be live once this Release publishes: published, and not under a page it hides.');
+                $this->refuse(\Splicewire\Beam\Ux\Release\ReleaseError::TakeDownTargetNotLive);
             }
         }
     }
@@ -134,7 +133,7 @@ class EntryMemberKind implements ReleaseMemberKind
                 $version = $pin === null || $entry->particle === null
                     ? null : app(VersionStore::class)->version($entry->particle, $pin);
                 if ($version === null || ! is_array($version->snapshot['payload'] ?? null)) {
-                    $this->refuse('A Take-down requires the currently published body snapshot.');
+                    $this->refuse(\Splicewire\Beam\Ux\Release\ReleaseError::TakeDownNeedsSnapshot);
                 }
                 $takedowns[] = [$entry, $version, $version->snapshot['payload']];
             }
@@ -158,7 +157,7 @@ class EntryMemberKind implements ReleaseMemberKind
                 $entry = $this->subject($release, $member->entry_id);
                 $result = app(WorkflowActuator::class)->transition($entry, 'unpublish', clone $context);
                 if (! $result->applied) {
-                    $this->refuse('The entry lifecycle refused Take-down.');
+                    $this->refuse(\Splicewire\Beam\Ux\Release\ReleaseError::TakeDownRefused);
                 }
             }
         }
@@ -218,11 +217,11 @@ class EntryMemberKind implements ReleaseMemberKind
     {
         if ($ref !== null) {
             if ($redirectTarget !== null) {
-                $this->refuse('Only a Take-down carries a redirect target.');
+                $this->refuse(\Splicewire\Beam\Ux\Release\ReleaseError::RedirectOnlyOnTakeDown);
             }
             $version = $entry->particle === null ? null : app(VersionStore::class)->version($entry->particle, $ref);
             if ($version === null || ! is_array($version->snapshot['payload'] ?? null)) {
-                $this->refuse('The selected saved version does not belong to this entry.');
+                $this->refuse(\Splicewire\Beam\Ux\Release\ReleaseError::VersionNotOfEntry);
             }
             app(CompileEntryBody::class)->forVersion($entry, $ref, $version->snapshot['payload']);
 
@@ -230,7 +229,7 @@ class EntryMemberKind implements ReleaseMemberKind
         }
         $workflow = app(WorkflowActuator::class);
         if (! $workflow->manages($entry) || ! in_array('unpublish', $workflow->available($entry), true)) {
-            $this->refuse('Take-down requires an entry lifecycle that currently permits unpublish.');
+            $this->refuse(\Splicewire\Beam\Ux\Release\ReleaseError::TakeDownLifecycle);
         }
         if ($redirectTarget !== null) {
             $target = $entry->newQuery()->where(fn ($query) => $query->whereNotNull('published_version')->orWhereIn('id', $publishing))->get()
@@ -242,7 +241,7 @@ class EntryMemberKind implements ReleaseMemberKind
                         && ($candidate->id === $redirectTarget || $candidate->url() === $redirectTarget);
                 });
             if ($target === null) {
-                $this->refuse('The Take-down redirect must resolve to a published page in this realm, or one this Release publishes.');
+                $this->refuse(\Splicewire\Beam\Ux\Release\ReleaseError::TakeDownRedirectUnresolved);
             }
         }
         // Admission only: the Release publishes the Redirects (ADR-0236 d4), once assertPublishable() finds the target
@@ -287,8 +286,9 @@ class EntryMemberKind implements ReleaseMemberKind
         return (new BeamUxEntry)->setConnection($release->getConnectionName());
     }
 
-    private function refuse(string $message): never
+    /** @param  array<string, scalar>  $params */
+    private function refuse(\Splicewire\Beam\Localization\CodedError $error, array $params = []): never
     {
-        throw ValidationException::withMessages(['release' => $message]);
+        throw \Splicewire\Beam\Localization\CodedValidationException::for('release', $error, $params);
     }
 }

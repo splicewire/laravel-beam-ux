@@ -61,8 +61,7 @@ final class ReleaseService
             $code = (int) ($failure->errorInfo[1] ?? 0);
             if (! $bodyCompleted && $initialDepth === 0 && $connection->transactionLevel() === 0
                 && $connection->getDriverName() === 'sqlite' && in_array($code & 0xFF, [5, 6], true)) {
-                throw new \Symfony\Component\HttpKernel\Exception\ConflictHttpException(
-                    'Publication conflicted with another local write. Nothing was published. Reload and explicitly retry.', $failure);
+                throw new \Splicewire\Beam\Ux\Localization\CodedConflictHttpException(ReleaseError::PublicationConflicted, [], $failure);
             }
             throw $failure;
         }
@@ -81,7 +80,7 @@ final class ReleaseService
             ? $this->entries()->authorizeDirect($context, $actor)
             : $this->entries()->authorizeEntry($context, $actor, false);
         if (trim($title) === '' || mb_strlen($title) > 255) {
-            $this->refuse('A Release needs a title of at most 255 characters.');
+            $this->refuse(ReleaseError::TitleTooLong);
         }
         $release = new BeamUxRelease;
         $release->setConnection($context->getConnectionName());
@@ -149,7 +148,7 @@ final class ReleaseService
             $this->assertEditable($locked);
             $this->authorizeLinks($locked, $actor);
             if (! $locked->getAttribute('preview_links_enabled')) {
-                $this->refuse('Turn Preview Links on before rotating them.');
+                $this->refuse(ReleaseError::PreviewLinksOff);
             }
             $locked->forceFill(['preview_link_secret' => ReleasePreviewLinks::newSecret()])->save();
         });
@@ -175,7 +174,7 @@ final class ReleaseService
             $entry = $this->entry($locked, $entryId);
             $ref = $useLatest ? app(EntryPublication::class)->state($entry)->headVersion : $member->version_id;
             if ($useLatest && $ref === null) {
-                $this->refuse('The entry has no saved version.');
+                $this->refuse(ReleaseError::EntryNoSavedVersion);
             }
             $this->putMember($locked, $entryId, $ref, $actor, $member->redirect_target);
         });
@@ -185,7 +184,8 @@ final class ReleaseService
     {
         $result = app(WorkflowActuator::class)->transition($release, $transition, new TransitionContext(actor: $this->token($actor)));
         if (! $result->applied) {
-            $this->refuse('The Release workflow refused '.$transition.': '.implode('; ', $result->blockers));
+            // The workflow's blockers are its own words, passed through as a parameter.
+            $this->refuse(ReleaseError::WorkflowRefused, ['transition' => $transition, 'blockers' => implode('; ', $result->blockers)]);
         }
 
         return $result;
@@ -200,15 +200,15 @@ final class ReleaseService
         return $source->getConnection()->transaction(function () use ($source, $actor) {
             $locked = $source->newQuery()->lockForUpdate()->findOrFail($source->id);
             if ($locked->status !== 'published') {
-                $this->refuse('Only a published Release can produce a rollback Release.');
+                $this->refuse(ReleaseError::RollbackNeedsPublished);
             }
             $members = $this->membersByKind($locked);
             if ($members->isEmpty()) {
-                $this->refuse('The Release has no members to roll back.');
+                $this->refuse(ReleaseError::RollbackNoMembers);
             }
             $context = $members->first(fn (BeamUxReleaseMember $member) => $member->kind() === BeamUxReleaseMember::KIND_ENTRY);
             if ($context === null) {
-                $this->refuse('A Release with no page members cannot be rolled back yet.');
+                $this->refuse(ReleaseError::RollbackNoPages);
             }
             $rollback = $this->create($this->entry($locked, $context->entry_id), 'Rollback: '.$locked->title, $actor);
             $rollback->forceFill(['rollback_of' => $locked->id])->save();
@@ -223,13 +223,13 @@ final class ReleaseService
     public function schedule(BeamUxRelease $release, string $dueAt, string $timezone, Authenticatable $actor): void
     {
         if (! app()->bound(\Splicewire\Beam\Calendars\Actions\ActionService::class)) {
-            $this->refuse('Scheduled publication requires the calendars ActionService. Publish now is available without it.');
+            $this->refuse(ReleaseError::SchedulingNeedsCalendars);
         }
         $release->getConnection()->transaction(function () use ($release, $dueAt, $timezone, $actor) {
             $locked = $release->newQuery()->lockForUpdate()->findOrFail($release->id);
             $context = app(\Splicewire\Beam\Calendars\Contracts\ActionContextProvider::class)->current();
             if ($context->principal !== $this->token($actor)) {
-                throw new AuthorizationException('Scheduled publication must use the current author principal.');
+                throw new \Splicewire\Beam\Localization\CodedAuthorizationException(ReleaseError::ScheduleAuthorPrincipal);
             }
             $token = 'ux-release:'.$locked->id.':'.$locked->revision;
             $locked->forceFill(['schedule_token' => $token])->save();
@@ -253,7 +253,7 @@ final class ReleaseService
         $actor = $this->actor($context->actor);
         $members = $this->membersByKind($release);
         if ($transition !== 'revise' && $members->isEmpty()) {
-            $this->refuse('An empty Release cannot advance.');
+            $this->refuse(ReleaseError::Empty);
         }
         $kinds = $this->kinds();
         foreach ($members as $member) {
@@ -270,7 +270,7 @@ final class ReleaseService
             $kind->authorize($release, $subject, $actor, $access);
             if ($transition === 'publish') {
                 if ($kind->moved($subject, $member)) {
-                    $this->refuse('A publication pin or marking moved. Rebase or drop that member.');
+                    $this->refuse(ReleaseError::PinOrMarkingMoved);
                 }
                 $kind->assertPublishable($release, $subject, $member);
             }
@@ -284,19 +284,19 @@ final class ReleaseService
             $release->schedule_token = null;
         } elseif ($transition === 'approve') {
             if (! config('beam.ux.releases.allow_self_approval', false) && in_array($context->actor, [$release->created_by, $release->edited_by], true)) {
-                throw new AuthorizationException('A different author must review this Release.');
+                throw new \Splicewire\Beam\Localization\CodedAuthorizationException(ReleaseError::DifferentReviewer);
             }
             $release->reviewed_by = $context->actor;
         } elseif ($transition === 'schedule') {
             if (! app()->bound(\Splicewire\Beam\Calendars\Actions\ActionService::class) || $release->schedule_token === null) {
-                $this->refuse('Schedule this Release through the calendars action service.');
+                $this->refuse(ReleaseError::ScheduleThroughCalendars);
             }
         } elseif ($transition === 'publish') {
             if (str_starts_with($context->causationId ?? '', 'ux-release:') && $context->causationId !== $release->schedule_token) {
-                throw new AuthorizationException('The scheduled Release membership changed; schedule the reviewed revision again.');
+                throw new \Splicewire\Beam\Localization\CodedAuthorizationException(ReleaseError::ScheduleMembershipChanged);
             }
             if ($this->awaitsReview($release)) {
-                $this->refuse('This Release requires approval before publication.');
+                $this->refuse(ReleaseError::ApprovalRequired);
             }
             // ADR-0232 d8: Publish ends the Preview Links; the secret goes with them (saved with the transition).
             if ($release->getAttribute('preview_links_enabled') || $release->getAttribute('preview_link_secret') !== null) {
@@ -346,7 +346,7 @@ final class ReleaseService
     {
         $members = $this->membersByKind($release);
         if ($release->status !== 'published' || $members->isEmpty()) {
-            throw new AuthorizationException('Only a published nonempty Release can be recorded.');
+            throw new \Splicewire\Beam\Localization\CodedAuthorizationException(ReleaseError::RecordNeedsPublished);
         }
         $this->authorizeMembers($release, $members, $actor, $this->isDirect($release) ? ReleaseAccess::Direct : ReleaseAccess::Publish);
     }
@@ -413,7 +413,7 @@ final class ReleaseService
     {
         $kind = $this->kinds()->for(BeamUxReleaseMember::KIND_ENTRY);
         if (! $kind instanceof EntryMemberKind) {
-            $this->refuse('The `entry` Release member kind must be beam-ux\'s EntryMemberKind.');
+            $this->refuse(ReleaseError::EntryKindMismatch);
         }
 
         return $kind;
@@ -428,7 +428,7 @@ final class ReleaseService
     {
         $actor = $this->resolveActorToken($token);
         if (! $actor instanceof Authenticatable) {
-            throw new AuthorizationException('A Release requires a currently resolvable author.');
+            throw new \Splicewire\Beam\Localization\CodedAuthorizationException(ReleaseError::AuthorUnresolvable);
         }
 
         return $actor;
@@ -538,12 +538,12 @@ final class ReleaseService
 
             if ($tenancy->isActive() || ($tenancy->isMultiTenant() && $connection !== $centralConnection)) {
                 if (! $tenancy->isMultiTenant() || ! $tenancy->isActive()) {
-                    throw new AuthorizationException('A tenant actor requires an initialized tenant identity.');
+                    throw new \Splicewire\Beam\Localization\CodedAuthorizationException(ReleaseError::TenantIdentityRequired);
                 }
 
                 $tenantId = $tenancy->currentTenantId();
                 if ($tenantId === null) {
-                    throw new AuthorizationException('A tenant actor requires an initialized tenant identity.');
+                    throw new \Splicewire\Beam\Localization\CodedAuthorizationException(ReleaseError::TenantIdentityRequired);
                 }
 
                 return 'tenant-model:'.base64_encode((string) $tenantId)
@@ -563,7 +563,7 @@ final class ReleaseService
         }
 
         if (app(TenancyContext::class)->isActive()) {
-            throw new AuthorizationException('A tenant actor requires an initialized tenant identity.');
+            throw new \Splicewire\Beam\Localization\CodedAuthorizationException(ReleaseError::TenantIdentityRequired);
         }
 
         return 'user:'.$actor->getAuthIdentifier();
@@ -593,12 +593,13 @@ final class ReleaseService
     private function assertEditable(BeamUxRelease $release): void
     {
         if ($release->status === 'published') {
-            $this->refuse('A published Release is immutable; create a rollback Release instead.');
+            $this->refuse(ReleaseError::PublishedImmutable);
         }
     }
 
-    private function refuse(string $message): never
+    /** @param  array<string, scalar>  $params */
+    private function refuse(\Splicewire\Beam\Localization\CodedError $error, array $params = []): never
     {
-        throw ValidationException::withMessages(['release' => $message]);
+        throw \Splicewire\Beam\Localization\CodedValidationException::for('release', $error, $params);
     }
 }

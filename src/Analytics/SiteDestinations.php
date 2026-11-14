@@ -96,7 +96,7 @@ final class SiteDestinations
     private function requireViewer(?string $realm): void
     {
         if (request()->user() === null || $realm === null) {
-            throw new AuthorizationException('The Site area reads each page as its viewer in a realm; with no signed-in viewer or realm it cannot be read.');
+            throw new \Splicewire\Beam\Localization\CodedAuthorizationException(AnalyticsError::SiteAreaNeedsViewer);
         }
     }
 

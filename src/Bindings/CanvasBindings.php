@@ -6,7 +6,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Validation\ValidationException;
+use Splicewire\Beam\Localization\CodedValidationException;
 use Splicewire\Beam\Ux\Data\CanvasRecordChoiceData;
 use Splicewire\Beam\Ux\Data\EntryCanvasBindingsOutputData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -74,7 +74,7 @@ final class CanvasBindings
         $declaration = $page->getAttribute('record_page');
         if (! is_array($declaration)) {
             if ($recordValue !== null) {
-                throw ValidationException::withMessages(['recordValue' => 'Save a Record Page declaration before choosing a Record.']);
+                throw CodedValidationException::for('recordValue', BindingError::RecordPageRequiredForRecord);
             }
 
             return new EntryCanvasBindingsOutputData($bindings, null, [], false, false, null, $this->pagePublic($entry));
@@ -94,7 +94,7 @@ final class CanvasBindings
         }
         $selected = $recordValue ?? ($choices[0]->value ?? null);
         if ($selected !== null && RecordPages::slug($selected) === null) {
-            throw ValidationException::withMessages(['recordValue' => 'Choose a valid Record value.']);
+            throw CodedValidationException::for('recordValue', BindingError::RecordValueInvalid);
         }
         $row = $selected === null ? null : $records->resolve($page, $selected, $request, (string) $page->realm);
         $extra = [];

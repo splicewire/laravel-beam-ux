@@ -89,7 +89,7 @@ final class PageFields
         }
         foreach (array_keys($unclaimed) as $key) {
             if (in_array(FrontmatterParser::canonicalize((string) $key), $declared, true)) {
-                throw ValidationException::withMessages(["pageSettings.unclaimed.{$key}" => 'This key is declared, so it cannot be kept as unclaimed. Set it as the page setting or Page Field it names.']);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for("pageSettings.unclaimed.{$key}", PageError::UnclaimedKeyDeclaredSetting);
             }
         }
     }
@@ -105,7 +105,7 @@ final class PageFields
     {
         if ($class === null) {
             if ($fields !== []) {
-                throw ValidationException::withMessages(['pageSettings.fields' => 'This page\'s parent declares no Page Fields (ADR-0233 d4).']);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings.fields', PageError::ParentDeclaresNoFields);
             }
 
             return [];
@@ -113,15 +113,15 @@ final class PageFields
         if (! class_exists($class)) {
             $schema = self::registeredSchema($class);
             if ($schema === null) {
-                throw ValidationException::withMessages(['pageSettings.fields' => 'The parent names no available Page Fields schema.']);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings.fields', PageError::ParentFieldsSchemaUnavailable);
             }
             try {
                 $fields = app(\Splicewire\Beam\Ux\Bindings\BindingFieldEvolution::class)->pageFields($class, $fields);
             } catch (InvalidArgumentException $e) {
-                throw ValidationException::withMessages(['pageSettings.fields' => $e->getMessage()]);
+                throw \Splicewire\Beam\Ux\Localization\DiagnosedValidationException::diagnosed('pageSettings.fields', PageError::FieldsUnevaluable, $e);
             }
             foreach (array_keys(array_diff_key($fields, $schema['properties'])) as $name) {
-                throw ValidationException::withMessages(["pageSettings.fields.{$name}" => 'The parent\'s Page Fields do not declare this field.']);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for("pageSettings.fields.{$name}", PageError::FieldUndeclared);
             }
             // Validate precisely what the version and frontmatter retain. In particular,
             // a required nullable field cannot pass as null and disappear after validation.
@@ -132,14 +132,14 @@ final class PageFields
                 ['fields' => (object) $fields],
                 ['type' => 'object', 'properties' => ['fields' => $schema]],
             )) {
-                throw ValidationException::withMessages(['pageSettings.fields' => 'These Page Fields do not conform to the parent\'s registered schema.']);
+                throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings.fields', PageError::FieldsNonconforming);
             }
 
             return $fields;
         }
         $parameters = self::parameters($class);
         foreach (array_keys(array_diff_key($fields, $parameters)) as $name) {
-            throw ValidationException::withMessages(["pageSettings.fields.{$name}" => 'The parent\'s Page Fields do not declare this field.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for("pageSettings.fields.{$name}", PageError::FieldUndeclared);
         }
         try {
             $data = $class::validateAndCreate($fields);

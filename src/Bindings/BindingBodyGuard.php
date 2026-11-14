@@ -3,11 +3,12 @@
 namespace Splicewire\Beam\Ux\Bindings;
 
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Collections\CollectionSchemaResolver;
 use Splicewire\Beam\Facades\Beam;
 use Splicewire\Beam\Filters\FilterQuerySelection;
+use Splicewire\Beam\Localization\CodedValidationException;
 use Splicewire\Beam\Ux\JsonDoc\NodeChildren;
+use Splicewire\Beam\Ux\Localization\DiagnosedValidationException;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /** Shared save/publish admission. This validates declarations; it never reads Records. */
@@ -84,7 +85,7 @@ final class BindingBodyGuard
         $stem = $source->address['collection'] ?? null;
         $edge = $stem === null ? null : (app(CollectionSchemaResolver::class)->resolve($stem)->relations()[$name] ?? null);
         if ($edge === null || ! $edge['many']) {
-            $this->refuse('A nested Repeat requires an owner-declared to-many relation.');
+            $this->refuse(BindingError::NestedRepeatOwnerToMany);
         }
         $target = new CollectionSource($source->name, $source->resource, ['collection' => $edge['collection']]);
 
@@ -98,11 +99,11 @@ final class BindingBodyGuard
             if (isset($node['repeat'])) {
                 $repeat = $node['repeat'];
                 if (array_diff(array_keys($repeat), ['collection', 'relation', 'query', 'empty'])) {
-                    $this->refuse('Unknown Repeat declaration field.');
+                    $this->refuse(BindingError::RepeatDeclarationFieldUnknown);
                 }
                 $id = $node['id'] ?? null;
                 if (! is_string($id) || $id === '' || isset($ids[$id])) {
-                    $this->refuse('A Repeat requires a unique block id.');
+                    $this->refuse(BindingError::RepeatIdRequired);
                 }
                 $ids[$id] = true;
                 $current = $source === null
@@ -111,16 +112,16 @@ final class BindingBodyGuard
                 $query = $repeat['query'] ?? [];
                 $allowed = $source !== null || $current->parentEntryId !== null ? ['limit'] : ['filter', 'sort', 'limit', 'filterVariant', 'ids'];
                 if (! is_array($query) || array_diff(array_keys($query), $allowed)) {
-                    $this->refuse('This Repeat query uses an undeclared field.');
+                    $this->refuse(BindingError::RepeatQueryFieldUndeclared);
                 }
                 // Hydrate independently of a JsonNode caller, so malformed limits never reach the query runtime.
                 try {
                     RepeatQueryData::from($query);
                 } catch (\InvalidArgumentException|\TypeError $e) {
-                    $this->refuse($e->getMessage());
+                    throw DiagnosedValidationException::diagnosed('body', BindingError::RepeatQueryInvalid, $e);
                 }
                 if (isset($query['ids']) && ! isset($current->address['collection'])) {
-                    $this->refuse('Record selections require a registered Collection source.');
+                    $this->refuse(BindingError::RecordSelectionNeedsCollection);
                 }
                 $parameters = array_filter($query, fn ($value) => $value !== null);
                 unset($parameters['limit'], $parameters['ids']);
@@ -158,8 +159,9 @@ final class BindingBodyGuard
         return false;
     }
 
-    private function refuse(string $message): never
+    /** @param  array<string, scalar>  $params */
+    private function refuse(BindingError $error, array $params = []): never
     {
-        throw ValidationException::withMessages(['body' => $message]);
+        throw CodedValidationException::for('body', $error, $params);
     }
 }

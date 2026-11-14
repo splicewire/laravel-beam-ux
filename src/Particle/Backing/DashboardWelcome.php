@@ -64,29 +64,29 @@ class DashboardWelcome
 
     public function welcome(Authenticatable $actor): DashboardWelcomeData
     {
-        $settings = $this->action('settings', __('Account settings'), self::SETTINGS_ROUTE);
+        $settings = $this->action('settings', __('beam-ux::dashboard.welcome.account_settings'), self::SETTINGS_ROUTE);
 
         if ($this->onTeam($actor) === false) {
             $name = $this->nameOf($actor);
 
             return new DashboardWelcomeData(
                 state: DashboardWelcomeData::STATE_FIRST_RUN,
-                heading: $name === null ? __('Welcome') : __('Welcome, :name', ['name' => $name]),
-                body: __("You aren't on a team yet, so there's nothing to show here."),
+                heading: $name === null ? __('beam-ux::dashboard.welcome.heading') : __('beam-ux::dashboard.welcome.heading_named', ['name' => $name]),
+                body: __('beam-ux::dashboard.welcome.not_on_team'),
                 actions: array_values(array_filter([
-                    $this->action('create-team', __('Create a team'), self::CREATE_TEAM_ROUTE),
+                    $this->action('create-team', __('beam-ux::dashboard.welcome.create_team'), self::CREATE_TEAM_ROUTE),
                     $settings,
                 ])),
                 hint: $this->router->has(self::ACCEPT_INVITATION_ROUTE)
-                    ? __('Have an invitation? Open the link from your email.')
+                    ? __('beam-ux::dashboard.welcome.invitation_hint')
                     : null,
             );
         }
 
         return new DashboardWelcomeData(
             state: DashboardWelcomeData::STATE_EMPTY,
-            heading: __('Nothing here yet'),
-            body: __('Summaries of your work will appear here as soon as there is something to show.'),
+            heading: __('beam-ux::dashboard.welcome.empty_heading'),
+            body: __('beam-ux::dashboard.welcome.empty_body'),
             actions: array_values(array_filter([$settings])),
         );
     }

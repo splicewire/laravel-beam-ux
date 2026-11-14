@@ -3,7 +3,6 @@
 namespace Splicewire\Beam\Ux\Filters;
 
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Rushing\DataFilters\Operators\Exact;
 use Spatie\QueryBuilder\AllowedFilter;
@@ -54,6 +53,6 @@ class ProjectedExact extends Exact
                 return false;
             }
         }
-        throw ValidationException::withMessages(['filter.'.$name => 'The filter value has an invalid type.']);
+        throw \Splicewire\Beam\Localization\CodedValidationException::for('filter.'.$name, FilterError::ValueInvalid);
     }
 }

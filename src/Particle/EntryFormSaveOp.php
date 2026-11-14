@@ -4,7 +4,6 @@ namespace Splicewire\Beam\Ux\Particle;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Opis\JsonSchema\Errors\ErrorFormatter;
 use Opis\JsonSchema\Validator;
 use Splicewire\Beam\Particle\Attributes\ParticleOp;
@@ -94,14 +93,7 @@ class EntryFormSaveOp
             return;
         }
 
-        throw ValidationException::withMessages([
-            'form' => sprintf(
-                'This entry declares a %s body, not a form. Edit it through the %s input, or change the '.
-                "entry's kind first.",
-                $entry->bodyKind()->value,
-                $entry->bodyKind()->value,
-            ),
-        ]);
+        throw \Splicewire\Beam\Localization\CodedValidationException::for('form', \Splicewire\Beam\Ux\Publish\EntryError::FormBodyMismatch, ['kind' => $entry->bodyKind()->value]);
     }
 
     /**
@@ -131,8 +123,7 @@ class EntryFormSaveOp
 
         $errors = (new ErrorFormatter)->formatKeyed($result->error());
 
-        throw ValidationException::withMessages([
-            'form' => 'This form does not match the entry\'s schema: '.json_encode($errors, JSON_THROW_ON_ERROR),
-        ]);
+        // The schema validator's keyed errors are machine output, passed through as a parameter.
+        throw \Splicewire\Beam\Localization\CodedValidationException::for('form', \Splicewire\Beam\Ux\Publish\EntryError::FormSchemaMismatch, ['errors' => json_encode($errors, JSON_THROW_ON_ERROR)]);
     }
 }

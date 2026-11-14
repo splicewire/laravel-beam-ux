@@ -55,20 +55,20 @@ final class SiteArea implements AnalyticsArea
             $href = $this->destinations->href(self::SITEMAP_HEALTH);
             $published = array_filter($pages, fn (array $row): bool => ($row['published'] ?? false) === true);
 
-            $figures[] = new AnalyticsFigureData(id: 'published', label: 'Published pages', value: count($published), href: $href);
-            $figures[] = new AnalyticsFigureData(id: 'indexed', label: 'Indexed pages', value: count(array_filter($pages, fn (array $row): bool => ($row['indexed'] ?? false) === true)), href: $href);
-            $figures[] = new AnalyticsFigureData(id: 'sitemap-issues', label: 'Published, not in the sitemap', value: count(array_filter($published, fn (array $row): bool => ($row['indexed'] ?? true) === false)), href: $href);
+            $figures[] = new AnalyticsFigureData(id: 'published', label: __('beam-ux::analytics.site.figures.published'), value: count($published), href: $href);
+            $figures[] = new AnalyticsFigureData(id: 'indexed', label: __('beam-ux::analytics.site.figures.indexed'), value: count(array_filter($pages, fn (array $row): bool => ($row['indexed'] ?? false) === true)), href: $href);
+            $figures[] = new AnalyticsFigureData(id: 'sitemap-issues', label: __('beam-ux::analytics.site.figures.sitemap-issues'), value: count(array_filter($published, fn (array $row): bool => ($row['indexed'] ?? true) === false)), href: $href);
         }
 
         $redirects = $this->destinations->rows(self::REDIRECTS);
         if ($redirects !== null) {
-            $figures[] = new AnalyticsFigureData(id: 'redirects', label: 'Redirects', value: count($redirects), href: $this->destinations->href(self::REDIRECTS));
+            $figures[] = new AnalyticsFigureData(id: 'redirects', label: __('beam-ux::analytics.site.figures.redirects'), value: count($redirects), href: $this->destinations->href(self::REDIRECTS));
         }
 
         if ($reading->scope->isInstall()) {
             $entries = $this->destinations->rows(self::SITE_HEALTH);
             if ($entries !== null) {
-                $figures[] = new AnalyticsFigureData(id: 'mirror', label: 'Mirror state', value: $this->mirror($entries), href: $this->destinations->href(self::SITE_HEALTH));
+                $figures[] = new AnalyticsFigureData(id: 'mirror', label: __('beam-ux::analytics.site.figures.mirror'), value: $this->mirror($entries), href: $this->destinations->href(self::SITE_HEALTH));
             }
         }
 

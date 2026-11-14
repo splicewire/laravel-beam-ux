@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\JsonDoc;
 
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Mdx\Lens\MdxLens;
 use Splicewire\Beam\Ux\Codec\UxFormatCase;
 use Splicewire\Beam\Ux\Format\UxFormat;
@@ -52,12 +51,12 @@ final class SourceToBlocks
     private function readMdx(string $source, ?array $profile): array
     {
         if (preg_match('/\A(?:\xEF\xBB\xBF)?---\r?\n/', $source) === 1) {
-            throw ValidationException::withMessages(['source' => 'An MDX page\'s frontmatter is its page settings, not its body (ADR-0233 d3). Edit those in page settings and write the body alone.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('source', SourceError::FrontmatterIsSettings);
         }
 
         $read = ($this->mdx ?? app(MdxLens::class))->read($source, $profile === null ? [] : ['profile' => $profile]);
         if ($read['meta'] !== null) {
-            throw ValidationException::withMessages(['source' => '`export const meta` becomes frontmatter when the host converts its MDX (ADR-0233 d9); a blocks page body holds no code.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('source', SourceError::MetaExportRefused);
         }
 
         return $read['doc'];

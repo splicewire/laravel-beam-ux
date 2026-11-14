@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\JsonDoc;
 
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Mdx\Lens\MdxLens;
 use Splicewire\Beam\Ux\Body\BodyKind;
 use Splicewire\Beam\Ux\Codec\JsonDocPrinter;
@@ -21,7 +20,7 @@ final class SourceMode
     {
         if (! app(EntryResidency::class)->isCentralResident($entry)
             || $entry->bodyKind() !== BodyKind::Blocks || ! in_array($entry->format?->value, [UxFormat::Tsx->value, UxFormat::Mdx->value], true)) {
-            throw ValidationException::withMessages(['source' => 'Source Mode requires a central TSX or MDX blocks entry; Hosted sites have no Source Mode.']);
+            throw \Splicewire\Beam\Localization\CodedValidationException::for('source', SourceError::SourceModeUnavailable);
         }
     }
 
