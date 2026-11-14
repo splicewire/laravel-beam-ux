@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Http\Concerns;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
+use Inertia\Inertia;
 use Rushing\DataNav\NavTree;
 use Rushing\Popcorn\Registries\Exceptions\RegistryMiss;
 use Schemastud\Frame\Realm\RealmDefinition;
@@ -12,6 +13,7 @@ use Splicewire\Beam\Accounts\Http\Concerns\SharesAccountShell;
 use Splicewire\Beam\Brand\Brand;
 use Splicewire\Beam\Entitlements\CanMapBuilder;
 use Splicewire\Beam\Ia\HostIa;
+use Splicewire\Beam\Localization\Client\ClientCatalogResolver;
 use Splicewire\Beam\Realm\RealmManifestProjector;
 use Splicewire\Beam\Realm\RealmRegistry;
 use Splicewire\Beam\Ux\Containment\NavProjector;
@@ -96,6 +98,29 @@ trait SharesBeamShell
             // The resolved theme (package default → central → tenant, ThemeResolver) — {canvas, shell, site}.
             // Consumed by editor/theme.ts's swap off NEUTRAL_THEME and the shell/site CSS-var <style> blocks.
             'theme' => EditorProps::theme(),
+            // localization 16 (ruling 02 §4): the client catalog's address (ordinary), and the initial catalog as a once-prop
+            // keyed by host, locale, realm and hash. The first and SSR render carries it synchronously; a later visit
+            // holding that key skips it; a changed context or hash is a new key.
+            'localization' => $this->localization($request),
+        ];
+    }
+
+    /**
+     * The localization bootstrap: `address` (an ordinary prop) and `initial` (once, keyed
+     * `beam.catalog:{host}:{locale}:{realm}:{hash}`). `initial` is null without a valid discovered catalog. The client
+     * then renders compiled English, which never counts as coverage.
+     *
+     * @return array{address: \Splicewire\Beam\Localization\Client\Data\ClientCatalogAddressData, initial: \Inertia\OnceProp}
+     */
+    protected function localization(Request $request): array
+    {
+        $bootstrap = app(ClientCatalogResolver::class)->bootstrap($request);
+        $address = $bootstrap->address;
+        $key = 'beam.catalog:'.$request->getSchemeAndHttpHost().':'.$address->locale.':'.($address->realm ?? '').':'.$address->hash;
+
+        return [
+            'address' => $address,
+            'initial' => Inertia::once(fn () => $bootstrap->initial)->as($key),
         ];
     }
 

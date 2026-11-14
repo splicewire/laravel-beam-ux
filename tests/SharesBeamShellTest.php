@@ -97,7 +97,7 @@ class SharesBeamShellTest extends TestCase
         $shared = (new SharesBeamShellHost)->share($this->request());
 
         $this->assertSame(
-            ['errors', 'name', 'brand', 'realms', 'auth', 'sidebarOpen', 'nav', 'accountNav', 'accountShell', 'can', 'realmManifest', 'theme'],
+            ['errors', 'name', 'brand', 'realms', 'auth', 'sidebarOpen', 'nav', 'accountNav', 'accountShell', 'can', 'realmManifest', 'theme', 'localization'],
             array_keys($shared),
         );
         $this->assertInstanceOf(BrandData::class, $shared['brand']);
@@ -106,6 +106,47 @@ class SharesBeamShellTest extends TestCase
         $this->assertInstanceOf(NavTree::class, $shared['nav']);
         $this->assertIsArray($shared['can']);
         $this->assertIsArray($shared['theme']);
+    }
+
+    /**
+     * localization 16 (ruling 02 §4): `localization.address` is ordinary and `localization.initial` is a once-prop keyed
+     * `beam.catalog:{host}:{locale}:{realm}:{hash}`, proven through the installed adapter's own PropsResolver:
+     * - the first (SSR) load carries the catalog;
+     * - an Inertia visit already holding that key excludes it;
+     * - a different key (a changed hash or context) still carries it.
+     */
+    public function test_the_initial_catalog_is_a_once_prop_keyed_by_host_locale_realm_and_hash(): void
+    {
+        // A version-1 discovered catalog written by schemastud's own jcs.mjs (the beam 16-a fixture, same bytes).
+        config(['beam.localization.client_catalog' => __DIR__.'/Fixtures/Localization/discovered-catalog.json']);
+        $this->app->forgetScopedInstances();
+        $shared = (new SharesBeamShellHost)->share($this->request());
+        $address = $shared['localization']['address'];
+        $key = 'beam.catalog:http://localhost:'.$address->locale.'::'.$address->hash;
+
+        $this->assertInstanceOf(\Splicewire\Beam\Localization\Client\Data\ClientCatalogAddressData::class, $address);
+        $this->assertSame($key, $shared['localization']['initial']->getKey());
+
+        $resolve = function (array $headers) use ($shared): array {
+            $request = Request::create('/');
+            foreach ($headers as $name => $value) {
+                $request->headers->set($name, $value);
+            }
+
+            // Only the localization prop: the proof concerns it, and the other lazy shell props need host bindings.
+            return (new \Inertia\PropsResolver($request, 'Page'))->resolve(['localization' => $shared['localization']], []);
+        };
+
+        [$first, $meta] = $resolve([]);
+        $this->assertSame('Save', $first['localization']['initial']->messages['schemastud-ui::messages.save']->text ?? $first['localization']['initial']['messages']['schemastud-ui::messages.save']['text'] ?? null);
+        $this->assertArrayHasKey($key, $meta['onceProps']);
+
+        [$again] = $resolve(['X-Inertia' => 'true', 'X-Inertia-Except-Once-Props' => $key]);
+        $this->assertArrayNotHasKey('initial', $again['localization'], 'an unchanged once-key is not resent');
+        $this->assertArrayHasKey('address', $again['localization']);
+
+        [$changed] = $resolve(['X-Inertia' => 'true', 'X-Inertia-Except-Once-Props' => 'beam.catalog:http://localhost:en::older-hash']);
+        $this->assertArrayHasKey('initial', $changed['localization'], 'a changed hash is a new key, so the catalog is resent');
     }
 
     public function test_a_guest_gets_no_account_rail_and_no_account_shell(): void
