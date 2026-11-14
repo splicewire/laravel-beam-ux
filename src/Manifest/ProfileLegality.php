@@ -5,6 +5,8 @@ namespace Splicewire\Beam\Ux\Manifest;
 use Illuminate\Validation\ValidationException;
 use Opis\JsonSchema\Errors\ErrorFormatter;
 use Opis\JsonSchema\Validator;
+use Splicewire\Beam\Localization\CodedError;
+use Splicewire\Beam\Ux\Localization\CodedRefusalList;
 
 /**
  * ADR-0228 d8 / ux-0227 d1 (EP-07a c + EP-06 d8) — the PHP save legality check. It walks a canvas
@@ -20,6 +22,10 @@ use Opis\JsonSchema\Validator;
  *     the entry. `$admitsCode` (the profile's `x-admits-code`) governs whether it runs at all.
  *
  * `$checkIds === null` checks everything (a central save, or any caller without a Working Head to diff).
+ *
+ * Localization 23A (range review B10 U1): every refusal is a coded {@see ProfileError} case with the node's id and
+ * path and the authored names as parameters. {@see refusals()} keeps the cases and their parameters, for an emit that
+ * carries codes; {@see violations()} renders them as localized messages, in the same two bands.
  */
 final class ProfileLegality
 {
@@ -32,11 +38,11 @@ final class ProfileLegality
      */
     public function assert(array $body, array $profile, ?array $checkIds = null, ?string $component = null): void
     {
-        ['code' => $code, 'legality' => $legality] = $this->violations($body, $profile, $checkIds, $component);
-        $violations = [...$code, ...$legality];
+        ['code' => $code, 'legality' => $legality] = $this->refusals($body, $profile, $checkIds, $component);
+        $refusals = [...$code, ...$legality];
 
-        if ($violations !== []) {
-            throw ValidationException::withMessages(['body' => $violations]);
+        if ($refusals !== []) {
+            throw CodedRefusalList::on('body', $refusals);
         }
     }
 
@@ -50,6 +56,22 @@ final class ProfileLegality
      * @return array{code: list<string>, legality: list<string>}
      */
     public function violations(array $body, array $profile, ?array $checkIds = null, ?string $component = null): array
+    {
+        $render = static fn (array $refusals): array => array_map(static fn (array $refusal): string => $refusal[0]->message($refusal[1]), $refusals);
+        ['code' => $code, 'legality' => $legality] = $this->refusals($body, $profile, $checkIds, $component);
+
+        return ['code' => $render($code), 'legality' => $render($legality)];
+    }
+
+    /**
+     * The two bands as coded refusals: each a {@see ProfileError} case and its parameters, in walk order.
+     *
+     * @param  array<int, array<string, mixed>>  $body
+     * @param  array<string, mixed>  $profile
+     * @param  array<string, true>|null  $checkIds
+     * @return array{code: list<array{0: CodedError, 1: array<string, string>}>, legality: list<array{0: CodedError, 1: array<string, string>}>}
+     */
+    public function refusals(array $body, array $profile, ?array $checkIds = null, ?string $component = null): array
     {
         $admitsCode = (bool) ($profile['x-admits-code'] ?? true);
         $entries = array_column($profile['nodes'] ?? [], null, 'name');
@@ -68,8 +90,8 @@ final class ProfileLegality
      * @param  array<string, array<string, mixed>>  $entries  name => v1 node entry
      * @param  array<string, true>|null  $checkIds
      * @param  list<string>|null  $parentAdmits  categories the parent admits (null = unconstrained)
-     * @param  list<string>  $violations  the legality band
-     * @param  list<string>  $code  the code band (ux-0227 d1)
+     * @param  list<array{0: CodedError, 1: array<string, string>}>  $violations  the legality band
+     * @param  list<array{0: CodedError, 1: array<string, string>}>  $code  the code band (ux-0227 d1)
      */
     private function walk(array $nodes, string $prefix, array $entries, bool $admitsCode, ?array $checkIds, ?array $parentAdmits, bool $parentAdmitsText, array &$violations, array &$code, ?array $componentEntry): void
     {
@@ -80,7 +102,7 @@ final class ProfileLegality
             if ($kind === 'opaque') {
                 // Code refusal — whole body, never narrowed (ux-0227 d1).
                 if (! $admitsCode) {
-                    $code[] = $this->message($path, null, 'carries an opaque node (verbatim code); this profile does not admit code (ux-0227 d1)');
+                    $code[] = $this->refusal($path, null, ProfileError::OpaqueNode);
                 }
 
                 continue;
@@ -88,13 +110,13 @@ final class ProfileLegality
 
             if ($kind === 'text') {
                 if (isset($node['prop']) && ! $this->hasProp($componentEntry, $node['prop'])) {
-                    $code[] = $this->message($path, null, 'uses an undeclared component prop reference');
+                    $code[] = $this->refusal($path, null, ProfileError::UndeclaredPropReference);
                 }
                 if (isset($node['prop']) && $this->hasProp($componentEntry, $node['prop']) && ! SchemaCompatibility::fits($componentEntry['attrsSchema']['properties'][$node['prop']], ['type' => 'string'])) {
-                    $violations[] = $this->message($path, null, 'text requires a text component prop');
+                    $violations[] = $this->refusal($path, null, ProfileError::TextRequiresTextProp);
                 }
                 if (! $parentAdmitsText) {
-                    $violations[] = $this->message($path, null, 'has text where the parent admits none');
+                    $violations[] = $this->refusal($path, null, ProfileError::TextNotAdmitted);
                 }
 
                 continue;
@@ -112,7 +134,7 @@ final class ProfileLegality
 
             foreach ($node['props'] ?? [] as $prop) {
                 if (($prop['kind'] ?? null) === 'prop' && ! $this->hasProp($componentEntry, $prop['value'] ?? null)) {
-                    $code[] = $this->message($path, $id, 'uses an undeclared component prop reference');
+                    $code[] = $this->refusal($path, $id, ProfileError::UndeclaredPropReference, ProfileError::UndeclaredPropReferenceIdentified);
                 }
             }
             // Slots are grammar, not registry islands. Their fallback is still ordinary content.
@@ -122,13 +144,13 @@ final class ProfileLegality
                     if (($prop['name'] ?? null) === 'name' && ($prop['kind'] ?? null) === 'string') {
                         $slotName = $prop['value'];
                     } else {
-                        $code[] = $this->message($path, $id, 'Slot accepts only a literal name');
+                        $code[] = $this->refusal($path, $id, ProfileError::SlotLiteralName, ProfileError::SlotLiteralNameIdentified);
                     }
                 }
                 $declarations = array_column($componentEntry['slots'] ?? [], null, 'name');
                 $slot = $slotName === 'children' && $componentEntry !== null ? $componentEntry : ($declarations[$slotName] ?? null);
                 if ($slot === null || ($slot['admitsChildCategories'] ?? null) === []) {
-                    $code[] = $this->message($path, $id, 'uses an undeclared component slot');
+                    $code[] = $this->refusal($path, $id, ProfileError::UndeclaredComponentSlot, ProfileError::UndeclaredComponentSlotIdentified);
                 }
                 $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, $slot['admitsChildCategories'] ?? $parentAdmits, $parentAdmitsText, $violations, $code, $componentEntry);
                 // Do not let a malformed Slot carry an unvisited subtree.
@@ -137,7 +159,7 @@ final class ProfileLegality
             $slotEntries = array_column($nodeEntry['slots'] ?? [], null, 'name');
             foreach ($node['slots'] ?? [] as $slotName => $slotChildren) {
                 if (! isset($slotEntries[$slotName])) {
-                    $violations[] = $this->message($path, $id, 'uses undeclared named slot '.$slotName);
+                    $violations[] = $this->refusal($path, $id, ProfileError::UndeclaredNamedSlot, ProfileError::UndeclaredNamedSlotIdentified, ['slot' => (string) $slotName]);
                 }
                 $this->walk($slotChildren, $path.'.slots.'.$slotName, $entries, $admitsCode, $checkIds, $slotEntries[$slotName]['admitsChildCategories'] ?? null, false, $violations, $code, $componentEntry);
             }
@@ -157,7 +179,7 @@ final class ProfileLegality
                 foreach ($node['props'] ?? [] as $prop) {
                     if (($prop['kind'] ?? null) === 'expression') {
                         $propName = $prop['name'] ?? '?';
-                        $code[] = $this->message($path, $id, "carries the expression prop '$propName' (code); this profile does not admit code (ux-0227 d1)");
+                        $code[] = $this->refusal($path, $id, ProfileError::ExpressionProp, ProfileError::ExpressionPropIdentified, ['prop' => (string) $propName]);
                     }
                 }
             }
@@ -170,7 +192,7 @@ final class ProfileLegality
 
             if ($entry === null) {
                 if ($checkLegality) {
-                    $violations[] = $this->message($path, $id, "uses the unknown block '$name', which is not in this profile");
+                    $violations[] = $this->refusal($path, $id, ProfileError::UnknownBlock, ProfileError::UnknownBlockIdentified, ['name' => (string) $name]);
                 }
                 $this->walk($node['children'] ?? [], $path, $entries, $admitsCode, $checkIds, null, true, $violations, $code, $componentEntry);
 
@@ -180,8 +202,9 @@ final class ProfileLegality
             if ($checkLegality) {
                 $category = $entry['category'] ?? null;
                 if ($parentAdmits !== null && ($category === null || ! in_array($category, $parentAdmits, true))) {
-                    $admitted = $parentAdmits === [] ? 'nothing' : implode(', ', $parentAdmits);
-                    $violations[] = $this->message($path, $id, "block '$name' (category '$category') is not admitted here (the parent admits: $admitted)");
+                    $violations[] = $parentAdmits === []
+                        ? $this->refusal($path, $id, ProfileError::BlockNotAdmittedAnywhere, ProfileError::BlockNotAdmittedAnywhereIdentified, ['name' => (string) $name, 'category' => (string) $category])
+                        : $this->refusal($path, $id, ProfileError::BlockNotAdmitted, ProfileError::BlockNotAdmittedIdentified, ['name' => (string) $name, 'category' => (string) $category, 'admitted' => implode(', ', $parentAdmits)]);
                 }
 
                 $this->assertAttrsMatchSchema($node, $entry, $path, $id, $violations, $componentEntry);
@@ -199,7 +222,7 @@ final class ProfileLegality
      *
      * @param  array<string, mixed>  $node
      * @param  array<string, mixed>  $entry
-     * @param  list<string>  $violations
+     * @param  list<array{0: CodedError, 1: array<string, string>}>  $violations
      */
     private function assertAttrsMatchSchema(array $node, array $entry, string $path, ?string $id, array &$violations, ?array $componentEntry): void
     {
@@ -219,7 +242,7 @@ final class ProfileLegality
                 $source = $componentEntry['attrsSchema']['properties'][$prop['value']];
                 $target = $schema['properties'][$name] ?? null;
                 if (! is_array($source) || ! is_array($target) || ! SchemaCompatibility::fits($source, $target)) {
-                    $violations[] = $this->message($path, $id, 'component prop does not fit attribute '.$name);
+                    $violations[] = $this->refusal($path, $id, ProfileError::PropDoesNotFitAttribute, ProfileError::PropDoesNotFitAttributeIdentified, ['attribute' => (string) $name]);
                 }
             }
             $attrs[$name] = $prop['value'] ?? null;
@@ -244,7 +267,7 @@ final class ProfileLegality
 
         if (! $result->isValid()) {
             $errors = (new ErrorFormatter)->formatKeyed($result->error());
-            $violations[] = $this->message($path, $id, 'has props that do not match the block schema: '.json_encode($errors, JSON_THROW_ON_ERROR));
+            $violations[] = $this->refusal($path, $id, ProfileError::PropsDoNotMatchSchema, ProfileError::PropsDoNotMatchSchemaIdentified, ['errors' => json_encode($errors, JSON_THROW_ON_ERROR)]);
         }
     }
 
@@ -255,10 +278,19 @@ final class ProfileLegality
             && array_key_exists($name, $entry['attrsSchema']['properties'] ?? []);
     }
 
-    private function message(string $path, ?string $id, string $what): string
+    /**
+     * One coded refusal: the identified case when the node has an id (and the refusal can name one), else the
+     * anonymous case. The id, path and authored names are parameters, never key material.
+     *
+     * @param  array<string, string>  $params
+     * @return array{0: CodedError, 1: array<string, string>}
+     */
+    private function refusal(string $path, ?string $id, ProfileError $anonymous, ?ProfileError $identified = null, array $params = []): array
     {
-        $where = $id !== null ? "node #$id" : 'node';
+        if ($id !== null && $identified !== null) {
+            return [$identified, ['id' => $id, 'path' => $path, ...$params]];
+        }
 
-        return "$where at [$path] $what";
+        return [$anonymous, ['path' => $path, ...$params]];
     }
 }

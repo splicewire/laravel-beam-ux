@@ -4425,6 +4425,27 @@ class EntryPublicationTest extends TestCase
             $table->unique(['versionable_type', 'versionable_id', 'version']);
         });
     }
+
+    /** localization 23A (B10 U4): the real compileDraft emit keys the wrapper; the engine reason stays raw data. */
+    public function test_23a_a_failed_draft_compile_returns_the_keyed_wrapper_with_the_raw_reason(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $publication = app(EntryPublication::class);
+        PublicationFakeCompiler::$fails = true;
+        try {
+            $english = $publication->recordDraft($entry->fresh(), self::BODY_TWO)->compileError;
+            $format = $entry->format?->value ?? 'unknown';
+            $this->assertSame("Compiling entry [{$entry->slug}] (format: {$format}) failed: the fake compiler was told to fail.", $english);
+
+            config(['beam.localization.pseudo' => true]);
+            $this->app->setLocale(\Splicewire\Beam\Localization\Locales::PSEUDO);
+            $pseudo = $publication->recordDraft($entry->fresh(), self::BODY_ONE)->compileError;
+            $this->assertTrue(\Splicewire\Beam\Localization\PseudoLocale::isMarked((string) $pseudo), (string) $pseudo);
+            $this->assertStringContainsString('the fake compiler was told to fail.', (string) $pseudo, 'the engine reason is data, never translated');
+        } finally {
+            PublicationFakeCompiler::$fails = false;
+        }
+    }
 }
 
 /** A compiler with no toolchain — it echoes the source back as a module. */

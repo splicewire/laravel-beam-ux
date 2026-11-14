@@ -561,6 +561,42 @@ class EntryBodyOpsTest extends TestCase
         }
     }
 
+    /** localization 23A (B10 U1): the restore emit keeps each code-band refusal's coded identity, marked under en-XA. */
+    public function test_23a_a_restore_code_refusal_is_coded_and_its_legality_diagnostics_are_keyed(): void
+    {
+        $entry = BeamUxEntry::create(['slug' => 'p', 'type' => 'page', 'format' => 'tsx', 'namespace' => null]);
+        $opaque = $this->versionWithBody($entry, [['kind' => 'opaque', 'reason' => 'expression', 'source' => '{steal()}']]);
+        $illegal = $this->versionWithBody($entry, [['kind' => 'block', 'id' => 'mq', 'name' => 'marquee', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []]]);
+        $this->setWorkingBody($entry, [$this->node('p', 'now')]);
+        $this->bindSplitTenancy();
+        $publication = app(\Splicewire\Beam\Ux\Publish\EntryPublication::class);
+
+        try {
+            $publication->restore($entry->fresh(), (string) $opaque->id);
+            $this->fail('a tenant-resident entry restored an opaque (code) node');
+        } catch (\Splicewire\Beam\Localization\CodedValidationException $e) {
+            $this->assertSame(['body' => ['node at [0] carries an opaque node (verbatim code); this profile does not admit code (ux-0227 d1)']], $e->errors());
+            $this->assertSame(['body' => ['profile_opaque_node']], $e->codes());
+        }
+
+        config(['beam.localization.pseudo' => true]);
+        $this->app->setLocale(\Splicewire\Beam\Localization\Locales::PSEUDO);
+        try {
+            $publication->restore($entry->fresh(), (string) $opaque->id);
+            $this->fail('a tenant-resident entry restored an opaque (code) node');
+        } catch (\Splicewire\Beam\Localization\CodedValidationException $e) {
+            $this->assertTrue(\Splicewire\Beam\Localization\PseudoLocale::isMarked($e->errors()['body'][0]), $e->errors()['body'][0]);
+            $this->assertSame(['body' => ['profile_opaque_node']], $e->codes());
+        }
+
+        $diagnostics = $publication->restore($entry->fresh(), (string) $illegal->id)->diagnostics;
+        $this->assertNotEmpty($diagnostics);
+        foreach ($diagnostics as $diagnostic) {
+            $this->assertTrue(\Splicewire\Beam\Localization\PseudoLocale::isMarked($diagnostic), $diagnostic);
+        }
+        $this->assertStringContainsString('#mq', implode("\n", $diagnostics), 'the id is a parameter, kept as data');
+    }
+
     /** A canvas text-leaf node. */
     private function node(string $tag, string $text): array
     {

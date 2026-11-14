@@ -928,7 +928,7 @@ class EntryPublication
 
             return null;
         } catch (CompilationFailed $exception) {
-            return $exception->getMessage();
+            return $exception->display(); // localization 23A (B10 U4): keyed at the emit
         } finally {
             $compiler->artifacts()->prune($entry->refresh());
         }
@@ -991,7 +991,7 @@ class EntryPublication
 
             return null;
         } catch (CompilationFailed $e) {
-            return $e->getMessage();
+            return $e->display(); // localization 23A (B10 U4): keyed at the emit
         }
     }
 

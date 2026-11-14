@@ -16,9 +16,11 @@ use Splicewire\Beam\Ux\Files\FileConflict;
 use Splicewire\Beam\Ux\Files\FileError;
 use Splicewire\Beam\Ux\Files\FileOperation;
 use Splicewire\Beam\Ux\Filters\FilterError;
+use Splicewire\Beam\Ux\Intake\IntakeError;
 use Splicewire\Beam\Ux\JsonDoc\SourceError;
 use Splicewire\Beam\Ux\Localization\CodedConflictHttpException;
 use Splicewire\Beam\Ux\Localization\DiagnosedValidationException;
+use Splicewire\Beam\Ux\Manifest\ProfileError;
 use Splicewire\Beam\Ux\Publish\EntryError;
 use Splicewire\Beam\Ux\Recording\RecordingError;
 use Splicewire\Beam\Ux\Recording\RecordingFailure;
@@ -35,14 +37,17 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 class BeamUxSweepTest extends TestCase
 {
     private const PARAMS = ['detail' => 'd', 'name' => 'n', 'entries' => 'e', 'path' => '/p', 'attribute' => 'a', 'language' => 'tsx',
-        'key' => 'k', 'ref' => 'r', 'format' => 'mdx', 'kind' => 'blocks', 'errors' => '{}', 'transition' => 't', 'blockers' => 'b'];
+        'key' => 'k', 'ref' => 'r', 'format' => 'mdx', 'kind' => 'blocks', 'errors' => '{}', 'transition' => 't', 'blockers' => 'b',
+        // localization 23A
+        'id' => 'i', 'prop' => 'p', 'slot' => 's', 'category' => 'c', 'admitted' => 'x', 'title' => 'T', 'page' => 'pg', 'aliases' => 'al',
+        'slug' => 'sl', 'reason' => 'why', 'compiler' => 'C'];
 
     /** @return list<CodedError> every case the sweep introduced */
     private function cases(): array
     {
         return [...ComponentError::cases(), ...RedirectError::cases(), ...BindingError::cases(), ...PageError::cases(),
             ...EntryError::cases(), ...SourceError::cases(), ...ReleaseError::cases(), ...AnalyticsError::cases(), ...FilterError::cases(),
-            ...RecordingError::cases(), ...FileError::cases()];
+            ...RecordingError::cases(), ...FileError::cases(), ...ProfileError::cases(), ...IntakeError::cases()];
     }
 
     private function pseudo(): void
@@ -69,7 +74,7 @@ class BeamUxSweepTest extends TestCase
         foreach ($this->cases() as $case) {
             $message = $case->message(self::PARAMS);
             $this->assertTrue(PseudoLocale::isMarked($message), $case::class.'::'.$case->name.': '.$message);
-            $this->assertDoesNotMatchRegularExpression('/:(detail|name|entries|path|attribute|language|key|ref|format|kind|errors|transition|blockers)\b/', $message, $case->name.' replaces every parameter');
+            $this->assertDoesNotMatchRegularExpression('/:(detail|name|entries|path|attribute|language|key|ref|format|kind|errors|transition|blockers|id|prop|slot|category|admitted|title|page|aliases|slug|reason|compiler)\b/', $message, $case->name.' replaces every parameter');
         }
     }
 

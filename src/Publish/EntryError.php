@@ -93,4 +93,13 @@ enum EntryError: string implements CodedError
 
     #[Message('Tenant Site Host Preview route is not mounted.')]
     case TenantPreviewUnmounted = 'entry_tenant_preview_unmounted';
+
+    // Compilation (localization 23A; range review B10 U4). Keyed at the response emit; `:reason` is the raw engine
+    // reason, passed through as data and never translated.
+
+    #[Message('Compiling entry [:slug] (format: :format) failed: :reason')]
+    case CompileFailed = 'entry_compile_failed';
+
+    #[Message("No compile strategy for entry [:slug]'s format [:format]. Register one on the bound :compiler, or give the entry a format the default Node compiler handles.")]
+    case CompileUnsupported = 'entry_compile_unsupported';
 }

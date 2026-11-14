@@ -72,7 +72,7 @@ final class ReleaseReadiness
             try {
                 $this->releases->assertMemberPublishable($release, $entry, $member, $removed);
             } catch (CompilationFailed $failed) {
-                $blockers[] = new Item('compile', $id, $failed->getMessage(), ['open', 'drop']);
+                $blockers[] = new Item('compile', $id, $failed->display(), ['open', 'drop']);
 
                 continue;
             } catch (ValidationException $refused) {

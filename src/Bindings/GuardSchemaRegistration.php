@@ -36,7 +36,8 @@ class GuardSchemaRegistration
             $body = $this->documents->read($page);
             $aliases = array_values(array_intersect($this->impact->collections($body, $page->record_page), $changedAliases));
             if ($aliases !== []) {
-                $aliasConflicts[] = 'Rebind the published page ['.(string) $page->title.' / '.(string) $page->getKey().'] before this registration changes its Collection alias or makes it ambiguous ['.implode(', ', $aliases).'].';
+                // Localization 23A (B10 U3): coded and keyed; the page's title and id and the aliases are parameters.
+                $aliasConflicts[] = [BindingError::SchemaAliasRebindRequired, ['title' => (string) $page->title, 'page' => (string) $page->getKey(), 'aliases' => implode(', ', $aliases)]];
 
                 continue;
             }
@@ -60,7 +61,8 @@ class GuardSchemaRegistration
             }
         }
         if ($aliasConflicts !== []) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['schema.aliases' => $aliasConflicts]);
+            // Not waivable: a confirmation never reaches past this refusal.
+            throw \Splicewire\Beam\Ux\Localization\CodedRefusalList::on('schema.aliases', $aliasConflicts);
         }
         if ($pages === []) {
             return;

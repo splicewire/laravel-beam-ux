@@ -2,7 +2,6 @@
 
 namespace Splicewire\Beam\Ux\Intake;
 
-use Illuminate\Validation\ValidationException;
 use Splicewire\Beam\Intake\PublicIntakeWriteGate;
 use Splicewire\Beam\Schema\Contracts\SchemaTargetResolver;
 use Splicewire\Beam\Ux\Bindings\PublishedBindingDocument;
@@ -65,11 +64,14 @@ final class IntakeForms
             }
             $key = self::captureKey($node);
             if ($key === null || $this->schemaFor($key) === null) {
-                $refused[] = ($id !== null ? "node #{$id}" : 'node')." at [{$path}] posts to [".($key ?? '').'], which is not a public intake schema on this host';
+                // Localization 23A (B10 U2): a coded, keyed refusal; the node's id and path and the key are parameters.
+                $refused[] = $id !== null
+                    ? [IntakeError::FormTargetNotPublicIdentified, ['id' => $id, 'path' => (string) $path, 'key' => $key ?? '']]
+                    : [IntakeError::FormTargetNotPublic, ['path' => (string) $path, 'key' => $key ?? '']];
             }
         }
         if ($refused !== []) {
-            throw ValidationException::withMessages(['body' => $refused]);
+            throw \Splicewire\Beam\Ux\Localization\CodedRefusalList::on('body', $refused);
         }
     }
 

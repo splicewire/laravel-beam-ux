@@ -112,13 +112,15 @@ final class CanvasBodyGuard
 
         [$profile, $component] = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->forBody($entry, $body, $this->resolver->resolve($entry));
         app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->assertGraph($entry, $body, profile: $profile);
-        ['code' => $code, 'legality' => $legality] = $this->legality->violations($body, $profile, component: $component);
+        ['code' => $code, 'legality' => $legality] = $this->legality->refusals($body, $profile, component: $component);
 
         if ($code !== []) {
-            throw ValidationException::withMessages(['body' => $code]);
+            // Localization 23A (B10 U1): the code band keeps each refusal's coded identity at the restore emit.
+            throw \Splicewire\Beam\Ux\Localization\CodedRefusalList::on('body', $code);
         }
 
-        return $legality;
+        // The legality band stays diagnostics, rendered as localized messages, in the same shape.
+        return array_map(static fn (array $refusal): string => $refusal[0]->message($refusal[1]), $legality);
     }
 
     /**

@@ -160,4 +160,9 @@ enum BindingError: string implements CodedError
 
     #[Message('Choose a valid Record value.')]
     case RecordValueInvalid = 'canvas_record_value_invalid';
+
+    // Schema registration (localization 23A; range review B10 U3)
+
+    #[Message('Rebind the published page [:title / :page] before this registration changes its Collection alias or makes it ambiguous [:aliases].')]
+    case SchemaAliasRebindRequired = 'schema_alias_rebind_required';
 }
