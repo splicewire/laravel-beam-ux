@@ -15,6 +15,21 @@ enum EntryError: string implements CodedError
 {
     use IsCodedError;
 
+    #[Message('Node previews require a canvas body.')]
+    case NodePreviewBlocksRequired = 'entry_node_preview_blocks_required';
+
+    #[Message('Supply a bounded instruction for refine and a valid node path.')]
+    case NodePreviewInputInvalid = 'entry_node_preview_input_invalid';
+
+    #[Message('The addressed node must exist exactly once in the current body.')]
+    case NodePreviewAddressInvalid = 'entry_node_preview_address_invalid';
+
+    #[Message('The canvas body is too deeply nested.')]
+    case NodePreviewDepthExceeded = 'entry_node_preview_depth_exceeded';
+
+    #[Message('Path segments must be strings or integers.')]
+    case NodePreviewPathSegmentInvalid = 'entry_node_preview_path_segment_invalid';
+
     #[Message('The editor base version has moved. Reload or explicitly save your changes against the new base.')]
     case EditorBaseMoved = 'entry_editor_base_moved';
 

@@ -216,6 +216,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
     public function packageBooted(): void
     {
+        \Illuminate\Foundation\Http\Middleware\TrimStrings::skipWhen(
+            fn (\Illuminate\Http\Request $request): bool => JsonDoc\PreservesJsonDocStrings::matches($request, ['refine-node']),
+        );
         \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::skipWhen(
             JsonDoc\PreservesJsonDocStrings::matches(...),
         );

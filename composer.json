@@ -39,7 +39,8 @@
         "splicewire/laravel-beam-sitemap": "dev-main",
         "splicewire/laravel-beam-taxonomy": "*",
         "splicewire/laravel-beam-workflows": "*",
-        "symfony/process": "^6.4|^7.0|^8.0"
+        "symfony/process": "^6.4|^7.0|^8.0",
+        "splicewire/laravel-composition-spine": "dev-main"
     },
     "require-dev": {
         "splicewire/laravel-beam-calendars": "*",
@@ -211,6 +212,10 @@
         {
             "type": "git",
             "url": "https://github.com/stephenr85/php-graphine.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/splicewire/laravel-composition-spine.git"
         }
     ],
     "minimum-stability": "dev",

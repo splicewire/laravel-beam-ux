@@ -11,7 +11,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 /** Keep literal JsonDoc text intact; ordinary host inputs retain Laravel's null conversion. */
 final class PreservesJsonDocStrings
 {
-    public static function matches(Request $request): bool
+    public static function matches(Request $request, ?array $operations = null): bool
     {
         try {
             $route = $request->route();
@@ -34,7 +34,7 @@ final class PreservesJsonDocStrings
             return $route instanceof Route
                 && ($route->defaults[ParticleOperationController::RESOURCE] ?? null) === 'beam-ux-entry'
                 && in_array($route->defaults[ParticleOperationController::NAME] ?? null,
-                    ['save-body', 'save-draft', 'save-blocks', 'canvas-bindings', 'print-source', 'read-source', 'make-editable', 'create-component'], true);
+                    $operations ?? ['save-body', 'save-draft', 'save-blocks', 'canvas-bindings', 'refine-node', 'print-source', 'read-source', 'make-editable', 'create-component'], true);
         } catch (NotFoundHttpException|MethodNotAllowedHttpException) {
             return false;
         }

@@ -13,6 +13,21 @@ use Splicewire\Beam\Ux\Particle\ResolvePageEntryRefOp;
  */
 final class EditorRoutes
 {
+    /**
+     * The host supplies the same consumption gate as its existing model-call routes, inside its auth
+     * boundary. This spend-capable preview is deliberately separate from ordinary editor reads/writes.
+     *
+     * @param  list<string>  $engineConsumption
+     */
+    public static function nodeActions(string $uri, array $engineConsumption, array $mountOptions = []): void
+    {
+        $realmPrefix = is_string($mountOptions['realm'] ?? null) ? $mountOptions['realm'].'.' : '';
+        $entryOptions = array_replace($mountOptions, ['names' => $realmPrefix.'beam-ux-entry']);
+        \Illuminate\Support\Facades\Route::middleware($engineConsumption)->group(
+            fn () => Particle::ops($uri, 'beam-ux-entry', [\Splicewire\Beam\Ux\Particle\EntryRefineNodeOp::class], $entryOptions),
+        );
+    }
+
     public static function mount(
         string $uri = 'beam-ux-entries',
         string $releasesUri = 'beam-ux-releases',
