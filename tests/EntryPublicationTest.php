@@ -2906,6 +2906,52 @@ class EntryPublicationTest extends TestCase
      */
     public function test_an_operator_override_of_review_required_submits_the_very_next_publish_request_for_review(): void
     {
+        [$entry, $publish, $row] = $this->operatorPublishesReviewRequired();
+        $pin = $entry->fresh()->published_version;
+
+        $state = $publish($entry);
+
+        $this->assertSame('in_review', $state['release']['status'], 'the very next publish request is submitted for review');
+        $this->assertSame($pin, $entry->fresh()->published_version, 'nothing went live');
+        $key = collect($row['keys'])->firstWhere('pointer', '/releases/review_required');
+        $this->assertSame('operator', $key['tier']);
+        $this->assertSame('live', $key['effect']);
+    }
+
+    /**
+     * config-sections 05, root ruling df42bf60 (2026-11-15, amending PRD:224): an override counter cache that cannot be
+     * read is skipped, never the operator tier. A published `review_required` therefore stays required when the cache
+     * breaks, so publishing never fails open on this governance control. The counter is first proven readable (an
+     * `array` store), then broken after the override is published.
+     */
+    public function test_an_unreadable_override_counter_cache_keeps_the_operator_tier_so_review_is_still_required(): void
+    {
+        config(['beam.core.config_overrides.cache_store' => 'array']);
+        [$entry, $publish] = $this->operatorPublishesReviewRequired();
+        $pin = $entry->fresh()->published_version;
+        \Illuminate\Support\Facades\Cache::extend('cs05-unreachable', fn () => new \Illuminate\Cache\Repository(new \Splicewire\Beam\Ux\Tests\Fixtures\UnreachableCacheStore));
+        config(['cache.stores.cs05-unreachable' => ['driver' => 'cs05-unreachable']]);
+        // The override is published and applying; now the counter's cache store becomes unreadable.
+        config(['beam.core.config_overrides.cache_store' => 'cs05-unreachable']);
+
+        $state = $publish($entry);
+
+        $this->assertSame('in_review', $state['release']['status'], 'the operator tier still applies: the publish is held for review');
+        $this->assertSame($pin, $entry->fresh()->published_version, 'nothing went live');
+        $this->assertTrue((bool) config('beam.ux.releases.review_required'), 'the operator value stands; the package default does not return');
+    }
+
+    /**
+     * Save and publish an operator override of `beam.ux.releases.review_required` through real `beam-config` requests.
+     *
+     * @return array{0: BeamUxEntry, 1: \Closure(BeamUxEntry): array<string, mixed>, 2: array<string, mixed>}
+     */
+    private function operatorPublishesReviewRequired(): array
+    {
+        // No cache pin: the override counter runs on this suite's default store, as a real host's does. That store is
+        // database-backed with no `cache` table here, so the counter cannot be read, and the operator tier still
+        // applies, read uncached (root ruling df42bf60).
+
         // The operator tier lives on `central`; laravel-beam's own shipped stubs, run there as the host runs them.
         $beam = dirname((new ReflectionClass(\Splicewire\Beam\BeamServiceProvider::class))->getFileName(), 2);
         $default = DB::getDefaultConnection();
@@ -2955,15 +3001,8 @@ class EntryPublicationTest extends TestCase
         $this->assertSame('published', $publish($this->publishedPage(self::BODY_ONE))['release']['status'], 'a saved draft changes nothing');
 
         $row = $this->postJson('/beam-config/publish', ['root' => 'beam.ux'])->assertOk()->json('data');
-        $pin = $entry->fresh()->published_version;
 
-        $state = $publish($entry);
-
-        $this->assertSame('in_review', $state['release']['status'], 'the very next publish request is submitted for review');
-        $this->assertSame($pin, $entry->fresh()->published_version, 'nothing went live');
-        $key = collect($row['keys'])->firstWhere('pointer', '/releases/review_required');
-        $this->assertSame('operator', $key['tier']);
-        $this->assertSame('live', $key['effect']);
+        return [$entry, $publish, $row];
     }
 
     public function test_a_host_that_defines_no_entry_ability_never_refuses_an_author(): void

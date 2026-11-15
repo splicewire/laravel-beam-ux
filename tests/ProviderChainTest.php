@@ -52,6 +52,10 @@ class ProviderChainTest extends TestCase
         // singleton that nothing else in this chain resolves at register time, so their place only has to be stable.
         'registerReleaseKinds',
         'registerPublishSinks',
+        // Added by config-sections 05, not part of the historical hand-written block: `beam.ux` as a Config Section
+        // (`WiresConfigSections`, order 67, right after the publish sinks). It only queues a section onto core's
+        // registry when that registry resolves, and nothing else in this chain reads it.
+        'registerConfigSections',
         'registerAccess',
         'registerContainment',
         'registerSitemap',
@@ -154,8 +158,9 @@ class ProviderChainTest extends TestCase
         // Guards the dead-seam shape from the other side: a rename that unhooked every link would leave
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
-        // 13 historical links + config-sections 04's two (release kinds, publish sinks) + analytics-area 10's one.
-        $this->assertCount(16, $this->chain('register'));
+        // 13 historical links + config-sections 04's two (release kinds, publish sinks) + analytics-area 10's one
+        // + config-sections 05's one (config sections).
+        $this->assertCount(17, $this->chain('register'));
         $this->assertCount(15, $this->chain('boot'));
     }
 
