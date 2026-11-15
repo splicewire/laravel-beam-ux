@@ -45,6 +45,18 @@ final class TenantReleaseActorFixture extends \Illuminate\Foundation\Auth\User
     public $timestamps = false;
 }
 
+/** A stored, string-keyed author that a real request resolves through the Eloquent user provider (config-sections 05). */
+final class ReleaseRequestAuthorFixture extends \Illuminate\Foundation\Auth\User
+{
+    protected $table = 'users';
+
+    protected $keyType = 'string';
+
+    public $incrementing = false;
+
+    public $timestamps = false;
+}
+
 /**
  * **Draft, publish, and restore as two pins into one version history** (G2-BEAM-DRAFT-PUBLISH).
  *
@@ -2882,6 +2894,76 @@ class EntryPublicationTest extends TestCase
 
         $this->assertSame('in_review', $state->release->status);
         $this->assertSame($pin, $entry->fresh()->published_version);
+    }
+
+    /**
+     * config-sections 05: the same opt-in as {@see test_a_host_that_opts_into_review_holds_a_publish_for_a_second_author()},
+     * made by an OPERATOR at runtime instead of in the host file. Everything runs through real requests: the override is
+     * saved and published through laravel-beam's `beam-config` ops, never `config()->set`, and the very next publish of
+     * a page, a request through the route stack where laravel-beam's ApplyConfigOverrides runs, is submitted for review
+     * with no deploy and no restart. Nothing here syncs the overlay by hand. The package default stays off (owner ruling
+     * `5dd27af98`).
+     */
+    public function test_an_operator_override_of_review_required_submits_the_very_next_publish_request_for_review(): void
+    {
+        // The operator tier lives on `central`; laravel-beam's own shipped stubs, run there as the host runs them.
+        $beam = dirname((new ReflectionClass(\Splicewire\Beam\BeamServiceProvider::class))->getFileName(), 2);
+        $default = DB::getDefaultConnection();
+        DB::setDefaultConnection('central');
+        try {
+            foreach (['create_beam_versions_table', 'create_beam_config_overrides_table'] as $stub) {
+                (require $beam.'/database/migrations/shared/'.$stub.'.php.stub')->up();
+            }
+        } finally {
+            DB::setDefaultConnection($default);
+        }
+
+        // Subject-free ops mount above any {id} route; the entry's publish op mounts at /beam-ux-entry/{id}/publish.
+        \Splicewire\Beam\Facades\Particle::ops('beam-config', 'beam-config', [
+            \Splicewire\Beam\Particle\Ops\Config\SaveConfigDraftOp::class,
+            \Splicewire\Beam\Particle\Ops\Config\PublishConfigOp::class,
+        ]);
+        \Splicewire\Beam\Facades\Particle::ops('beam-ux-entry', 'beam-ux-entry', [EntryPublishOp::class]);
+
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $this->releaseFixture(reviewedAndMapped: false, realUserProvider: true);
+        // A real request resolves its actor through the Eloquent user provider, so the author is a stored,
+        // string-keyed user (the stock User's integer key would read 'author' back as 0).
+        Schema::create('users', function (Blueprint $table): void {
+            $table->string('id')->primary();
+        });
+        config(['auth.providers.users.model' => ReleaseRequestAuthorFixture::class]);
+        \Illuminate\Support\Facades\Auth::forgetGuards();
+        $author = (new ReleaseRequestAuthorFixture)->forceFill(['id' => 'author']);
+        $author->save();
+        // Over HTTP the operation controller asks the entitlement plane (`entitlement:ux.author`, as
+        // EntryWorkflowOpAbilityTest shows); the op's own body still asks `ux.author` of the Release policy.
+        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::define('entitlement:os.operate', fn ($user = null) => true);
+        $this->actingAs($author);
+        $publish = function (BeamUxEntry $entry): array {
+            $draft = app(EntryPublication::class)->recordDraft($entry->fresh(), self::BODY_TWO);
+
+            return $this->postJson("/beam-ux-entry/{$entry->getKey()}/publish", ['ref' => $draft->headVersion])->assertSuccessful()->json('data');
+        };
+        $this->assertFalse((bool) config('beam.ux.releases.review_required'), 'the package default is off');
+
+        $this->postJson('/beam-config/save-draft', [
+            'root' => 'beam.ux', 'pointer' => '/releases/review_required', 'op' => 'set', 'value' => 'true',
+        ])->assertOk();
+        $this->assertSame('published', $publish($this->publishedPage(self::BODY_ONE))['release']['status'], 'a saved draft changes nothing');
+
+        $row = $this->postJson('/beam-config/publish', ['root' => 'beam.ux'])->assertOk()->json('data');
+        $pin = $entry->fresh()->published_version;
+
+        $state = $publish($entry);
+
+        $this->assertSame('in_review', $state['release']['status'], 'the very next publish request is submitted for review');
+        $this->assertSame($pin, $entry->fresh()->published_version, 'nothing went live');
+        $key = collect($row['keys'])->firstWhere('pointer', '/releases/review_required');
+        $this->assertSame('operator', $key['tier']);
+        $this->assertSame('live', $key['effect']);
     }
 
     public function test_a_host_that_defines_no_entry_ability_never_refuses_an_author(): void

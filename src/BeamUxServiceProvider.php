@@ -22,6 +22,7 @@ use Splicewire\Beam\Ux\Concerns\WiresAnalyticsArea;
 use Splicewire\Beam\Ux\Concerns\WiresCodecs;
 use Splicewire\Beam\Ux\Concerns\WiresCommands;
 use Splicewire\Beam\Ux\Concerns\WiresCompile;
+use Splicewire\Beam\Ux\Concerns\WiresConfigSections;
 use Splicewire\Beam\Ux\Concerns\WiresContainment;
 use Splicewire\Beam\Ux\Concerns\WiresDisk;
 use Splicewire\Beam\Ux\Concerns\WiresEntitlements;
@@ -85,6 +86,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
     use WiresCodecs;
     use WiresCommands;
     use WiresCompile;
+    use WiresConfigSections;
     use WiresContainment;
     use WiresDisk;
     use WiresEntitlements;
