@@ -6,10 +6,12 @@ use Illuminate\Http\UploadedFile;
 use Schemastud\DataSchemas\Attributes\Description;
 use Schemastud\DataSchemas\Attributes\Title;
 use Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType;
+use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
 
 #[Title('Image upload')]
+#[TypeScript]
 final class EntryImageUploadData extends BeamData
 {
     use RejectsUnknownInputKeys;
