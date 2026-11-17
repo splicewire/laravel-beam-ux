@@ -62,15 +62,17 @@ class EntryFormSaveOp
         // d10: the form is checked against the entry's OWN schema before it is stored.
         self::assertMatchesSchema($model, $input->form);
 
-        // ADR-0225 d2: a save is its own publish; the publish needs the version store. Refuse first.
+        // ADR-0225 d2: a save is its own publish; the publish needs the version store. Refuse first. Under review
+        // (launch ticket 74) a save is a request for review instead, and a request needs an actor: refused here too.
         $publication->requireVersionStore();
+        $publication->assertCanSubmitSave($model, $actor);
         $publication->baseline($model, mirror: true);
 
         $written = $publication->write($model, $input->form);
 
         return [
             'key' => $written['key'],
-            'compileError' => $publication->publishWritten($model->refresh()),
+            'compileError' => $publication->concludeAuthorSave($model->refresh(), $actor, requireCompiled: false),
         ];
     }
 

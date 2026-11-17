@@ -2517,6 +2517,335 @@ class EntryPublicationTest extends TestCase
         }
     }
 
+    // ---- Launch ticket 74 (HIGH): with review required, NO in-place Save publishes. Measured on a tower install, the
+    // editor's save-body moved the publication pin with no Release opened while `review_required` was true, so every
+    // save kind was a second, ungated Publish. Each kind is driven through its own operation, both settings.
+
+    /** @return array<string, array{string}> */
+    public static function saveKinds(): array
+    {
+        return ['save-body' => ['body'], 'save-blocks' => ['blocks'], 'save-form' => ['form'], 'save-source' => ['source']];
+    }
+
+    /** An entry of the kind's shape, published once (review off) so a later save has a live body to keep. */
+    private function publishedEntryFor(string $kind): BeamUxEntry
+    {
+        if ($kind === 'body' || $kind === 'blocks') {
+            return $this->publishedPage(self::BODY_ONE);
+        }
+        $entry = $kind === 'form'
+            ? BeamUxEntry::create(['slug' => 'beam', 'type' => 'theme', 'format' => 'css', 'namespace' => 'theme'])
+            : BeamUxEntry::create(['slug' => 'docs-'.substr(bin2hex(random_bytes(4)), 0, 8), 'type' => 'page', 'format' => 'mdx', 'namespace' => null]);
+        $this->saveAs($kind, $entry, null, 'one');
+        $this->assertNotNull($entry->fresh()->published_version, "the {$kind} fixture is published");
+
+        return $entry->fresh();
+    }
+
+    /** One save of `$kind` carrying `$marker`, through its operation's own handle(). */
+    private function saveAs(string $kind, BeamUxEntry $entry, mixed $actor, string $marker): array
+    {
+        $doc = [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [],
+            'children' => [['kind' => 'text', 'value' => $marker]]]];
+
+        return match ($kind) {
+            'body' => EntryBodySaveOp::handle($entry->fresh(), $this->saveRequest($doc), $actor),
+            'blocks' => \Splicewire\Beam\Ux\Particle\EntryBlocksSaveOp::handle($entry->fresh(),
+                Request::create('/beam-ux-entries/x/save-blocks', 'POST', ['body' => $doc]), $actor),
+            'form' => \Splicewire\Beam\Ux\Particle\EntryFormSaveOp::handle($entry->fresh(),
+                Request::create('/beam-ux-entries/x/save-form', 'POST', ['form' => ['canvas' => ['accent' => self::markerColor($marker)], 'site' => []]]), $actor),
+            'source' => \Splicewire\Beam\Ux\Particle\EntrySourceSaveOp::handle($entry->fresh(),
+                Request::create('/beam-ux-entries/x/save-source', 'POST', ['source' => "# {$marker}\n\nBody."]), $actor),
+        };
+    }
+
+    /** A form field holds a colour, so each marker maps to its own. */
+    private static function markerColor(string $marker): string
+    {
+        return '#'.substr(md5($marker), 0, 6);
+    }
+
+    /** Whether `$body` carries `$marker` in the kind's own shape. */
+    private static function carries(string $kind, ?array $body, string $marker): bool
+    {
+        $needle = $kind === 'form' ? self::markerColor($marker) : $marker;
+
+        return $body !== null && str_contains(json_encode($body, JSON_UNESCAPED_SLASHES) ?: '', $needle);
+    }
+
+    private function workingCopyOf(BeamUxEntry $entry): ?array
+    {
+        $entry = $entry->fresh();
+        if ($entry->particle_id === null) {
+            return null;
+        }
+        $read = app(\Splicewire\Beam\Ux\Storage\StorageDriverResolver::class)->resolve($entry)->read((string) $entry->particle_id);
+
+        return is_array($read?->body) ? $read->body : null;
+    }
+
+    /** @return list<\Splicewire\Beam\Ux\Models\BeamUxRelease> */
+    private function releasesFor(BeamUxEntry $entry): array
+    {
+        return \Splicewire\Beam\Ux\Models\BeamUxRelease::query()
+            ->whereHas('members', fn ($members) => $members->where('entry_id', $entry->id))
+            ->orderBy('created_at')->get()->all();
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('saveKinds')]
+    public function test_under_review_a_save_holds_the_edit_in_the_working_copy_and_requests_review(string $kind): void
+    {
+        $entry = $this->publishedEntryFor($kind);
+        $pin = $entry->published_version;
+        $live = app(EntryPublication::class)->publishedBodyOf($entry);
+        [, $author] = $this->releaseFixture();
+
+        $this->saveAs($kind, $entry, $author, 'reviewed-edit');
+
+        $entry = $entry->fresh();
+        $this->assertSame($pin, $entry->published_version, 'the publication pin did not move');
+        $this->assertSame($live, app(EntryPublication::class)->publishedBodyOf($entry), 'the live body is unchanged');
+        $this->assertTrue(self::carries($kind, $this->workingCopyOf($entry), 'reviewed-edit'), 'the working copy holds the edit');
+        $state = app(EntryPublication::class)->state($entry);
+        $this->assertTrue($state->draftPending, 'the saved version is a pending draft');
+        $releases = $this->releasesFor($entry);
+        $this->assertCount(1, $releases, 'the save requested one Release');
+        $this->assertSame('in_review', $releases[0]->status);
+        $this->assertSame('direct', $releases[0]->origin->value);
+        $this->assertSame($state->headVersion, $releases[0]->members()->first()->version_id, 'the Release holds the saved version');
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('saveKinds')]
+    public function test_with_review_off_a_save_is_still_its_own_publish(string $kind): void
+    {
+        $entry = $this->publishedEntryFor($kind);
+        $pin = $entry->published_version;
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        $this->assertFalse((bool) config('beam.ux.releases.review_required'));
+
+        $this->saveAs($kind, $entry, $author, 'live-edit');
+
+        $entry = $entry->fresh();
+        $this->assertNotSame($pin, $entry->published_version, 'the pin moved: the save published');
+        $this->assertSame(app(EntryPublication::class)->state($entry)->headVersion, $entry->published_version);
+        $this->assertTrue(self::carries($kind, app(EntryPublication::class)->publishedBodyOf($entry), 'live-edit'), 'the edit is live');
+        $this->assertSame([], $this->releasesFor($entry), 'no Release: review is off');
+    }
+
+    public function test_under_review_a_second_save_updates_the_open_release_and_resubmits_it(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+
+        $this->saveAs('body', $entry, $author, 'first');
+        $first = $this->releasesFor($entry)[0];
+        $service->transition($first->fresh(), 'approve', $reviewer);
+        $this->assertSame('approved', $first->fresh()->status);
+
+        $this->saveAs('body', $entry, $author, 'second');
+
+        $releases = $this->releasesFor($entry);
+        $this->assertCount(1, $releases, 'the open Release was updated, not a second one opened');
+        $this->assertSame($first->id, $releases[0]->id);
+        $this->assertSame('in_review', $releases[0]->status, 'the change voided the approval and went back to review');
+        $this->assertSame(app(EntryPublication::class)->state($entry->fresh())->headVersion, $releases[0]->members()->first()->version_id);
+    }
+
+    public function test_under_review_the_saved_edit_goes_live_only_through_the_reviewed_release(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture();
+
+        $this->saveAs('body', $entry, $author, 'approved-edit');
+        $release = $this->releasesFor($entry)[0];
+        $this->assertFalse(self::carries('body', app(EntryPublication::class)->publishedBodyOf($entry->fresh()), 'approved-edit'));
+
+        $service->transition($release->fresh(), 'approve', $reviewer);
+        $service->transition($release->fresh(), 'publish', $reviewer);
+
+        $this->assertSame('published', $release->fresh()->status);
+        $this->assertSame($release->members()->first()->version_id, $entry->fresh()->published_version);
+        $this->assertTrue(self::carries('body', app(EntryPublication::class)->publishedBodyOf($entry->fresh()), 'approved-edit'));
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('saveKinds')]
+    public function test_under_review_a_save_with_no_actor_is_refused_before_it_writes(string $kind): void
+    {
+        $entry = $this->publishedEntryFor($kind);
+        $before = $this->workingCopyOf($entry);
+        $this->releaseFixture();
+
+        try {
+            $this->saveAs($kind, $entry, null, 'anonymous-edit');
+            $this->fail('a save under review with no actor was accepted');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+
+        $this->assertSame($before, $this->workingCopyOf($entry), 'nothing was written');
+        $this->assertSame([], $this->releasesFor($entry));
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('saveKinds')]
+    public function test_under_review_an_author_who_could_not_request_the_release_is_refused_before_anything_is_written(string $kind): void
+    {
+        $entry = $this->publishedEntryFor($kind);
+        $before = $this->workingCopyOf($entry);
+        $versions = $this->versionRows($entry);
+        // The host maps `publish` and refuses it: this author may edit but not request a publish.
+        [, $author] = $this->releaseFixture(fn ($user, string $ability) => $ability !== 'publish');
+
+        try {
+            $this->saveAs($kind, $entry, $author, 'unrequestable-edit');
+            $this->fail('a save under review was accepted from an author who cannot request its Release');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+
+        $this->assertSame($before, $this->workingCopyOf($entry), 'nothing was written');
+        $this->assertSame($versions, $this->versionRows($entry), 'no draft version was recorded');
+        $this->assertSame([], $this->releasesFor($entry));
+    }
+
+    public function test_under_review_a_second_save_decides_on_the_publish_ladder_alone_as_a_direct_release_does(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        // A host that grants `publish` and refuses `update`: a direct Publish is admitted, so a second save must be.
+        [, $author] = $this->releaseFixture(fn ($user, string $ability) => $ability !== 'update');
+
+        $this->saveAs('body', $entry, $author, 'first');
+        $this->saveAs('body', $entry, $author, 'second');
+
+        $releases = $this->releasesFor($entry);
+        $this->assertCount(1, $releases);
+        $this->assertSame('in_review', $releases[0]->status);
+        $this->assertSame(app(EntryPublication::class)->state($entry->fresh())->headVersion, $releases[0]->members()->first()->version_id);
+    }
+
+    public function test_under_review_a_save_never_updates_another_authors_open_release(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author, $reviewer] = $this->releaseFixture();
+
+        $this->saveAs('body', $entry, $author, 'authors-edit');
+        $theirs = $this->releasesFor($entry)[0];
+        $theirVersion = $theirs->members()->first()->version_id;
+
+        $this->saveAs('body', $entry, $reviewer, 'second-authors-edit');
+
+        $releases = $this->releasesFor($entry);
+        $this->assertCount(2, $releases, 'the second author opened their own Release');
+        $this->assertSame($theirVersion, $theirs->fresh()->members()->first()->version_id, 'the first author\'s Release still holds their body');
+        $this->assertSame('in_review', $theirs->fresh()->status);
+    }
+
+    public function test_under_review_a_save_leaves_a_built_release_and_a_take_down_alone(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author] = $this->releaseFixture();
+        $draft = app(EntryPublication::class)->recordDraft($entry->fresh(), self::BODY_TWO);
+        $built = $service->create($entry->fresh(), 'Batch', $author);
+        $service->putMember($built, $entry->id, $draft->headVersion, $author);
+        // A take-down needs a managed, published entry (as the take-down cases above set up).
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => 'published'])->save();
+        $takeDown = $service->requestOne($entry->fresh(), null, $author);
+        $this->assertSame('in_review', $takeDown->status);
+
+        $this->saveAs('body', $entry, $author, 'beside-them');
+
+        $this->assertSame($draft->headVersion, $built->fresh()->members()->first()->version_id, 'the built Release is unchanged');
+        $this->assertSame('draft', $built->fresh()->status);
+        $this->assertNull($takeDown->fresh()->members()->first()->version_id, 'the take-down is still a take-down');
+        $this->assertSame('in_review', $takeDown->fresh()->status);
+        $saved = collect($this->releasesFor($entry))->reject(fn ($r) => in_array($r->id, [$built->id, $takeDown->id], true))->values();
+        $this->assertCount(1, $saved, 'the save opened its own direct Release');
+        $this->assertSame(app(EntryPublication::class)->state($entry->fresh())->headVersion, $saved[0]->members()->first()->version_id);
+    }
+
+    /** make-editable's two cases under review: a new slug (an empty page) and a code/kit page (its default tree). */
+    public static function makeEditableSlugs(): array
+    {
+        return ['a new slug' => ['launch-74-new'], 'over a kit page' => ['home']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('makeEditableSlugs')]
+    public function test_under_review_make_editable_puts_nothing_of_the_authors_live_and_opens_a_release(string $slug): void
+    {
+        [, $author] = $this->releaseFixture();
+        $doc = [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [],
+            'children' => [['kind' => 'text', 'value' => 'made-editable-edit']]]];
+
+        \Splicewire\Beam\Ux\Particle\EntryMakeEditableOp::handle(null,
+            Request::create('/beam-ux-entries/make-editable', 'POST', ['slug' => $slug, 'body' => $doc]), $author);
+
+        $entry = BeamUxEntry::query()->where('slug', $slug)->firstOrFail();
+        $live = app(EntryPublication::class)->publishedBodyOf($entry);
+        $this->assertFalse(self::carries('body', $live, 'made-editable-edit'), 'the author\'s body is not live');
+        // What is live is the server-owned initial body, pinned as the page's first version (the kit page's default
+        // tree, normalized by the write, or an empty page for a new slug): the baseline, never the author's version.
+        $published = collect(app(EntryPublication::class)->state($entry)->versions)->firstWhere('isPublished', true);
+        $this->assertSame('baseline', $published?->label);
+        $this->assertSame(1, $published->version);
+        if ($slug === 'home') {
+            $this->assertTrue(self::carries('body', $live, 'st-editable-home'), 'the kit page\'s own default tree is what stays live');
+        }
+        $this->assertTrue(self::carries('body', $this->workingCopyOf($entry), 'made-editable-edit'), 'the working copy holds the author\'s body');
+        $releases = $this->releasesFor($entry);
+        $this->assertCount(1, $releases);
+        $this->assertSame('in_review', $releases[0]->status);
+        $this->assertSame(app(EntryPublication::class)->state($entry)->headVersion, $releases[0]->members()->first()->version_id);
+    }
+
+    public function test_under_review_make_editable_with_no_actor_creates_nothing(): void
+    {
+        $this->releaseFixture();
+
+        try {
+            \Splicewire\Beam\Ux\Particle\EntryMakeEditableOp::handle(null,
+                Request::create('/beam-ux-entries/make-editable', 'POST', ['slug' => 'launch-74-anon', 'body' => self::BODY_TWO]), null);
+            $this->fail('make-editable under review was accepted with no actor');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+
+        $this->assertFalse(BeamUxEntry::query()->where('slug', 'launch-74-anon')->exists(), 'the new row was rolled back');
+    }
+
+    public function test_with_review_off_make_editable_still_publishes_the_authors_body(): void
+    {
+        $this->releaseFixture(reviewedAndMapped: false);
+
+        \Splicewire\Beam\Ux\Particle\EntryMakeEditableOp::handle(null,
+            Request::create('/beam-ux-entries/make-editable', 'POST', ['slug' => 'launch-74-off', 'body' => self::BODY_TWO]), null);
+
+        $entry = BeamUxEntry::query()->where('slug', 'launch-74-off')->firstOrFail();
+        $this->assertSame(json_encode(self::BODY_TWO), json_encode(app(EntryPublication::class)->publishedBodyOf($entry)));
+        $this->assertSame([], $this->releasesFor($entry));
+    }
+
+    /**
+     * The same gate when an OPERATOR turns review on at runtime: the override is saved and published through
+     * laravel-beam's `beam-config` ops, and the very next editor Save, a real request through the route stack where
+     * ApplyConfigOverrides runs, is held for review. A tenant-tier override reaches the same `config()` read; its
+     * own test is stacked once config-sections 07 raises the key's ceiling to the tenant tier.
+     */
+    public function test_an_operator_override_of_review_required_holds_the_very_next_save_body_request(): void
+    {
+        [$entry] = $this->operatorPublishesReviewRequired();
+        \Splicewire\Beam\Facades\Particle::ops('beam-ux-entry', 'beam-ux-entry', [EntryBodySaveOp::class]);
+        $entry = $entry->fresh();
+        $pin = $entry->published_version;
+        $doc = [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [],
+            'children' => [['kind' => 'text', 'value' => 'operator-held']]]];
+
+        $this->postJson("/beam-ux-entry/{$entry->getKey()}/save-body", ['body' => $doc])->assertSuccessful();
+
+        $this->assertSame($pin, $entry->fresh()->published_version, 'nothing went live');
+        $this->assertFalse(self::carries('body', app(EntryPublication::class)->publishedBodyOf($entry->fresh()), 'operator-held'));
+        $release = collect($this->releasesFor($entry))->last();
+        $this->assertNotNull($release, 'the save requested a Release');
+        $this->assertSame('in_review', $release->status);
+    }
+
     private function releaseFixture(?\Closure $authorize = null, bool $reviewedAndMapped = true, bool $standardGuardProvider = false, bool $realUserProvider = false): array
     {
         // Most cases here are about REVIEWED Releases and the abilities a host maps: opt in to review, and map

@@ -67,6 +67,61 @@ final class ReleaseService
         }
     }
 
+    /**
+     * An author's in-place Save while review is required (launch ticket 74): the saved version goes to review, never
+     * live. It UPDATES the entry's open direct Release (the one an earlier Publish or Save of this entry requested,
+     * whose only member is this entry, publishing a version): the member is placed at the new version, which revises
+     * the Release to draft and so voids any approval of the old body, and it is submitted again. With no such Release
+     * it requests one, as a Publish does ({@see requestOne()}). Either way the Release is `in_review`.
+     *
+     * Only a Release THIS actor requested is updated: another author's open Release keeps its own body and its own
+     * requester, so a reviewer can never be handed a Release mixing their own edit with someone else's, and a save
+     * never rewrites what another author put up for review. A Release built member by member, or a direct Take-down,
+     * is not this save's to change either: a save opens its own.
+     *
+     * The placement decides on the publish ladder, as every check on a direct Release does (see {@see requestOne()}),
+     * never edit-then-publish: a host that grants `publish` and refuses `update` must not see the second save refused.
+     */
+    public function requestSave(BeamUxEntry $entry, string $version, Authenticatable $actor): BeamUxRelease
+    {
+        return $entry->getConnection()->transaction(function () use ($entry, $version, $actor) {
+            $open = $this->openDirectPublishFor($entry, $actor);
+            if ($open === null) {
+                return $this->requestOne($entry, $version, $actor);
+            }
+            $this->place($open, BeamUxReleaseMember::KIND_ENTRY, (string) $entry->id, $version, $actor, null, true);
+            $this->transition($open->fresh(), 'submit', $actor);
+
+            return $open->fresh();
+        });
+    }
+
+    /**
+     * Refuse, before a save under review writes anything, an actor who could not request its Release: the same check
+     * a direct Publish of this entry makes when it opens one (`authorizeDirect`, the publish ladder).
+     */
+    public function authorizeSave(BeamUxEntry $entry, Authenticatable $actor): void
+    {
+        $this->entries()->authorizeDirect($entry, $actor);
+    }
+
+    /** The actor's latest open direct Release whose one member publishes this entry, locked; null when none. */
+    private function openDirectPublishFor(BeamUxEntry $entry, Authenticatable $actor): ?BeamUxRelease
+    {
+        $release = BeamUxRelease::on($entry->getConnectionName())
+            ->where('origin', ReleaseOrigin::Direct)
+            ->where('created_by', $this->token($actor))
+            ->whereIn('status', ['draft', 'in_review', 'approved', 'scheduled'])
+            ->whereHas('members', fn ($members) => $members->where('entry_id', $entry->id)->whereNotNull('version_id'))
+            ->has('allMembers', '=', 1)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->lockForUpdate()
+            ->first();
+
+        return $release instanceof BeamUxRelease ? $release : null;
+    }
+
     /** A Release built member by member: every member operation is an edit. */
     public function create(BeamUxEntry $context, string $title, Authenticatable $actor): BeamUxRelease
     {

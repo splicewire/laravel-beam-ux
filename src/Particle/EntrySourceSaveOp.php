@@ -74,6 +74,8 @@ class EntrySourceSaveOp
         // ADR-0225 d2: a save is its own publish, and a publish needs the version store — refuse before
         // the write so a host missing the store keeps its working copy.
         $publication->requireVersionStore();
+        // Under review (launch ticket 74) a save is a request for review, and a request needs an actor.
+        $publication->assertCanSubmitSave($model, $actor);
 
         // Baseline the currently-live body before the write destroys it (no-op once there is history).
         $publication->baseline($model, mirror: true);
@@ -82,7 +84,7 @@ class EntrySourceSaveOp
 
         return [
             'key' => $written['key'],
-            'compileError' => $publication->publishWritten($model->refresh()),
+            'compileError' => $publication->concludeAuthorSave($model->refresh(), $actor, requireCompiled: false),
         ];
     }
 

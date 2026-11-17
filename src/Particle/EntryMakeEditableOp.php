@@ -25,13 +25,26 @@ final class EntryMakeEditableOp
         $input = EntryMakeEditableInputData::validateAndCreate($request->all());
         $publication = app(EntryPublication::class);
         $publication->requireVersionStore();
-        $compileError = DB::transaction(function () use ($input, $publication) {
+        $compileError = DB::transaction(function () use ($input, $publication, $actor) {
             $namespace = config('beam.ux.namespace', 'starter');
             throw_if(BeamUxEntry::withTrashed()->where('namespace', $namespace)->where('slug', $input->slug)->exists(), new \Splicewire\Beam\Ux\Localization\CodedConflictHttpException(\Splicewire\Beam\Ux\Publish\EntryError::PageEntryExists));
             // The unique namespace/slug key also refuses concurrent creation. No existing row is written.
             $entry = BeamUxEntry::create(['namespace' => $namespace, 'slug' => $input->slug,
                 'type' => UxType::Page, 'format' => 'tsx', 'title' => $input->slug]);
             $publication->assertStorable($entry, $input->body);
+
+            if ($publication->reviewRequired()) {
+                // Launch ticket 74: under review the CLIENT's body must not go live from here either; this op is an
+                // author write like any save. Refused before the write when no Release could be requested (the
+                // transaction rolls the new row back). The page is created on the server-owned initial body, pinned
+                // as its first version (a kit page's default tree, else an empty page: the same baseline a first
+                // save takes), and the author's body follows as a draft that waits in review.
+                $publication->assertCanSubmitSave($entry, $actor);
+                $publication->writeImmediate($entry, $input->body);
+
+                return $publication->concludeAuthorSave($entry->refresh(), $actor, requireCompiled: false);
+            }
+
             $publication->write($entry, $input->body);
 
             return $publication->publishWritten($entry->refresh());

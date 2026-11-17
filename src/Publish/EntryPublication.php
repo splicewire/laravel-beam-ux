@@ -519,6 +519,67 @@ class EntryPublication
     }
 
     /**
+     * Whether a Publish must be reviewed first (ADR-0226). Read per request, as {@see \Splicewire\Beam\Ux\Release\ReleaseService}
+     * reads it, so a runtime override at any tier the key's ceiling admits applies to the very next save.
+     */
+    public function reviewRequired(): bool
+    {
+        return (bool) config('beam.ux.releases.review_required', false);
+    }
+
+    /**
+     * Refuse, BEFORE anything is written, an author save under review that could not request its Release: with review
+     * on, a save is a request for review, so it needs a requester, and that requester must hold the same publish ladder
+     * a Publish of this entry asks ({@see \Splicewire\Beam\Ux\Release\ReleaseService::authorizeSave()}). Checking first
+     * means a refused save leaves no written edit and no recorded draft behind. With review off this is a no-op.
+     */
+    public function assertCanSubmitSave(BeamUxEntry $entry, mixed $actor): void
+    {
+        if (! $this->reviewRequired()) {
+            return;
+        }
+        if (! $actor instanceof \Illuminate\Contracts\Auth\Authenticatable) {
+            throw new \Illuminate\Auth\Access\AuthorizationException;
+        }
+        app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->authorizeSave($entry, $actor);
+    }
+
+    /**
+     * The end of an author's in-place Save (save-body, save-blocks, save-form, save-source) and of make-editable's
+     * first authored body, after its write.
+     *
+     * Review OFF: the save is its own publish, exactly as before ({@see publishAuthoredBody()} for the canvas saves,
+     * {@see publishWritten()} for form and source).
+     *
+     * Review ON (launch ticket 74): a save must not go live, because Publish is gated and a save that publishes is a
+     * second, ungated Publish (measured on a tower install: save-body moved the pin with no Release opened). So the
+     * written working copy is recorded as a draft version, compiled at its own draft address with no pin, mirror or
+     * public artifact moved, and handed to the Release path: the entry's open direct Release is updated to the new
+     * version and resubmitted, or a new one is requested ({@see \Splicewire\Beam\Ux\Release\ReleaseService::requestSave()}).
+     * A reviewer's approval and the Release's publish are then the only way it goes live.
+     *
+     * @return string|null the compile diagnostic, as the immediate-publish path returns it
+     */
+    public function concludeAuthorSave(BeamUxEntry $entry, mixed $actor, bool $requireCompiled): ?string
+    {
+        if (! $this->reviewRequired()) {
+            return $requireCompiled ? $this->publishAuthoredBody($entry) : $this->publishWritten($entry);
+        }
+
+        if (! $actor instanceof \Illuminate\Contracts\Auth\Authenticatable) {
+            throw new \Illuminate\Auth\Access\AuthorizationException;
+        }
+        $this->requireVersionStore();
+        $version = $this->versionForWorkingCopy($this->requireParticle($entry), 'draft');
+        $compileError = $this->compileDraft($entry, $version);
+
+        app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->requestSave($entry->fresh(), (string) $version->id, $actor);
+        $entry->refresh();
+
+        return $compileError;
+    }
+
+    /**
      * Publish a body the caller has ALREADY written — the immediate-publish path
      * {@see \Splicewire\Beam\Ux\Particle\EntryBodySaveOp} takes, where a save is its own publish.
      *

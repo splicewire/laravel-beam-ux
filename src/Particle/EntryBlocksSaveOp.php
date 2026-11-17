@@ -40,6 +40,6 @@ class EntryBlocksSaveOp extends EntryBodySaveOp
             throw \Splicewire\Beam\Localization\CodedValidationException::for('body', \Splicewire\Beam\Ux\JsonDoc\SourceError::CanvasNodeUnreadable);
         }
 
-        return parent::persistBody($model, $input->toArray()['body']);
+        return parent::persistBody($model, $input->toArray()['body'], $actor);
     }
 }

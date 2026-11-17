@@ -23,9 +23,16 @@ use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
  * ## This op is the IMMEDIATE-PUBLISH write, and that is now a statement with a sibling
  *
  * `save-draft` / `publish` ({@see EntryDraftSaveOp}, {@see EntryPublishOp}) split the same act in two
- * for an author who wants to work before anyone reads it. This op stays what it always was — a save
- * that is live the moment it returns — and the difference is only WHEN the publish half runs, not
- * whether. Every step below is {@see EntryPublication}'s, so the two paths cannot drift.
+ * for an author who wants to work before anyone reads it. With review off, this op stays what it always
+ * was — a save that is live the moment it returns — and the difference is only WHEN the publish half
+ * runs, not whether. Every step below is {@see EntryPublication}'s, so the two paths cannot drift.
+ *
+ * ## Under review, a save is a request for review, NOT a publish (launch ticket 74)
+ *
+ * With `beam.ux.releases.review_required` on, step 4 below does not run: the written working copy is
+ * recorded as a draft version and handed to the Release path, and only a reviewed Release puts it live
+ * ({@see EntryPublication::concludeAuthorSave()}). The actor and their publish ladder are checked before
+ * step 1 writes anything. This holds for every save kind: save-blocks, save-form and save-source too.
  *
  * ## What one save does, in order — all five steps are load-bearing
  *
@@ -40,7 +47,8 @@ use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
  *     the tests all create rows that way) and the freshly-minted key is what makes the next read find
  *     anything. (ADR-0092 composition seam: the surface is beam-ux's, the versioned particle it
  *     round-trips is beam-core's — this package forks neither.)
- *  4. **Publish**: record the written body as a version and move the entry's publication pin to it.
+ *  4. **Publish** (review off; under review, request review instead): record the written body as a
+ *     version and move the entry's publication pin to it.
  *     The pin is what the artifact's address is keyed on, so this step is what makes the save public.
  *  5. **Mirror to disk** at the entry's resolved `FilePlacement` (charter S2 / ADR-0165) and
  *     **compile the artifact** (ADR-0209 §7) — both follow the PUBLISHED body, both at the address
@@ -98,7 +106,7 @@ class EntryBodySaveOp
         /** @var BeamUxEntry $model */
         $input = BeamUxEntryBodyInputData::validateAndCreate($request->all());
 
-        return self::persistBody($model, $input->body);
+        return self::persistBody($model, $input->body, $actor);
     }
 
     /**
@@ -107,11 +115,13 @@ class EntryBodySaveOp
      * @param  array<int|string, mixed>  $body
      * @return array{key: string, compileError: string|null}
      */
-    protected static function persistBody(BeamUxEntry $model, array $body): array
+    protected static function persistBody(BeamUxEntry $model, array $body, mixed $actor): array
     {
         $publication = app(EntryPublication::class);
 
         $publication->assertStorable($model, $body);
+        // Under review (launch ticket 74) a save is a request for review, and a request needs an actor.
+        $publication->assertCanSubmitSave($model, $actor);
 
         // ADR-0228 d2/d8 / ux-0227 d1: the canvas body's well-formedness AND its Manifest Profile check
         // (shape, containment, attrs + the code boundary) run at the publication CHOKE,
@@ -135,7 +145,9 @@ class EntryBodySaveOp
             // publishes the way {@see EntryPublishOp} does: the body is recorded as a version, the
             // publication pin moves to it, the disk mirror and the artifact follow the pin. An author
             // who never opens the draft affordance sees no difference, and gains a history.
-            'compileError' => $publication->publishAuthoredBody($model->refresh()),
+            // Launch ticket 74: with review required, the save does NOT publish. The working copy is recorded as a
+            // draft version and goes to review through the Release path; see EntryPublication::concludeAuthorSave().
+            'compileError' => $publication->concludeAuthorSave($model->refresh(), $actor, requireCompiled: true),
         ];
     }
 
