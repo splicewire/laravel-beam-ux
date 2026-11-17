@@ -26,6 +26,7 @@ class SeedManifestTest extends TestCase
         $step = $steps->first();
         $this->assertSame(BeamUxSeeder::class, $step->seeder);
         $this->assertNull($step->configGate);
+        $this->assertGreaterThan(150, $step->order, 'nav must run after the default contributors and documentation seeders');
     }
 
     public function test_the_seed_nav_gate_defaults_on(): void

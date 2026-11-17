@@ -88,6 +88,9 @@ return [
     |      seeds its nav with NO bespoke PHP: the frontmatter carries it.
     |
     | Null (default) ⇒ fall through to disk, then to frontmatter derivation.
+    | In that derived mode an empty namespace selects the host-wide content nav
+    | across disk-grouping namespaces; a non-empty namespace scopes the entries.
+    | Existing rows keep their namespace and containment; they are not copied.
     |
     */
     'nav' => null,

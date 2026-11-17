@@ -409,7 +409,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // Self-registers its seeder DOWN into beam-core's seed manifest, so one `splicewire:beam:seed`
         // provisions the realm root (ADR-0209 §9 — the renderer never writes, so something has to), the
         // docs subtree (ADR-0210), and the content nav, alongside every other package's seeders after a
-        // migrate:fresh. Order 20, after the accounts substrate; guarded on the manifest being bound.
+        // migrate:fresh. Order 200, after default contributors (100) and docs (150); guarded on the manifest being bound.
         //
         // Registration is UNGATED and the three gates moved inside {@see BeamUxSeeder}, because
         // `register()` is idempotent per PACKAGE name — a second registration would silently replace the
@@ -418,7 +418,7 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             $this->app->make(BeamSeedManifest::class)->register(
                 package: 'splicewire/laravel-beam-ux',
                 seederClass: BeamUxSeeder::class,
-                order: 20,
+                order: 200,
             );
         }
 

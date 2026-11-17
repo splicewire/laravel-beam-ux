@@ -28,7 +28,7 @@ class NavSource
     /**
      * Resolve the ordered nav rows for a namespace, following the config → disk → derived priority.
      *
-     * @return list<array{slug: string, segment: ?string, title: ?string, type: string, realm: string, nav_order: ?int}>
+     * @return list<array{entry_id?: string, slug: string, segment: ?string, title: ?string, type: string, realm: string, nav_order: ?int}>
      */
     public function resolve(string $namespace): array
     {
@@ -96,21 +96,25 @@ class NavSource
     }
 
     /**
-     * Derive nav rows from the entries already registered under a namespace — the frontmatter-carried
+     * Derive nav rows from registered entries (all disk namespaces by default) — the frontmatter-carried
      * `segment`/`realm`/`nav_order`. Only routable pages that carry a `segment` are nav rows; ordered by
      * `nav_order` (then slug for a stable tiebreak). This is the "no bespoke PHP" default: the disk
-     * frontmatter is the single source, projected here into nav.
+     * frontmatter is the single source, projected here into nav. A non-empty namespace explicitly
+     * scopes the projection; the default empty selector reads the host-wide content tree. Existing
+     * entry identity travels with derived rows so seeding never copies them into the selector namespace.
      *
-     * @return list<array{slug: string, segment: ?string, title: ?string, type: string, realm: string, nav_order: ?int}>
+     * @return list<array{entry_id?: string, slug: string, segment: ?string, title: ?string, type: string, realm: string, nav_order: ?int}>
      */
     private function deriveFromEntries(string $namespace): array
     {
         return BeamUxEntry::query()
-            ->where('namespace', $namespace)
+            ->when($namespace !== '', fn ($query) => $query->where('namespace', $namespace))
+            ->where('type', 'page')
             ->whereNotNull('segment')
             ->where('segment', '!=', '')
             ->get()
             ->map(fn (BeamUxEntry $e): array => [
+                'entry_id' => (string) $e->getKey(),
                 'slug' => (string) $e->slug,
                 'segment' => $e->segment,
                 'title' => $e->title,
@@ -127,7 +131,7 @@ class NavSource
      * Normalize either authoring shape (list-of-maps OR slug⇒row assoc) into ordered nav rows.
      *
      * @param  array<mixed>  $raw
-     * @return list<array{slug: string, segment: ?string, title: ?string, type: string, realm: string, nav_order: ?int}>
+     * @return list<array{entry_id?: string, slug: string, segment: ?string, title: ?string, type: string, realm: string, nav_order: ?int}>
      */
     private function normalize(array $raw): array
     {
