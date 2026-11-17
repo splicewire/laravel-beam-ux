@@ -153,6 +153,18 @@ final class ReleaseService
     }
 
     /**
+     * config-sections 08: add or change a member of ANY kind — the ticket's "putting a member by kind". The kind
+     * ({@see \Splicewire\Beam\Ux\Release\Kinds\ReleaseMemberKind::headVersion()}) resolves the version it pins, its head
+     * draft on the Release's connection, so a new member kind (a config override, and the next) needs no further
+     * ReleaseService edit — ADR-0243's spirit. {@see putMember()} keeps pinning a caller-chosen entry version.
+     */
+    public function putMemberByKind(BeamUxRelease $release, string $kind, string $ref, Authenticatable $actor): void
+    {
+        $version = $this->kinds()->for($kind)->headVersion($release, $ref);
+        $this->place($release, $kind, $ref, $version, $actor, null, false);
+    }
+
+    /**
      * `$directFirst` is true only from requestOne, for the one member of the direct Release it just opened: that
      * placement is part of the direct request and decides on the publish ladder. Every other placement, including a
      * re-add after the member was dropped, is an edit (orch-peer, 2026-10-18).
@@ -357,6 +369,12 @@ final class ReleaseService
             if ($release->getAttribute('preview_links_enabled') || $release->getAttribute('preview_link_secret') !== null) {
                 $release->forceFill(['preview_links_enabled' => false, 'preview_link_secret' => null]);
             }
+            // ADR-0226 decision 2: publishing moves EVERY member's pin in ONE transaction. The landed loop had no
+            // enclosing transaction — each kind published in its own (entries in publishVersions', config overrides in
+            // the config store's) — so the pins were not atomic (a 0226 d2 violation) and a kind's recording after-commit
+            // fired before a later kind had published. config-sections 08: one transaction makes both pins atomic and
+            // the recording fire once over all kinds, so a config override rides the entry commit (and if any member
+            // refuses, no pin moves).
             $grouped = $members->groupBy(fn (BeamUxReleaseMember $member) => $member->kind());
             // Launch ticket 77: the members' marking moves (publish, Take-down) happen only inside this scope; an entry
             // refuses them anywhere else while review is required (BeamUxEntry::participateInWorkflowTransaction()).

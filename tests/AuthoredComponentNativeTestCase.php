@@ -30,7 +30,9 @@ abstract class AuthoredComponentNativeTestCase extends TestCase
             (require dirname(__DIR__).'/database/migrations/shared/'.$name.'.php.stub')->up();
         }
         $this->assertSame('sqlite', Schema::getConnection()->getDriverName());
-        $this->assertSame(':memory:', Schema::getConnection()->getDatabaseName());
+        // An in-memory sqlite database: a plain `:memory:`, or a shared-cache in-memory DSN (`…mode=memory…`) when a test
+        // needs a second connection onto the same in-memory database (config-sections 08's two-PDO flagship wiring).
+        $this->assertStringContainsString('memory', Schema::getConnection()->getDatabaseName());
         Storage::fake('component-artifacts');
         Storage::fake('component-mirror');
         config(['beam.ux.compile.disk' => 'component-artifacts', 'beam.ux.storage.mirror_disk' => 'component-mirror']);

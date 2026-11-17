@@ -36,6 +36,13 @@ interface ReleaseMemberKind
     /** The subject `$ref` addresses. Refuses one outside the Release's realm or connection. */
     public function subject(BeamUxRelease $release, string $ref): object;
 
+    /**
+     * The version a generic {@see \Splicewire\Beam\Ux\Release\ReleaseService::putMemberByKind()} pins for `$ref` — the
+     * subject's current head draft, resolved on the Release's connection (config-sections 08). A kind that has no version
+     * to resolve returns null. Entry membership that pins a caller-chosen version keeps its own `putMember`.
+     */
+    public function headVersion(BeamUxRelease $release, string $ref): ?string;
+
     public function authorize(BeamUxRelease $release, object $subject, Authenticatable $actor, ReleaseAccess $access): void;
 
     /**

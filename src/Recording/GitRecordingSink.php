@@ -24,10 +24,14 @@ class GitRecordingSink implements PublishSink
 
     public function project(BeamUxRelease $release, ReleaseProjection $projection, Authenticatable $actor): ?\Closure
     {
-        if ($projection->kind !== BeamUxReleaseMember::KIND_ENTRY) {
-            return null;
+        if ($projection->kind === BeamUxReleaseMember::KIND_ENTRY) {
+            return app(ReleaseRecording::class)->prepare($release, $projection->published, $actor, $projection->withdrawn);
+        }
+        // config-sections 08: a config override's published roots join the SAME per-release receipt and commit (ADR-0243 d4).
+        if ($projection->kind === BeamUxReleaseMember::KIND_CONFIG) {
+            return app(ReleaseRecording::class)->prepareConfig($release, $projection->published, $actor);
         }
 
-        return app(ReleaseRecording::class)->prepare($release, $projection->published, $actor, $projection->withdrawn);
+        return null;
     }
 }

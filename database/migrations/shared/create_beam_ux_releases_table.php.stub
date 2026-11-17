@@ -38,6 +38,9 @@ return new class extends Migration
                 $table->uuid('observed_pin')->nullable();
                 $table->string('observed_marking')->nullable();
                 $table->string('redirect_target')->nullable();
+                // config-sections 08: a non-entry member records the resolved residency it was placed under (realm +
+                // resolved connection identity); publish/rollback re-check it. Null for entry members.
+                $table->string('member_residency')->nullable();
                 $table->timestamps();
                 $table->unique(['release_id', 'entry_id']);
                 $table->unique(['release_id', 'member_kind', 'member_ref']);

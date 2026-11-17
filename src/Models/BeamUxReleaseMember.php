@@ -15,6 +15,9 @@ class BeamUxReleaseMember extends Model
 
     public const KIND_ENTRY = 'entry';
 
+    /** config-sections ticket 08: a published config override rides a Release and records under `config/overrides/` (ADR-0243 d4). */
+    public const KIND_CONFIG = 'config-override';
+
     protected $table = 'beam_ux_release_members';
 
     protected $guarded = ['*'];

@@ -60,6 +60,15 @@ class EntryMemberKind implements ReleaseMemberKind
             : $this->authorizeEntry($subject, $actor, $access === ReleaseAccess::Publish);
     }
 
+    /** The entry's working head version (config-sections 08), for a generic putMemberByKind; `putMember` pins a chosen version. */
+    public function headVersion(BeamUxRelease $release, string $ref): ?string
+    {
+        $entry = $this->subject($release, $ref);
+        $head = $entry->particle === null ? null : app(VersionStore::class)->head($entry->particle);
+
+        return $head === null ? null : (string) $head->id;
+    }
+
     public function admit(BeamUxRelease $release, object $subject, BeamUxReleaseMember $member): void
     {
         $this->assertMember($subject, $member->version_id, $member->redirect_target, $this->publishing($release));

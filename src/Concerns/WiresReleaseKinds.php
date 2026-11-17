@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Concerns;
 use Rushing\Popcorn\Concerns\Chained;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Recording\GitRecordingSink;
+use Splicewire\Beam\Ux\Release\Kinds\ConfigOverrideMemberKind;
 use Splicewire\Beam\Ux\Release\Kinds\EntryMemberKind;
 use Splicewire\Beam\Ux\Release\Kinds\ReleaseMemberKindRegistry;
 use Splicewire\Beam\Ux\Release\Sinks\PublishSinkRegistry;
@@ -19,14 +20,18 @@ use Splicewire\Beam\Ux\Release\Sinks\PublishSinkRegistry;
 trait WiresReleaseKinds
 {
     /**
-     * The {@see ReleaseMemberKindRegistry} (ADR-0243), seeded with `entry`. Another package registers its own kind on
-     * the same singleton, from its provider's boot. The registry's root enters the shared index through the bake, from
-     * its `#[IsRegistry]` declaration.
+     * The {@see ReleaseMemberKindRegistry} (ADR-0243), seeded with `entry` and `config-override` (config-sections 08).
+     * Another package registers its own kind on the same singleton, from its provider's boot. The registry's root enters
+     * the shared index through the bake, from its `#[IsRegistry]` declaration.
      */
     #[Chained('register', order: 65)]
     protected function registerReleaseKinds(): void
     {
-        $this->app->singleton(ReleaseMemberKindRegistry::class, fn () => (new ReleaseMemberKindRegistry)->register(new EntryMemberKind));
+        // config-sections 08: the config-override kind registers on the same singleton beside `entry`; it consumes
+        // laravel-beam's ConfigOverrideStore and records under `config/overrides/` (ADR-0243 d4).
+        $this->app->singleton(ReleaseMemberKindRegistry::class, fn () => (new ReleaseMemberKindRegistry)
+            ->register(new EntryMemberKind)
+            ->register(new ConfigOverrideMemberKind));
     }
 
     /**

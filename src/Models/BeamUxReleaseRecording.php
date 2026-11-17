@@ -19,12 +19,19 @@ class BeamUxReleaseRecording extends Model
     protected static function booted(): void
     {
         static::updating(function (self $row): void {
-            foreach (['id', 'release_id', 'manifest'] as $column) {
+            foreach (['id', 'release_id'] as $column) {
                 if ($row->isDirty($column)) {
-                    throw new \LogicException('A frozen recording manifest and identity cannot be rewritten.');
+                    throw new \LogicException('A frozen recording identity cannot be rewritten.');
                 }
             }
-            if ($row->getOriginal('candidate') !== null || $row->getOriginal('sha') !== null) {
+            // config-sections 08 (ADR-0243 d4): several member kinds freeze their rows into ONE receipt, so while the
+            // receipt is still pending its manifest GROWS additively (each kind adds its own rows, keyed by path). Once a
+            // candidate or SHA is saved the receipt is RECORDED, and from then on its manifest is sealed.
+            $recorded = $row->getOriginal('candidate') !== null || $row->getOriginal('sha') !== null;
+            if ($recorded && $row->isDirty('manifest')) {
+                throw new \LogicException('A recorded recording manifest cannot be rewritten.');
+            }
+            if ($recorded) {
                 foreach (['repository', 'branch', 'base', 'tree', 'preparation', 'candidate'] as $column) {
                     if ($row->isDirty($column)) {
                         throw new \LogicException('A saved recording candidate cannot be replaced.');

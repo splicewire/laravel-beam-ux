@@ -15,6 +15,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
+use Splicewire\Beam\Ux\Release\Kinds\ConfigOverrideMemberKind;
 use Splicewire\Beam\Ux\Release\Kinds\EntryMemberKind;
 use Splicewire\Beam\Ux\Release\Kinds\ReleaseAccess;
 use Splicewire\Beam\Ux\Release\Kinds\ReleaseMemberKind;
@@ -60,9 +61,13 @@ class ReleaseMemberKindTest extends AuthoredComponentNativeTestCase
         $this->assertTrue(app(RegistryIndex::class)->has('beam.ux.release-member-kinds'));
         $this->assertSame($kinds, app(RegistryIndex::class)->resolve('beam.ux.release-member-kinds'));
         $this->assertInstanceOf(Registry::class, $kinds);
-        $this->assertSame(['entry'], $kinds->kinds());
+        // config-sections 08: the config-override kind is seeded beside `entry` (WiresReleaseKinds).
+        $this->assertSame(['entry', BeamUxReleaseMember::KIND_CONFIG], $kinds->kinds());
         $this->assertInstanceOf(EntryMemberKind::class, $kinds->for('entry'));
-        $this->assertContains('beam.ux.release-member-kinds.entry', array_map('strval', $kinds->keys()));
+        $this->assertInstanceOf(ConfigOverrideMemberKind::class, $kinds->for(BeamUxReleaseMember::KIND_CONFIG));
+        $keys = array_map('strval', $kinds->keys());
+        $this->assertContains('beam.ux.release-member-kinds.entry', $keys);
+        $this->assertContains('beam.ux.release-member-kinds.'.BeamUxReleaseMember::KIND_CONFIG, $keys);
     }
 
     public function test_a_taken_kind_is_never_replaced(): void
@@ -174,6 +179,13 @@ class ProbeMemberKind implements ReleaseMemberKind
         self::$calls[] = "subject:{$ref}";
 
         return (object) ['ref' => $ref];
+    }
+
+    public function headVersion(BeamUxRelease $release, string $ref): ?string
+    {
+        self::$calls[] = "headVersion:{$ref}";
+
+        return null;
     }
 
     public function authorize(BeamUxRelease $release, object $subject, Authenticatable $actor, ReleaseAccess $access): void

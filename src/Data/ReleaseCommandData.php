@@ -4,9 +4,11 @@ namespace Splicewire\Beam\Ux\Data;
 
 use Schemastud\DataSchemas\Attributes\Description;
 use Schemastud\DataSchemas\Attributes\Title;
+use Spatie\LaravelData\Support\Validation\ValidationContext;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
+use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 
 #[TypeScript, Title('Release action')]
 final class ReleaseCommandData extends BeamData
@@ -18,8 +20,10 @@ final class ReleaseCommandData extends BeamData
         public string $action,
         #[Description('The entry the member actions (`member`, `drop`, `rebase`, `use-latest`) act on: its uuid. Required for those, ignored by the others.')]
         public ?string $entryId = null,
-        #[Description('For `member`: the saved version of the entry to publish. Omitted, the member is a Take-down that unpublishes the entry.')]
+        #[Description('For `member`: the saved version of the entry to publish (entry kind), or the config section ROOT (a non-entry kind). For an entry, omitted means a Take-down that unpublishes the entry.')]
         public ?string $ref = null,
+        #[Description('For `member`: the member KIND. `entry` (default) places an entry by `entryId`; a non-entry kind such as `config-override` places that kind of member by its `ref`, with no `entryId` (config-sections 08).')]
+        public ?string $kind = null,
         #[Description('For a Take-down `member` only: the published entry in the same realm to redirect to, by id or by URL.')]
         public ?string $redirectTarget = null,
         #[Description('For `schedule`: the instant the Release becomes due to publish. Required for `schedule`.')]
@@ -28,12 +32,20 @@ final class ReleaseCommandData extends BeamData
         public ?string $timezone = null,
     ) {}
 
-    public static function rules(): array
+    public static function rules(ValidationContext $context): array
     {
+        $action = $context->payload['action'] ?? null;
+        $kind = $context->payload['kind'] ?? BeamUxReleaseMember::KIND_ENTRY;
+        // A NON-entry `member` (config-sections 08) identifies its subject by kind + ref (the section root) — no entryId —
+        // and routes to putMemberByKind; an entry `member` is unchanged (entryId required, ref is the version).
+        $nonEntryMember = $action === 'member' && $kind !== BeamUxReleaseMember::KIND_ENTRY;
+
         return [
             'action' => ['required', 'in:member,drop,rebase,use-latest,submit,approve,publish,schedule,rollback,links-on,links-off,rotate-links'],
-            'entryId' => ['required_if:action,member,drop,rebase,use-latest', 'nullable', 'uuid'],
-            'ref' => ['nullable', 'string'], 'redirectTarget' => ['nullable', 'string', 'max:255'],
+            'kind' => ['nullable', 'string', 'in:'.BeamUxReleaseMember::KIND_ENTRY.','.BeamUxReleaseMember::KIND_CONFIG],
+            'entryId' => [$nonEntryMember ? 'nullable' : 'required_if:action,member,drop,rebase,use-latest', 'nullable', 'uuid'],
+            'ref' => [$nonEntryMember ? 'required' : 'nullable', 'string'],
+            'redirectTarget' => ['nullable', 'string', 'max:255'],
             'dueAt' => ['required_if:action,schedule', 'nullable', 'string'],
             'timezone' => ['required_if:action,schedule', 'nullable', 'timezone'],
         ];

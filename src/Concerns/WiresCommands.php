@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Concerns;
 use Rushing\Popcorn\Concerns\Chained;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Console\CompileEntriesCommand;
+use Splicewire\Beam\Ux\Console\ConfigImportCommand;
 use Splicewire\Beam\Ux\Console\EnrichPageSchemasCommand;
 use Splicewire\Beam\Ux\Console\PinNodeCommand;
 use Splicewire\Beam\Ux\Console\PnpmOverridesCommand;
@@ -45,6 +46,8 @@ trait WiresCommands
             PnpmOverridesCommand::class,
             PinNodeCommand::class,
             ReapArtifactsCommand::class,
+            // config-sections 08: a published override mirror imports back into a draft; it never publishes.
+            ConfigImportCommand::class,
             \Splicewire\Beam\Ux\Console\ConvertMdxCommand::class,
             // make-surface 02: the copy-once shell stamp (route lines and staff seeding printed, routes never edited).
             StampShellCommand::class,

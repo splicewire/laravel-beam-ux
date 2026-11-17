@@ -102,15 +102,7 @@ class ReleaseRecording
         } catch (\Throwable $error) {
             $failure = $error instanceof RecordingFailure ? $error->reason : 'preparation';
         }
-        try {
-            $release->getConnection()->transaction(function () use ($release, $manifest, $failure) {
-                $row = (new BeamUxReleaseRecording)->setConnection($release->getConnectionName());
-                $row->forceFill(['release_id' => $release->id, 'manifest' => $manifest,
-                    'state' => $failure === null ? 'pending' : 'unavailable', 'error' => $failure])->save();
-            });
-        } catch (\Throwable) {
-            // Without a durable receipt, completion may mirror but MUST NOT run Git.
-        }
+        $this->freeze($release, $manifest, $failure);
         $snapshot = clone $release;
 
         return function () use ($snapshot, $prepared, $takedowns, $actor): void {
@@ -130,6 +122,104 @@ class ReleaseRecording
         };
     }
 
+    /**
+     * Freeze a Release's config-override members into the SAME receipt as its entry members (config-sections 08; ADR-0243
+     * d3 per-kind projection, d4 the config root). Each root's PUBLISHED mirror bytes become one `config/overrides/<root>.json`
+     * row added to the per-release receipt. The config files ride the ENTRY closure's single commit when the Release has
+     * entry members (decided from release state, not registration order); only a config-ONLY Release records from here.
+     *
+     * @param  list<string>  $roots
+     */
+    public function prepareConfig(BeamUxRelease $release, array $roots, Authenticatable $actor): \Closure
+    {
+        $manifest = [];
+        $failure = null;
+        try {
+            $disk = $this->disk();
+            $mirror = app(ConfigOverrideMirror::class);
+            foreach ($roots as $root) {
+                $bytes = $mirror->bytes($root, $release->getConnectionName());
+                $path = ConfigOverrideMirror::pathFor($root);
+                if ($bytes === null) {
+                    // The override now has NO published layer (a rollback reverted the pin to null). If a committed mirror
+                    // file exists, record its DELETE so the one commit drops it — otherwise a later import would
+                    // re-introduce an override the DB no longer has (config-sections 08 import AC). No committed file: no row.
+                    if (! $disk->exists($path)) {
+                        continue;
+                    }
+                    $this->contained($disk->path(''), $path);
+                    $existing = (string) $disk->get($path);
+                    $manifest[] = ['kind' => BeamUxReleaseMember::KIND_CONFIG, 'ref' => $root, 'root' => ConfigOverrideMirror::ROOT,
+                        'action' => 'delete', 'path' => $path, 'absolute' => $disk->path($path),
+                        'mode' => '100644', 'bytes' => base64_encode($existing), 'sha256' => hash('sha256', $existing)];
+
+                    continue;
+                }
+                $this->contained($disk->path(''), $path);
+                $manifest[] = ['kind' => BeamUxReleaseMember::KIND_CONFIG, 'ref' => $root, 'root' => ConfigOverrideMirror::ROOT,
+                    'path' => $path, 'absolute' => $disk->path($path),
+                    'mode' => '100644', 'bytes' => base64_encode($bytes), 'sha256' => hash('sha256', $bytes)];
+            }
+        } catch (\Throwable $error) {
+            $failure = $error instanceof RecordingFailure ? $error->reason : 'preparation';
+        }
+        $this->freeze($release, $manifest, $failure);
+        $snapshot = clone $release;
+
+        return function () use ($snapshot, $actor): void {
+            // When the Release has entry members, the entry closure's completion records every kind's rows in one commit;
+            // this config closure defers to it. A config-ONLY Release is recorded here.
+            if ($snapshot->members()->where('member_kind', BeamUxReleaseMember::KIND_ENTRY)->exists()) {
+                return;
+            }
+            try {
+                $this->complete($snapshot->fresh(), [], [], $actor);
+            } catch (\Throwable) {
+                $this->failure($snapshot, 'completion');
+            }
+        };
+    }
+
+    /**
+     * Write or extend the per-release receipt: a kind ADDS its frozen rows to the one receipt row (config-sections 08),
+     * keyed by path, so each kind projecting its own members (ADR-0243 d3) lands in one receipt and one commit. A freeze
+     * failure marks the receipt unavailable, and once unavailable it stays so.
+     *
+     * @param  list<array<string, mixed>>  $manifest
+     */
+    private function freeze(BeamUxRelease $release, array $manifest, ?string $failure): void
+    {
+        try {
+            $release->getConnection()->transaction(function () use ($release, $manifest, $failure) {
+                $existing = BeamUxReleaseRecording::on($release->getConnectionName())
+                    ->where('release_id', $release->id)->lockForUpdate()->first();
+                $merged = $this->mergeManifest($existing?->manifest ?? [], $manifest);
+                $row = $existing ?? (new BeamUxReleaseRecording)->setConnection($release->getConnectionName());
+                $state = ($failure !== null || ($existing && $existing->state === 'unavailable')) ? 'unavailable' : 'pending';
+                $row->forceFill(['release_id' => $release->id, 'manifest' => $merged,
+                    'state' => $state, 'error' => $failure ?? ($existing->error ?? null)])->save();
+            });
+        } catch (\Throwable) {
+            // Without a durable receipt, completion may mirror but MUST NOT run Git.
+        }
+    }
+
+    /**
+     * Merge a kind's freshly frozen rows into the receipt, keyed by path: a kind re-freezing replaces its own rows, a new
+     * kind appends, others stay. One receipt row, one commit.
+     *
+     * @param  list<array<string, mixed>>  $existing
+     * @param  list<array<string, mixed>>  $added
+     * @return list<array<string, mixed>>
+     */
+    private function mergeManifest(array $existing, array $added): array
+    {
+        $addedPaths = array_fill_keys(array_map(fn (array $r): string => (string) ($r['path'] ?? ''), $added), true);
+        $kept = array_values(array_filter($existing, fn (array $r): bool => ! isset($addedPaths[(string) ($r['path'] ?? '')])));
+
+        return array_merge($kept, $added);
+    }
+
     private function complete(BeamUxRelease $release, array $prepared, array $takedowns, Authenticatable $actor): void
     {
         $git = null;
@@ -145,7 +235,7 @@ class ReleaseRecording
                 $this->authorize($release, $actor);
                 $receipt = $this->receipt($release);
                 $rows = $receipt === null ? [] : $this->rows($receipt->manifest);
-                if ($receipt === null || $receipt->state === 'unavailable' || count(self::memberFiles($rows)) !== $release->members()->count()) {
+                if ($receipt === null || $receipt->state === 'unavailable' || count(self::memberFiles($rows)) !== $release->allMembers()->count()) {
                     throw new RecordingFailure('unavailable', RecordingError::UnavailableNoDurableRecordingReceiptAvailable);
                 }
                 $git = new LocalGit($this->disk()->path(''));
@@ -208,6 +298,37 @@ class ReleaseRecording
                     $actual = $disk->get($path);
                     if ($actual !== app(PlacedDiskMirror::class)->bytes($entry, $body)) {
                         throw new RecordingFailure('mirror', RecordingError::MirrorReleaseMirrorDidNotMatchPublished);
+                    }
+                }
+                // config-sections 08 (ADR-0243 d4): write the CONFIG-override mirror files from the frozen receipt, so a
+                // config override rides the entry closure's single commit. Config rows only — entry bodies are already
+                // mirrored by EntryPublication; this leaves the entry mirror/move/takedown path untouched.
+                if ($local) {
+                    foreach (($this->receipt($release)?->manifest ?? []) as $file) {
+                        if (($file['kind'] ?? null) !== BeamUxReleaseMember::KIND_CONFIG) {
+                            continue;
+                        }
+                        $path = (string) ($file['path'] ?? '');
+                        $this->mirrorContained($disk->path(''), $path);
+                        $bytes = base64_decode((string) ($file['bytes'] ?? ''), true);
+                        if ($bytes === false) {
+                            throw new RecordingFailure('mirror', RecordingError::MirrorReleaseMirrorCouldNotCompleted);
+                        }
+                        if (($file['action'] ?? null) === 'delete') {
+                            // A rollback-to-null drops the committed override file (its frozen bytes drift-checked first), so
+                            // the one commit removes it and a later import cannot re-introduce the override.
+                            if (! $disk->exists($path) || hash('sha256', (string) $disk->get($path)) !== $file['sha256']) {
+                                throw new RecordingFailure('mirror-drift', RecordingError::MirrorDriftTakeDownMirrorDiffersFromFrozen);
+                            }
+                            if (! $disk->delete($path) || $disk->exists($path)) {
+                                throw new RecordingFailure('mirror', RecordingError::MirrorTakeDownMirrorCouldNotRemoved);
+                            }
+
+                            continue;
+                        }
+                        if (! $disk->put($path, $bytes) || $disk->get($path) !== $bytes) {
+                            throw new RecordingFailure('mirror', RecordingError::MirrorReleaseMirrorCouldNotCompleted);
+                        }
                     }
                 }
                 $this->completeMoves($release, $disk, $local, $preparedIds, $allMembers);
@@ -322,11 +443,18 @@ class ReleaseRecording
 
         return array_map(function (array $file) use ($root): array {
             $file += ['kind' => BeamUxReleaseMember::KIND_ENTRY, 'ref' => (string) ($file['entryId'] ?? ''), 'root' => $root];
-            if ($file['kind'] !== BeamUxReleaseMember::KIND_ENTRY) {
+            if ($file['kind'] === BeamUxReleaseMember::KIND_ENTRY) {
+                if ($file['root'] !== $root) {
+                    throw new RecordingFailure('path', RecordingError::PathMirrorDiskNoLongerMatchesFrozen);
+                }
+            } elseif ($file['kind'] === BeamUxReleaseMember::KIND_CONFIG) {
+                // config-sections 08 (ADR-0243 d4): a config override records under config/overrides/ on the mirror disk;
+                // this kind now defines its rows, so it no longer refuses — a different kind or root still does.
+                if ($file['root'] !== ConfigOverrideMirror::ROOT || ! str_starts_with((string) ($file['path'] ?? ''), ConfigOverrideMirror::ROOT)) {
+                    throw new RecordingFailure('path', RecordingError::PathMirrorDiskNoLongerMatchesFrozen);
+                }
+            } else {
                 throw new RecordingFailure('unavailable', RecordingError::UnavailableReleaseHasNoSupportedFrozenRecording);
-            }
-            if ($file['root'] !== $root) {
-                throw new RecordingFailure('path', RecordingError::PathMirrorDiskNoLongerMatchesFrozen);
             }
 
             return $file;
@@ -403,12 +531,16 @@ class ReleaseRecording
         $row = $this->receipt($release);
         $rows = $row === null ? [] : $this->rows($row->manifest);
         $members = self::memberFiles($rows);
+        // config-sections 08: a receipt may hold both entry and config-override files. The per-entry uniqueness and
+        // move-ownership invariants apply to ENTRY files (which carry an `entryId`); config files are counted toward the
+        // total but validated by their own frozen bytes below, not by entry placement.
+        $entryMembers = array_values(array_filter($members, fn (array $file) => ($file['kind'] ?? null) !== BeamUxReleaseMember::KIND_CONFIG));
         $moves = array_values(array_filter($rows, fn (array $file) => ($file['move'] ?? false) === true));
         if ($row === null || $row->state === 'unavailable' || $rows === []
-            || count($members) !== $release->members()->count()
-            || count(array_unique(array_column($members, 'entryId'))) !== count($members)
+            || count($members) !== $release->allMembers()->count()
+            || count(array_unique(array_column($entryMembers, 'entryId'))) !== count($entryMembers)
             || count(array_unique(array_column($moves, 'entryId'))) !== count($moves)
-            || array_diff(array_column($moves, 'entryId'), array_column($members, 'entryId')) !== []) {
+            || array_diff(array_column($moves, 'entryId'), array_column($entryMembers, 'entryId')) !== []) {
             throw new RecordingFailure('unavailable', RecordingError::UnavailableReleaseHasNoSupportedFrozenRecording);
         }
         $git->assertSupported();
@@ -418,6 +550,20 @@ class ReleaseRecording
         }
         $manifest = [];
         foreach ($rows as $file) {
+            if (($file['kind'] ?? null) === BeamUxReleaseMember::KIND_CONFIG) {
+                // config-sections 08: a config-override file has no entry or placement. Its member is matched by section
+                // ref; the frozen bytes are drift-checked by the common loop below — an added file must be present, a
+                // delete (a rollback-to-null) must be absent (complete() removed it), exactly like an entry take-down.
+                $member = $release->allMembers()->where('member_kind', BeamUxReleaseMember::KIND_CONFIG)
+                    ->where('member_ref', (string) ($file['ref'] ?? ''))->first();
+                if ($member === null) {
+                    throw new RecordingFailure('manifest', RecordingError::ManifestReleaseMembershipOrMirrorPlacementNo);
+                }
+                $file['path'] = $git->relative($file['absolute']);
+                $manifest[] = $file;
+
+                continue;
+            }
             $entry = BeamUxEntry::on($release->getConnectionName())->findOrFail($file['entryId']);
             $member = $release->members()->where('entry_id', $entry->id)->first();
             $path = app(PlacementResolver::class)->resolve($entry)->pathFor($entry);
