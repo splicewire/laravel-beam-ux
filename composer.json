@@ -216,6 +216,10 @@
         {
             "type": "git",
             "url": "https://github.com/splicewire/laravel-composition-spine.git"
+        },
+        {
+            "type": "git",
+            "url": "https://github.com/splicewire/laravel-grounding-spine.git"
         }
     ],
     "minimum-stability": "dev",
