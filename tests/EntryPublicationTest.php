@@ -3584,6 +3584,20 @@ class EntryPublicationTest extends TestCase
     }
 
     /**
+     * config-sections 07 (deliberate change from 05's `operator` ceiling): `review_required` is overridable up to the
+     * TENANT tier, so a workspace admin may require review in their own workspace (laravel-beam's tenant tier); the other
+     * `releases` keys stay deploy-only at the host ceiling.
+     */
+    public function test_review_required_is_declared_overridable_up_to_the_tenant_tier(): void
+    {
+        $declared = \Splicewire\Beam\Ux\Config\BeamUxSection::keyDeclaration(['releases', 'review_required']);
+
+        $this->assertSame(\Splicewire\Beam\Enums\ConfigTier::Tenant, $declared->ceiling);
+        $this->assertSame(\Splicewire\Beam\Enums\ConfigEffect::Live, $declared->effect);
+        $this->assertSame(\Splicewire\Beam\Enums\ConfigTier::Host, \Splicewire\Beam\Ux\Config\BeamUxSection::keyDeclaration(['releases', 'allow_self_approval'])->ceiling);
+    }
+
+    /**
      * config-sections 05, root ruling df42bf60 (2026-11-15, amending PRD:224): an override counter cache that cannot be
      * read is skipped, never the operator tier. A published `review_required` therefore stays required when the cache
      * breaks, so publishing never fails open on this governance control. The counter is first proven readable (an
