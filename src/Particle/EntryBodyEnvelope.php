@@ -147,12 +147,16 @@ class EntryBodyEnvelope
         }
 
         if ($entry->type === UxType::Theme) {
+            // The editor's projection reads for its reader (localization 23b): labels and descriptions in the request's
+            // locale. The stored registry artifacts stay English (ThemeSchemas::all()).
+            $locale = app()->getLocale();
+
             return [
                 'type' => 'object',
-                'title' => 'Theme',
+                'title' => ThemeSchemas::line('entry.title', $locale),
                 'properties' => [
-                    'canvas' => ThemeSchemas::canvas(),
-                    'site' => ThemeSchemas::site(),
+                    'canvas' => ThemeSchemas::canvas($locale),
+                    'site' => ThemeSchemas::site($locale),
                 ],
             ];
         }

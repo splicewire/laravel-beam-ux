@@ -82,87 +82,87 @@ class ThemeSchemas
     }
 
     /** @return array<string, mixed> */
-    public static function canvas(): array
+    public static function canvas(string $locale = 'en'): array
     {
         return [
             '$id' => self::CANVAS_ID,
             'type' => 'object',
-            'title' => 'Canvas theme',
-            'description' => 'The beam-ux visual editor canvas palette (CanvasTheme: 9 colors + 2 font families).',
+            'title' => self::line('canvas.title', $locale),
+            'description' => self::line('canvas.description', $locale),
             'additionalProperties' => false,
             'properties' => [
-                'accent' => self::color('Primary accent (selection outline, active toggles, save button).', '#14803f'),
-                'accentHover' => self::color('Accent hover (save button hover).', '#0f5f2e'),
-                'editAccent' => self::color('Editable-text (contenteditable) outline.', '#35d07a'),
-                'canvas' => self::color('The canvas surface (the live page background).', '#ffffff'),
-                'ink' => self::color('Ink / body text on the canvas.', '#2e2c26'),
-                'panelBg' => self::color('Panel (bar / palette / inspector) background.', '#11201a'),
-                'rootBg' => self::color('Editor root backdrop (behind the panels, in window mode).', '#0d1a14'),
-                'panelFg' => self::color('Primary panel text.', '#eaf6ee'),
-                'muted' => self::color('Muted panel text (hints, labels).', '#83998c'),
-                'fontBody' => self::font('Font family for body/panel chrome.', 'system-ui, sans-serif'),
-                'fontMono' => self::font('Font family for code/mono chrome.', 'ui-monospace, monospace'),
+                'accent' => self::color(self::line('canvas.properties.accent', $locale), '#14803f'),
+                'accentHover' => self::color(self::line('canvas.properties.accentHover', $locale), '#0f5f2e'),
+                'editAccent' => self::color(self::line('canvas.properties.editAccent', $locale), '#35d07a'),
+                'canvas' => self::color(self::line('canvas.properties.canvas', $locale), '#ffffff'),
+                'ink' => self::color(self::line('canvas.properties.ink', $locale), '#2e2c26'),
+                'panelBg' => self::color(self::line('canvas.properties.panelBg', $locale), '#11201a'),
+                'rootBg' => self::color(self::line('canvas.properties.rootBg', $locale), '#0d1a14'),
+                'panelFg' => self::color(self::line('canvas.properties.panelFg', $locale), '#eaf6ee'),
+                'muted' => self::color(self::line('canvas.properties.muted', $locale), '#83998c'),
+                'fontBody' => self::font(self::line('canvas.properties.fontBody', $locale), 'system-ui, sans-serif'),
+                'fontMono' => self::font(self::line('canvas.properties.fontMono', $locale), 'ui-monospace, monospace'),
             ],
         ];
     }
 
     /** @return array<string, mixed> */
-    public static function shell(): array
+    public static function shell(string $locale = 'en'): array
     {
         return [
             '$id' => self::SHELL_ID,
             'type' => 'object',
-            'title' => 'Shell theme',
-            'description' => 'The mainframe OS shell chrome (--shell-* custom properties, @schemastud/mainframe/os/shell.css).',
+            'title' => self::line('shell.title', $locale),
+            'description' => self::line('shell.description', $locale),
             'additionalProperties' => false,
             'properties' => [
-                'surface' => self::color('--shell-surface: window/taskbar background.', '#f4f4f5'),
-                'surfaceRaised' => self::color('--shell-surface-raised: bars, menus, window chrome.', '#ffffff'),
-                'fg' => self::color('--shell-fg: primary shell text.', '#1c1c1e'),
-                'fgMuted' => self::color('--shell-fg-muted: statusbar/hint text.', '#6b7280'),
-                'accent' => self::color('--shell-accent: focus/active accent.', '#52525b'),
-                'edge' => self::color('--shell-edge: borders/dividers.', '#d4d4d8'),
-                'radius' => self::str('--shell-radius: chrome corner radius (CSS length).', '8px'),
-                'shadow' => self::str('--shell-shadow: window/menu drop shadow (CSS box-shadow).', '0 8px 24px rgba(0, 0, 0, 0.16)'),
-                'font' => self::font('--shell-font: chrome body font stack.', 'system-ui, sans-serif'),
-                'fontMono' => self::font('--shell-font-mono: statusbar/mono chrome font stack.', 'ui-monospace, SFMono-Regular, Menlo, monospace'),
+                'surface' => self::color(self::line('shell.properties.surface', $locale), '#f4f4f5'),
+                'surfaceRaised' => self::color(self::line('shell.properties.surfaceRaised', $locale), '#ffffff'),
+                'fg' => self::color(self::line('shell.properties.fg', $locale), '#1c1c1e'),
+                'fgMuted' => self::color(self::line('shell.properties.fgMuted', $locale), '#6b7280'),
+                'accent' => self::color(self::line('shell.properties.accent', $locale), '#52525b'),
+                'edge' => self::color(self::line('shell.properties.edge', $locale), '#d4d4d8'),
+                'radius' => self::str(self::line('shell.properties.radius', $locale), '8px'),
+                'shadow' => self::str(self::line('shell.properties.shadow', $locale), '0 8px 24px rgba(0, 0, 0, 0.16)'),
+                'font' => self::font(self::line('shell.properties.font', $locale), 'system-ui, sans-serif'),
+                'fontMono' => self::font(self::line('shell.properties.fontMono', $locale), 'ui-monospace, SFMono-Regular, Menlo, monospace'),
             ],
         ];
     }
 
     /** @return array<string, mixed> */
-    public static function site(): array
+    public static function site(string $locale = 'en'): array
     {
         return [
             '$id' => self::SITE_ID,
             'type' => 'object',
-            'title' => 'Site theme',
-            'description' => 'The public site palette — net-new namespace, a first reasonable shape (no prior structure existed).',
+            'title' => self::line('site.title', $locale),
+            'description' => self::line('site.description', $locale),
             'additionalProperties' => false,
             'properties' => [
-                'background' => self::color('Page background.', '#FFFFFF'),
-                'foreground' => self::color('Primary body text.', '#1A1A1A'),
-                'muted' => self::color('Secondary/muted text.', '#6B7280'),
-                'accent' => self::color('Primary accent (links, buttons).', '#4F7CFF'),
-                'accentHover' => self::color('Accent :hover treatment (buttons, links).', '#3A63E0'),
-                'accentForeground' => self::color('Text on an accent fill (the primary button label).', '#FFFFFF'),
-                'border' => self::color('Dividers/card borders.', '#D4D4D8'),
+                'background' => self::color(self::line('site.properties.background', $locale), '#FFFFFF'),
+                'foreground' => self::color(self::line('site.properties.foreground', $locale), '#1A1A1A'),
+                'muted' => self::color(self::line('site.properties.muted', $locale), '#6B7280'),
+                'accent' => self::color(self::line('site.properties.accent', $locale), '#4F7CFF'),
+                'accentHover' => self::color(self::line('site.properties.accentHover', $locale), '#3A63E0'),
+                'accentForeground' => self::color(self::line('site.properties.accentForeground', $locale), '#FFFFFF'),
+                'border' => self::color(self::line('site.properties.border', $locale), '#D4D4D8'),
                 // Typography (theme-entries-and-authoring follow-up: a brand-distinct sub-site needs more
                 // than recoloring — mirrors canvas's fontBody/fontMono naming, split a third way since a
                 // site brand commonly carries a serif/display face too, unlike the neutral editor chrome).
-                'fontSans' => self::font('Primary UI/body font stack.', 'system-ui, sans-serif'),
-                'fontSerif' => self::font('Display/headline font stack (falls back to fontSans when a brand has none).', 'system-ui, sans-serif'),
-                'fontMono' => self::font('Code/label font stack.', 'ui-monospace, monospace'),
+                'fontSans' => self::font(self::line('site.properties.fontSans', $locale), 'system-ui, sans-serif'),
+                'fontSerif' => self::font(self::line('site.properties.fontSerif', $locale), 'system-ui, sans-serif'),
+                'fontMono' => self::font(self::line('site.properties.fontMono', $locale), 'ui-monospace, monospace'),
                 // The dark variant — applied when the visitor's scheme is dark. Defaults are a neutral
                 // dark pairing of the light defaults above: a near-black page, light ink, and an accent
                 // lifted far enough to read on it, with a DARK label on that lighter accent.
-                'darkBackground' => self::color('Dark scheme: page background.', '#0B0F17'),
-                'darkForeground' => self::color('Dark scheme: primary body text.', '#E5E7EB'),
-                'darkMuted' => self::color('Dark scheme: secondary/muted text.', '#9CA3AF'),
-                'darkAccent' => self::color('Dark scheme: primary accent (links, buttons).', '#8AA4FF'),
-                'darkAccentHover' => self::color('Dark scheme: accent :hover treatment.', '#A9BDFF'),
-                'darkAccentForeground' => self::color('Dark scheme: text on an accent fill.', '#0B0F17'),
-                'darkBorder' => self::color('Dark scheme: dividers/card borders.', '#262B36'),
+                'darkBackground' => self::color(self::line('site.properties.darkBackground', $locale), '#0B0F17'),
+                'darkForeground' => self::color(self::line('site.properties.darkForeground', $locale), '#E5E7EB'),
+                'darkMuted' => self::color(self::line('site.properties.darkMuted', $locale), '#9CA3AF'),
+                'darkAccent' => self::color(self::line('site.properties.darkAccent', $locale), '#8AA4FF'),
+                'darkAccentHover' => self::color(self::line('site.properties.darkAccentHover', $locale), '#A9BDFF'),
+                'darkAccentForeground' => self::color(self::line('site.properties.darkAccentForeground', $locale), '#0B0F17'),
+                'darkBorder' => self::color(self::line('site.properties.darkBorder', $locale), '#262B36'),
             ],
         ];
     }
@@ -194,7 +194,7 @@ class ThemeSchemas
      *
      * @return array<string, mixed>
      */
-    public static function docs(): array
+    public static function docs(string $locale = 'en'): array
     {
         $defaults = [
             'paper' => '#eef1ee',
@@ -288,13 +288,13 @@ class ThemeSchemas
         ];
         $properties = [];
         foreach ($defaults as $key => $default) {
-            $properties[$key] = self::color('Docs '.$key.' token.', $default);
+            $properties[$key] = self::color(self::line('docs.token', $locale, ['token' => $key]), $default);
         }
         // tokens.css intentionally leaves brand fonts to the host; inherit preserves that default.
-        $properties['fontSans'] = self::font('Docs body font family.', 'inherit');
-        $properties['fontMono'] = self::font('Docs code font family.', 'ui-monospace, monospace');
+        $properties['fontSans'] = self::font(self::line('docs.font_sans', $locale), 'inherit');
+        $properties['fontMono'] = self::font(self::line('docs.font_mono', $locale), 'ui-monospace, monospace');
 
-        return ['$id' => self::DOCS_ID, 'type' => 'object', 'title' => 'Docs theme', 'additionalProperties' => false, 'properties' => $properties];
+        return ['$id' => self::DOCS_ID, 'type' => 'object', 'title' => self::line('docs.title', $locale), 'additionalProperties' => false, 'properties' => $properties];
     }
 
     /** @return array<string, mixed> */
@@ -308,10 +308,22 @@ class ThemeSchemas
         return [
             '$id' => self::ROOT_ID,
             'type' => 'object',
-            'title' => 'Theme',
-            'description' => 'The composed theme entry body — one namespace per surface-agnostic token group.',
+            'title' => self::line('root.title', 'en'),
+            'description' => self::line('root.description', 'en'),
             'properties' => $properties,
         ];
+    }
+
+    /**
+     * One line of the theme schema's copy (`beam-ux::theme.*`, lang/en/theme.php), in $locale. The registry artifacts
+     * ({@see self::all()}) are built in `en`, so their fingerprints never depend on a request; the editor's projection
+     * (EntryBodyEnvelope::schemaFor) asks for the reader's locale (localization 23b).
+     *
+     * @param  array<string, string>  $replace
+     */
+    public static function line(string $key, string $locale, array $replace = []): string
+    {
+        return (string) __('beam-ux::theme.'.$key, $replace, $locale);
     }
 
     /** @return array{type: string, format: string, description: string, default: string} */

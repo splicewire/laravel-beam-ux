@@ -1,0 +1,78 @@
+<?php
+
+/*
+ * The theme token schema's labels and descriptions (localization 23b): what the theme editor shows beside each token,
+ * resolved for its reader. src/Schema/ThemeSchemas.php builds every schema from these lines; its generated registry
+ * artifacts always use the English ones, so their fingerprints never depend on a request's locale.
+ */
+return [
+    'canvas' => [
+        'title' => 'Canvas theme',
+        'description' => 'The beam-ux visual editor canvas palette (CanvasTheme: 9 colors + 2 font families).',
+        'properties' => [
+            'accent' => 'Primary accent (selection outline, active toggles, save button).',
+            'accentHover' => 'Accent hover (save button hover).',
+            'editAccent' => 'Editable-text (contenteditable) outline.',
+            'canvas' => 'The canvas surface (the live page background).',
+            'ink' => 'Ink / body text on the canvas.',
+            'panelBg' => 'Panel (bar / palette / inspector) background.',
+            'rootBg' => 'Editor root backdrop (behind the panels, in window mode).',
+            'panelFg' => 'Primary panel text.',
+            'muted' => 'Muted panel text (hints, labels).',
+            'fontBody' => 'Font family for body/panel chrome.',
+            'fontMono' => 'Font family for code/mono chrome.',
+        ],
+    ],
+    'shell' => [
+        'title' => 'Shell theme',
+        'description' => 'The mainframe OS shell chrome (--shell-* custom properties, @schemastud/mainframe/os/shell.css).',
+        'properties' => [
+            'surface' => '--shell-surface: window/taskbar background.',
+            'surfaceRaised' => '--shell-surface-raised: bars, menus, window chrome.',
+            'fg' => '--shell-fg: primary shell text.',
+            'fgMuted' => '--shell-fg-muted: statusbar/hint text.',
+            'accent' => '--shell-accent: focus/active accent.',
+            'edge' => '--shell-edge: borders/dividers.',
+            'radius' => '--shell-radius: chrome corner radius (CSS length).',
+            'shadow' => '--shell-shadow: window/menu drop shadow (CSS box-shadow).',
+            'font' => '--shell-font: chrome body font stack.',
+            'fontMono' => '--shell-font-mono: statusbar/mono chrome font stack.',
+        ],
+    ],
+    'site' => [
+        'title' => 'Site theme',
+        'description' => 'The public site palette — net-new namespace, a first reasonable shape (no prior structure existed).',
+        'properties' => [
+            'background' => 'Page background.',
+            'foreground' => 'Primary body text.',
+            'muted' => 'Secondary/muted text.',
+            'accent' => 'Primary accent (links, buttons).',
+            'accentHover' => 'Accent :hover treatment (buttons, links).',
+            'accentForeground' => 'Text on an accent fill (the primary button label).',
+            'border' => 'Dividers/card borders.',
+            'fontSans' => 'Primary UI/body font stack.',
+            'fontSerif' => 'Display/headline font stack (falls back to fontSans when a brand has none).',
+            'fontMono' => 'Code/label font stack.',
+            'darkBackground' => 'Dark scheme: page background.',
+            'darkForeground' => 'Dark scheme: primary body text.',
+            'darkMuted' => 'Dark scheme: secondary/muted text.',
+            'darkAccent' => 'Dark scheme: primary accent (links, buttons).',
+            'darkAccentHover' => 'Dark scheme: accent :hover treatment.',
+            'darkAccentForeground' => 'Dark scheme: text on an accent fill.',
+            'darkBorder' => 'Dark scheme: dividers/card borders.',
+        ],
+    ],
+    'docs' => [
+        'title' => 'Docs theme',
+        'token' => 'Docs :token token.',
+        'font_sans' => 'Docs body font family.',
+        'font_mono' => 'Docs code font family.',
+    ],
+    'root' => [
+        'title' => 'Theme',
+        'description' => 'The composed theme entry body — one namespace per surface-agnostic token group.',
+    ],
+    'entry' => [
+        'title' => 'Theme',
+    ],
+];
