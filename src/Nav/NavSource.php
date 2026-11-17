@@ -43,33 +43,47 @@ class NavSource
         return $this->deriveFromEntries($namespace);
     }
 
-    /** True when the source is DERIVED (no config + no disk file) — nav rides entry frontmatter. */
+    /**
+     * True when the source is DERIVED: NO nav is DECLARED, i.e. `config('beam.ux.nav')` is null and no
+     * `nav.{yml,yaml,json}` file EXISTS. Decided by presence, never by whether a declared source decodes (launch 76): a
+     * present-but-unusable source (a nav.json with a trailing comma; an empty, comments-only or scalar nav.yml; a
+     * non-array config value) is a DECLARED source gone wrong, so an empty result from it is an authoring error the
+     * caller must report, not the benign "no entry carries nav data yet".
+     */
     public function isDerived(string $namespace): bool
     {
-        return (config('beam.ux.nav') === null || ! is_array(config('beam.ux.nav')))
-            && $this->fromDisk() === null;
+        return config('beam.ux.nav') === null && $this->navFile() === null;
     }
 
     /**
      * Read `resources/beam-ux/nav.{yml,yaml,json}` if present, relative to the mirror-disk root (else the
-     * `resource_path('beam-ux')` default). Returns the raw decoded array, or null when no file exists.
+     * `resource_path('beam-ux')` default). Returns the raw decoded array, or null when no file exists OR the file
+     * does not decode to an array (see {@see isDerived()}, which tells those two apart by presence).
      *
      * @return array<mixed>|null
      */
     private function fromDisk(): ?array
     {
+        $file = $this->navFile();
+        if ($file === null) {
+            return null;
+        }
+
+        $raw = (string) file_get_contents($file);
+        $decoded = str_ends_with($file, '.json') ? json_decode($raw, true) : Yaml::parse($raw);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /** The first `nav.{yml,yaml,json}` that exists under {@see navRoot()}, or null when none does. */
+    private function navFile(): ?string
+    {
         $root = $this->navRoot();
 
         foreach (['yml', 'yaml', 'json'] as $ext) {
-            $file = $root.'/nav.'.$ext;
-            if (! is_file($file)) {
-                continue;
+            if (is_file($file = $root.'/nav.'.$ext)) {
+                return $file;
             }
-
-            $raw = (string) file_get_contents($file);
-            $decoded = $ext === 'json' ? json_decode($raw, true) : Yaml::parse($raw);
-
-            return is_array($decoded) ? $decoded : null;
         }
 
         return null;

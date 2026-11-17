@@ -66,6 +66,14 @@ class BeamUxSeeder extends Seeder
             ? $this->command->call(SeedNavCommand::class)
             : Artisan::call(SeedNavCommand::class);
 
+        // No nav data is a benign skip (launch 76): nothing was seeded, and the run is not failed for it. Before any
+        // entry carries nav data (a central seed, where docs register after this seeder) the empty nav is legitimate.
+        if ($exitCode === SeedNavCommand::NO_DATA) {
+            $this->report('beam-ux: no nav data — nav skipped (nothing seeded).');
+
+            return;
+        }
+
         // The manifest records thrown failures; discarding this exit would count a failed nav as seeded.
         if ($exitCode !== SeedNavCommand::SUCCESS) {
             throw new RuntimeException("splicewire:beam:ux:seed-nav exited {$exitCode}.");

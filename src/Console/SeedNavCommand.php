@@ -26,6 +26,15 @@ use Splicewire\Beam\Ux\Nav\NavSource;
  */
 class SeedNavCommand extends Command
 {
+    /**
+     * A DERIVED nav source resolved no rows: a benign skip, NOT a failure (launch 76). It is legitimate whenever
+     * seeding runs before any entry carries nav data, e.g. a central seed where only the realm root exists and the
+     * docs register later. Distinct from SUCCESS so a caller ({@see \Splicewire\Beam\Ux\Database\Seeders\BeamUxSeeder})
+     * can report the nav as skipped rather than seeded; distinct from FAILURE so it is not counted as one. A DECLARED
+     * source (config or disk) that resolves no rows is still FAILURE: that is an authoring error, not "not yet".
+     */
+    public const NO_DATA = 3;
+
     protected $signature = 'splicewire:beam:ux:seed-nav {--namespace= : Disk-grouping namespace (default config beam.ux.namespace)}';
 
     protected $description = 'Seed the content nav (per-realm sitemaps) from config/disk/derived data — no hard-coded array.';
@@ -35,7 +44,17 @@ class SeedNavCommand extends Command
         $namespace = $this->namespace();
         $rows = $source->resolve($namespace);
 
+        if ($rows === [] && $source->isDerived($namespace)) {
+            // Derived and empty: no entry carries nav data YET (a central seed before the docs register). Benign.
+            $this->components->info(
+                "No nav data for namespace [{$namespace}]: no entry carries segment/realm/nav_order frontmatter yet, so nothing seeded."
+            );
+
+            return self::NO_DATA;
+        }
+
         if ($rows === []) {
+            // A DECLARED source (config('beam.ux.nav') or a nav.{yml,json}) that resolves no rows is an authoring error.
             $this->components->error(
                 "No nav data for namespace [{$namespace}] — set config('beam.ux.nav'), author resources/beam-ux/nav.{yml,json}, or register entries with segment/realm/nav_order frontmatter first."
             );

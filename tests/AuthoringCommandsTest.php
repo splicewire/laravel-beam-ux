@@ -5,8 +5,11 @@ namespace Splicewire\Beam\Ux\Tests;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Schema;
+use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Storage\StorageDriver;
 use Splicewire\Beam\Storage\StorageItem;
+use Splicewire\Beam\Ux\Console\SeedNavCommand;
+use Splicewire\Beam\Ux\Database\Seeders\BeamUxSeeder;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Storage\StorageDriverResolver;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -219,9 +222,91 @@ class AuthoringCommandsTest extends TestCase
         Config::set('beam.ux.namespace', 'demo');
         Config::set('beam.ux.nav', []);
 
+        // Exactly FAILURE (launch 76): a declared source with no rows is an authoring error, never the benign NO_DATA.
         $this->artisan('splicewire:beam:ux:seed-nav')
             ->expectsOutputToContain('No nav data for namespace [demo]')
-            ->assertFailed();
+            ->assertExitCode(SeedNavCommand::FAILURE);
+    }
+
+    // launch 76, the ticket's scenario: a central seed (namespace '', no config, no disk file, so DERIVED) where the only
+    // entry is the realm root, which carries no segment. The docs register later, so the empty nav is benign.
+    public function test_seed_nav_answers_a_derived_empty_nav_with_no_data_and_writes_nothing(): void
+    {
+        $this->assertTrue(defined(SeedNavCommand::class.'::NO_DATA'), 'SeedNavCommand::NO_DATA (launch 76)');
+        Config::set('beam.ux.namespace', '');
+        Config::set('beam.ux.nav', null);
+        $root = BeamUxEntry::rootFor('site');
+        $before = BeamUxEntry::query()->count();
+
+        $this->artisan('splicewire:beam:ux:seed-nav')
+            ->expectsOutputToContain('nothing seeded')
+            ->assertExitCode(SeedNavCommand::NO_DATA);
+
+        $this->assertSame($before, BeamUxEntry::query()->count(), 'a derived empty nav writes no entry');
+        $this->assertSame($root->nav_order, $root->fresh()->nav_order, 'the realm root is not restamped');
+    }
+
+    // launch 76 re-review: a nav file that is PRESENT but does not decode to rows is a DECLARED source gone wrong, never the
+    // derived "no data yet" skip. At base each of these failed loudly; they must still fail, exactly FAILURE, not NO_DATA.
+    public function test_seed_nav_fails_loudly_for_a_present_nav_file_that_does_not_decode(): void
+    {
+        $dir = sys_get_temp_dir().'/beam-ux-nav-'.bin2hex(random_bytes(6));
+        mkdir($dir);
+        Config::set('filesystems.disks.navprobe', ['driver' => 'local', 'root' => $dir]);
+        Config::set('beam.ux.storage.mirror_disk', 'navprobe');
+        Config::set('beam.ux.namespace', '');
+        Config::set('beam.ux.nav', null);
+        BeamUxEntry::rootFor('site');
+
+        try {
+            foreach ([
+                'nav.json' => "[{\"slug\": \"home\"},]",   // trailing comma: json_decode gives null
+                'nav.yml' => '',                           // empty
+                'nav.yaml' => "# only a comment\n",        // comments-only
+            ] as $name => $body) {
+                file_put_contents("{$dir}/{$name}", $body);
+
+                $this->artisan('splicewire:beam:ux:seed-nav')
+                    ->expectsOutputToContain('No nav data for namespace []')
+                    ->assertExitCode(SeedNavCommand::FAILURE);
+
+                unlink("{$dir}/{$name}");
+            }
+        } finally {
+            array_map('unlink', glob("{$dir}/*") ?: []);
+            rmdir($dir);
+        }
+    }
+
+    public function test_seed_nav_fails_loudly_for_a_non_array_nav_config(): void
+    {
+        Config::set('beam.ux.namespace', '');
+        Config::set('beam.ux.nav', 'not-a-nav');
+        BeamUxEntry::rootFor('site');
+
+        $this->artisan('splicewire:beam:ux:seed-nav')
+            ->expectsOutputToContain('No nav data for namespace []')
+            ->assertExitCode(SeedNavCommand::FAILURE);
+    }
+
+    // The same scenario through splicewire:beam:seed with the REAL registered step: the run passes with 0 FAILED and the
+    // step's skip line. The manifest step still reads seeded (seedRealmRoot provisions the root in the same step); a
+    // 'skipped (no data)' bucket is a laravel-beam follow-up.
+    public function test_the_beam_seed_run_passes_a_derived_empty_nav_with_the_skip_line(): void
+    {
+        Config::set('beam.ux.namespace', '');
+        Config::set('beam.ux.nav', null);
+        Config::set('beam.ux.seed_nav', true);
+        $manifest = new BeamSeedManifest;
+        $manifest->register('splicewire/laravel-beam-ux', BeamUxSeeder::class);
+        $this->app->instance(BeamSeedManifest::class, $manifest);
+
+        $this->artisan('splicewire:beam:seed')
+            ->expectsOutputToContain('no nav data — nav skipped (nothing seeded)')
+            ->expectsOutputToContain('0 FAILED')
+            ->assertSuccessful();
+
+        $this->assertSame(1, BeamUxEntry::query()->count(), 'only the realm root the same step provisions');
     }
 
     public function test_seed_nav_derives_from_entry_frontmatter_when_no_config_or_disk(): void
