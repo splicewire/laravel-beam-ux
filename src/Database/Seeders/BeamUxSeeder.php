@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Artisan;
+use RuntimeException;
 use Splicewire\Beam\Seed\BeamSeedManifest;
 use Splicewire\Beam\Ux\Console\SeedNavCommand;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
@@ -61,13 +62,14 @@ class BeamUxSeeder extends Seeder
             return;
         }
 
-        if ($this->command !== null) {
-            $this->command->call(SeedNavCommand::class);
+        $exitCode = $this->command !== null
+            ? $this->command->call(SeedNavCommand::class)
+            : Artisan::call(SeedNavCommand::class);
 
-            return;
+        // The manifest records thrown failures; discarding this exit would count a failed nav as seeded.
+        if ($exitCode !== SeedNavCommand::SUCCESS) {
+            throw new RuntimeException("splicewire:beam:ux:seed-nav exited {$exitCode}.");
         }
-
-        Artisan::call(SeedNavCommand::class);
     }
 
     private function report(string $message): void
