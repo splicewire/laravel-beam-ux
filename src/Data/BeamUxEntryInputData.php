@@ -16,6 +16,8 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
+use Splicewire\Beam\Ux\Schema\EnumValueLabels;
+use Splicewire\Beam\Ux\Type\UxType;
 use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 
 /**
@@ -50,7 +52,8 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
     public const CREATABLE_TYPES = ['page', 'component', 'theme'];
 
     public function __construct(
-        #[Title('Type'), In(self::CREATABLE_TYPES)]
+        // localization 23c: the create form's options read each type's label (UxType::label(), translated).
+        #[Title('Type'), In(self::CREATABLE_TYPES), EnumValueLabels(UxType::class)]
         public string $type,
         #[Title('Title')]
         public string $title,
@@ -90,7 +93,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             parentId: $entry->parent_id,
             segment: $entry->segment,
             navOrder: $entry->nav_order,
-            fileLanguage: $entry->type === \Splicewire\Beam\Ux\Type\UxType::Page ? $entry->format?->value : null,
+            fileLanguage: $entry->type === UxType::Page ? $entry->format?->value : null,
             componentKind: $entry->getAttribute('component_kind')?->value,
         );
     }
@@ -182,7 +185,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             && $this->componentKind !== ($current->getAttribute('component_kind')?->value ?? 'source')) {
             throw \Splicewire\Beam\Localization\CodedValidationException::for('componentKind', \Splicewire\Beam\Ux\Publish\EntryError::ComponentKindLocked);
         }
-        if ($current?->type === \Splicewire\Beam\Ux\Type\UxType::Page) {
+        if ($current?->type === UxType::Page) {
             $format = $this->fileLanguage === null ? $current->getAttribute('format') : \Splicewire\Beam\Ux\Format\UxFormat::tryFrom($this->fileLanguage);
             foreach (['title' => $this->title, 'parent_id' => $this->parentId, 'segment' => $this->segment, 'nav_order' => $this->navOrder, 'format' => $format] as $column => $value) {
                 if ($current->getAttribute($column) !== $value) {

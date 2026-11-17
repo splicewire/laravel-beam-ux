@@ -55,9 +55,10 @@ class ThemeSchemaLocalizationTest extends TestCase
         $this->pseudo();
         $marked = $this->texts($this->editorSchema());
 
-        // The entry title, canvas and site: their titles, descriptions and every token's description.
+        // The entry title, canvas and site: their titles, descriptions and every token's description, and (localization
+        // 23c) every token's title: 11 canvas + 17 site.
         $this->assertCount(count($english), $marked);
-        $this->assertCount(1 + (2 + 11) + (2 + 17), $marked);
+        $this->assertCount(1 + (2 + 11 + 11) + (2 + 17 + 17), $marked);
         foreach ($marked as $text) {
             $this->assertTrue(PseudoLocale::isMarked($text), $text);
         }

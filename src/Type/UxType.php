@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Type;
 
+use Schemastud\DataSchemas\Contracts\ProvidesEnumLabel;
 use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
@@ -23,7 +24,7 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *
  * @api
  */
-enum UxType: string
+enum UxType: string implements ProvidesEnumLabel
 {
     /** Wraps other renderings — a chrome shell, not a component. */
     case Layout = 'layout';
@@ -39,4 +40,17 @@ enum UxType: string
 
     /** A theme override (central or tenant tier) — `Splicewire\Beam\Ux\Theme\ThemeResolver`. */
     case Theme = 'theme';
+
+    /**
+     * localization 23c: the type's declared (English) label, which is the value itself: exactly what forms and lists
+     * showed before (no `enumNames`, so the backing value). The schema generator emits it as `enumNames` (an enum-typed
+     * property, and the string properties that name this enum through {@see \Splicewire\Beam\Ux\Schema\EnumValueLabels}),
+     * and beam's SchemaText translates it ONCE, per request, from the derived key
+     * `beam-ux::enums.Splicewire/Beam/Ux/Type/UxType.cases.<Case>.label` (lang/en/enums.php). Declared English here,
+     * so no second path translates (or pseudo-marks) it again.
+     */
+    public function label(): string
+    {
+        return $this->value;
+    }
 }

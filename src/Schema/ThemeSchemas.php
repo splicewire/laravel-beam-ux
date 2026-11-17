@@ -90,7 +90,7 @@ class ThemeSchemas
             'title' => self::line('canvas.title', $locale),
             'description' => self::line('canvas.description', $locale),
             'additionalProperties' => false,
-            'properties' => [
+            'properties' => self::titled('canvas', [
                 'accent' => self::color(self::line('canvas.properties.accent', $locale), '#14803f'),
                 'accentHover' => self::color(self::line('canvas.properties.accentHover', $locale), '#0f5f2e'),
                 'editAccent' => self::color(self::line('canvas.properties.editAccent', $locale), '#35d07a'),
@@ -102,7 +102,7 @@ class ThemeSchemas
                 'muted' => self::color(self::line('canvas.properties.muted', $locale), '#83998c'),
                 'fontBody' => self::font(self::line('canvas.properties.fontBody', $locale), 'system-ui, sans-serif'),
                 'fontMono' => self::font(self::line('canvas.properties.fontMono', $locale), 'ui-monospace, monospace'),
-            ],
+            ], $locale),
         ];
     }
 
@@ -115,7 +115,7 @@ class ThemeSchemas
             'title' => self::line('shell.title', $locale),
             'description' => self::line('shell.description', $locale),
             'additionalProperties' => false,
-            'properties' => [
+            'properties' => self::titled('shell', [
                 'surface' => self::color(self::line('shell.properties.surface', $locale), '#f4f4f5'),
                 'surfaceRaised' => self::color(self::line('shell.properties.surfaceRaised', $locale), '#ffffff'),
                 'fg' => self::color(self::line('shell.properties.fg', $locale), '#1c1c1e'),
@@ -126,7 +126,7 @@ class ThemeSchemas
                 'shadow' => self::str(self::line('shell.properties.shadow', $locale), '0 8px 24px rgba(0, 0, 0, 0.16)'),
                 'font' => self::font(self::line('shell.properties.font', $locale), 'system-ui, sans-serif'),
                 'fontMono' => self::font(self::line('shell.properties.fontMono', $locale), 'ui-monospace, SFMono-Regular, Menlo, monospace'),
-            ],
+            ], $locale),
         ];
     }
 
@@ -139,7 +139,7 @@ class ThemeSchemas
             'title' => self::line('site.title', $locale),
             'description' => self::line('site.description', $locale),
             'additionalProperties' => false,
-            'properties' => [
+            'properties' => self::titled('site', [
                 'background' => self::color(self::line('site.properties.background', $locale), '#FFFFFF'),
                 'foreground' => self::color(self::line('site.properties.foreground', $locale), '#1A1A1A'),
                 'muted' => self::color(self::line('site.properties.muted', $locale), '#6B7280'),
@@ -163,7 +163,7 @@ class ThemeSchemas
                 'darkAccentHover' => self::color(self::line('site.properties.darkAccentHover', $locale), '#A9BDFF'),
                 'darkAccentForeground' => self::color(self::line('site.properties.darkAccentForeground', $locale), '#0B0F17'),
                 'darkBorder' => self::color(self::line('site.properties.darkBorder', $locale), '#262B36'),
-            ],
+            ], $locale),
         ];
     }
 
@@ -293,6 +293,11 @@ class ThemeSchemas
         // tokens.css intentionally leaves brand fonts to the host; inherit preserves that default.
         $properties['fontSans'] = self::font(self::line('docs.font_sans', $locale), 'inherit');
         $properties['fontMono'] = self::font(self::line('docs.font_mono', $locale), 'ui-monospace, monospace');
+        // localization 23c: each token's label. The docs palette's names are token names, so one line carries the
+        // name the editor showed before (seam's humanized key) as a parameter, as `docs.token` does for descriptions.
+        foreach ($properties as $key => $property) {
+            $properties[$key] = ['title' => self::line('docs.token_title', $locale, ['label' => self::humanizeKey($key)])] + $property;
+        }
 
         return ['$id' => self::DOCS_ID, 'type' => 'object', 'title' => self::line('docs.title', $locale), 'additionalProperties' => false, 'properties' => $properties];
     }
@@ -324,6 +329,40 @@ class ThemeSchemas
     public static function line(string $key, string $locale, array $replace = []): string
     {
         return (string) __('beam-ux::theme.'.$key, $replace, $locale);
+    }
+
+    /**
+     * localization 23c: each token property's label, `beam-ux::theme.<schema>.titles.<token>`, in $locale, placed before
+     * its other keywords. Before this the property had no `title`, so the form labelled it with seam's humanized key
+     * ({@see self::humanizeKey()}); the English lines ARE that text, so an English reader sees the same label.
+     *
+     * @param  array<string, array<string, mixed>>  $properties
+     * @return array<string, array<string, mixed>>
+     */
+    private static function titled(string $schema, array $properties, string $locale): array
+    {
+        foreach ($properties as $key => $property) {
+            $properties[$key] = ['title' => self::line($schema.'.titles.'.$key, $locale)] + $property;
+        }
+
+        return $properties;
+    }
+
+    /**
+     * The label a form drew for an untitled property: @schemastud/seam's `humanizeKey` (display-label.ts), byte for byte.
+     * Split camelCase and `_ - .`, lowercase every word, drop a trailing `id`, capitalise the first letter
+     * (`accentHover` → "Accent hover"). Used only for the docs palette's parameterised label.
+     */
+    public static function humanizeKey(string $key): string
+    {
+        $spaced = (string) preg_replace('/([a-z0-9])([A-Z])/', '$1 $2', $key);
+        $words = array_values(array_map('strtolower', array_filter(preg_split('/[\s_\-.]+/', $spaced) ?: [], static fn (string $w): bool => $w !== '')));
+        if (count($words) > 1 && $words[count($words) - 1] === 'id') {
+            array_pop($words);
+        }
+        $sentence = implode(' ', $words);
+
+        return $sentence === '' ? '' : strtoupper($sentence[0]).substr($sentence, 1);
     }
 
     /** @return array{type: string, format: string, description: string, default: string} */

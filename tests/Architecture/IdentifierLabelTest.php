@@ -31,7 +31,6 @@ class IdentifierLabelTest extends TestCase
         'Splicewire\Beam\Ux\Data\EntryVersionRestoreInputData',
         'Splicewire\Beam\Ux\Data\MirrorStatusRowData',
         'Splicewire\Beam\Ux\Data\SitemapHealthRowData',
-        'Splicewire\Beam\Ux\Type\UxType',
     ];
 
     public function test_every_reachable_package_class_declares_its_label_or_is_listed(): void

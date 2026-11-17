@@ -223,6 +223,14 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
             JsonDoc\PreservesJsonDocStrings::matches(...),
         );
 
+        // localization 23c: a string property limited to a labelled enum's values projects those labels (`enumNames`).
+        // Appended after the validation-attribute strategy that sets `enum`, under the estate's in_array guard
+        // (beam's TranslatedPropertyTextStrategy precedent).
+        $strategies = (array) config('data-schemas.strategies', []);
+        if (! in_array(Schema\EnumValueLabelsStrategy::class, $strategies, true)) {
+            config(['data-schemas.strategies' => [...$strategies, Schema\EnumValueLabelsStrategy::class]]);
+        }
+
         // BeamUxEntry implements WorkflowManaged, so EloquentAwaitingStore writes
         // `beam_workflow_awaiting.subject_type = $subject->getMorphClass()`. Unaliased it was
         // storing the raw FQCN in that column, and the alias is also the permission-token prefix
