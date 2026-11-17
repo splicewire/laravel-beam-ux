@@ -16,6 +16,7 @@ use Splicewire\Beam\Dashboard\RealmDashboard;
 use Splicewire\Beam\Dashboard\SectionOverview;
 use Splicewire\Beam\Localization\ShellText;
 use Splicewire\Beam\Nav\NavAudience;
+use Splicewire\Beam\Nav\NavGroupMatch;
 use Splicewire\Beam\Nav\NavSection;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
@@ -309,6 +310,29 @@ class NavSectionProjector
         return $rows;
     }
 
+    /**
+     * A seat's groups with each PACKAGE group's label in the request's language (analytics-area 22; coord 00:37Z, the
+     * static-row idiom of {@see localizedRows()}): keyed as a nav route title (`<ns>::nav.routes.<name>.title`) in the
+     * namespace of the seat that declared the group ({@see NavSection::groupRegistrant()}), where `<name>` is the group
+     * tab's own realm-free route name ({@see NavGroupMatch::routeName()} on a root realm, e.g. `analytics-traffic.section`):
+     * a nav key carries no realm (ruling 01 §3). A HOST's group (no registrant) keeps the label the host wrote.
+     *
+     * @return list<array{label: string, match: string}>
+     */
+    private static function localizedGroups(NavSection $section): array
+    {
+        $shell = self::shell();
+
+        $groups = [];
+        foreach ($section->groups as $i => $group) {
+            $by = $section->groupRegistrant($i);
+            $groups[] = $by === null ? $group
+                : ['label' => $shell->navRouteTitle(NavGroupMatch::resolve($group['match'], '/')->routeName(), $by, $group['label'])] + $group;
+        }
+
+        return $groups;
+    }
+
     private static function shell(): ShellText
     {
         return app(ShellText::class);
@@ -446,11 +470,14 @@ class NavSectionProjector
         $node = InvocableNavItem::make(
             title: self::shell()->navSectionLabel($section->key, $section->registrant(), $section->label),
             invocable: FrameResourcesInvocable::NAME,
+            // analytics-area 22: a seat's declared groups ride in the input exactly as the flagship helper passes its own
+            // (`AppNavigation::section(groups:)`), so the collector folds a package's groups the way it folds a host's. Only
+            // when declared: a seat without groups keeps the input it always had, byte for byte.
             input: [
                 'section' => $section->key,
                 'realm' => $section->realm,
                 'static' => $static,
-            ],
+            ] + ($section->groups !== [] ? ['groups' => self::localizedGroups($section)] : []),
             href: $href,
             match: trim($href, '/').'*',
             icon: $section->icon,

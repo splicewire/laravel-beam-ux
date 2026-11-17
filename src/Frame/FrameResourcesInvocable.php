@@ -13,6 +13,7 @@ use Schemastud\Frame\Contracts\ResourceRegistry;
 use Schemastud\Frame\Registry\ResourceDefinition;
 use Splicewire\Beam\Authorization\ResourceVisibility;
 use Splicewire\Beam\Authorization\SeatGate;
+use Splicewire\Beam\Nav\NavGroupMatch;
 use Splicewire\Beam\Particle\ListRouteName;
 use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
@@ -127,14 +128,90 @@ class FrameResourcesInvocable implements Invocable
         // static authored order) and an undeclared `navOrder` still trails.
         usort($children, fn (array $a, array $b): int => $a['order'] <=> $b['order']);
 
-        return ['items' => array_map(function (array $child) use ($realm): array {
+        $items = array_map(function (array $child) use ($realm): array {
             $link = $child['link'];
             $resolution = $this->seatGate->resolve((string) $link->routeName, $realm);
 
             return $resolution === null
                 ? $link->toArray()
                 : [...$link->toArray(), 'meta' => [SeatGate::META => $resolution]];
-        }, $children)];
+        }, $children);
+
+        // A seat's declared groups fold AFTER the one sort, so a group lands where its first member sorted (analytics-area
+        // 22): the same fold the flagship's own collector does for a host's groups. No groups, no change.
+        $groups = is_array($input['groups'] ?? null) ? $input['groups'] : [];
+
+        return ['items' => $this->foldGroups($items, $groups, $realm)];
+    }
+
+    /**
+     * Fold the children a declared group takes into one synthesized group tab, in place (analytics-area 22, owner ruling
+     * 2026-11-12; root ruling f46b2b53), exactly as the flagship's `FrameResourcesInvocable::foldGroups()` does for a host's
+     * groups. Which children a group takes is {@see NavGroupMatch}'s one reading of `match`, resolved against this realm's
+     * route base. The first group that takes a child wins it.
+     *
+     * The tab is a GROUP HEADER: its routeName ends in `.section`, so IaInvariants I6 exempts it from needing its own
+     * resolvable seat gate (it binds to no leaf; its members carry theirs). It lands on its first member's href, has no
+     * Overview (APP-4), and keeps that member's sorted position. A group that takes no child emits nothing. The rail and
+     * the overview cards don't read this tree's nesting, so a grouped leaf keeps both.
+     *
+     * @param  array<int, array<string, mixed>>  $items  serialized children, in final order
+     * @param  array<int, mixed>  $groups  the seat's `{label, match}` groups, labels already localized by the projector
+     * @return array<int, array<string, mixed>>
+     */
+    private function foldGroups(array $items, array $groups, string $realm): array
+    {
+        $routeBase = $this->realms->tryResolve($realm)?->routeBase ?? '/';
+        $matches = [];
+        foreach (array_values($groups) as $group) {
+            if (is_array($group) && is_string($group['label'] ?? null) && is_string($group['match'] ?? null)
+                && NavGroupMatch::isWellFormed($group['match'])) {
+                $matches[] = ['label' => $group['label'], 'match' => NavGroupMatch::resolve($group['match'], $routeBase)];
+            }
+        }
+        if ($matches === []) {
+            return $items;
+        }
+
+        $groupOf = static function (array $item) use ($matches): ?int {
+            $href = $item['href'] ?? null;
+            if (! is_string($href)) {
+                return null;
+            }
+            foreach ($matches as $index => $group) {
+                if ($group['match']->takes($href)) {
+                    return $index;
+                }
+            }
+
+            return null;
+        };
+
+        $out = [];
+        $emitted = [];
+        foreach ($items as $item) {
+            $group = $groupOf($item);
+            if ($group === null) {
+                $out[] = $item;
+
+                continue;
+            }
+            if (isset($emitted[$group])) {
+                continue; // already folded into the tab emitted at the first member's position
+            }
+
+            $members = array_values(array_filter($items, static fn (array $i): bool => $groupOf($i) === $group));
+            $tab = NavLink::make(
+                title: $matches[$group]['label'],
+                href: $members[0]['href'],
+                match: $matches[$group]['match']->linkMatch(),
+                routeName: $matches[$group]['match']->routeName(),
+            );
+            $out[] = [...$tab->toArray(), 'children' => $members];
+            $emitted[$group] = true;
+        }
+
+        return $out;
     }
 
     /**

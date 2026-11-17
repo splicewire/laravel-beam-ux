@@ -326,6 +326,84 @@ class FrameResourcesCollectorTest extends TestCase
         $this->assertSame(['Tenants', 'Packs', 'Plans', 'Hooks'], $anonymous);
     }
 
+    // ---------------------------------------------------------------- declared groups (analytics-area 22)
+
+    /** The collector's items for `platform` in `operator` with these groups in the seat's input. */
+    private function grouped(array $groups, array $static = []): array
+    {
+        $this->app->instance(NavContext::class, new NavContext(user: null, attributes: ['realm' => 'operator']));
+
+        return $this->app->make(FrameResourcesInvocable::class)
+            ->invoke(['section' => 'platform', 'realm' => 'operator', 'static' => $static, 'groups' => $groups])['items'];
+    }
+
+    public function test_a_seat_without_groups_collects_exactly_as_before(): void
+    {
+        $static = [['title' => 'Zeta', 'href' => '/operator/zeta']];
+
+        $before = $this->invoke('platform', 'operator', $static);
+        $after = $this->grouped([], $static);
+
+        // The WIRE projection, byte for byte: the serialized items with the server-only meta stripped, no canonicalization,
+        // so key order and scalar types count (build-qa 116e1ad0). The meta carries fresh objects per invocation, so it is
+        // compared apart, by value.
+        $this->assertSame(json_encode(self::wire($before), JSON_THROW_ON_ERROR), json_encode(self::wire($after), JSON_THROW_ON_ERROR));
+        $this->assertEquals(array_column($before, 'meta'), array_column($after, 'meta'));
+    }
+
+    /** Serialized nav items as the wire carries them: every `meta` key removed, at any depth, nothing else touched. */
+    private static function wire(array $items): array
+    {
+        return array_map(static function (array $item): array {
+            unset($item['meta']);
+            if (isset($item['children']) && is_array($item['children'])) {
+                $item['children'] = self::wire($item['children']);
+            }
+
+            return $item;
+        }, $items);
+    }
+
+    public function test_a_path_group_is_realm_relative_and_folds_its_members_into_one_tab_where_the_first_sorted(): void
+    {
+        $items = $this->grouped([['label' => 'Scaffolding', 'match' => 'scaffolding']]);
+
+        $this->assertSame(['Tenants', 'Scaffolding', 'Plans', 'Hooks'], array_column($items, 'title'));
+        $tab = $items[1];
+        $this->assertSame('/operator/scaffolding/packs', $tab['href'], 'it lands on its first member; there is no Overview');
+        $this->assertSame('operator/scaffolding*', $tab['match']);
+        $this->assertSame('operator.scaffolding.section', $tab['routeName'], 'a group HEADER (IaInvariants I6)');
+        $this->assertSame(['Packs'], array_column($tab['children'], 'title'));
+    }
+
+    public function test_a_trailing_star_folds_a_raw_prefix_and_leaves_the_page_it_extends(): void
+    {
+        $items = $this->grouped([['label' => 'Report panels', 'match' => 'report-*']], [
+            ['title' => 'Report', 'href' => '/operator/report', 'navOrder' => 10],
+            ['title' => 'Report trend', 'href' => '/operator/report-trend', 'navOrder' => 11],
+            ['title' => 'Report pages', 'href' => '/operator/report-pages', 'navOrder' => 12],
+        ]);
+
+        $titles = array_column($items, 'title');
+        $this->assertContains('Report', $titles, 'the page the panels extend keeps its own tab');
+        $this->assertNotContains('Report trend', $titles);
+        $tab = $items[array_search('Report panels', $titles, true)];
+        $this->assertSame(['Report trend', 'Report pages'], array_column($tab['children'], 'title'));
+        $this->assertSame('operator/report-*', $tab['match']);
+        $this->assertSame('operator.report.section', $tab['routeName']);
+    }
+
+    public function test_a_group_that_takes_nothing_draws_nothing_and_the_first_group_wins_a_child(): void
+    {
+        $items = $this->grouped([
+            ['label' => 'Nothing here', 'match' => 'no-such-path'],
+            ['label' => 'First', 'match' => 'scaffolding'],
+            ['label' => 'Second', 'match' => 'scaffolding/packs'],
+        ]);
+
+        $this->assertSame(['Tenants', 'First', 'Plans', 'Hooks'], array_column($items, 'title'));
+    }
+
     // ---------------------------------------------------------------- the href join
 
     public function test_a_resource_href_comes_from_the_leaf_its_route_name_names(): void

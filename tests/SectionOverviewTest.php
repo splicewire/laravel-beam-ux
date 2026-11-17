@@ -299,6 +299,139 @@ class SectionOverviewTest extends TestCase
         $this->assertNotContains('reports.section', $routes);
     }
 
+    /**
+     * analytics-area 22 (review-r1 b1ddaadb): a nav group tab is minted from its first member BEFORE the host's gate stages
+     * run. Through the REAL pipeline (NavRegistry's gate, then the contribution's prune) a stage that removes that member
+     * must leave the tab landing on the first member that survived, and a stage that removes every member must leave no
+     * tab. Statics carry no route name, so nothing earlier (listability, the unbound prune) can drop a member: only the stage.
+     */
+    private function groupedSeat(): void
+    {
+        $this->app->make(NavSectionRegistry::class)->register(new NavSection(
+            key: 'grouped', realm: 'operator', label: 'Grouped', icon: 'ChartBar', href: '/operator/grouped', order: 30,
+            entitlement: null, permission: null, audience: NavAudience::Product,
+            static: [
+                ['title' => 'Report A', 'href' => '/operator/report-a', 'navOrder' => 1],
+                ['title' => 'Report B', 'href' => '/operator/report-b', 'navOrder' => 2],
+                ['title' => 'Other', 'href' => '/operator/other', 'navOrder' => 3],
+            ],
+            groups: [['label' => 'Panels', 'match' => 'report-*']],
+        ), by: self::class);
+    }
+
+    /** @return list<array<string, mixed>> the `grouped` seat's children as the inner contribution emits them */
+    private function groupedChildren(): array
+    {
+        Route::get('ov-grouped-probe', function (): array {
+            $items = app(FrameNavContributor::class)->inner()->contributeNav('operator')['nav']['items'];
+
+            return collect($items)->firstWhere('routeName', 'grouped.section')['children'] ?? [];
+        });
+        app('router')->getRoutes()->refreshNameLookups();
+
+        return $this->getJson('ov-grouped-probe')->assertOk()->json();
+    }
+
+    public function test_a_group_lands_on_its_first_member_when_every_member_survives(): void
+    {
+        $this->groupedSeat();
+        $this->actingAs($this->staff());
+
+        $tab = collect($this->groupedChildren())->firstWhere('title', 'Panels');
+
+        $this->assertSame('/operator/report-a', $tab['href']);
+        $this->assertSame(['Report A', 'Report B'], array_column($tab['children'], 'title'));
+    }
+
+    public function test_a_group_whose_first_member_a_gate_stage_removes_lands_on_the_first_survivor(): void
+    {
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => $node->title !== 'Report A'));
+        $this->groupedSeat();
+        $this->actingAs($this->staff());
+
+        $tab = collect($this->groupedChildren())->firstWhere('title', 'Panels');
+
+        $this->assertSame(['Report B'], array_column($tab['children'], 'title'));
+        $this->assertSame('/operator/report-b', $tab['href'], 'the tab lands where this reader can go, not on the removed member');
+    }
+
+    public function test_a_group_whose_every_member_a_gate_stage_removes_is_not_drawn(): void
+    {
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => ! in_array($node->title, ['Report A', 'Report B'], true)));
+        $this->groupedSeat();
+        $this->actingAs($this->staff());
+
+        $this->assertSame(['Other'], array_column($this->groupedChildren(), 'title'));
+    }
+
+    /** The inner contribution's whole item tree for `operator`, asked inside a request as the reader. */
+    private function operatorTree(): array
+    {
+        Route::get('ov-tree-probe', fn (): array => app(FrameNavContributor::class)->inner()->contributeNav('operator')['nav']['items']);
+        app('router')->getRoutes()->refreshNameLookups();
+
+        return $this->getJson('ov-tree-probe')->assertOk()->json();
+    }
+
+    /** The first node anywhere in `$items` with this route name, depth first. */
+    private static function nodeNamed(array $items, string $routeName): ?array
+    {
+        foreach ($items as $item) {
+            if (($item['routeName'] ?? null) === $routeName) {
+                return $item;
+            }
+            if (($found = self::nodeNamed($item['children'] ?? [], $routeName)) !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
+    private function developerSeat(string $key, array $groups = []): void
+    {
+        $this->app->make(NavSectionRegistry::class)->register(new NavSection(
+            key: $key, realm: 'operator', label: ucfirst($key), icon: 'Code', href: '/operator/'.$key, order: 40,
+            entitlement: null, permission: null, audience: NavAudience::Developer,
+            static: [
+                ['title' => 'Report A', 'href' => '/operator/'.$key.'/report-a', 'navOrder' => 1],
+                ['title' => 'Report B', 'href' => '/operator/'.$key.'/report-b', 'navOrder' => 2],
+            ],
+            groups: $groups,
+        ), by: self::class);
+    }
+
+    /**
+     * review-r1 98e0e49c / build-qa (HIGH): a Developer seat sits one level down, under beam-ux's `developer.section`
+     * wrapper, with children. Without groups it is an ordinary seat: its authored href stands, byte for byte.
+     */
+    public function test_an_ungrouped_developer_seat_keeps_its_authored_href(): void
+    {
+        $this->developerSeat('tools');
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => $node->title !== 'Report A'));
+        $this->actingAs($this->staff());
+
+        $tools = self::nodeNamed($this->operatorTree(), 'tools.section');
+
+        $this->assertNotNull($tools, 'the Developer seat is drawn under the wrapper');
+        $this->assertSame('/operator/tools', $tools['href']);
+        $this->assertSame(['Report B'], array_column($tools['children'], 'title'));
+    }
+
+    public function test_a_group_inside_a_developer_seat_lands_on_its_first_survivor(): void
+    {
+        $this->developerSeat('devgrouped', [['label' => 'Panels', 'match' => 'devgrouped/report-*']]);
+        $this->app->make(NavGate::class)->through(new OvStage(fn (NavNode $node): bool => $node->title !== 'Report A'));
+        $this->actingAs($this->staff());
+
+        $seat = self::nodeNamed($this->operatorTree(), 'devgrouped.section');
+        $tab = collect($seat['children'])->firstWhere('title', 'Panels');
+
+        $this->assertSame('/operator/devgrouped', $seat['href'], 'the seat itself is never retargeted');
+        $this->assertSame(['Report B'], array_column($tab['children'], 'title'));
+        $this->assertSame('/operator/devgrouped/report-b', $tab['href']);
+    }
+
     /** @return list<string|null> the top-level route names the inner contribution emits, asked inside a request as the reader */
     private function innerRoutes(): array
     {

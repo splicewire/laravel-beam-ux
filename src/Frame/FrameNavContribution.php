@@ -13,6 +13,7 @@ use Rushing\Popcorn\Registries\RecordsRegistrants;
 use Schemastud\Frame\Contracts\FrameNavContributor;
 use Splicewire\Beam\Dashboard\SectionOverview;
 use Splicewire\Beam\Localization\ShellText;
+use Splicewire\Beam\Nav\NavGroupMatch;
 use Splicewire\Beam\Nav\NavSectionRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 
@@ -73,7 +74,7 @@ class FrameNavContribution implements FrameNavContributor
         $nav = $this->navigation($realm, $context);
 
         if ($this->navigations->tryResolve($realm) instanceof DeclaredSectionNavigation) {
-            $nav = $this->pruneUnbound($routeContext, $nav);
+            $nav = $this->pruneUnbound($routeContext, $nav, $realm);
         }
 
         $this->validator->assert($routeContext, $nav);
@@ -165,7 +166,7 @@ class FrameNavContribution implements FrameNavContributor
      * have gated every child, so it is the rail's own answer to "is there anything here for this reader", and nothing else
      * asks it on the overview's behalf.
      */
-    protected function pruneUnbound(array $routeContext, NavTree $nav): NavTree
+    protected function pruneUnbound(array $routeContext, NavTree $nav, ?string $realm = null): NavTree
     {
         $bound = [];
 
@@ -173,16 +174,52 @@ class FrameNavContribution implements FrameNavContributor
             $bound[$entry->routeName] = true;
         }
 
-        return NavTree::make($this->keepBound($nav->items, $bound, $this->overviewRoutes()));
+        $groupTabs = $realm === null ? [] : $this->groupTabs($realm);
+
+        return NavTree::make($this->keepBound($nav->items, $bound, $this->overviewRoutes(), $groupTabs));
+    }
+
+    /**
+     * Every nav GROUP tab the fold can draw in `$realm` ({@see FrameResourcesInvocable::foldGroups()}, analytics-area 22),
+     * keyed by the route name of the SEAT it sits directly under: the seat's `{key}.section`, or its overview's list route
+     * when the seat lands on one ({@see NavSectionProjector}). Each tab is named by the group's declared identity, its
+     * {@see NavGroupMatch::routeName()} against the realm's route base, exactly as the fold mints it. The build's round
+     * trip strips server-only meta, so the tab is recognised by what was DECLARED, never inferred from the tree's shape
+     * (review-r1 98e0e49c, build-qa: a Developer wrapper puts ordinary seats one level down).
+     *
+     * @return array<string, array<string, true>>  seat route name => group tab route names
+     */
+    private function groupTabs(string $realm): array
+    {
+        if (! app()->bound(NavSectionRegistry::class)) {
+            return [];
+        }
+        $routeBase = $this->realms->tryResolve($realm)?->routeBase ?? '/';
+
+        $tabs = [];
+        foreach (app(NavSectionRegistry::class)->for($realm) as $section) {
+            foreach ($section->groups as $group) {
+                if (! NavGroupMatch::isWellFormed($group['match'])) {
+                    continue;
+                }
+                $name = NavGroupMatch::resolve($group['match'], $routeBase)->routeName();
+                $tabs[$section->key.'.section'][$name] = true;
+                $tabs[SectionOverview::routeNameFor($realm, $section->key)][$name] = true;
+            }
+        }
+
+        return $tabs;
     }
 
     /**
      * @param  array<int, NavNode>  $nodes
      * @param  array<string, true>  $bound
      * @param  array<string, true>  $overviews  the list route of every flagged seat's overview, which an empty seat is bound to
+     * @param  array<string, array<string, true>>  $groupTabs  {@see groupTabs()}
+     * @param  array<string, true>  $tabsHere  the group tabs the fold can have drawn at THIS level: the parent seat's, else none
      * @return array<int, NavNode>
      */
-    private function keepBound(array $nodes, array $bound, array $overviews): array
+    private function keepBound(array $nodes, array $bound, array $overviews, array $groupTabs = [], array $tabsHere = []): array
     {
         $kept = [];
 
@@ -193,7 +230,17 @@ class FrameNavContribution implements FrameNavContributor
                 continue;
             }
 
-            $children = $this->keepBound($node->children, $bound, $overviews);
+            $children = $this->keepBound($node->children, $bound, $overviews, $groupTabs, $groupTabs[(string) $name] ?? []);
+
+            // A nav GROUP tab lands on its first SURVIVING member (analytics-area 22; review-r1 b1ddaadb). The fold minted
+            // its href from its first member BEFORE the host's gate stages ran, and they (and the unbound prune above)
+            // remove children without retargeting the parent: a reader denied that member would click into it. This
+            // runs after both, so the tab now lands where this reader can go. A group left with no member is dropped by
+            // the empty-`.section` rule below. Only a tab the fold drew: a declared group's name, directly under its seat.
+            if ($children !== [] && isset($tabsHere[(string) $name])) {
+                $node = clone $node;
+                $node->href = $children[0]->href;
+            }
 
             // An EMPTY contributed seat is dropped. A package cannot know which realm its section
             // belongs to at a given host — realm membership is the host's `config/frame.realms` list,
