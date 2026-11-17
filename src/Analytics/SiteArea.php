@@ -28,7 +28,12 @@ use Splicewire\Beam\Ux\Diagnostics\DiagnosticsAbility;
  *  - Indexed pages = Sitemap health `filter[type]=page&filter[indexed]=true` (Install), or a Site map row the feed lists,
  *    `search.listed` (Tenant);
  *  - Sitemap issues = published pages the feed leaves out, in either source;
- *  - Redirects = the Redirects list;
+ *  - Redirects = the Redirects list (Install), or, labelled **Redirects to your pages**, the sum of the Site map rows'
+ *    inbound `redirects.count` (Tenant, analytics-area 29): the Redirects that lead to one of the tenant's own pages, each
+ *    counted once, at the page its guest walk reaches, or, when the walk stops short (a dead end, a loop, too long), at
+ *    the page its last Redirect names. A Redirect whose target is a Record, another site or a path no page answers is not
+ *    counted there. The tenant's Redirects live on its own connection, so this needs no read of the
+ *    `ux.author` Redirects list, which a tenant principal may not hold;
  *  - Mirror state = Site health per `filter[state]=…` (Install only).
  *
  * A list this viewer may not read here draws no figure. The area's own gate is {@see SiteAreaAbility} (analytics-area 20): in
@@ -85,15 +90,21 @@ final class SiteArea implements AnalyticsArea
                 $figures[] = new AnalyticsFigureData(id: 'published', label: __('beam-ux::analytics.site.figures.published'), value: count($published), href: $href);
                 $figures[] = new AnalyticsFigureData(id: 'indexed', label: __('beam-ux::analytics.site.figures.indexed'), value: count(array_filter($pages, fn (array $row): bool => (($row['search']['listed'] ?? false) === true))), href: $href);
                 $figures[] = new AnalyticsFigureData(id: 'sitemap-issues', label: __('beam-ux::analytics.site.figures.sitemap-issues'), value: count(array_filter($published, fn (array $row): bool => (($row['search']['listed'] ?? true) === false))), href: $href);
+
+                // analytics-area 29: the tenant's Redirects figure counts from the same Site map rows: each page carries the
+                // Redirects whose guest walk reaches it (`redirects.count`), so the sum is the Redirects that lead to the
+                // tenant's own pages, each counted once. It links to the Redirects list where this realm's rail shows one,
+                // else to the Site map, where each page lists its inbound Redirects.
+                $figures[] = new AnalyticsFigureData(id: 'redirects', label: __('beam-ux::analytics.site.figures.redirects-to-pages'), value: array_sum(array_map(fn (array $row): int => (int) ($row['redirects']['count'] ?? 0), $pages)), href: $this->destinations->href(self::REDIRECTS) ?? $href);
             }
         }
 
-        $redirects = $this->destinations->rows(self::REDIRECTS);
-        if ($redirects !== null) {
-            $figures[] = new AnalyticsFigureData(id: 'redirects', label: __('beam-ux::analytics.site.figures.redirects'), value: count($redirects), href: $this->destinations->href(self::REDIRECTS));
-        }
-
         if ($reading->scope->isInstall()) {
+            $redirects = $this->destinations->rows(self::REDIRECTS);
+            if ($redirects !== null) {
+                $figures[] = new AnalyticsFigureData(id: 'redirects', label: __('beam-ux::analytics.site.figures.redirects'), value: count($redirects), href: $this->destinations->href(self::REDIRECTS));
+            }
+
             $entries = $this->destinations->rows(self::SITE_HEALTH);
             if ($entries !== null) {
                 $figures[] = new AnalyticsFigureData(id: 'mirror', label: __('beam-ux::analytics.site.figures.mirror'), value: $this->mirror($entries), href: $this->destinations->href(self::SITE_HEALTH));

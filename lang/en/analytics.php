@@ -11,6 +11,8 @@ return [
             'indexed' => 'Indexed pages',
             'sitemap-issues' => 'Published, not in the sitemap',
             'redirects' => 'Redirects',
+            // analytics-area 29: Tenant scope's Redirects figure counts only the Redirects that lead to the tenant's own pages.
+            'redirects-to-pages' => 'Redirects to your pages',
             'mirror' => 'Mirror state',
         ],
     ],
