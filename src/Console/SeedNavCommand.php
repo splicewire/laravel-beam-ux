@@ -61,16 +61,27 @@ class SeedNavCommand extends Command
                 'type' => $row['type'],
                 'realm' => $realm,
                 'realms' => [$realm],
-                'parent_id' => null,
                 'segment' => $row['segment'],
                 'title' => $row['title'],
                 // Preserve an explicit authored order; else the derived display sequence.
                 'nav_order' => $row['nav_order'] ?? $order,
             ];
-            $entry = BeamUxEntry::firstOrCreate($attributes, array_merge($values, BeamUxEntry::publishedMarkingAttributes()));
-            // Re-seeding navigation must not publish an author's existing draft or archived page.
-            if (! $entry->wasRecentlyCreated) {
-                $entry->fill($values)->save();
+            if (isset($row['entry_id'])) {
+                // A derived row already exists: namespace, containment and realm fallbacks remain authored.
+                $entry = BeamUxEntry::findOrFail($row['entry_id']);
+                $entry->fill(['nav_order' => $values['nav_order']])->save();
+            } else {
+                // Ungrouped seeded/disk entries use NULL; older command-authored entries can use ''.
+                // Reuse either existing identity without migrating it or creating a second page.
+                $existing = $namespace === ''
+                    ? (BeamUxEntry::query()->where($attributes)->first()
+                        ?? BeamUxEntry::query()->where('slug', $row['slug'])->whereNull('namespace')->first())
+                    : null;
+                $entry = $existing ?? BeamUxEntry::firstOrCreate($attributes, array_merge($values, BeamUxEntry::publishedMarkingAttributes()));
+                // Re-seeding navigation must not publish an author's existing draft or archived page.
+                if (! $entry->wasRecentlyCreated) {
+                    $entry->fill($values)->save();
+                }
             }
 
             $title = $row['title'] ?? $row['slug'];

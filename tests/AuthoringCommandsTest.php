@@ -143,6 +143,77 @@ class AuthoringCommandsTest extends TestCase
         }
     }
 
+    public function test_default_projection_updates_existing_cross_namespace_entries_without_cloning_or_reparenting(): void
+    {
+        Config::set('beam.ux.namespace', '');
+        Config::set('beam.ux.nav', null);
+        $parent = BeamUxEntry::rootFor('site');
+        $one = BeamUxEntry::create(['slug' => 'guide', 'namespace' => 'docs', 'type' => 'page', 'realm' => 'site', 'realms' => ['site', 'account'], 'segment' => '/guide', 'title' => 'Docs guide', 'parent_id' => $parent->getKey()]);
+        $two = BeamUxEntry::create(['slug' => 'guide', 'namespace' => 'product', 'type' => 'page', 'realm' => 'site', 'segment' => '/product-guide', 'title' => 'Product guide', 'parent_id' => $parent->getKey()]);
+        BeamUxEntry::create(['slug' => 'structural', 'namespace' => 'docs', 'type' => 'template', 'realm' => 'site', 'segment' => '/not-a-page']);
+
+        $rows = app(\Splicewire\Beam\Ux\Nav\NavSource::class)->resolve('');
+        $this->assertCount(2, $rows);
+        $this->assertEqualsCanonicalizing([$one->getKey(), $two->getKey()], array_column($rows, 'entry_id'));
+        $this->artisan('splicewire:beam:ux:seed-nav')->assertSuccessful();
+        $this->artisan('splicewire:beam:ux:seed-nav')->assertSuccessful();
+
+        $this->assertSame(2, BeamUxEntry::query()->where('slug', 'guide')->count());
+        $this->assertSame('docs', $one->fresh()->namespace);
+        $this->assertSame('product', $two->fresh()->namespace);
+        $this->assertSame('Docs guide', $one->fresh()->title);
+        $this->assertSame('Product guide', $two->fresh()->title);
+        $this->assertSame($parent->getKey(), $one->fresh()->parent_id);
+        $this->assertSame($parent->getKey(), $two->fresh()->parent_id);
+        $this->assertSame(['site', 'account'], $one->fresh()->realms);
+    }
+
+    public function test_default_nav_derivation_includes_ungrouped_null_and_empty_namespace_rows(): void
+    {
+        Config::set('beam.ux.namespace', '');
+        Config::set('beam.ux.nav', null);
+        BeamUxEntry::create(['slug' => 'ungrouped', 'namespace' => null, 'type' => 'page', 'realm' => 'site', 'segment' => '/ungrouped', 'nav_order' => 10]);
+        BeamUxEntry::create(['slug' => 'legacy-empty', 'namespace' => '', 'type' => 'page', 'realm' => 'site', 'segment' => '/legacy', 'nav_order' => 20]);
+
+        $rows = app(\Splicewire\Beam\Ux\Nav\NavSource::class)->resolve('');
+
+        $this->assertSame(['ungrouped', 'legacy-empty'], array_column($rows, 'slug'));
+    }
+
+    public function test_default_config_nav_updates_an_existing_null_namespace_entry_without_a_duplicate(): void
+    {
+        Config::set('beam.ux.namespace', '');
+        $parent = BeamUxEntry::rootFor('site');
+        $entry = BeamUxEntry::create(['slug' => 'home', 'namespace' => null, 'type' => 'page', 'realm' => 'site', 'segment' => '/home', 'title' => 'Old', 'parent_id' => $parent->getKey()]);
+        Config::set('beam.ux.nav', ['home' => ['segment' => '/home', 'title' => 'Updated', 'realm' => 'site']]);
+
+        $this->artisan('splicewire:beam:ux:seed-nav')->assertSuccessful();
+
+        $this->assertSame(1, BeamUxEntry::query()->where('slug', 'home')->count());
+        $this->assertSame('Updated', $entry->fresh()->title);
+        $this->assertNull($entry->fresh()->namespace);
+        $this->assertSame($parent->getKey(), $entry->fresh()->parent_id);
+    }
+
+    public function test_explicit_namespace_nav_preserves_hierarchy_and_other_namespace_duplicate_slugs(): void
+    {
+        Config::set('beam.ux.namespace', 'docs');
+        Config::set('beam.ux.nav', null);
+        $parent = BeamUxEntry::rootFor('site');
+        $entry = BeamUxEntry::create(['slug' => 'guide', 'namespace' => 'docs', 'type' => 'page', 'realm' => 'site', 'segment' => '/guide', 'title' => 'Guide', 'parent_id' => $parent->getKey()]);
+        $other = BeamUxEntry::create(['slug' => 'guide', 'namespace' => 'other', 'type' => 'page', 'realm' => 'site', 'segment' => '/other-guide', 'title' => 'Other guide', 'nav_order' => 87]);
+
+        $rows = app(\Splicewire\Beam\Ux\Nav\NavSource::class)->resolve('docs');
+        $this->assertCount(1, $rows);
+        $this->artisan('splicewire:beam:ux:seed-nav')->assertSuccessful();
+
+        $this->assertSame(2, BeamUxEntry::query()->where('slug', 'guide')->count());
+        $this->assertSame($parent->getKey(), $entry->fresh()->parent_id);
+        $this->assertSame('docs', $entry->fresh()->namespace);
+        $this->assertSame(87, $other->fresh()->nav_order);
+        $this->assertSame('Other guide', $other->fresh()->title);
+    }
+
     public function test_seed_nav_fails_when_the_declared_source_resolves_no_rows(): void
     {
         Config::set('beam.ux.namespace', 'demo');
