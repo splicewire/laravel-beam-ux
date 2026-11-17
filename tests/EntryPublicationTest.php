@@ -2212,6 +2212,182 @@ class EntryPublicationTest extends TestCase
         $this->assertNotSame('published', $entry->fresh()->workflow_marking);
     }
 
+    // ---- Launch ticket 75 (HIGH, 74's F8): the entry workflow's `publish` transition fired straight on the actuator,
+    // so under review an author could re-show a page whose Take-down a reviewer had approved, with no review at all.
+
+    /** A managed page whose Take-down went through a Release (reviewed when review is on); returns the actors. */
+    private function takenDownPage(bool $review): array
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, $author, $reviewer] = $this->releaseFixture(reviewedAndMapped: $review);
+        if (! $review) {
+            \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        }
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => 'published'])->save();
+        $takeDown = \Splicewire\Beam\Ux\Workflow\EntryWorkflowTransitionOp::handle($entry->fresh(),
+            Request::create('/', 'POST', ['transition' => 'unpublish']), $author);
+        if ($review) {
+            $service->transition($takeDown->fresh(), 'approve', $reviewer);
+            $service->transition($takeDown->fresh(), 'publish', $reviewer);
+        }
+        $this->assertSame('published', $takeDown->fresh()->status, 'the Take-down went through');
+        $this->assertSame('draft', $entry->fresh()->workflow_marking, 'the page is taken down');
+
+        return [$entry->fresh(), $service, $author, $reviewer];
+    }
+
+    private function fireTransition(BeamUxEntry $entry, string $transition, mixed $actor): mixed
+    {
+        $result = \Splicewire\Beam\Ux\Workflow\EntryWorkflowTransitionOp::handle($entry->fresh(),
+            Request::create('/', 'POST', ['transition' => $transition]), $actor);
+
+        return \Splicewire\Beam\Ux\Workflow\EntryWorkflowTransitionOp::respond($result, $entry);
+    }
+
+    public function test_under_review_the_workflow_publish_transition_cannot_re_show_a_reviewed_take_down(): void
+    {
+        [$entry, $service, $author, $reviewer] = $this->takenDownPage(review: true);
+        $pin = $entry->published_version;
+
+        $response = $this->fireTransition($entry, 'publish', $author);
+
+        $this->assertSame('draft', $entry->fresh()->workflow_marking, 'the page is still taken down: nothing re-shown');
+        $this->assertFalse($response->applied);
+        $this->assertSame('in_review', $response->release->status, 'the re-show waits in review');
+        $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($response->release->id);
+        $this->assertSame($pin, $release->members()->first()->version_id, 'the Release re-shows the pinned body, nothing new');
+        $this->assertStringStartsWith('Publish submitted for Release review', $response->blockers[0] ?? '');
+
+        // Only the reviewed Release re-shows it, at the same pin.
+        $service->transition($release->fresh(), 'approve', $reviewer);
+        $service->transition($release->fresh(), 'publish', $reviewer);
+        $this->assertSame('published', $entry->fresh()->workflow_marking);
+        $this->assertSame($pin, $entry->fresh()->published_version);
+    }
+
+    public function test_with_review_off_the_workflow_publish_transition_re_shows_at_once_as_before(): void
+    {
+        [$entry, , $author] = $this->takenDownPage(review: false);
+        $releases = \Splicewire\Beam\Ux\Models\BeamUxRelease::query()->count();
+
+        $response = $this->fireTransition($entry, 'publish', $author);
+
+        $this->assertTrue($response->applied);
+        $this->assertSame('published', $entry->fresh()->workflow_marking);
+        $this->assertSame($releases, \Splicewire\Beam\Ux\Models\BeamUxRelease::query()->count(), 'no Release: the actuator fired it');
+    }
+
+    public function test_under_review_the_workflow_publish_transition_with_no_actor_is_refused(): void
+    {
+        [$entry] = $this->takenDownPage(review: true);
+
+        try {
+            $this->fireTransition($entry, 'publish', null);
+            $this->fail('a re-show under review was accepted with no actor');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+
+        $this->assertSame('draft', $entry->fresh()->workflow_marking);
+    }
+
+    public function test_under_review_an_unavailable_publish_transition_is_refused_by_the_actuator_and_opens_nothing(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture();
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => 'published'])->save();
+
+        $response = $this->fireTransition($entry, 'publish', $author);
+
+        $this->assertFalse($response->applied);
+        $this->assertSame(0, \Splicewire\Beam\Ux\Models\BeamUxRelease::query()->count());
+    }
+
+    public function test_under_review_the_workflow_publish_transition_on_an_entry_with_no_pin_is_refused(): void
+    {
+        $entry = $this->pageWithUnversionedBody(self::BODY_ONE);
+        [, $author] = $this->releaseFixture();
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => 'draft'])->save();
+        $this->assertNull($entry->fresh()->published_version);
+
+        try {
+            $this->fireTransition($entry, 'publish', $author);
+            $this->fail('a publish transition with no pinned body was accepted under review');
+        } catch (ValidationException $refused) {
+            // Refused by THIS guard (no pin to re-show), not by a Take-down request a null ref would make.
+            $this->assertSame(['transition'], array_keys($refused->errors()));
+            $this->assertSame(\Splicewire\Beam\Ux\Publish\EntryError::PublishRefused->message(), $refused->errors()['transition'][0]);
+        }
+
+        $this->assertSame('draft', $entry->fresh()->workflow_marking);
+        $this->assertSame(0, \Splicewire\Beam\Ux\Models\BeamUxRelease::query()->count());
+    }
+
+    /**
+     * A host-bound page workflow: the shipped publish/unpublish, an archive, and a second way INTO `published`
+     * (`restore`), with `publish` guarded on the actor so only an author-stamped context may fire it.
+     */
+    private function bindHostPageWorkflow(): void
+    {
+        app(\Splicewire\Beam\Workflows\Control\GuardRegistry::class)->register('launch-75-author-only',
+            fn ($subject, ?\Splicewire\Beam\Workflows\Control\TransitionContext $context = null, array $params = []) => $context?->actor === 'user:author' ? true : 'Only the author may publish.');
+        app(\Splicewire\Beam\Workflows\Control\WorkflowRegistry::class)->register('launch-75.host-page', \Splicewire\Beam\Workflows\Blueprint\WorkflowBlueprint::fromArray([
+            'name' => 'launch-75.host-page',
+            'places' => ['draft', 'published', 'archived'],
+            'initial' => ['draft'],
+            'transitions' => [
+                ['name' => 'publish', 'from' => 'draft', 'to' => 'published', 'guard' => 'launch-75-author-only'],
+                ['name' => 'unpublish', 'from' => 'published', 'to' => 'draft'],
+                ['name' => 'archive', 'from' => 'published', 'to' => 'archived'],
+                ['name' => 'restore', 'from' => 'archived', 'to' => 'published'],
+            ],
+        ]));
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', 'launch-75.host-page');
+    }
+
+    public function test_under_review_an_actor_guarded_publish_is_judged_for_that_actor_and_goes_through_a_release(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture();
+        $this->bindHostPageWorkflow();
+        $entry->forceFill(['workflow_marking' => 'draft'])->save();
+
+        $response = $this->fireTransition($entry, 'publish', $author);
+
+        $this->assertSame('draft', $entry->fresh()->workflow_marking, 'nothing re-shown: the guard passed for the author, so it went to review');
+        $this->assertSame('in_review', $response->release?->status);
+    }
+
+    public function test_under_review_another_transition_into_published_is_refused_and_opens_nothing(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture();
+        $this->bindHostPageWorkflow();
+        $entry->forceFill(['workflow_marking' => 'archived'])->save();
+
+        $response = $this->fireTransition($entry, 'restore', $author);
+
+        $this->assertFalse($response->applied);
+        $this->assertSame('archived', $entry->fresh()->workflow_marking, 'restore did not re-show the page past review');
+        $this->assertSame(0, \Splicewire\Beam\Ux\Models\BeamUxRelease::query()->count());
+    }
+
+    public function test_with_review_off_a_host_restore_into_published_fires_as_before(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [, $author] = $this->releaseFixture(reviewedAndMapped: false);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        $this->bindHostPageWorkflow();
+        $entry->forceFill(['workflow_marking' => 'archived'])->save();
+
+        $response = $this->fireTransition($entry, 'restore', $author);
+
+        $this->assertTrue($response->applied);
+        $this->assertSame('published', $entry->fresh()->workflow_marking);
+    }
+
     public function test_release_without_calendars_refuses_schedule_but_can_publish_now(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
