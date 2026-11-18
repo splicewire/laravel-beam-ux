@@ -22,7 +22,7 @@ use Throwable;
 class ConfigImportCommand extends Command
 {
     protected $signature = 'splicewire:beam:config:import
-        {root : the config section root, e.g. beam.ux.releases}
+        {root : the config section root, e.g. beam.ux}
         {file : path to the config/overrides/<root>.json mirror}
         {--dry-run : parse and report, write no draft}';
 

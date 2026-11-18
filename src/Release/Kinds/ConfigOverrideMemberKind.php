@@ -7,6 +7,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Splicewire\Beam\Config\ConfigSectionAccess;
+use Splicewire\Beam\Config\ConfigSectionRegistry;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideScope;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
 use Splicewire\Beam\Enums\ConfigTier;
@@ -20,7 +21,8 @@ use Splicewire\Beam\Workflows\Control\TransitionContext;
 
 /**
  * A published config-section override as a Release member (config-sections ticket 08). `member_ref` is the section
- * ROOT (e.g. `beam.ux.releases`); the subject is its {@see ConfigOverrideScope}. Publishing the Release moves the
+ * ROOT (e.g. `beam.ux`; a nested key such as `beam.ux.releases` is a pointer inside it, not a root); the subject is its
+ * {@see ConfigOverrideScope}. Publishing the Release moves the
  * override's published pin in the SAME transaction as its entry members' pins, and — on a host that opts into the
  * mirror, in the central realm — the recording writes `config/overrides/<root>.json` into the SAME commit (ADR-0243
  * decision 4, root `config/overrides/`; the recording still refuses while tenancy is active, so a tenant Release
@@ -58,6 +60,11 @@ class ConfigOverrideMemberKind implements ReleaseMemberKind
      */
     public function subject(BeamUxRelease $release, string $ref): ConfigOverrideScope
     {
+        // A ref that names no registered section (a typo, or a nested key such as `beam.ux.releases` under the `beam.ux`
+        // root) is not a realm question: say so, rather than reporting it outside the Release's realm.
+        if (app(ConfigSectionRegistry::class)->get($ref) === null) {
+            $this->refuse(ReleaseError::MemberUnknownSection, ['ref' => $ref]);
+        }
         // config-sections 08 + 07: the override's TIER follows the Release's REALM — a central Release carries the
         // OPERATOR tier (on `central`), a tenant Release the TENANT tier (on the tenant's own connection). The override
         // publishes through the Release's OWN connection (atomic with its entry pins), sound only when that connection
@@ -78,9 +85,12 @@ class ConfigOverrideMemberKind implements ReleaseMemberKind
         if ($tier === ConfigTier::Tenant && $this->sameDatabase($releaseConn, DB::connection('central'))) {
             $this->refuse(ReleaseError::MembersOutsideRealm);
         }
-        $scope = $this->store($release)->scope($ref);
+        $store = $this->store($release);
+        $scope = $store->scope($ref);
         if ($scope === null) {
-            $this->refuse(ReleaseError::MembersOutsideRealm);
+            // The registered section has no override on this realm's tier yet, so there is nothing to publish. (A tenant tier
+            // with no safe storage never gets here: store()->on() runs guardTenantTarget(), which refuses on `tier` first.)
+            $this->refuse(ReleaseError::MemberNoDraft, ['ref' => $ref]);
         }
 
         return $scope;
@@ -235,7 +245,7 @@ class ConfigOverrideMemberKind implements ReleaseMemberKind
     private function assertHasDraft(ConfigOverrideScope $scope): void
     {
         if ($scope->head_version === null || $scope->head_version === $scope->published_version) {
-            $this->refuse(ReleaseError::EntryNoSavedVersion);
+            $this->refuse(ReleaseError::MemberNoDraft, ['ref' => (string) $scope->section]);
         }
     }
 

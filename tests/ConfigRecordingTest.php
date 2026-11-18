@@ -16,6 +16,7 @@ use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
 use Splicewire\Beam\Config\RegisteredConfigSection;
 use Splicewire\Beam\Enums\ConfigOverrideOp;
 use Splicewire\Beam\Enums\ConfigTier;
+use Splicewire\Beam\Ux\Config\BeamUxSection;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
@@ -539,33 +540,43 @@ class ConfigRecordingTest extends AuthoredComponentNativeTestCase
     public function test_a_config_override_is_refused_across_the_realm_boundary_both_ways(): void // AC3 (Spec HIGH 2)
     {
         // The exclusion keys on realm/tier, not just the database. The operator publishes heading on central (so the
-        // tenant tier's base validates) but drafts nothing new.
+        // tenant tier's base validates), then leaves a PENDING operator draft. If the central row leaked into a tenant
+        // Release, that draft would make it admissible, so direction 1 can only pass when the leak is truly absent.
         $this->migrateOn('tenant');
         $op = app(ConfigOverrideStore::class)->forTier(ConfigTier::Operator);
         $op->saveDraft('release-fixture', [['pointer' => '/heading', 'op' => 'set', 'value' => 'operator']]);
         $op->publish('release-fixture');
+        $op->saveDraft('release-fixture', [['pointer' => '/heading', 'op' => 'set', 'value' => 'operator pending']]);
+        $this->assertNotSame($op->scope('release-fixture')->published_version, $op->scope('release-fixture')->head_version,
+            'precondition: the operator row on central holds a pending draft');
 
-        // Direction 1: a TENANT Release (realm tier Tenant) finds NO tenant-tier scope — the central override cannot join it.
+        // Direction 1: a TENANT Release reads only the tenant tier, which has no row for the section. The operator's
+        // pending draft is invisible to it rather than foreign, so the refusal is "nothing to publish", not a realm error.
         $this->enterTenantRealm();
         $tenantRelease = app(ReleaseService::class)->create($this->page(), 'tenant', $this->author);
         try {
             app(ReleaseService::class)->putMemberByKind($tenantRelease, BeamUxReleaseMember::KIND_CONFIG, 'release-fixture', $this->author);
             $this->fail('a central (operator) override must not join a tenant Release');
-        } catch (\Splicewire\Beam\Localization\CodedValidationException) {
-            // expected — no admissible tenant-tier scope
+        } catch (\Splicewire\Beam\Localization\CodedValidationException $e) {
+            $this->assertSame(['release' => ['release_member_no_draft']], $e->codes());
         }
+        $this->assertSame(0, $tenantRelease->fresh()->allMembers()->where('member_kind', BeamUxReleaseMember::KIND_CONFIG)->count(),
+            'the tenant Release holds no config member');
 
-        // The tenant drafts banner on its own tier. Direction 2: a CENTRAL Release (realm tier Operator) has no operator
-        // draft to publish and cannot see the tenant's draft — the tenant override cannot join it.
+        // The tenant drafts banner on its own tier. Publish the operator's pending draft, so the operator tier has nothing
+        // new. Direction 2: a CENTRAL Release reads only the operator tier and cannot see the tenant's draft.
         app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant)->saveDraft('release-fixture', [['pointer' => '/banner', 'op' => 'set', 'value' => 'tenant']]);
         $this->leaveTenantRealm();
+        $op->publish('release-fixture');
         $centralRelease = app(ReleaseService::class)->create($this->page(), 'central', $this->author);
         try {
             app(ReleaseService::class)->putMemberByKind($centralRelease, BeamUxReleaseMember::KIND_CONFIG, 'release-fixture', $this->author);
             $this->fail('a tenant override must not join a central Release');
-        } catch (\Splicewire\Beam\Localization\CodedValidationException) {
-            // expected — the central tier has no admissible scope
+        } catch (\Splicewire\Beam\Localization\CodedValidationException $e) {
+            $this->assertSame(['release' => ['release_member_no_draft']], $e->codes());
         }
+        $this->assertSame(0, $centralRelease->fresh()->allMembers()->where('member_kind', BeamUxReleaseMember::KIND_CONFIG)->count(),
+            'the central Release holds no config member');
     }
 
     public function test_a_config_member_is_added_to_a_release_through_the_release_action_op(): void // AC9/browser 72002092 (Spec amend)
@@ -597,8 +608,41 @@ class ConfigRecordingTest extends AuthoredComponentNativeTestCase
         try {
             app(ReleaseService::class)->putMemberByKind($release, BeamUxReleaseMember::KIND_CONFIG, 'release-fixture', $this->author);
             $this->fail('a pooled tenant Release identical to central must be refused a config member');
-        } catch (\Splicewire\Beam\Localization\CodedValidationException) {
-            // expected — the tenant tier is not isolated from the operator tier on an identical target
+        } catch (\Splicewire\Beam\Localization\CodedValidationException $e) {
+            // expected — the tenant tier is not isolated from the operator tier on an identical target: a REALM refusal
+            $this->assertSame(['release' => ['release_members_outside_realm']], $e->codes());
+        }
+    }
+
+    public function test_a_nested_key_of_a_registered_root_is_refused_as_an_unknown_section_not_outside_the_realm(): void
+    {
+        // `beam.ux` is the section root; `beam.ux.releases` is a key inside it, which names no section (ADR-0245 §1). The
+        // refusal says so, rather than reporting a realm/connection problem the Release does not have.
+        app(ConfigSectionRegistry::class)->section(BeamUxSection::class, owner: 'splicewire/laravel-beam-ux');
+        $this->assertNotNull(app(ConfigSectionRegistry::class)->get('beam.ux'), 'precondition: beam.ux is registered');
+        $release = app(ReleaseService::class)->create($this->page(), 'unknown section', $this->author);
+
+        try {
+            app(ReleaseService::class)->putMemberByKind($release, BeamUxReleaseMember::KIND_CONFIG, 'beam.ux.releases', $this->author);
+            $this->fail('a ref that names no registered section must be refused');
+        } catch (\Splicewire\Beam\Localization\CodedValidationException $e) {
+            $this->assertSame(['release' => ['release_member_unknown_section']], $e->codes());
+            $this->assertStringContainsString('No config section is registered for beam.ux.releases.', implode("\n", $e->errors()['release']));
+        }
+    }
+
+    public function test_a_registered_root_with_no_override_draft_is_refused_as_having_no_draft(): void
+    {
+        app(ConfigSectionRegistry::class)->section(BeamUxSection::class, owner: 'splicewire/laravel-beam-ux');
+        $this->assertNull(app(ConfigOverrideStore::class)->scope('beam.ux'), 'precondition: no override row for beam.ux');
+        $release = app(ReleaseService::class)->create($this->page(), 'no draft', $this->author);
+
+        try {
+            app(ReleaseService::class)->putMemberByKind($release, BeamUxReleaseMember::KIND_CONFIG, 'beam.ux', $this->author);
+            $this->fail('a registered section with no draft has nothing to publish');
+        } catch (\Splicewire\Beam\Localization\CodedValidationException $e) {
+            $this->assertSame(['release' => ['release_member_no_draft']], $e->codes());
+            $this->assertStringContainsString('There is no unpublished change to beam.ux.', implode("\n", $e->errors()['release']));
         }
     }
 

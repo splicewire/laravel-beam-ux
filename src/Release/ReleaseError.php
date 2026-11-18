@@ -60,6 +60,12 @@ enum ReleaseError: string implements CodedError
     #[Message('Release members must belong to its realm and connection.')]
     case MembersOutsideRealm = 'release_members_outside_realm';
 
+    #[Message('No config section is registered for :ref.')]
+    case MemberUnknownSection = 'release_member_unknown_section';
+
+    #[Message('There is no unpublished change to :ref.')]
+    case MemberNoDraft = 'release_member_no_draft';
+
     #[Message('A redirect target cannot be taken down in the same Release.')]
     case RedirectTargetTakenDown = 'release_redirect_target_taken_down';
 
