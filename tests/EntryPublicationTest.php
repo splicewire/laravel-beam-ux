@@ -3684,6 +3684,300 @@ class EntryPublicationTest extends TestCase
         return [$entry, $publish, $row];
     }
 
+    /**
+     * Set up a release fixture and publish the `review_required` override at the TENANT tier (for the cases that
+     * do not already run their own fixture). Returns {@see publishTenantOverride()}'s pair.
+     *
+     * @return array{0: \Closure(BeamUxEntry): array<string, mixed>, 1: array<string, mixed>}
+     */
+    private function tenantReviewOverride(): array
+    {
+        $this->releaseFixture(reviewedAndMapped: false, realUserProvider: true);
+
+        return $this->publishTenantOverride();
+    }
+
+    /**
+     * Publish the `review_required` override at the TENANT tier through real beam-config ops, tenancy left active.
+     * Assumes a release fixture is already set up (so it composes with a taken-down page). The override store writes
+     * the tenant tier while tenancy is active; the operator base layer is read from central.
+     *
+     * @return array{0: \Closure(BeamUxEntry): array<string, mixed>, 1: array<string, mixed>}
+     */
+    private function publishTenantOverride(): array
+    {
+        $beam = dirname((new ReflectionClass(\Splicewire\Beam\BeamServiceProvider::class))->getFileName(), 2);
+        foreach (array_unique(['central', DB::getDefaultConnection()]) as $connection) {
+            $default = DB::getDefaultConnection();
+            DB::setDefaultConnection($connection);
+            try {
+                foreach (['create_beam_versions_table', 'create_beam_config_overrides_table'] as $stub) {
+                    (require $beam.'/database/migrations/shared/'.$stub.'.php.stub')->up();
+                }
+            } finally {
+                DB::setDefaultConnection($default);
+            }
+        }
+
+        \Splicewire\Beam\Facades\Particle::ops('beam-config', 'beam-config', [
+            \Splicewire\Beam\Particle\Ops\Config\SaveConfigDraftOp::class,
+            \Splicewire\Beam\Particle\Ops\Config\PublishConfigOp::class,
+        ]);
+        \Splicewire\Beam\Facades\Particle::ops('beam-ux-entry', 'beam-ux-entry', [EntryPublishOp::class]);
+
+        if (! Schema::hasTable('users')) {
+            Schema::create('users', function (Blueprint $table): void {
+                $table->string('id')->primary();
+            });
+        }
+        config(['auth.providers.users.model' => ReleaseRequestAuthorFixture::class]);
+        \Illuminate\Support\Facades\Auth::forgetGuards();
+        $admin = (new ReleaseRequestAuthorFixture)->forceFill(['id' => 'tenant-admin']);
+        $admin->save();
+
+        // A workspace admin may require review in their own workspace: the tenant tier authorizes this ability.
+        config(['beam.core.config_overrides.tenant_ability' => 'ux.workspace.configure']);
+        \Illuminate\Support\Facades\Gate::define('ux.workspace.configure', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        \Illuminate\Support\Facades\Gate::define('entitlement:os.operate', fn ($user = null) => true);
+        $this->actingAs($admin);
+
+        // Tenancy ACTIVE -> the override store writes the tenant tier (to the default connection).
+        $this->releaseActorTenancy('tenant-a');
+
+        $publish = function (BeamUxEntry $entry): array {
+            $draft = app(EntryPublication::class)->recordDraft($entry->fresh(), self::BODY_TWO);
+
+            return $this->postJson("/beam-ux-entry/{$entry->getKey()}/publish", ['ref' => $draft->headVersion])->assertSuccessful()->json('data');
+        };
+
+        // Negative control: review is OFF before the override (the package default), so the tenant override is
+        // what causes the hold — not a default that was already on (as the operator helper asserts).
+        $this->assertFalse((bool) config('beam.ux.releases.review_required'), 'review is off before the tenant override');
+
+        $this->postJson('/beam-config/save-draft', [
+            'root' => 'beam.ux', 'pointer' => '/releases/review_required', 'op' => 'set', 'value' => 'true',
+        ])->assertOk();
+
+        $row = $this->postJson('/beam-config/publish', ['root' => 'beam.ux'])->assertOk()->json('data');
+
+        return [$publish, $row];
+    }
+
+    private function tenantPublishesReviewRequired(): array
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$publish, $row] = $this->tenantReviewOverride();
+
+        return [$entry, $publish, $row];
+    }
+
+    /** The op, route segment and payload that drive one save kind through the route stack. */
+    private function saveKindHttp(string $kind): array
+    {
+        $doc = [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [],
+            'children' => [['kind' => 'text', 'value' => 'tenant-held']]]];
+
+        return match ($kind) {
+            'body' => [EntryBodySaveOp::class, 'save-body', ['body' => $doc]],
+            'blocks' => [\Splicewire\Beam\Ux\Particle\EntryBlocksSaveOp::class, 'save-blocks', ['body' => $doc]],
+            'form' => [\Splicewire\Beam\Ux\Particle\EntryFormSaveOp::class, 'save-form', ['form' => ['canvas' => ['accent' => self::markerColor('tenant-held')], 'site' => []]]],
+            'source' => [\Splicewire\Beam\Ux\Particle\EntrySourceSaveOp::class, 'save-source', ['source' => "# tenant-held\n\nBody."]],
+        };
+    }
+
+    /**
+     * config-sections 07 (ticket 74 F2), publish-submit: a workspace admin publishes the review_required override
+     * at the TENANT tier through real beam-config ops (the key row reads `tier === 'tenant'`), and the very next
+     * publish request — a real request through the route stack — is submitted for review with nothing going live.
+     * (The tenant-tier sibling of the operator test at {@see
+     * test_an_operator_override_of_review_required_submits_the_very_next_publish_request_for_review()}.)
+     */
+    public function test_a_tenant_tier_override_of_review_required_submits_the_very_next_publish_request_for_review(): void
+    {
+        [$entry, $publish, $row] = $this->tenantPublishesReviewRequired();
+        $key = collect($row['keys'])->firstWhere('pointer', '/releases/review_required');
+        $this->assertSame('tenant', $key['tier'], 'the override is published at the tenant tier');
+
+        $pin = $entry->fresh()->published_version;
+        $state = $publish($entry);
+        $this->assertSame('in_review', $state['release']['status'], 'the very next publish is held for review');
+        $this->assertSame($pin, $entry->fresh()->published_version, 'nothing went live');
+    }
+
+    /** The save kinds a tenant-owned (hosted-site) entry holds: body/blocks/form. `source` is code and is refused
+     *  for a tenant-owned entry outright (ADR-0227/0233), so it has no held-for-review case at the tenant tier. */
+    public static function tenantSaveKinds(): array
+    {
+        return ['save-body' => ['body'], 'save-blocks' => ['blocks'], 'save-form' => ['form']];
+    }
+
+    /**
+     * config-sections 07 (ticket 74 F2), save kinds: with review raised to the TENANT tier by a workspace admin,
+     * every in-place editor Save is held in the working copy for review, not published live. The override reaches
+     * the save's `config()` read because the beam-config publish refreshed `ConfigTenantOverlay` in-process at
+     * publish time ({@see \Splicewire\Beam\Config\Overrides\ConfigOverrideStore::announce()}) and testbench shares
+     * one config repository across requests — NOT via `ApplyConfigOverrides`, which syncs only the operator tier.
+     * The overlay is reverted and re-applied before the save, so the HTTP op re-reads the tenant tier from the
+     * tenant store. One case per save kind a tenant-owned entry holds (body/blocks/form; `source` is refused —
+     * {@see test_a_tenant_owned_entry_refuses_a_source_save_before_review()}).
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('tenantSaveKinds')]
+    public function test_a_tenant_tier_review_override_holds_the_very_next_save(string $kind): void
+    {
+        $entry = $this->publishedEntryFor($kind);
+        $pin = $entry->published_version;
+        $live = app(EntryPublication::class)->publishedBodyOf($entry);
+        [, $row] = $this->tenantReviewOverride();
+        $this->assertSame('tenant', collect($row['keys'])->firstWhere('pointer', '/releases/review_required')['tier'], 'the override is at the tenant tier');
+
+        // Re-read the tenant tier from the tenant store (not merely the publish-time refresh) before the save:
+        // the revert alone drops the override, and the re-apply re-queries the tenant store and restores it.
+        app(\Splicewire\Beam\Config\Overrides\ConfigTenantOverlay::class)->revert();
+        $this->assertFalse((bool) config('beam.ux.releases.review_required'), 'the revert alone drops the tenant override');
+        app(\Splicewire\Beam\Config\Overrides\ConfigTenantOverlay::class)->apply();
+        $this->assertTrue((bool) config('beam.ux.releases.review_required'), 'the re-apply re-reads the tenant override as active');
+
+        [$op, $route, $payload] = $this->saveKindHttp($kind);
+        \Splicewire\Beam\Facades\Particle::ops('beam-ux-entry', 'beam-ux-entry', [$op]);
+        $this->postJson("/beam-ux-entry/{$entry->getKey()}/{$route}", $payload)->assertSuccessful();
+
+        $entry = $entry->fresh();
+        $this->assertSame($pin, $entry->published_version, "the {$kind} save did not move the publication pin");
+        $this->assertSame($live, app(EntryPublication::class)->publishedBodyOf($entry), 'the live body is unchanged');
+        $this->assertTrue(self::carries($kind, $this->workingCopyOf($entry), 'tenant-held'), 'the working copy holds the edit');
+        $releases = $this->releasesFor($entry);
+        $this->assertCount(1, $releases, 'exactly one Release opened');
+        $release = $releases[0];
+        $this->assertSame('in_review', $release->status, 'the save is held for review at the tenant tier');
+        $this->assertSame('direct', $release->origin->value, 'the Release origin is direct');
+        $this->assertSame(app(EntryPublication::class)->state($entry)->headVersion, $release->members()->first()->version_id, 'the Release member is the new head');
+    }
+
+    /**
+     * config-sections 07 (ticket 74 F2), the save-source edge: a tenant-owned (hosted-site) entry holds blocks, not
+     * source — a source body is code and is refused outright for a tenant-owned entry (ADR-0227 decision 1, ADR-0233
+     * decision 6), BEFORE review is ever reached. So there is no held-for-review case for `source` at the tenant
+     * tier; the stricter refusal stands, and nothing is published or held.
+     */
+    public function test_a_tenant_owned_entry_refuses_a_source_save_before_review(): void
+    {
+        $entry = $this->publishedEntryFor('source');
+        [, $row] = $this->tenantReviewOverride();
+        $this->assertSame('tenant', collect($row['keys'])->firstWhere('pointer', '/releases/review_required')['tier']);
+
+        [$op, $route, $payload] = $this->saveKindHttp('source');
+        \Splicewire\Beam\Facades\Particle::ops('beam-ux-entry', 'beam-ux-entry', [$op]);
+        $response = $this->postJson("/beam-ux-entry/{$entry->getKey()}/{$route}", $payload);
+
+        $response->assertStatus(422);
+        $this->assertSame('source_hosted_refused', $response->json('codes.source.0'), 'source is refused for a tenant-owned entry');
+        $this->assertSame([], $this->releasesFor($entry->fresh()), 'nothing is held for review: the save was refused outright');
+    }
+
+    /**
+     * config-sections 07 (ticket 74 F2), make-editable: with review raised to the TENANT tier, make-editable (a
+     * real request through the route stack) puts nothing of the author's body live — only the server-owned baseline
+     * v1 is published — and opens a Release in_review holding the author's body.
+     */
+    public function test_a_tenant_tier_review_override_holds_make_editable(): void
+    {
+        [, $row] = $this->tenantReviewOverride();
+        $this->assertSame('tenant', collect($row['keys'])->firstWhere('pointer', '/releases/review_required')['tier']);
+
+        \Splicewire\Beam\Facades\Particle::ops('beam-ux-entries', 'beam-ux-entry', [\Splicewire\Beam\Ux\Particle\EntryMakeEditableOp::class]);
+        $doc = [['kind' => 'block', 'name' => 'h2', 'isComponent' => false, 'dynamic' => false, 'props' => [],
+            'children' => [['kind' => 'text', 'value' => 'tenant-made-editable']]]];
+        $this->postJson('/beam-ux-entries/make-editable', ['slug' => 'launch-74-tenant', 'body' => $doc])->assertSuccessful();
+
+        $entry = BeamUxEntry::query()->where('slug', 'launch-74-tenant')->firstOrFail();
+        $live = app(EntryPublication::class)->publishedBodyOf($entry);
+        $this->assertFalse(self::carries('body', $live, 'tenant-made-editable'), "the author's body is not live");
+        $published = collect(app(EntryPublication::class)->state($entry)->versions)->firstWhere('isPublished', true);
+        $this->assertSame('baseline', $published?->label, 'only the server-owned baseline is live');
+        $this->assertSame(1, $published->version);
+        $this->assertTrue(self::carries('body', $this->workingCopyOf($entry), 'tenant-made-editable'), 'the working copy holds the author body');
+        $releases = $this->releasesFor($entry);
+        $this->assertCount(1, $releases);
+        $this->assertSame('in_review', $releases[0]->status, 'make-editable is held for review at the tenant tier');
+    }
+
+    /**
+     * A taken-down page (taken down while review is OFF) with review then raised to the TENANT tier.
+     *
+     * @return array{0: BeamUxEntry, 1: mixed, 2: mixed, 3: mixed, 4: array<string, mixed>}
+     */
+    private function tenantReviewTakenDownPage(): array
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        [$service, , $reviewer] = $this->releaseFixture(reviewedAndMapped: false, realUserProvider: true);
+        // A real stored author, so the real user provider resolves the take-down's actor (and the actuator's
+        // `user:author`) through the users table — created here, before the take-down queries it.
+        if (! Schema::hasTable('users')) {
+            Schema::create('users', function (Blueprint $table): void {
+                $table->string('id')->primary();
+            });
+        }
+        config(['auth.providers.users.model' => ReleaseRequestAuthorFixture::class]);
+        \Illuminate\Support\Facades\Auth::forgetGuards();
+        $author = (new ReleaseRequestAuthorFixture)->forceFill(['id' => 'author']);
+        $author->save();
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => true);
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => 'published'])->save();
+        \Splicewire\Beam\Ux\Workflow\EntryWorkflowTransitionOp::handle($entry->fresh(),
+            Request::create('/', 'POST', ['transition' => 'unpublish']), $author);
+        $this->assertSame('draft', $entry->fresh()->workflow_marking, 'the page is taken down while review is off');
+
+        [, $row] = $this->publishTenantOverride();
+
+        return [$entry->fresh(), $service, $author, $reviewer, $row];
+    }
+
+    /**
+     * config-sections 07 (ticket 74 F2), workflow publish (ticket 75): with review raised to the TENANT tier, the
+     * editor workflow `publish` transition (a real request through the route stack) cannot re-show a reviewed
+     * take-down — the page stays down and the re-show waits in a Release in_review at the pinned body.
+     */
+    public function test_a_tenant_tier_review_override_holds_the_workflow_publish_transition(): void
+    {
+        [$entry, , , , $row] = $this->tenantReviewTakenDownPage();
+        $this->assertSame('tenant', collect($row['keys'])->firstWhere('pointer', '/releases/review_required')['tier']);
+        $pin = $entry->published_version;
+
+        \Splicewire\Beam\Facades\Particle::ops('beam-ux-entry', 'beam-ux-entry', [\Splicewire\Beam\Ux\Workflow\EntryWorkflowTransitionOp::class]);
+        $this->postJson("/beam-ux-entry/{$entry->getKey()}/transition", ['transition' => 'publish'])->assertSuccessful();
+
+        $this->assertSame('draft', $entry->fresh()->workflow_marking, 'the page is still taken down: nothing re-shown');
+        $release = collect($this->releasesFor($entry))->last();
+        $this->assertNotNull($release, 'the re-show opened a Release');
+        $this->assertSame('in_review', $release->status, 'the re-show waits in review at the tenant tier');
+        $this->assertSame($pin, $release->members()->first()->version_id, 'the Release re-shows the pinned body, nothing new');
+    }
+
+    /**
+     * config-sections 07 (ticket 74 F2), defence-in-depth (ticket 77): the entry model itself refuses a workflow
+     * marking that would re-show a taken-down page past TENANT-tier review, for ANY actuator surface (not just the
+     * editor op). A non-editor actuator publish is refused with ApprovalRequired and the whole transition rolls back.
+     */
+    public function test_a_tenant_tier_review_override_holds_an_actuator_publish(): void
+    {
+        [$entry, , , , $row] = $this->tenantReviewTakenDownPage();
+        $this->assertSame('tenant', collect($row['keys'])->firstWhere('pointer', '/releases/review_required')['tier']);
+        $this->assertTrue((bool) config('beam.ux.releases.review_required'), 'the tenant override is active in this hop');
+        $this->registerEntrySubjectResolver();
+
+        try {
+            $this->actuate($entry, 'publish');
+            $this->fail('the actuator re-showed a taken-down page past tenant-tier review');
+        } catch (\Illuminate\Auth\Access\AuthorizationException $refused) {
+            $this->assertSame(\Splicewire\Beam\Ux\Release\ReleaseError::ApprovalRequired->message(), $refused->getMessage());
+        }
+
+        $this->assertSame('draft', $entry->fresh()->workflow_marking, 'the whole transition rolled back');
+    }
+
     public function test_a_host_that_defines_no_entry_ability_never_refuses_an_author(): void
     {
         // audiostud's shape: a global `update` for its own models only, and no `publish`.
