@@ -420,8 +420,17 @@ return [
     | behind a 200. A name that IS an entry's slug is accepted only on the terms
     | the renderer nests it (a live, compiled page); otherwise it warns.
     |
+    | `snapshot` — the path of the client chrome registry snapshot, which the
+    |            host writes from its bundle's own registrations with
+    |            `beam-ux-chrome-snapshot --register <module> --write`
+    |            (`@splicewire/beam-ux`). When the file is there the audit
+    |            reads the registered names from it and ignores `registered`;
+    |            when it is not, `registered` is read as before. The audit's
+    |            report says which one it used.
+    |
     */
     'chrome' => [
+        'snapshot' => env('BEAM_UX_CHROME_SNAPSHOT', storage_path('app/beam-chrome-registry.json')),
         'registered' => [
             'ProseTemplate',
             'SpreadTemplate',

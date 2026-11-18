@@ -311,6 +311,148 @@ class EntryChromeTest extends TestCase
         $this->assertStringContainsString('DcosLayout', $findings[0]->detail);
     }
 
+    // ── the client registry snapshot (registry-kernel-ts 09) ───────────────────────────────
+
+    /**
+     * The fixture is what `beam-ux-chrome-snapshot --write` wrote for a bundle registering the layout
+     * `DocsLayout` (by `@splicewire/beam-docs`) and the template `ReferenceTemplate` (by `app/host`), plus the
+     * packaged builtins `ProseTemplate` and `SpreadTemplate`.
+     */
+    private const SNAPSHOT_FIXTURE = __DIR__.'/Fixtures/chrome-snapshot/beam-chrome-registry.json';
+
+    public function test_the_audit_passes_with_a_current_snapshot_and_no_hand_kept_list(): void
+    {
+        config(['beam.ux.chrome.snapshot' => self::SNAPSHOT_FIXTURE, 'beam.ux.chrome.registered' => []]);
+
+        $this->page('docs', ['segment' => 'docs', 'layout' => 'DocsLayout', 'template' => 'ReferenceTemplate']);
+        $this->page('guide', ['segment' => 'guide', 'layout' => 'DocsLayout', 'template' => 'SpreadTemplate']);
+
+        $findings = (new BeamUxChromeAudit)->run();
+
+        $this->assertCount(1, $findings);
+        $this->assertSame(DoctorStatus::Pass, $findings[0]->status);
+        $this->assertStringContainsString('Registered names read from the client registry snapshot ['.self::SNAPSHOT_FIXTURE.']', $findings[0]->detail);
+    }
+
+    public function test_a_snapshot_replaces_the_hand_kept_list_rather_than_adding_to_it(): void
+    {
+        // The list names a layout the snapshot does not: with a snapshot present, the list is not read.
+        config(['beam.ux.chrome.snapshot' => self::SNAPSHOT_FIXTURE, 'beam.ux.chrome.registered' => ['HostOnlyLayout']]);
+
+        $this->page('docs', ['segment' => 'docs', 'layout' => 'HostOnlyLayout']);
+
+        $findings = (new BeamUxChromeAudit)->run();
+
+        $this->assertCount(1, $findings);
+        $this->assertSame(DoctorStatus::Fail, $findings[0]->status);
+        $this->assertStringContainsString('[HostOnlyLayout]', $findings[0]->detail);
+    }
+
+    public function test_a_name_missing_from_the_snapshot_fails_as_a_missing_config_entry_does(): void
+    {
+        // The same snapshot with `DocsLayout` taken out: a layout the bundle registers, absent from the file.
+        $snapshot = json_decode((string) file_get_contents(self::SNAPSHOT_FIXTURE), true);
+        $snapshot['registries'][0]['keys'] = array_values(array_filter(
+            $snapshot['registries'][0]['keys'],
+            fn (array $key) => $key['name'] !== 'DocsLayout',
+        ));
+        $path = sys_get_temp_dir().'/beam-chrome-registry-'.uniqid().'.json';
+        file_put_contents($path, json_encode($snapshot));
+
+        try {
+            $this->page('docs', ['segment' => 'docs', 'layout' => 'DocsLayout', 'template' => 'ReferenceTemplate']);
+
+            config(['beam.ux.chrome.snapshot' => $path, 'beam.ux.chrome.registered' => []]);
+            $fromSnapshot = (new BeamUxChromeAudit)->run();
+
+            // The same entry against a hand-kept list that lacks the name, as the audit read it before.
+            config(['beam.ux.chrome.snapshot' => null, 'beam.ux.chrome.registered' => ['ReferenceTemplate']]);
+            $fromList = (new BeamUxChromeAudit)->run();
+        } finally {
+            @unlink($path);
+        }
+
+        $this->assertCount(1, $fromSnapshot);
+        $this->assertSame(DoctorStatus::Fail, $fromSnapshot[0]->status);
+        $this->assertStringContainsString('docs · layout: [DocsLayout]', $fromSnapshot[0]->detail);
+        $this->assertStringNotContainsString('ReferenceTemplate', $fromSnapshot[0]->detail);
+        $this->assertStringContainsString('regenerate the snapshot (`beam-ux-chrome-snapshot --write`)', $fromSnapshot[0]->detail);
+        $this->assertStringContainsString("the client registry snapshot [{$path}]", $fromSnapshot[0]->detail);
+
+        // The same status and the same unresolved list; only the remedy and the named source differ.
+        $this->assertCount(1, $fromList);
+        $this->assertSame(DoctorStatus::Fail, $fromList[0]->status);
+        $unresolved = fn (string $detail) => explode('. Registered names read from', explode(' or fix the typo: ', $detail)[1])[0];
+        $this->assertSame('docs · layout: [DocsLayout]', $unresolved($fromSnapshot[0]->detail));
+        $this->assertSame($unresolved($fromList[0]->detail), $unresolved($fromSnapshot[0]->detail));
+    }
+
+    public function test_without_a_snapshot_the_audit_reads_the_hand_kept_list_and_says_so(): void
+    {
+        $missing = sys_get_temp_dir().'/beam-chrome-registry-absent-'.uniqid().'.json';
+        config(['beam.ux.chrome.snapshot' => $missing, 'beam.ux.chrome.registered' => ['DocsLayout']]);
+
+        $this->page('docs', ['segment' => 'docs', 'layout' => 'DocsLayout']);
+
+        $findings = (new BeamUxChromeAudit)->run();
+
+        $this->assertCount(1, $findings);
+        $this->assertSame(DoctorStatus::Pass, $findings[0]->status);
+        $this->assertStringContainsString('`beam.ux.chrome.registered` (the hand-kept list)', $findings[0]->detail);
+        $this->assertStringContainsString("there is no client registry snapshot at [{$missing}]", $findings[0]->detail);
+
+        config(['beam.ux.chrome.snapshot' => null]);
+        $this->assertStringContainsString('no client registry snapshot is configured', (new BeamUxChromeAudit)->run()[0]->detail);
+    }
+
+    public function test_an_unreadable_snapshot_warns_and_the_hand_kept_list_is_read_in_its_place(): void
+    {
+        $path = sys_get_temp_dir().'/beam-chrome-registry-bad-'.uniqid().'.json';
+        file_put_contents($path, json_encode(['DocsLayout']));
+
+        try {
+            config(['beam.ux.chrome.snapshot' => $path, 'beam.ux.chrome.registered' => ['DocsLayout']]);
+            $this->page('docs', ['segment' => 'docs', 'layout' => 'DocsLayout']);
+
+            $findings = (new BeamUxChromeAudit)->run();
+        } finally {
+            @unlink($path);
+        }
+
+        $this->assertCount(2, $findings);
+        $this->assertSame(DoctorStatus::Warn, $findings[0]->status);
+        $this->assertStringContainsString("[{$path}] is not one `beam-ux-chrome-snapshot` writes", $findings[0]->detail);
+        $this->assertSame(DoctorStatus::Pass, $findings[1]->status);
+        $this->assertStringContainsString('the hand-kept list', $findings[1]->detail);
+    }
+
+    public function test_the_audit_compares_snapshot_roots_by_segments_and_never_reads_a_display(): void
+    {
+        // A registry whose display spells a chrome root but whose segments do not is not a chrome registry.
+        $snapshot = json_decode((string) file_get_contents(self::SNAPSHOT_FIXTURE), true);
+        $snapshot['registries'][] = [
+            'root' => ['segments' => ['beam', 'ux', 'other'], 'display' => 'beam.ux.chrome.layouts'],
+            'describedBy' => 'pkg/x',
+            'declaration' => ['onKeyDuplicate' => 'supersede', 'populationRequirement' => 'optional', 'description' => null],
+            'keys' => [['key' => ['segments' => ['beam', 'ux', 'other', 'SpoofLayout'], 'display' => 'beam.ux.chrome.layouts.SpoofLayout'], 'name' => 'SpoofLayout', 'registrant' => null]],
+        ];
+        $path = sys_get_temp_dir().'/beam-chrome-registry-'.uniqid().'.json';
+        file_put_contents($path, json_encode($snapshot));
+
+        try {
+            config(['beam.ux.chrome.snapshot' => $path, 'beam.ux.chrome.registered' => []]);
+            $this->page('docs', ['segment' => 'docs', 'layout' => 'SpoofLayout']);
+
+            $findings = (new BeamUxChromeAudit)->run();
+        } finally {
+            @unlink($path);
+        }
+
+        $this->assertCount(1, $findings);
+        $this->assertSame(DoctorStatus::Fail, $findings[0]->status);
+        $this->assertStringContainsString('[SpoofLayout]', $findings[0]->detail);
+    }
+
     /**
      * @param  array<string, mixed>  $attributes
      */

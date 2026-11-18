@@ -1,0 +1,100 @@
+{
+    "version": 1,
+    "registries": [
+        {
+            "root": {
+                "segments": [
+                    "beam",
+                    "ux",
+                    "chrome",
+                    "layouts"
+                ],
+                "display": "beam.ux.chrome.layouts"
+            },
+            "describedBy": "@splicewire/beam-ux",
+            "declaration": {
+                "onKeyDuplicate": "supersede",
+                "populationRequirement": "optional",
+                "description": "Layouts an entry names in its `layout` column."
+            },
+            "keys": [
+                {
+                    "key": {
+                        "segments": [
+                            "beam",
+                            "ux",
+                            "chrome",
+                            "layouts",
+                            "DocsLayout"
+                        ],
+                        "display": "beam.ux.chrome.layouts.DocsLayout"
+                    },
+                    "name": "DocsLayout",
+                    "registrant": "@splicewire/beam-docs"
+                }
+            ]
+        },
+        {
+            "root": {
+                "segments": [
+                    "beam",
+                    "ux",
+                    "chrome",
+                    "templates"
+                ],
+                "display": "beam.ux.chrome.templates"
+            },
+            "describedBy": "@splicewire/beam-ux",
+            "declaration": {
+                "onKeyDuplicate": "supersede",
+                "populationRequirement": "optional",
+                "description": "Templates an entry names in its `template` column."
+            },
+            "keys": [
+                {
+                    "key": {
+                        "segments": [
+                            "beam",
+                            "ux",
+                            "chrome",
+                            "templates",
+                            "ReferenceTemplate"
+                        ],
+                        "display": "beam.ux.chrome.templates.ReferenceTemplate"
+                    },
+                    "name": "ReferenceTemplate",
+                    "registrant": "app/host"
+                }
+            ]
+        }
+    ],
+    "builtins": [
+        {
+            "root": {
+                "segments": [
+                    "beam",
+                    "ux",
+                    "chrome",
+                    "layouts"
+                ],
+                "display": "beam.ux.chrome.layouts"
+            },
+            "names": []
+        },
+        {
+            "root": {
+                "segments": [
+                    "beam",
+                    "ux",
+                    "chrome",
+                    "templates"
+                ],
+                "display": "beam.ux.chrome.templates"
+            },
+            "names": [
+                "ProseTemplate",
+                "SpreadTemplate"
+            ]
+        }
+    ]
+}

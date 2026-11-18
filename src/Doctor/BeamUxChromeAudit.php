@@ -37,11 +37,25 @@ use Splicewire\Beam\Ux\Models\BeamUxEntry;
  *
  * That makes a stale config a source of **false alarms**, which is the right direction for a doctor
  * finding: the alternative — trusting any unresolvable name — is the silent version this exists to end.
+ *
+ * **A snapshot replaces the hand-kept list when the host has one** (registry-kernel-ts 09). The host writes
+ * what its bundle registered with `beam-ux-chrome-snapshot --write` (`@splicewire/beam-ux`) to the path
+ * `beam.ux.chrome.snapshot` names: the two chrome registries' roots, declarations, keys and registrants, and
+ * the packaged builtin names. This audit reads the names under the roots `beam.ux.chrome.layouts` and
+ * `beam.ux.chrome.templates` from it, comparing a root by its segments and reading each key's `name` as data;
+ * it never parses a key's display, which for `beam.ux.chrome.layouts.DocsLayout` is not a key PHP can parse.
+ * Without the file, the list is read as before. Every finding says which of the two it used.
  */
 class BeamUxChromeAudit implements DoctorAudit
 {
     /** The two inherited chrome axes, both plain nullable string columns. */
     private const AXES = ['layout', 'template'];
+
+    /** The roots of the two client chrome registries, as the segments a snapshot carries them by. */
+    private const CHROME_ROOTS = [
+        ['beam', 'ux', 'chrome', 'layouts'],
+        ['beam', 'ux', 'chrome', 'templates'],
+    ];
 
     public function __construct(private ?ChromeEntryResolver $chromeEntries = null) {}
 
@@ -77,7 +91,7 @@ class BeamUxChromeAudit implements DoctorAudit
             $slugs[(string) $entry->slug] = true;
         }
 
-        $registered = $this->registeredNames();
+        ['names' => $registered, 'source' => $source, 'findings' => $findings] = $this->registeredNames($check);
         $resolver = $this->chromeEntries ?? app(ChromeEntryResolver::class);
         $unresolved = [];
         $unnestable = [];
@@ -111,36 +125,117 @@ class BeamUxChromeAudit implements DoctorAudit
             }
         }
 
-        $findings = [];
+        $register = $source['snapshot']
+            ? 'Register the name in the client bundle and regenerate the snapshot (`beam-ux-chrome-snapshot --write`)'
+            : 'Register the name in `beam.ux.chrome.registered`';
+        $readFrom = " Registered names read from {$source['label']}.";
 
         if ($unresolved !== []) {
             $findings[] = Finding::fail($check, 'entries name a layout/template that resolves to neither a '.
                 'registered component nor an entry — the page renders in the fallback shell behind a 200, '.
-                'so nothing else will ever mention it. Register the name in `beam.ux.chrome.registered`, '.
-                'author the entry, or fix the typo: '.implode('; ', $unresolved).'.');
+                "so nothing else will ever mention it. {$register}, ".
+                'author the entry, or fix the typo: '.implode('; ', $unresolved).'.'.$readFrom);
         }
 
         if ($unnestable !== []) {
             $findings[] = Finding::warn($check, 'entries name a layout/template that is another entry\'s '.
                 'slug, but not one the renderer can nest — the page renders without that chrome behind a '.
                 '200. Compile, restore or re-type the named entry, or register the name instead: '.
-                implode('; ', $unnestable).'.');
+                implode('; ', $unnestable).'.'.$readFrom);
         }
 
-        if ($findings !== []) {
+        if ($unresolved !== [] || $unnestable !== []) {
             return $findings;
         }
 
-        return [Finding::pass(
+        return [...$findings, Finding::pass(
             $check,
-            'every declared layout/template resolves to a registered component or a nestable entry.',
+            'every declared layout/template resolves to a registered component or a nestable entry.'.$readFrom,
         )];
+    }
+
+    /**
+     * The names the client registers, from the host's snapshot when it has one, otherwise from the
+     * hand-kept list. An unreadable snapshot is a warning, and the list is read in its place.
+     *
+     * @return array{names: list<string>, source: array{snapshot: bool, label: string}, findings: list<Finding>}
+     */
+    private function registeredNames(string $check): array
+    {
+        $path = config('beam.ux.chrome.snapshot');
+        $list = '`beam.ux.chrome.registered` (the hand-kept list)';
+        $fallback = fn (string $why, array $findings = []) => [
+            'names' => $this->configuredNames(),
+            'source' => ['snapshot' => false, 'label' => "{$list}; {$why}"],
+            'findings' => $findings,
+        ];
+
+        if (! is_string($path) || $path === '') {
+            return $fallback('no client registry snapshot is configured (`beam.ux.chrome.snapshot`)');
+        }
+
+        if (! is_file($path)) {
+            return $fallback("there is no client registry snapshot at [{$path}]");
+        }
+
+        $names = $this->snapshotNames(json_decode((string) file_get_contents($path), true));
+
+        if ($names === null) {
+            $why = "the client registry snapshot [{$path}] is not one `beam-ux-chrome-snapshot` writes";
+
+            return $fallback($why, [Finding::warn($check, ucfirst($why).'; regenerate it with `beam-ux-chrome-snapshot --write`. '.
+                "Registered names read from {$list} in its place.")]);
+        }
+
+        return ['names' => $names, 'source' => ['snapshot' => true, 'label' => "the client registry snapshot [{$path}]"], 'findings' => []];
+    }
+
+    /**
+     * The chrome names in a decoded snapshot: each key's `name` in a registry whose root is a chrome root,
+     * and the packaged builtin names under those roots. Null when the data is not a snapshot.
+     *
+     * @return list<string>|null
+     */
+    private function snapshotNames(mixed $snapshot): ?array
+    {
+        if (! is_array($snapshot) || ($snapshot['version'] ?? null) !== 1
+            || ! is_array($snapshot['registries'] ?? null) || ! array_is_list($snapshot['registries'])) {
+            return null;
+        }
+
+        $names = [];
+
+        foreach ($snapshot['registries'] as $registry) {
+            if (! is_array($registry) || ! $this->isChromeRoot($registry['root'] ?? null)) {
+                continue;
+            }
+
+            foreach ((array) ($registry['keys'] ?? []) as $key) {
+                $names[] = is_array($key) && is_string($key['name'] ?? null) ? $key['name'] : '';
+            }
+        }
+
+        foreach ((array) ($snapshot['builtins'] ?? []) as $builtin) {
+            if (is_array($builtin) && $this->isChromeRoot($builtin['root'] ?? null)) {
+                foreach ((array) ($builtin['names'] ?? []) as $name) {
+                    $names[] = is_string($name) ? $name : '';
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($names, fn (string $name) => $name !== '')));
+    }
+
+    /** Whether a snapshot's root is one of the two chrome roots, compared by segments. */
+    private function isChromeRoot(mixed $root): bool
+    {
+        return is_array($root) && in_array($root['segments'] ?? null, self::CHROME_ROOTS, true);
     }
 
     /**
      * @return list<string>
      */
-    private function registeredNames(): array
+    private function configuredNames(): array
     {
         $names = config('beam.ux.chrome.registered', []);
 
