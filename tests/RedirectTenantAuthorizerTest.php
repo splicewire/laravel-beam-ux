@@ -19,7 +19,8 @@ class RedirectTenantAuthorizerTest extends AuthoredComponentNativeTestCase
     {
         parent::setUp();
         (require dirname(__DIR__).'/database/migrations/shared/create_beam_ux_redirects_table.php.stub')->up();
-        Gate::define('entitlement:site.edit', fn ($user): bool => $user instanceof TenantRedirectEditor);
+        // site.edit is the tenant role permission; the override target is asked as itself (launch 72b).
+        Gate::define('site.edit', fn ($user): bool => $user instanceof TenantRedirectEditor);
         Gate::define('entitlement:ux.author', fn ($user): bool => $user instanceof CentralRedirectAuthor);
         Gate::define('ux.author', fn ($user): bool => $user instanceof CentralRedirectAuthor);
     }

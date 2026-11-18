@@ -20,7 +20,75 @@ class EditorAuthorizerTest extends TestCase
         // not the entitlement-prefixed ability used for a tenant override.
         Gate::define('ux.author', fn ($user): bool => $user instanceof EditorCentralAuthor || $user instanceof EditorRawGateOnlyAuthor);
         Gate::define('entitlement:ux.author', fn ($user): bool => $user instanceof EditorCentralAuthor || $user instanceof EditorEntitlementOnlyAuthor);
-        Gate::define('entitlement:site.edit', fn ($user): bool => $user instanceof EditorTenantAuthor);
+        // site.edit is the tenant ROLE PERMISSION; the override target is asked as itself (launch 72b, Option A).
+        Gate::define('site.edit', fn ($user): bool => $user instanceof EditorTenantAuthor);
+    }
+
+    // ── Launch 72b (root Option A, an AUTHORIZATION change): the override target is the permission itself ───────
+
+    public function test_the_tenant_override_target_is_asked_as_the_permission_on_all_three_entry_points(): void
+    {
+        $authorizer = app(EditorAuthorizer::class);
+        $tenant = $this->request($this->route('tenant', ['ux.author' => 'site.edit']));
+
+        $this->assertTrue($authorizer->allows(new EditorTenantAuthor, $tenant));
+        $this->assertTrue($authorizer->allowsResolved(new EditorTenantAuthor, $tenant));
+        $authorizer->authorize(new EditorTenantAuthor, $tenant);
+
+        foreach ([new User, new EditorCentralAuthor, new EditorEntitlementOnlyAuthor] as $without) {
+            $this->assertFalse($authorizer->allows($without, $tenant), $without::class.' lacks site.edit');
+            $this->assertFalse($authorizer->allowsResolved($without, $tenant), $without::class.' lacks site.edit');
+        }
+        $this->assertFalse($authorizer->allows(null, $tenant));
+        $this->assertFalse($authorizer->allowsResolved(null, $tenant));
+
+        $this->expectException(AuthorizationException::class);
+        $authorizer->authorize(new User, $tenant);
+    }
+
+    public function test_a_permission_target_is_not_answered_by_an_entitlement_of_the_same_name(): void
+    {
+        Gate::define('entitlement:site.edit', fn ($user = null): bool => true);
+        $authorizer = app(EditorAuthorizer::class);
+        $tenant = $this->request($this->route('tenant', ['ux.author' => 'site.edit']));
+
+        $this->assertFalse($authorizer->allows(new User, $tenant));
+        $this->assertFalse($authorizer->allowsResolved(new User, $tenant));
+
+        $this->expectException(AuthorizationException::class);
+        $authorizer->authorize(new User, $tenant);
+    }
+
+    public function test_an_entitlement_prefixed_target_keeps_the_entitlement_plane(): void
+    {
+        Gate::define('entitlement:workbench.enter', fn ($user = null): bool => $user instanceof EditorTenantAuthor);
+        Gate::define('workbench.enter', fn ($user = null): bool => true);
+        $authorizer = app(EditorAuthorizer::class);
+        $tenant = $this->request($this->route('tenant', ['ux.author' => 'entitlement:workbench.enter']));
+
+        $this->assertTrue($authorizer->allows(new EditorTenantAuthor, $tenant));
+        $this->assertTrue($authorizer->allowsResolved(new EditorTenantAuthor, $tenant));
+        $authorizer->authorize(new EditorTenantAuthor, $tenant);
+        // A same-named PERMISSION does not admit: the prefixed form stays on the entitlement plane.
+        $this->assertFalse($authorizer->allows(new User, $tenant));
+        $this->assertFalse($authorizer->allowsResolved(new User, $tenant));
+
+        $this->expectException(AuthorizationException::class);
+        $authorizer->authorize(new User, $tenant);
+    }
+
+    public function test_an_unoverridden_mount_is_unchanged_by_a_same_named_permission(): void
+    {
+        // allowsResolved() on a non-overridden mount stays on the resolver's entitlement plane: a permissive
+        // `site.edit` or raw grant must not leak in; allows()/authorize() stay on the raw ux.author Gate.
+        Gate::define('site.edit', fn ($user = null): bool => true);
+        $authorizer = app(EditorAuthorizer::class);
+        $strictTenant = $this->request($this->route('tenant', []));
+
+        $this->assertFalse($authorizer->allowsResolved(new EditorRawGateOnlyAuthor, $strictTenant));
+        $this->assertTrue($authorizer->allowsResolved(new EditorEntitlementOnlyAuthor, $strictTenant));
+        $this->assertTrue($authorizer->allows(new EditorRawGateOnlyAuthor, $strictTenant));
+        $this->assertFalse($authorizer->allows(new EditorTenantAuthor, $strictTenant));
     }
 
     public function test_only_the_matched_tenant_route_can_map_authoring_to_site_edit(): void

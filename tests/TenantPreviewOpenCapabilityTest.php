@@ -254,7 +254,8 @@ class TenantPreviewOpenCapabilityTest extends TestCase
         $actor = TenantPreviewCapabilityUser::query()->create(['name' => 'Tenant Admin']);
         $actor->assignRole($role);
         app(PermissionRegistrar::class)->forgetCachedPermissions();
-        Gate::define('entitlement:site.edit', fn ($user): bool => $user->hasPermissionTo('site.edit', 'web'));
+        // No host bridge (launch 72b): the tenant override target site.edit is asked as itself, so spatie's own Gate
+        // check of the seeded permission answers it.
 
         $releaseId = (string) Str::uuid();
         $entryId = (string) Str::uuid();
