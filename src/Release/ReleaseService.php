@@ -358,11 +358,16 @@ final class ReleaseService
                 $release->forceFill(['preview_links_enabled' => false, 'preview_link_secret' => null]);
             }
             $grouped = $members->groupBy(fn (BeamUxReleaseMember $member) => $member->kind());
-            foreach ($kinds->all() as $kind) {
-                if ($grouped->has($kind->kind())) {
-                    $kind->publish($release, $grouped->get($kind->kind())->values(), $actor, $context);
+            // Launch ticket 77: the members' marking moves (publish, Take-down) happen only inside this scope; an entry
+            // refuses them anywhere else while review is required (BeamUxEntry::participateInWorkflowTransaction()).
+            $memberEntries = $members->pluck('entry_id')->filter()->map(fn ($id) => (string) $id)->values()->all();
+            ReleasePublicationScope::run($memberEntries, function () use ($kinds, $grouped, $release, $actor, $context): void {
+                foreach ($kinds->all() as $kind) {
+                    if ($grouped->has($kind->kind())) {
+                        $kind->publish($release, $grouped->get($kind->kind())->values(), $actor, $context);
+                    }
                 }
-            }
+            });
         }
     }
 

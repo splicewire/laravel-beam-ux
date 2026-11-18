@@ -150,7 +150,7 @@ use Splicewire\Beam\Write\ParticleWriter;
  * @api
  */
 #[UseCascadePolicy]
-class BeamUxEntry extends Model implements \Splicewire\Sync\Contracts\Syncable, WorkflowManaged
+class BeamUxEntry extends Model implements \Splicewire\Beam\Workflows\Control\Contracts\ParticipatesInWorkflowTransaction, \Splicewire\Sync\Contracts\Syncable, WorkflowManaged
 {
     use HasFacets;
     use HasUuids;
@@ -160,6 +160,39 @@ class BeamUxEntry extends Model implements \Splicewire\Sync\Contracts\Syncable, 
     }
     use \Splicewire\Beam\Ux\Sync\SyncsAsPackCopy;
     use WorkflowManagedTrait;
+
+    /**
+     * Launch ticket 77 (defence in depth behind 74/75): while `beam.ux.releases.review_required` is on, an entry's
+     * workflow marking may enter or leave `published` ONLY inside a Release's own Publish of THIS entry
+     * ({@see \Splicewire\Beam\Ux\Release\ReleasePublicationScope}). The editor ops already route such moves through a
+     * Release; this holds the same line for every other caller of the actuator, which runs this hook inside the
+     * transition's transaction whatever fired it: the calendar, Circuit and Reaction actions
+     * (`WorkflowActionService::execute`), tower's workflow endpoint, and any host that registers an entry subject
+     * resolver. Throwing rolls the whole transition back (the contract's own rule). Moves that neither enter nor leave
+     * `published` (an archive of a draft, say), and every move with review off, are untouched.
+     *
+     * Every declaration matching the name and the current place counts, not the first: the underlying state machine
+     * applies every enabled declaration of a name, so a definition that declares the same name twice (one guarded, one
+     * into `published`) must not be judged by the harmless one.
+     */
+    public function participateInWorkflowTransaction(string $transition, \Splicewire\Beam\Workflows\Control\TransitionContext $context): void
+    {
+        if (! config('beam.ux.releases.review_required', false)
+            || \Splicewire\Beam\Ux\Release\ReleasePublicationScope::admits((string) $this->getKey())) {
+            return;
+        }
+
+        // The marking BEFORE this move: the hook runs after admission and before the marking is persisted.
+        $projection = app(\Splicewire\Beam\Workflows\Control\WorkflowActuator::class)->projection($this) ?? [];
+        $from = (string) ($projection['current'] ?? $this->getAttribute('workflow_marking'));
+        $entersPublished = collect($projection['transitions'] ?? [])
+            ->filter(fn (array $t): bool => $t['name'] === $transition && in_array($from, (array) $t['from'], true))
+            ->contains(fn (array $t): bool => in_array(self::MARKING_PUBLISHED, (array) $t['to'], true));
+
+        if ($from === self::MARKING_PUBLISHED || $entersPublished) {
+            throw new \Splicewire\Beam\Localization\CodedAuthorizationException(\Splicewire\Beam\Ux\Release\ReleaseError::ApprovalRequired);
+        }
+    }
 
     protected $table = 'beam_ux_entries';
 

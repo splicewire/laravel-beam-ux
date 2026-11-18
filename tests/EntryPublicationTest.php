@@ -2388,6 +2388,166 @@ class EntryPublicationTest extends TestCase
         $this->assertSame('published', $entry->fresh()->workflow_marking);
     }
 
+    // ---- Launch ticket 77 (defence in depth): every actuator surface (calendar, Circuit, Reactions, tower's workflow
+    // endpoint) fires `WorkflowActuator::transition` directly. Entries are not a registered subject kind today, but a
+    // host that registers one must not reopen 75: the entry itself refuses a move into or out of `published` under
+    // review unless a Release's own Publish is applying it.
+
+    /** What a host would add, and what every actuator surface resolves through. */
+    private function registerEntrySubjectResolver(): void
+    {
+        app(\Splicewire\Beam\Workflows\Control\SubjectResolverRegistry::class)
+            ->register('beam-ux-entry', fn (string $id) => BeamUxEntry::query()->find($id));
+    }
+
+    private function actuate(BeamUxEntry $entry, string $transition): \Splicewire\Beam\Workflows\Control\TransitionResult
+    {
+        $workflow = app(\Splicewire\Beam\Workflows\Control\WorkflowActuator::class);
+        $subject = $workflow->subject('beam-ux-entry', (string) $entry->getKey());
+        $this->assertInstanceOf(BeamUxEntry::class, $subject, 'the registered resolver addresses the entry');
+
+        return $workflow->transition($subject, $transition, new \Splicewire\Beam\Workflows\Control\TransitionContext(actor: 'user:author'));
+    }
+
+    public function test_under_review_an_actuator_publish_cannot_re_show_a_reviewed_take_down(): void
+    {
+        [$entry] = $this->takenDownPage(review: true);
+        $this->registerEntrySubjectResolver();
+
+        try {
+            $this->actuate($entry, 'publish');
+            $this->fail('the actuator re-showed a taken-down page past review');
+        } catch (\Illuminate\Auth\Access\AuthorizationException $refused) {
+            $this->assertSame(\Splicewire\Beam\Ux\Release\ReleaseError::ApprovalRequired->message(), $refused->getMessage());
+        }
+
+        $this->assertSame('draft', $entry->fresh()->workflow_marking, 'the whole transition rolled back');
+    }
+
+    public function test_under_review_an_actuator_unpublish_cannot_take_a_page_down_past_review(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $this->releaseFixture();
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => 'published'])->save();
+        $this->registerEntrySubjectResolver();
+
+        try {
+            $this->actuate($entry, 'unpublish');
+            $this->fail('the actuator took a page down past review');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+
+        $this->assertSame('published', $entry->fresh()->workflow_marking);
+    }
+
+    public function test_under_review_a_move_that_neither_enters_nor_leaves_published_still_applies(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $this->releaseFixture();
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', \Splicewire\Beam\Ux\Workflow\EntryPublishLifecycle::DEFINITION);
+        $entry->forceFill(['workflow_marking' => 'draft'])->save();
+        $this->registerEntrySubjectResolver();
+
+        $this->assertTrue($this->actuate($entry, 'archive')->applied);
+        $this->assertSame('archived', $entry->fresh()->workflow_marking);
+    }
+
+    public function test_with_review_off_the_actuator_moves_an_entry_as_before(): void
+    {
+        [$entry] = $this->takenDownPage(review: false);
+        $this->registerEntrySubjectResolver();
+
+        $this->assertTrue($this->actuate($entry, 'publish')->applied);
+        $this->assertSame('published', $entry->fresh()->workflow_marking);
+        $this->assertTrue($this->actuate($entry->fresh(), 'unpublish')->applied);
+        $this->assertSame('draft', $entry->fresh()->workflow_marking);
+    }
+
+    public function test_the_release_publication_scope_closes_even_when_the_publish_fails(): void
+    {
+        try {
+            \Splicewire\Beam\Ux\Release\ReleasePublicationScope::run(['member-1'], function (): void {
+                $this->assertTrue(\Splicewire\Beam\Ux\Release\ReleasePublicationScope::admits('member-1'));
+                throw new \RuntimeException('a member failed');
+            });
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertFalse(\Splicewire\Beam\Ux\Release\ReleasePublicationScope::active(), 'no open scope survives a failed publish');
+        $this->assertFalse(\Splicewire\Beam\Ux\Release\ReleasePublicationScope::admits('member-1'));
+    }
+
+    public function test_under_review_a_release_publish_in_progress_admits_only_its_own_members(): void
+    {
+        [$entry] = $this->takenDownPage(review: true);
+        $this->registerEntrySubjectResolver();
+
+        // Host code running inside SOME Release's publish (a sink, an observer) moves an entry that is not its member.
+        try {
+            \Splicewire\Beam\Ux\Release\ReleasePublicationScope::run(['some-other-entry'], fn () => $this->actuate($entry, 'publish'));
+            $this->fail('an unrelated entry was re-shown inside another Release\'s publish');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+
+        $this->assertSame('draft', $entry->fresh()->workflow_marking);
+    }
+
+    public function test_under_review_a_host_restore_into_published_and_an_archive_out_of_it_are_refused_on_the_actuator(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $this->releaseFixture();
+        $this->bindHostPageWorkflow();
+        $this->registerEntrySubjectResolver();
+
+        $entry->forceFill(['workflow_marking' => 'archived'])->save();
+        try {
+            $this->actuate($entry, 'restore');
+            $this->fail('restore re-showed the page past review');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+        $this->assertSame('archived', $entry->fresh()->workflow_marking);
+
+        $entry->forceFill(['workflow_marking' => 'published'])->save();
+        try {
+            $this->actuate($entry, 'archive');
+            $this->fail('archive took the page down past review');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+        $this->assertSame('published', $entry->fresh()->workflow_marking);
+    }
+
+    /**
+     * The review's F1: the state machine applies EVERY enabled declaration of a name, so a definition that declares
+     * `archive` twice from `draft` (one blocked by a guard, one into `published`) is judged by all of them.
+     */
+    public function test_under_review_a_duplicate_declaration_into_published_cannot_hide_behind_a_harmless_one(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $this->releaseFixture();
+        app(\Splicewire\Beam\Workflows\Control\GuardRegistry::class)->register('launch-77-never', fn ($subject) => 'never');
+        app(\Splicewire\Beam\Workflows\Control\WorkflowRegistry::class)->register('launch-77.duplicate', \Splicewire\Beam\Workflows\Blueprint\WorkflowBlueprint::fromArray([
+            'name' => 'launch-77.duplicate',
+            'places' => ['draft', 'published', 'archived'],
+            'initial' => ['draft'],
+            'transitions' => [
+                ['name' => 'archive', 'from' => 'draft', 'to' => 'archived', 'guard' => 'launch-77-never'],
+                ['name' => 'archive', 'from' => 'draft', 'to' => 'published'],
+            ],
+        ]));
+        app(\Splicewire\Beam\Workflows\Binding\WorkflowBindingRegistry::class)->bind('page', 'launch-77.duplicate');
+        $entry->forceFill(['workflow_marking' => 'draft'])->save();
+        $this->registerEntrySubjectResolver();
+
+        try {
+            $this->actuate($entry, 'archive');
+            $this->fail('a duplicate declaration published the page past review');
+        } catch (\Illuminate\Auth\Access\AuthorizationException) {
+        }
+
+        $this->assertSame('draft', $entry->fresh()->workflow_marking);
+    }
+
     public function test_release_without_calendars_refuses_schedule_but_can_publish_now(): void
     {
         $entry = $this->publishedPage(self::BODY_ONE);
