@@ -523,14 +523,26 @@ class ConfigRecordingTest extends AuthoredComponentNativeTestCase
         $this->enterTenantRealm();
         app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant)->saveDraft('release-fixture', [['pointer' => '/banner', 'op' => 'set', 'value' => 'tenant banner']]);
         $base = $this->git(['rev-parse', 'HEAD']);
+        $file = $this->repo.'/'.ConfigOverrideMirror::pathFor('release-fixture');
+        $this->assertFileDoesNotExist($file, 'precondition: no override file in the central mirror');
+        // A CONFIG-ONLY tenant Release: no entry member fails the mirror first, so before the residency guard its
+        // completion wrote the tenant's override file into the central mirror tree.
         $release = app(ReleaseService::class)->create($this->page(), 'tenant config', $this->author);
         app(ReleaseService::class)->putMemberByKind($release, BeamUxReleaseMember::KIND_CONFIG, 'release-fixture', $this->author);
+        $this->assertSame([BeamUxReleaseMember::KIND_CONFIG], $release->fresh()->allMembers()->pluck('member_kind')->all(), 'config-only');
         app(ReleaseService::class)->transition($release->fresh(), 'publish', $this->author);
 
         $this->assertSame('published', $release->fresh()->status, 'the tenant Release published its pins');
         $this->assertNotNull(app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant)->scope('release-fixture')->published_version,
             'the TENANT tier pin moved on the tenant store');
         $this->assertSame($base, $this->git(['rev-parse', 'HEAD']), 'no commit while tenancy is active');
+        $this->assertFileDoesNotExist($file, "no file: the tenant's override never reaches the central mirror tree");
+        $receipt = app(ReleaseRecording::class)->receipt($release->fresh());
+        $this->assertNotNull($receipt);
+        $this->assertSame('failed', $receipt->state);
+        $this->assertStringStartsWith('tenancy', (string) $receipt->error, 'the recording refused for tenancy');
+        $this->assertSame([], array_values(array_filter($receipt->manifest ?? [], fn (array $row) => ($row['kind'] ?? null) === BeamUxReleaseMember::KIND_CONFIG)),
+            'a tenant Release freezes no config rows');
 
         $this->leaveTenantRealm();
         $this->assertSame($operatorPin, app(ConfigOverrideStore::class)->forTier(ConfigTier::Operator)->scope('release-fixture')->published_version,

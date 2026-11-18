@@ -137,7 +137,9 @@ class ReleaseRecording
         try {
             $disk = $this->disk();
             $mirror = app(ConfigOverrideMirror::class);
-            foreach ($roots as $root) {
+            // A tenant Release records nothing to the central mirror, so it freezes no config rows either; completion
+            // guards the write as well ({@see complete()}).
+            foreach ($this->centralResident($release) ? $roots : [] as $root) {
                 $bytes = $mirror->bytes($root, $release->getConnectionName());
                 $path = ConfigOverrideMirror::pathFor($root);
                 if ($bytes === null) {
@@ -302,8 +304,10 @@ class ReleaseRecording
                 }
                 // config-sections 08 (ADR-0243 d4): write the CONFIG-override mirror files from the frozen receipt, so a
                 // config override rides the entry closure's single commit. Config rows only — entry bodies are already
-                // mirrored by EntryPublication; this leaves the entry mirror/move/takedown path untouched.
-                if ($local) {
+                // mirrored by EntryPublication; this leaves the entry mirror/move/takedown path untouched. Only a CENTRAL
+                // Release writes them: the mirror disk is the central site's tree, so a tenant's config never reaches it,
+                // whatever the receipt froze (the rule PlacedDiskMirror applies to a tenant-resident entry, ADR-0233 d6).
+                if ($local && $this->centralResident($release)) {
                     foreach (($this->receipt($release)?->manifest ?? []) as $file) {
                         if (($file['kind'] ?? null) !== BeamUxReleaseMember::KIND_CONFIG) {
                             continue;
@@ -523,6 +527,23 @@ class ReleaseRecording
                 throw new RecordingFailure('tenancy', RecordingError::TenancyEveryReleaseMemberMustProvenCentral);
             }
         }
+    }
+
+    /**
+     * Whether the Release lives in the central realm: no tenant is active, and a probe on the Release's connection is
+     * central-resident ({@see EntryResidency}). It fails closed: residency that cannot be determined is not central.
+     */
+    private function centralResident(BeamUxRelease $release): bool
+    {
+        try {
+            if (app(TenancyContext::class)->isActive()) {
+                return false;
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return app(EntryResidency::class)->isCentralResident((new BeamUxEntry)->setConnection($release->getConnectionName()));
     }
 
     private function recordLocked(BeamUxRelease $release, Authenticatable $actor, LocalGit $git): void
