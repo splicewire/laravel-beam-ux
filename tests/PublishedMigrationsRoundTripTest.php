@@ -56,11 +56,32 @@ class PublishedMigrationsRoundTripTest extends TestCase
             $this->assertTrue(Schema::hasColumn('beam_ux_entries', 'origin'));
             $this->assertTrue(Schema::hasIndex('beam_ux_entries', 'beam_ux_entries_origin_index'));
             $this->assertTrue(Schema::hasColumn('beam_ux_entries', 'component_name'));
+            $this->assertTrue(Schema::hasColumn('beam_ux_release_members', 'member_residency'));
         } finally {
             foreach (array_reverse($tables) as $table) {
                 Schema::dropIfExists($table);
             }
         }
+    }
+
+    /**
+     * beam-ux is publish-only (`runsMigrations` stays false), so a stub that is not declared in `hasMigrations([...])`
+     * never reaches a host. Tests that `require` a stub directly cannot see that gap. This one reads the declared list.
+     */
+    public function test_every_shipped_migration_stub_is_declared(): void
+    {
+        $package = new Package;
+        $package->setBasePath(dirname(__DIR__).'/src');
+        (new BeamUxServiceProvider($this->app))->configurePackage($package);
+
+        $shipped = array_map(
+            fn (string $path) => 'shared/'.basename($path, '.php.stub'),
+            glob(dirname(__DIR__).'/database/migrations/shared/*.php.stub'),
+        );
+
+        $this->assertNotEmpty($shipped);
+        $this->assertSame([], array_values(array_diff($shipped, $package->migrationFileNames)), 'Shipped but not declared in hasMigrations');
+        $this->assertContains('shared/add_member_residency_to_beam_ux_release_members_table', $package->migrationFileNames);
     }
 
     public function test_provenance_rollback_also_handles_an_absent_index_and_a_repeated_down(): void

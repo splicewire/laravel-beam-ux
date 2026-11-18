@@ -142,6 +142,9 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
                 'shared/add_preview_links_to_beam_ux_releases_table',
                 // Release members have kinds (ADR-0243, config-sections 04): kind + ref, entry_id nullable, backfilled.
                 'shared/add_member_kind_to_beam_ux_release_members_table',
+                // A non-entry member's resolved residency (config-sections 08). The create stub carries the column,
+                // but a host that already published an earlier create stub only gets it through this ALTER.
+                'shared/add_member_residency_to_beam_ux_release_members_table',
                 // A site's Redirects (ADR-0236 d1): a row of their own, beside the entries they lead to.
                 'shared/create_beam_ux_redirects_table',
                 'shared/create_beam_ux_release_recordings_table',

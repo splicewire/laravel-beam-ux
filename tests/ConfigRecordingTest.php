@@ -130,9 +130,6 @@ class ConfigRecordingTest extends AuthoredComponentNativeTestCase
         [$release, $page] = $this->buildAndPublish(configFirst: false);
 
         $receipt = app(ReleaseRecording::class)->receipt($release);
-        fwrite(STDERR, "\n[DIAG] members=".json_encode($release->allMembers()->get(['member_kind', 'member_ref', 'version_id', 'member_residency'])->toArray())
-            ."\n[DIAG] scope.published=".json_encode(app(ConfigOverrideStore::class)->scope('release-fixture')?->only(['section', 'head_version', 'published_version']))
-            ."\n[DIAG] receipt.state=".$receipt?->state." manifest.kinds=".json_encode(array_column($receipt?->manifest ?? [], 'kind'))."\n");
         $this->assertSame('recorded', $receipt->state, (string) $receipt->error);
         $this->assertSame('1', $this->git(['rev-list', '--count', $base.'..HEAD']), 'exactly one new commit');
         $kinds = array_column($receipt->manifest, 'kind');
