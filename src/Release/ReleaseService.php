@@ -594,6 +594,19 @@ final class ReleaseService
                 }
             }
 
+            // config-sections 10b (lead ruling 10:15Z): a request authenticated by a guard that has NO user provider,
+            // Sanctum's `sanctum` guard being the case, switches the default guard to it (Authenticate:sanctum), so a
+            // central `user:` actor token could never resolve: every Release command on such a route answered
+            // release_author_unresolvable. Such a caller is still a user of the application's own user provider, the web
+            // guard's, so fall back to it. The provider name is read from the host's auth config, never assumed.
+            $webProvider = config('auth.guards.web.provider');
+            if (is_string($webProvider) && $webProvider !== '') {
+                $provider = Auth::createUserProvider($webProvider);
+                if ($provider instanceof UserProvider) {
+                    return $provider;
+                }
+            }
+
             return Auth::createUserProvider();
         } catch (\InvalidArgumentException) {
             return null;
