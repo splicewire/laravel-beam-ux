@@ -28,6 +28,7 @@ use Splicewire\Beam\Ux\Particle\EntryDraftSaveOp;
 use Splicewire\Beam\Ux\Particle\EntryPreviewOp;
 use Splicewire\Beam\Ux\Particle\EntryPublishOp;
 use Splicewire\Beam\Ux\Particle\EntryVersionRestoreOp;
+use Splicewire\Beam\Ux\Particle\EntryVersionShowOp;
 use Splicewire\Beam\Ux\Particle\EntryVersionsShowOp;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -5083,6 +5084,95 @@ class EntryPublicationTest extends TestCase
         $this->assertTrue($state->draftPending);
         $this->assertSame('wip', $state->versions[0]->label);
         $this->assertSame((string) $entry->getKey(), $state->id);
+    }
+
+    // ── particle-editor G3: EntryVersionShowOp, one version WITH its snapshot, over HTTP ──────────────────────────
+
+    /** Mount the shipped declaration the way a host does, and answer the entitlement plane as told. */
+    private function mountVersionShowOp(bool $entitled): void
+    {
+        $this->app->make(\Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery::class)->registerClass(EntryVersionShowOp::class);
+        \Splicewire\Beam\Facades\Particle::ops('beam-ux-entry', 'beam-ux-entry', 'version');
+        // Opposed on purpose (as EntryWorkflowOpAbilityTest): only the ENTITLEMENT plane may decide.
+        \Illuminate\Support\Facades\Gate::define('entitlement:ux.author', fn ($user = null) => $entitled);
+        \Illuminate\Support\Facades\Gate::define('ux.author', fn ($user = null) => ! $entitled);
+        $this->actingAs((new ReleaseRequestAuthorFixture)->forceFill(['id' => 'author']));
+    }
+
+    public function test_the_version_read_returns_one_versions_snapshot_to_an_author_by_slug_and_by_uuid(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $draft = app(EntryPublication::class)->recordDraft($entry->fresh(), self::BODY_TWO, 'wip');
+        $this->mountVersionShowOp(entitled: true);
+        $published = collect($draft->versions)->firstWhere('isPublished', true);
+        $this->assertNotNull($published, 'the fixture has no published version, so this case proves nothing');
+
+        $bySlug = $this->getJson("/beam-ux-entry/{$entry->getKey()}/version?ref={$published->readable}")->assertOk();
+        $this->assertSame($published->id, $bySlug->json('data.id'));
+        $this->assertTrue($bySlug->json('data.isPublished'));
+        $this->assertFalse($bySlug->json('data.isHead'));
+        $this->assertSame(self::BODY_ONE, $bySlug->json('data.snapshot.payload'));
+
+        $head = $this->getJson("/beam-ux-entry/{$entry->getKey()}/version?ref={$draft->headVersion}")->assertOk();
+        $this->assertSame('wip', $head->json('data.label'));
+        $this->assertTrue($head->json('data.isHead'));
+        $this->assertSame(self::BODY_TWO, $head->json('data.snapshot.payload'));
+
+        $byId = $this->getJson("/beam-ux-entry/{$entry->getKey()}/version?ref={$published->id}")->assertOk();
+        $this->assertSame($bySlug->json('data'), $byId->json('data'));
+    }
+
+    public function test_the_version_read_refuses_an_actor_without_the_author_entitlement(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $this->mountVersionShowOp(entitled: false);
+
+        $this->getJson("/beam-ux-entry/{$entry->getKey()}/version?ref=v1")->assertForbidden();
+    }
+
+    public function test_the_version_read_answers_422_on_ref_for_a_version_that_is_not_this_entrys(): void
+    {
+        $entry = $this->publishedPage(self::BODY_ONE);
+        $other = $this->publishedPage(self::BODY_TWO);
+        $foreign = app(EntryPublication::class)->state($other->fresh())->headVersion;
+        $this->mountVersionShowOp(entitled: true);
+
+        foreach (['v99', (string) $foreign] as $ref) {
+            $this->getJson("/beam-ux-entry/{$entry->getKey()}/version?ref={$ref}")
+                ->assertStatus(422)
+                ->assertJsonValidationErrors(['ref']);
+        }
+        // A missing ref is the declared input's own refusal, on the same field.
+        $this->getJson("/beam-ux-entry/{$entry->getKey()}/version")->assertStatus(422)->assertJsonValidationErrors(['ref']);
+    }
+
+    public function test_the_version_read_declares_its_slots_on_the_one_entitlement_plane_and_leaves_the_list_alone(): void
+    {
+        $op = (new ReflectionClass(EntryVersionShowOp::class))->getAttributes(ParticleOp::class)[0]->newInstance();
+
+        $this->assertSame('beam-ux-entry', $op->resource);
+        $this->assertSame('version', $op->name);
+        $this->assertSame(OperationKind::Read, $op->kind);
+        $this->assertSame('ux.author', $op->ability);
+        $this->assertFalse($op->abilityModel);
+        $this->assertSame(\Splicewire\Beam\Routing\HttpMethod::Get, $op->method);
+        $this->assertSame(\Splicewire\Beam\Ux\Data\EntryVersionShowInputData::class, $op->input);
+        $this->assertSame(\Splicewire\Beam\Ux\Data\EntryVersionSnapshotData::class, $op->output);
+        // The list row stays snapshot-free: the read is a sibling, not a widening.
+        $rowFields = array_map(
+            fn (\ReflectionParameter $parameter): string => $parameter->getName(),
+            (new ReflectionClass(\Splicewire\Beam\Ux\Data\EntryVersionData::class))->getConstructor()->getParameters(),
+        );
+        $this->assertNotContains('snapshot', $rowFields);
+    }
+
+    public function test_an_empty_version_snapshot_goes_on_the_wire_as_an_object(): void
+    {
+        $empty = new \Splicewire\Beam\Ux\Data\EntryVersionSnapshotData(id: 'version-1', version: 1, readable: 'v1', snapshot: []);
+        $this->assertStringContainsString('"snapshot":{}', json_encode($empty, JSON_THROW_ON_ERROR));
+
+        $full = new \Splicewire\Beam\Ux\Data\EntryVersionSnapshotData(id: 'version-2', version: 2, readable: 'v2', snapshot: ['payload' => self::BODY_ONE]);
+        $this->assertSame(self::BODY_ONE, json_decode(json_encode($full, JSON_THROW_ON_ERROR), true)['snapshot']['payload']);
     }
 
     public function test_the_publish_and_draft_operations_round_trip_through_their_declared_inputs(): void

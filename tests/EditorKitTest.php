@@ -40,6 +40,39 @@ class EditorKitTest extends TestCase
         $this->assertContains('beam-ux-entries/{id}/preview', $routes);
     }
 
+    /** particle-editor G3 (review B1): the one-version read is reached through the package's OWN mount, not a hand mount. */
+    public function test_editor_routes_mount_the_one_version_read_and_an_author_reaches_it_through_them(): void
+    {
+        $routes = collect(app('router')->getRoutes()->getRoutes())->map(fn ($route) => $route->uri())->all();
+        $this->assertContains('beam-ux-entries/{id}/version', $routes);
+
+        $body = [['kind' => 'block', 'name' => 'h1', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => [['kind' => 'text', 'value' => 'Versioned page']]]];
+        $this->actingAs(new KitAuthor);
+        $this->postJson('/beam-ux-entries/make-editable', ['slug' => 'home', 'body' => $body])->assertOk();
+        $entry = BeamUxEntry::query()->where('slug', 'home')->firstOrFail();
+
+        $read = $this->getJson("/beam-ux-entries/{$entry->id}/version?ref={$entry->published_version}")->assertOk();
+        $this->assertSame((string) $entry->published_version, $read->json('data.id'));
+        $this->assertTrue($read->json('data.isPublished'));
+        $this->assertSame($body, $read->json('data.snapshot.payload'));
+
+        $this->actingAs(new User);
+        $this->getJson("/beam-ux-entries/{$entry->id}/version?ref={$entry->published_version}")->assertForbidden();
+    }
+
+    /** Review N4: a host without the version store gets the same clean 422 on `ref`, not a 500 from a missing table. */
+    public function test_the_one_version_read_refuses_cleanly_on_a_host_without_the_version_store(): void
+    {
+        $this->actingAs(new KitAuthor);
+        $this->postJson('/beam-ux-entries/make-editable', ['slug' => 'home', 'body' => []])->assertOk();
+        $entry = BeamUxEntry::query()->where('slug', 'home')->firstOrFail();
+        Schema::drop(Beam::table('versions'));
+
+        $this->getJson("/beam-ux-entries/{$entry->id}/version?ref={$entry->published_version}")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['ref']);
+    }
+
     public function test_central_redirect_routes_keep_the_0691_route_list(): void
     {
         $redirectRoutes = collect(app('router')->getRoutes()->getRoutes())
