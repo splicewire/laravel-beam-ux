@@ -160,19 +160,26 @@ final class ReleaseService
      */
     public function putMemberByKind(BeamUxRelease $release, string $kind, string $ref, Authenticatable $actor): void
     {
-        $version = $this->kinds()->for($kind)->headVersion($release, $ref);
-        $this->place($release, $kind, $ref, $version, $actor, null, false);
+        // config-sections 10b (08 defect, root ruling 012b6388): the head is read UNDER the Release lock, inside place(),
+        // not before it, so a Save draft racing the add cannot leave the member pinning a head read outside the lock.
+        $this->place($release, $kind, $ref, fn (BeamUxRelease $locked): ?string => $this->kinds()->for($kind)->headVersion($locked, $ref), $actor, null, false);
     }
 
     /**
      * `$directFirst` is true only from requestOne, for the one member of the direct Release it just opened: that
      * placement is part of the direct request and decides on the publish ladder. Every other placement, including a
      * re-add after the member was dropped, is an edit (orch-peer, 2026-10-18).
+     *
+     * `$version` is the version to pin, or a resolver given the LOCKED Release (putMemberByKind's head draft), so a
+     * version read from live state is taken after the lock, never before it.
+     *
+     * @param  string|\Closure(BeamUxRelease): ?string|null  $version
      */
-    private function place(BeamUxRelease $release, string $kindName, string $ref, ?string $version, Authenticatable $actor, ?string $redirectTarget, bool $directFirst): void
+    private function place(BeamUxRelease $release, string $kindName, string $ref, string|\Closure|null $version, Authenticatable $actor, ?string $redirectTarget, bool $directFirst): void
     {
         $release->getConnection()->transaction(function () use ($release, $kindName, $ref, $version, $actor, $redirectTarget, $directFirst) {
             $locked = $release->newQuery()->lockForUpdate()->findOrFail($release->id);
+            $version = $version instanceof \Closure ? $version($locked) : $version;
             $this->assertEditable($locked);
             $kind = $this->kinds()->for($kindName);
             $subject = $kind->subject($locked, $ref);

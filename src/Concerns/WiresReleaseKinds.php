@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Concerns;
 
 use Rushing\Popcorn\Concerns\Chained;
+use Splicewire\Beam\Config\Overrides\ConfigOverrideScope;
 use Splicewire\Beam\Ux\BeamUxServiceProvider;
 use Splicewire\Beam\Ux\Recording\GitRecordingSink;
 use Splicewire\Beam\Ux\Release\Kinds\ConfigOverrideMemberKind;
@@ -42,5 +43,17 @@ trait WiresReleaseKinds
     protected function registerPublishSinks(): void
     {
         $this->app->singleton(PublishSinkRegistry::class, fn () => (new PublishSinkRegistry)->register(new GitRecordingSink));
+    }
+
+    /**
+     * config-sections 10b (08 defect, root ruling 012b6388): Discard draft drops the config members that pinned the
+     * discarded draft. laravel-beam's store fires no event of its own, and laravel-beam never depends on beam-ux, so
+     * beam-ux observes the scope MODEL it already consumes. {@see ConfigOverrideMemberKind::dropDiscardedMembers()}
+     * recognises a discard (the head moved back to the published version) and acts only then.
+     */
+    #[Chained('boot', order: 67)]
+    protected function dropConfigMembersOnDiscard(): void
+    {
+        ConfigOverrideScope::updated(fn (ConfigOverrideScope $scope) => ConfigOverrideMemberKind::dropDiscardedMembers($scope));
     }
 }

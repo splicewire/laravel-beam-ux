@@ -66,6 +66,12 @@ enum ReleaseError: string implements CodedError
     #[Message('There is no unpublished change to :ref.')]
     case MemberNoDraft = 'release_member_no_draft';
 
+    // config-sections 10b (08 defect, root ruling 012b6388): a config member pins a draft that is no longer the section's
+    // head (a later Save draft, or a Discard then a new draft). Publishing it would publish that earlier draft, so it is
+    // refused, never silently re-pinned; adding the section to the Release again takes the current draft.
+    #[Message('This Release holds an earlier draft of :ref. Add :ref to the Release again to take its current draft.')]
+    case MemberNotHeadDraft = 'release_member_not_head_draft';
+
     #[Message('A redirect target cannot be taken down in the same Release.')]
     case RedirectTargetTakenDown = 'release_redirect_target_taken_down';
 

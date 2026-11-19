@@ -152,7 +152,50 @@ class ConfigOverrideMemberKind implements ReleaseMemberKind
         }
         if (! $this->isRollback($release)) {
             $this->assertHasDraft($subject);
+            // config-sections 10b (08 defect, root ruling 012b6388): a forward publish moves the published pin to the
+            // MEMBER's version. If that is no longer the section's head draft (a Save draft since it joined, or a Discard
+            // and a new draft), it is an earlier or discarded draft: refuse, never re-pin silently.
+            if ($member->version_id !== $subject->head_version) {
+                $this->refuse(ReleaseError::MemberNotHeadDraft, ['ref' => (string) $subject->section]);
+            }
         }
+    }
+
+    /**
+     * Discard draft drops the members that pinned the discarded draft (config-sections 10b, 08 defect, root ruling
+     * 012b6388). laravel-beam's `ConfigOverrideStore::discardDraft()` resets the scope's head to its published version
+     * and keeps the version row, so a member would otherwise stay pinned to a draft nobody can see. A discard is the one
+     * scope update that moves `head_version` BACK to `published_version`. A Save draft or a restore moves the head
+     * forward, and a publish moves only `published_version`.
+     *
+     * - **Draft Releases:** the member is dropped. Such a Release carries no approval to revoke.
+     * - **Releases under review, approved or scheduled:** the member is KEPT. Revising one is a workflow transition that
+     *   needs an actor. {@see assertPublishable()} refuses it at publish ({@see ReleaseError::MemberNotHeadDraft}), so
+     *   it is invalidated either way.
+     * - **Published Releases:** never touched.
+     *
+     * Runs inside the discard's own transaction, on the scope's connection.
+     */
+    public static function dropDiscardedMembers(ConfigOverrideScope $scope): void
+    {
+        $discarded = $scope->getOriginal('head_version');
+        if (! $scope->wasChanged('head_version') || $scope->head_version !== $scope->published_version
+            || $discarded === null || $discarded === $scope->published_version) {
+            return;
+        }
+
+        $connection = $scope->getConnectionName();
+        $members = (new BeamUxReleaseMember)->setConnection($connection);
+        if (! $members->getConnection()->getSchemaBuilder()->hasTable($members->getTable())) {
+            return;
+        }
+
+        $members->newQuery()
+            ->where('member_kind', BeamUxReleaseMember::KIND_CONFIG)
+            ->where('member_ref', $scope->section)
+            ->where('version_id', $discarded)
+            ->whereIn('release_id', (new BeamUxRelease)->setConnection($connection)->newQuery()->where('status', 'draft')->select('id'))
+            ->delete();
     }
 
     /**
