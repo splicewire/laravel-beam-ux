@@ -11,6 +11,7 @@ use Splicewire\Beam\Config\ConfigSectionReader;
 use Splicewire\Beam\Config\ConfigSectionRegistry;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideScope;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
+use Splicewire\Beam\Enums\ConfigTier;
 use Splicewire\Beam\Localization\CodedValidationException;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
@@ -47,6 +48,10 @@ class ConfigMemberHeadDraftTest extends AuthoredComponentNativeTestCase
         $shared = ['driver' => 'sqlite', 'database' => $db, 'prefix' => '', 'foreign_key_constraints' => false];
         $app['config']->set('database.connections.testing', $shared);
         $app['config']->set('database.connections.central', $shared);
+        // 08's tenant harness: a SEPARATE database for a tenant's own store, and a POOLED tenant identical to central.
+        $tdb = 'file:beam10bt_'.uniqid().'?mode=memory&cache=shared';
+        $app['config']->set('database.connections.tenant', ['driver' => 'sqlite', 'database' => $tdb, 'prefix' => '', 'foreign_key_constraints' => false]);
+        $app['config']->set('database.connections.tenant_pooled', $shared);
         $app['config']->set('app.key', 'base64:'.base64_encode(str_repeat('k', 32)));
         // One author submits, approves and publishes (the review gate is not what these tests are about).
         $app['config']->set('beam.ux.releases.allow_self_approval', true);
@@ -206,5 +211,107 @@ class ConfigMemberHeadDraftTest extends AuthoredComponentNativeTestCase
         $this->assertNotFalse($first($scopes), 'the scope head is read');
         $this->assertLessThan($first($scopes), $first($releases), 'the Release lock is taken before the head is read');
         $this->assertSame($this->scope()->head_version, $this->configMember($release->fresh())->version_id);
+    }
+
+    public function test_a_tenant_discard_drops_the_member_on_the_tenant_store_and_leaves_central_untouched(): void
+    {
+        // Lead 09:43Z: tenant Releases are where 10b's tenant draft bar sends members. Same tenancy harness as 08's AC4: a
+        // SECOND database is the tenant's own store; the tier follows the realm.
+        // Central first. As in 08's AC4, the operator publishes heading so the tenant tier's base validates, then leaves an
+        // operator DRAFT, held by a central draft Release.
+        $this->migrateOn('tenant');
+        $this->saveDraft('published heading');
+        app(ConfigOverrideStore::class)->publish(self::ROOT);
+        $this->saveDraft('operator heading');
+        $central = $this->releaseWithConfig();
+        $centralMember = $this->configMember($central);
+        $this->assertNotNull($centralMember);
+        $centralHead = $this->scope()->head_version;
+
+        // The tenant: a tenant-tier draft (banner, ceiling tenant) held by a tenant Release on the tenant store.
+        $this->enterTenantRealm();
+        $tenantStore = app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant);
+        $tenantStore->saveDraft(self::ROOT, [['pointer' => '/banner', 'op' => 'set', 'value' => 'tenant banner']]);
+        $tenant = app(ReleaseService::class)->create($this->page(), 'tenant config', $this->author);
+        app(ReleaseService::class)->putMemberByKind($tenant, BeamUxReleaseMember::KIND_CONFIG, self::ROOT, $this->author);
+        $this->assertSame('tenant', $tenant->getConnectionName() ?? config('database.default'), 'the tenant Release lives on the tenant store');
+        $this->assertNotNull($this->configMember($tenant->fresh()), 'precondition: the tenant Release holds the section');
+
+        $tenantStore->discardDraft(self::ROOT);
+
+        $this->assertNull($this->configMember($tenant->fresh()), 'the tenant member pinned to the discarded draft is dropped on the tenant store');
+        $this->leaveTenantRealm();
+        $this->assertSame($centralMember->version_id, $this->configMember($central->fresh())?->version_id, 'the central member is untouched');
+        $this->assertSame($centralHead, $this->scope()->head_version, 'the central draft is untouched');
+    }
+
+    public function test_a_pooled_tenant_discard_never_reaches_a_central_member(): void
+    {
+        // A POOLED tenant's store is the SAME database as central (08's AC3 pooled harness): it cannot hold a config member
+        // at all (release_members_outside_realm), and its tier has no safe store, so a tenant-tier discard there is refused
+        // by laravel-beam. Whatever the store does, the central Release's member must survive.
+        $this->saveDraft('operator heading');
+        $central = $this->releaseWithConfig();
+        $centralMember = $this->configMember($central);
+        $this->assertNotNull($centralMember);
+
+        $this->enterTenantRealm('tenant_pooled');
+        try {
+            app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant)->discardDraft(self::ROOT);
+        } catch (\Illuminate\Validation\ValidationException) {
+            // refused: a pooled tenant tier has no safe store of its own
+        }
+        $this->leaveTenantRealm();
+
+        $this->assertSame($centralMember->version_id, $this->configMember($central->fresh())?->version_id, 'the central member survives a pooled tenant discard');
+    }
+
+    /** Enter a tenant hop: tenancy active, default connection = the tenant's store (08's harness). */
+    private function enterTenantRealm(string $connection = 'tenant'): void
+    {
+        $tenancy = \Mockery::mock(\Splicewire\Beam\Realm\Contracts\TenancyContext::class)->shouldIgnoreMissing();
+        $tenancy->shouldReceive('isActive')->andReturnTrue();
+        $tenancy->shouldReceive('isMultiTenant')->andReturnTrue();
+        $tenancy->shouldReceive('currentTenantId')->andReturn('tenant-1');
+        $tenancy->shouldReceive('centralConnection')->andReturn('central');
+        $this->app->instance(\Splicewire\Beam\Realm\Contracts\TenancyContext::class, $tenancy);
+        config(['database.default' => $connection]);
+        $this->app->forgetInstance(ConfigOverrideStore::class);
+    }
+
+    /** Leave the tenant hop: back to the central realm (default connection, tenancy inactive). */
+    private function leaveTenantRealm(): void
+    {
+        $this->app->instance(\Splicewire\Beam\Realm\Contracts\TenancyContext::class,
+            \Mockery::mock(\Splicewire\Beam\Realm\Contracts\TenancyContext::class)->shouldIgnoreMissing());
+        config(['database.default' => 'testing']);
+        $this->app->forgetInstance(ConfigOverrideStore::class);
+    }
+
+    /** Run the full beam + ux + config schema on a connection (a tenant's own store), restoring the default after (08's harness). */
+    private function migrateOn(string $connection): void
+    {
+        $previous = config('database.default');
+        config(['database.default' => $connection]);
+        try {
+            $core = dirname((new \ReflectionClass(\Splicewire\Beam\BeamServiceProvider::class))->getFileName(), 2);
+            foreach (['create_beam_particles_table', 'create_beam_versions_table', 'create_activity_log_table'] as $n) {
+                (require $core.'/database/migrations/shared/'.$n.'.php.stub')->up();
+            }
+            foreach (['create_beam_ux_entries_table', 'add_page_settings_to_beam_ux_entries_table', 'add_child_fields_to_beam_ux_entries_table',
+                'add_record_page_to_beam_ux_entries_table', 'add_component_kind_to_beam_ux_entries_table', 'add_component_names_to_beam_ux_entries_table',
+                'create_beam_ux_redirects_table'] as $n) {
+                (require dirname(__DIR__).'/database/migrations/shared/'.$n.'.php.stub')->up();
+            }
+            $this->runBeamWorkflowsMigrations();
+            foreach (['create_beam_ux_releases_table', 'add_origin_to_beam_ux_releases_table', 'create_beam_ux_release_recordings_table'] as $n) {
+                (require dirname(__DIR__)."/database/migrations/shared/{$n}.php.stub")->up();
+            }
+            foreach (['create_beam_versions_table', 'create_beam_config_overrides_table'] as $n) {
+                (require dirname(__DIR__)."/vendor/splicewire/laravel-beam/database/migrations/shared/{$n}.php.stub")->up();
+            }
+        } finally {
+            config(['database.default' => $previous]);
+        }
     }
 }
