@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Support;
 
 use Splicewire\Beam\Facades\Particle;
+use Splicewire\Beam\Ux\Media\EntryMedia;
 use Splicewire\Beam\Ux\Particle\EntryMakeEditableOp;
 use Splicewire\Beam\Ux\Particle\ResolvePageEntryRefOp;
 
@@ -40,8 +41,15 @@ final class EditorRoutes
 
         // NoSubject must precede any {id} route; no hidden package route registration.
         Particle::ops($uri, 'beam-ux-entry', [ResolvePageEntryRefOp::class, EntryMakeEditableOp::class], $entryOptions);
-        foreach (['body', 'save-body', 'save-draft', 'publish', 'versions', 'version', 'restore', 'clear-body', 'print-source', 'read-source', 'canvas-bindings', 'component-capabilities', 'create-component', 'duplicate-component', 'create-release', 'preview'] as $op) {
+        // particle-editor G8: the Entry's declared workflow/transition/save-blocks ops are mounted here alongside their
+        // siblings (upload-image is conditional below, mirroring its EntryMedia::available() registration guard).
+        foreach (['body', 'save-body', 'save-draft', 'publish', 'versions', 'version', 'restore', 'clear-body', 'print-source', 'read-source', 'canvas-bindings', 'component-capabilities', 'create-component', 'duplicate-component', 'create-release', 'preview', 'workflow', 'transition', 'save-blocks'] as $op) {
             Particle::ops($uri, 'beam-ux-entry', $op, $entryOptions);
+        }
+        // G8: upload-image exists only when entry media is available, so mount it on the same guard as its registration
+        // (WiresParticleDeclarations scans the Media/Particle declarations only when EntryMedia::available()).
+        if (EntryMedia::available()) {
+            Particle::ops($uri, 'beam-ux-entry', 'upload-image', $entryOptions);
         }
 
         $releaseMount = Particle::mount($releasesUri, 'beam-ux-release')
