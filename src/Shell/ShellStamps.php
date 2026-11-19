@@ -43,6 +43,13 @@ class ShellStamps
     /** The nav data target: composed from the surface selection rather than copied from one stub. */
     public const NAV = 'resources/beam-ux/nav.yml';
 
+    /**
+     * The default host-relative target of the resource-map registration (satellite layout). A host whose front-end
+     * root differs (the platform's `ui/src`) re-keys it via {@see self::withFrameResourceMapAt()} from
+     * {@see FrontEndRoot::frameResourceMapTarget()}, so the stamp, the parity record and the audit name one path.
+     */
+    public const FRAME_RESOURCE_MAP_DEFAULT = 'resources/js/frame-resource-map.ts';
+
     /** @var array<string, array<string, string>> surface => [host-relative target => absolute stub path] */
     private array $files = [];
 
@@ -66,7 +73,7 @@ class ShellStamps
         $stamps->file(self::BASE, 'resources/js/app.tsx', $stubs.'/app.tsx.stub');
         // The host's registration of its generated resource map with frame (frame-foundation ruling 03 Q9/Q17): a `.ts`
         // module, so a host with skipLibCheck still checks it, and the host's type test imports it by path.
-        $stamps->file(self::BASE, 'resources/js/frame-resource-map.ts', $stubs.'/frame-resource-map.ts.stub');
+        $stamps->file(self::BASE, self::FRAME_RESOURCE_MAP_DEFAULT, $stubs.'/frame-resource-map.ts.stub');
 
         // The public site: the packaged home page, then the entry renderer's catch-all, printed after every other line.
         $stamps->route('site', "Route::beamUxHome('site/home');");
@@ -99,6 +106,25 @@ class ShellStamps
         $this->files[$surface][$target] = $stub;
 
         return $this;
+    }
+
+    /**
+     * A copy whose resource-map registration is keyed at $target instead of {@see self::FRAME_RESOURCE_MAP_DEFAULT},
+     * so a host with a non-default front-end root ({@see FrontEndRoot}) stamps, records and audits the map at one
+     * agreed path. A no-op when $target is the default or the map is not registered. Never mutates the shared instance.
+     */
+    public function withFrameResourceMapAt(string $target): self
+    {
+        if ($target === self::FRAME_RESOURCE_MAP_DEFAULT
+            || ! isset($this->files[self::BASE][self::FRAME_RESOURCE_MAP_DEFAULT])) {
+            return $this;
+        }
+
+        $clone = clone $this;
+        $clone->files[self::BASE][$target] = $clone->files[self::BASE][self::FRAME_RESOURCE_MAP_DEFAULT];
+        unset($clone->files[self::BASE][self::FRAME_RESOURCE_MAP_DEFAULT]);
+
+        return $clone;
     }
 
     /** @param bool $last the line registers a catch-all, so it is printed after every other surface's and tier's lines */

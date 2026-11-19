@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Doctor;
 use Rushing\Doctor\DoctorAudit;
 use Rushing\Doctor\Finding;
 use Splicewire\Beam\Ux\Console\StampShellCommand;
+use Splicewire\Beam\Ux\Shell\FrontEndRoot;
 use Splicewire\Beam\Ux\Shell\ShellStamps;
 
 /**
@@ -55,6 +56,10 @@ class ShellStampParityAudit implements DoctorAudit
         $findings = [];
         $contents = [];
 
+        // Resolve the resource map at the host's configured front-end root ({@see FrontEndRoot}), so a record that
+        // names `ui/src/frame-resource-map.ts` is compared to its stub rather than read as "no surface stamps it".
+        $stamps = $this->stamps->withFrameResourceMapAt(FrontEndRoot::frameResourceMapTarget());
+
         foreach ($record as $target => $surfaces) {
             $path = $base.'/'.$target;
 
@@ -65,7 +70,7 @@ class ShellStampParityAudit implements DoctorAudit
             }
 
             $selection = implode(',', $surfaces);
-            $contents[$selection] ??= $this->stamps->contentsFor($surfaces);
+            $contents[$selection] ??= $stamps->contentsFor($surfaces);
             $stub = $contents[$selection][$target] ?? null;
 
             if ($stub === null) {

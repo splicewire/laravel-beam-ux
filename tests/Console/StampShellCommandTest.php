@@ -11,6 +11,7 @@ use Rushing\Doctor\Finding;
 use Splicewire\Beam\Install\BeamInstallManifest;
 use Splicewire\Beam\Ux\Console\StampShellCommand;
 use Splicewire\Beam\Ux\Doctor\ShellStampParityAudit;
+use Splicewire\Beam\Ux\Shell\FrontEndRoot;
 use Splicewire\Beam\Ux\Shell\ShellStamps;
 use Splicewire\Beam\Ux\Tests\TestCase;
 use Symfony\Component\Process\Process;
@@ -41,6 +42,11 @@ class StampShellCommandTest extends TestCase
         ]], JSON_PRETTY_PRINT));
 
         $this->app->setBasePath($this->host);
+
+        // `beam.client.out_dir` resolved once at config load, against the ORIGINAL base path; relocating the base here
+        // would leave it pointing under the old base (which FrontEndRoot fails closed on, as a misconfiguration).
+        // Null it so the package default resolves against the current base — the state a real host has.
+        config(['beam.client.out_dir' => null]);
     }
 
     protected function tearDown(): void
@@ -364,6 +370,165 @@ class StampShellCommandTest extends TestCase
             ->assertSuccessful();
 
         $this->assertFileDoesNotExist($this->host.'/'.StampShellCommand::FRAME_RESOURCES);
+    }
+
+    // pe08 (G9) — stamp-shell front-end-root lift: the resource map and its generated module track the host's
+    // configured front-end root (`beam.client.out_dir`), so a platform app whose generated SDK lives at
+    // `ui/src/generated` registers its map at `ui/src/frame-resource-map.ts`. The default (`resources/js`) is
+    // unchanged — the frame tests above still pass byte-for-byte. Each new test is red at base (base hardcodes
+    // `resources/js`).
+
+    public function test_a_configured_ui_root_stamps_the_map_and_placeholder_under_it(): void
+    {
+        config(['beam.client.out_dir' => $this->host.'/ui/src/generated']);
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])
+            ->expectsOutputToContain('ui/src/frame-resource-map.ts')
+            ->expectsOutputToContain('placeholder written')
+            ->assertSuccessful();
+
+        // The map and its generated placeholder land under the configured root...
+        $this->assertFileExists($this->host.'/ui/src/frame-resource-map.ts');
+        $this->assertStringContainsString("from '@/generated/frame-resources'", File::get($this->host.'/ui/src/frame-resource-map.ts'));
+        $this->assertFileEquals(dirname(__DIR__, 2).'/stubs/shell/frame-resources.placeholder.ts.stub', $this->host.'/ui/src/generated/frame-resources.ts');
+        // ...and NOT at the satellite default.
+        $this->assertFileDoesNotExist($this->host.'/'.StampShellCommand::FRAME_RESOURCE_MAP);
+        $this->assertFileDoesNotExist($this->host.'/'.StampShellCommand::FRAME_RESOURCES);
+        // The parity record names the configured path, not the default.
+        $this->assertNotNull($this->recorded('ui/src/frame-resource-map.ts'));
+        $this->assertNull($this->recorded(StampShellCommand::FRAME_RESOURCE_MAP));
+    }
+
+    public function test_the_stamped_map_is_byte_identical_to_its_stub_under_any_root(): void
+    {
+        config(['beam.client.out_dir' => $this->host.'/ui/src/generated']);
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])->assertSuccessful();
+
+        // Same stub, wherever the root is: only the location moves, never the content.
+        $this->assertFileEquals(dirname(__DIR__, 2).'/stubs/shell/frame-resource-map.ts.stub', $this->host.'/ui/src/frame-resource-map.ts');
+    }
+
+    public function test_the_parity_audit_is_green_after_a_ui_root_stamp(): void
+    {
+        config(['beam.client.out_dir' => $this->host.'/ui/src/generated']);
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])->assertSuccessful();
+
+        // The map lands at the ui root (red at base, where it lands at the default resources/js)...
+        $this->assertFileExists($this->host.'/ui/src/frame-resource-map.ts');
+        // ...and the audit re-keys to the configured root, so the recorded ui/src map reads as stamped, not as drift.
+        $this->assertStatuses([DoctorStatus::Pass], $this->audit());
+    }
+
+    public function test_a_re_stamp_under_a_ui_root_is_identical_and_writes_nothing_new(): void
+    {
+        config(['beam.client.out_dir' => $this->host.'/ui/src/generated']);
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])->assertSuccessful();
+        $this->assertFileExists($this->host.'/ui/src/frame-resource-map.ts');   // ui root, not the default (red at base)
+        $before = $this->tree();
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])
+            ->expectsOutputToContain('identical')
+            ->expectsOutputToContain('placeholder present')
+            ->doesntExpectOutputToContain('placeholder written')
+            ->assertSuccessful();
+
+        $this->assertSame($before, $this->tree());
+    }
+
+    public function test_a_dry_run_under_a_ui_root_writes_nothing(): void
+    {
+        config(['beam.client.out_dir' => $this->host.'/ui/src/generated']);
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site', '--dry-run' => true])
+            ->expectsOutputToContain('ui/src/frame-resource-map.ts')
+            ->assertSuccessful();
+
+        $this->assertFileDoesNotExist($this->host.'/ui/src/frame-resource-map.ts');
+        $this->assertFileDoesNotExist($this->host.'/ui/src/generated/frame-resources.ts');
+    }
+
+    public function test_an_out_dir_not_named_generated_fails_closed(): void
+    {
+        config(['beam.client.out_dir' => $this->host.'/ui/src/sdk']);
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])
+            ->expectsOutputToContain("must end in a 'generated' directory")
+            ->assertExitCode(1);
+
+        // Nothing is written when the root is unusable.
+        $this->assertFileDoesNotExist($this->host.'/ui/src/frame-resource-map.ts');
+        $this->assertFileDoesNotExist($this->host.'/'.StampShellCommand::FRAME_RESOURCE_MAP);
+    }
+
+    public function test_an_out_dir_outside_the_app_fails_closed(): void
+    {
+        // An out_dir resolving outside the app is refused — silently re-rooting a misconfiguration (a monorepo
+        // sibling, a config:cache built elsewhere) would reintroduce the stamp/generator-disagree bug this lift removes.
+        config(['beam.client.out_dir' => sys_get_temp_dir().'/beam-explicit-'.Str::random(6).'/generated']);
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])
+            ->expectsOutputToContain('resolves outside the application')
+            ->assertExitCode(1);
+
+        $this->assertFileDoesNotExist($this->host.'/'.StampShellCommand::FRAME_RESOURCE_MAP);
+        $this->assertFileDoesNotExist($this->host.'/'.StampShellCommand::FRAME_RESOURCES);
+    }
+
+    #[DataProvider('escapingOutDirs')]
+    public function test_an_out_dir_that_escapes_the_base_path_fails_closed(string $outDir): void
+    {
+        // `..` that climbs above the base path — absolute (`/base/../web/generated`) or relative (`../web/generated`,
+        // resolved against the base) — is normalised and refused; the stamp never writes outside the app.
+        config(['beam.client.out_dir' => str_replace('{BASE}', $this->host, $outDir)]);
+
+        $this->artisan('splicewire:beam:ux:stamp-shell', ['--surfaces' => 'site'])
+            ->expectsOutputToContain('resolves outside the application')
+            ->assertExitCode(1);
+
+        $this->assertFileDoesNotExist($this->host.'/'.StampShellCommand::FRAME_RESOURCE_MAP);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function escapingOutDirs(): array
+    {
+        return [
+            'absolute with ..' => ['{BASE}/../sibling-web/generated'],
+            'relative with ..' => ['../sibling-web/generated'],
+        ];
+    }
+
+    public function test_front_end_root_matches_the_generator_out_dir_resolution(): void
+    {
+        // B3: FrontEndRoot must not DRIFT from the generator's own out_dir resolution — the generated module the map
+        // imports is written by Splicewire\Beam\Console\GenerateClientSdkCommand::outDir() (private → reflected). For
+        // every case where both apply (unset/empty → default; a path under the base), generatedDir() equals it.
+        foreach ([null, '', $this->host.'/ui/src/generated', $this->host.'/resources/js/generated'] as $configured) {
+            config(['beam.client.out_dir' => $configured]);
+            $this->assertSame(
+                $this->generatorOutDir(),
+                FrontEndRoot::generatedDir(),
+                'FrontEndRoot drifted from the generator for out_dir='.var_export($configured, true),
+            );
+        }
+
+        // The derived host-relative stamp targets for the ui root.
+        config(['beam.client.out_dir' => $this->host.'/ui/src/generated']);
+        $this->assertSame('ui/src/frame-resource-map.ts', FrontEndRoot::frameResourceMapTarget());
+        $this->assertSame('ui/src/generated/frame-resources.ts', FrontEndRoot::frameResourcesTarget());
+        $this->assertNull(FrontEndRoot::configError());
+    }
+
+    /** The generator's own out_dir resolution, reflected (it is private). */
+    private function generatorOutDir(): string
+    {
+        $command = $this->app->make(\Splicewire\Beam\Console\GenerateClientSdkCommand::class);
+        $method = new \ReflectionMethod($command, 'outDir');
+        $method->setAccessible(true);
+
+        return $method->invoke($command);
     }
 
     public function test_surfaces_are_independent(): void

@@ -5,6 +5,7 @@ namespace Splicewire\Beam\Ux\Console;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use Splicewire\Beam\Ux\Doctor\ShellStampParityAudit;
+use Splicewire\Beam\Ux\Shell\FrontEndRoot;
 use Splicewire\Beam\Ux\Shell\ShellStamps;
 use Splicewire\Beam\Ux\Shell\ViteFamilySources;
 
@@ -55,10 +56,18 @@ class StampShellCommand extends Command
     /** The nav data target, composed per surface rather than read from one stub. */
     public const NAV = ShellStamps::NAV;
 
-    /** The stamped resource map, which imports {@see self::FRAME_RESOURCES} as `@/generated/frame-resources`. */
+    /**
+     * The stamped resource map's DEFAULT host-relative target (satellite layout), which imports
+     * {@see self::FRAME_RESOURCES} as `@/generated/frame-resources`. The runtime path tracks the host's configured
+     * front-end root ({@see FrontEndRoot::frameResourceMapTarget()}); this value is the default and what the parity
+     * record holds for a satellite host.
+     */
     public const FRAME_RESOURCE_MAP = 'resources/js/frame-resource-map.ts';
 
-    /** The module `splicewire:beam:generate:client` writes; the map's import target. */
+    /**
+     * The DEFAULT host-relative path of the module `splicewire:beam:generate:client` writes; the map's import target.
+     * The runtime path tracks the configured front-end root ({@see FrontEndRoot::frameResourcesTarget()}).
+     */
     public const FRAME_RESOURCES = 'resources/js/generated/frame-resources.ts';
 
     /** @var array<string, list<string>> surface => composer packages it needs in the host */
@@ -80,6 +89,19 @@ class StampShellCommand extends Command
         $force = (bool) $this->option('force');
         $dry = (bool) $this->option('dry-run');
         $base = $this->laravel->basePath();
+
+        // Fail closed before writing anything: a misconfigured front-end root would stamp a map whose
+        // `@/generated/frame-resources` import cannot resolve (frame-foundation: the stamp must leave the host compiling).
+        if ($error = FrontEndRoot::configError()) {
+            $this->components->error($error);
+
+            return self::FAILURE;
+        }
+
+        // Track the host's configured front-end root ({@see FrontEndRoot}; the default `resources/js` is unchanged):
+        // the resource map stamps beside the generated module the generator writes under `beam.client.out_dir`.
+        $stamps = $stamps->withFrameResourceMapAt(FrontEndRoot::frameResourceMapTarget());
+
         $record = ShellStampParityAudit::readRecord($base.'/'.self::RECORD);
         $matching = [];
 
@@ -133,11 +155,12 @@ class StampShellCommand extends Command
      */
     private function placeFrameResourcesPlaceholder(Filesystem $files, string $base, bool $dry): void
     {
-        $module = $base.'/'.self::FRAME_RESOURCES;
+        $target = FrontEndRoot::frameResourcesTarget();
+        $module = $base.'/'.$target;
         $placeholder = (string) $files->get(dirname(__DIR__, 2).'/stubs/shell/frame-resources.placeholder.ts.stub');
         if ($files->exists($module)) {
             if (rtrim((string) $files->get($module)) === rtrim($placeholder)) {
-                $this->components->twoColumnDetail(self::FRAME_RESOURCES, '<fg=yellow>placeholder present</>');
+                $this->components->twoColumnDetail($target, '<fg=yellow>placeholder present</>');
                 $this->printGenerateLine();
             }
 
@@ -149,7 +172,7 @@ class StampShellCommand extends Command
             $files->put($module, $placeholder);
         }
 
-        $this->components->twoColumnDetail(self::FRAME_RESOURCES, $dry ? '<fg=green>would write placeholder</>' : '<fg=green>placeholder written</>');
+        $this->components->twoColumnDetail($target, $dry ? '<fg=green>would write placeholder</>' : '<fg=green>placeholder written</>');
         $this->printGenerateLine();
     }
 

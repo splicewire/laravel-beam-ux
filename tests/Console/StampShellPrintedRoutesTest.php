@@ -38,6 +38,11 @@ class StampShellPrintedRoutesTest extends TestCase
         File::ensureDirectoryExists($this->host.'/routes');
         File::put($this->host.'/composer.json', '{"require": {}}');
         $this->app->setBasePath($this->host);
+
+        // `beam.client.out_dir` resolved at config load against the ORIGINAL base; relocating the base leaves it
+        // pointing under the old base, which the shell stamp fails closed on. Null it so the package default resolves
+        // against the current base — the state a real host has (see FrontEndRoot).
+        config(['beam.client.out_dir' => null]);
     }
 
     protected function tearDown(): void
