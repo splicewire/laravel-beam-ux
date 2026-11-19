@@ -108,7 +108,12 @@ class ConfigOverrideMemberKind implements ReleaseMemberKind
     /** The section's current head draft (config-sections 08), which a generic putMemberByKind pins on this connection. */
     public function headVersion(BeamUxRelease $release, string $ref): ?string
     {
-        return $this->subject($release, $ref)->head_version;
+        $subject = $this->subject($release, $ref);
+
+        // config-sections 10b (ux-08fix review S3): read the head with the scope row locked FOR UPDATE, as lock() does.
+        // laravel-beam's saveDraft()/discardDraft() lock this row (lockedScope), so an add serializes with them; the
+        // Release row lock alone does not. Release, then scope: the same order publish takes.
+        return $subject->newQuery()->whereKey($subject->getKey())->lockForUpdate()->value('head_version');
     }
 
     public function admit(BeamUxRelease $release, object $subject, BeamUxReleaseMember $member): void
@@ -164,17 +169,28 @@ class ConfigOverrideMemberKind implements ReleaseMemberKind
     /**
      * Discard draft drops the members that pinned the discarded draft (config-sections 10b, 08 defect, root ruling
      * 012b6388). laravel-beam's `ConfigOverrideStore::discardDraft()` resets the scope's head to its published version
-     * and keeps the version row, so a member would otherwise stay pinned to a draft nobody can see. A discard is the one
-     * scope update that moves `head_version` BACK to `published_version`. A Save draft or a restore moves the head
-     * forward, and a publish moves only `published_version`.
+     * and keeps the version row, so a member would otherwise stay pinned to a draft nobody can see.
      *
-     * - **Draft Releases:** the member is dropped. Such a Release carries no approval to revoke.
+     * What counts as a discard: a scope update that moves `head_version` BACK to `published_version`, away from a head
+     * that was not published.
+     * - A Save draft moves the head forward, and a publish moves only `published_version`; neither counts.
+     * - A RESTORE to the published version counts (ux-08fix review S2; pinned by a test). laravel-beam's versioning
+     *   restore first saves `head_version = <target>`, then mints the new head. When the target is the published
+     *   version, that first save looks exactly like a discard, so members pinned to the abandoned draft are dropped,
+     *   which is what a discard would do. A restore to any other version does not match.
+     *
+     * Which Releases lose the member:
+     * - **Draft Releases:** the member is dropped. Such a Release carries no approval to revoke. Rollback Releases are
+     *   excluded (review S1): their member is a prior pin rollback() selected, not a draft.
      * - **Releases under review, approved or scheduled:** the member is KEPT. Revising one is a workflow transition that
      *   needs an actor. {@see assertPublishable()} refuses it at publish ({@see ReleaseError::MemberNotHeadDraft}), so
      *   it is invalidated either way.
      * - **Published Releases:** never touched.
      *
-     * Runs inside the discard's own transaction, on the scope's connection.
+     * Runs inside the discard's own transaction, on the scope's connection: if this throws, the laravel-beam write rolls
+     * back with it (atomic by design). It deletes rows without a `revise` transition, so a draft Release's `revision`
+     * does not move. A laravel-beam discard event would be a sturdier seam than this model observer, since a future
+     * `saveQuietly()` would silently disable it (a nominated follow-up).
      */
     public static function dropDiscardedMembers(ConfigOverrideScope $scope): void
     {
@@ -194,7 +210,7 @@ class ConfigOverrideMemberKind implements ReleaseMemberKind
             ->where('member_kind', BeamUxReleaseMember::KIND_CONFIG)
             ->where('member_ref', $scope->section)
             ->where('version_id', $discarded)
-            ->whereIn('release_id', (new BeamUxRelease)->setConnection($connection)->newQuery()->where('status', 'draft')->select('id'))
+            ->whereIn('release_id', (new BeamUxRelease)->setConnection($connection)->newQuery()->where('status', 'draft')->whereNull('rollback_of')->select('id'))
             ->delete();
     }
 

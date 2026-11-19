@@ -16,6 +16,7 @@ use Splicewire\Beam\Localization\CodedValidationException;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
+use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Release\Kinds\ConfigOverrideMemberKind;
 use Splicewire\Beam\Ux\Release\ReleaseService;
 use Splicewire\Beam\Ux\Tests\Fixtures\Config\ReleaseConfigSection;
@@ -28,7 +29,7 @@ use Splicewire\Beam\Ux\Tests\Fixtures\Config\ReleaseConfigSection;
  *   re-pinned silently;
  * - Discard draft DROPS the members of draft Releases that pinned the discarded draft; a Release past draft keeps its
  *   member, and publish refuses it;
- * - putMemberByKind reads the head under the Release lock, not before it.
+ * - putMemberByKind reads the head under the Release lock and the scope row lock, and refuses a rollback Release.
  *
  * No git recording is needed: every publish here is refused before any pin moves. Same database wiring as
  * ConfigRecordingTest: `central` shares the default connection's database.
@@ -192,9 +193,10 @@ class ConfigMemberHeadDraftTest extends AuthoredComponentNativeTestCase
 
     public function test_put_member_by_kind_reads_the_head_under_the_release_lock(): void
     {
-        // The race: a Save draft between reading the head and taking the Release lock would leave the member pinning a
-        // head read outside the lock. SQLite takes no row locks, so this pins what the lock protects: the ORDER. The
-        // Release is read FOR UPDATE before any read of the section scope's head.
+        // The order of the locks. The Release row is locked first; the head is then read with the SCOPE row locked FOR
+        // UPDATE (ConfigOverrideMemberKind::headVersion()), the row Save draft and Discard draft lock, so on PostgreSQL an
+        // add serializes with them. SQLite takes no row locks and drops FOR UPDATE from the SQL, so this pins the ORDER
+        // only: the Release is read before the scope head. Publish's MemberNotHeadDraft refusal stays the guarantee.
         $this->saveDraft('head');
         $release = app(ReleaseService::class)->create($this->page(), 'config', $this->author);
         $releases = (new BeamUxRelease)->getTable();
@@ -234,12 +236,14 @@ class ConfigMemberHeadDraftTest extends AuthoredComponentNativeTestCase
         $tenantStore->saveDraft(self::ROOT, [['pointer' => '/banner', 'op' => 'set', 'value' => 'tenant banner']]);
         $tenant = app(ReleaseService::class)->create($this->page(), 'tenant config', $this->author);
         app(ReleaseService::class)->putMemberByKind($tenant, BeamUxReleaseMember::KIND_CONFIG, self::ROOT, $this->author);
-        $this->assertSame('tenant', $tenant->getConnectionName() ?? config('database.default'), 'the tenant Release lives on the tenant store');
-        $this->assertNotNull($this->configMember($tenant->fresh()), 'precondition: the tenant Release holds the section');
+        $members = (new BeamUxReleaseMember)->getTable();
+        $onTenant = fn () => DB::connection('tenant')->table($members)->where('release_id', $tenant->id)->where('member_kind', BeamUxReleaseMember::KIND_CONFIG)->exists();
+        $this->assertTrue($onTenant(), 'precondition: the member row is on the TENANT store');
+        $this->assertFalse(DB::connection('testing')->table($members)->where('release_id', $tenant->id)->exists(), 'and not on central');
 
         $tenantStore->discardDraft(self::ROOT);
 
-        $this->assertNull($this->configMember($tenant->fresh()), 'the tenant member pinned to the discarded draft is dropped on the tenant store');
+        $this->assertFalse($onTenant(), 'the tenant member pinned to the discarded draft is dropped on the tenant store');
         $this->leaveTenantRealm();
         $this->assertSame($centralMember->version_id, $this->configMember($central->fresh())?->version_id, 'the central member is untouched');
         $this->assertSame($centralHead, $this->scope()->head_version, 'the central draft is untouched');
@@ -256,14 +260,98 @@ class ConfigMemberHeadDraftTest extends AuthoredComponentNativeTestCase
         $this->assertNotNull($centralMember);
 
         $this->enterTenantRealm('tenant_pooled');
+        $refused = false;
         try {
             app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant)->discardDraft(self::ROOT);
-        } catch (\Illuminate\Validation\ValidationException) {
-            // refused: a pooled tenant tier has no safe store of its own
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $refused = true;
+            $this->assertArrayHasKey('tier', $e->errors(), 'refused as a tenant tier with no safe store of its own');
         }
         $this->leaveTenantRealm();
+        $this->assertTrue($refused, 'laravel-beam refused the pooled tenant-tier discard (what this test relies on)');
 
         $this->assertSame($centralMember->version_id, $this->configMember($central->fresh())?->version_id, 'the central member survives a pooled tenant discard');
+    }
+
+    public function test_a_rollback_release_takes_no_hand_added_config_member_so_its_publish_never_publishes_a_draft(): void
+    {
+        // ux-08fix review B1: a rollback Release skips the head-draft check (its members are prior pins rollback() selects),
+        // so a config member hand-added to it would pin a live draft that the rollback's publish never checks. The
+        // scenario: open rollback R, save D1, add (now REFUSED), submit, approve, discard, save D2, publish R.
+        $rollback = $this->rollbackRelease();
+        $this->assertNotNull($rollback->rollback_of);
+        $this->saveDraft('D1');
+        $d1 = $this->scope()->head_version;
+
+        try {
+            app(ReleaseService::class)->putMemberByKind($rollback->fresh(), BeamUxReleaseMember::KIND_CONFIG, self::ROOT, $this->author);
+            $this->fail('a config member must not be hand-added to a rollback Release');
+        } catch (CodedValidationException $refused) {
+            $this->assertSame(['release' => ['release_rollback_members_fixed']], $refused->codes());
+        }
+        $this->assertNull($this->configMember($rollback->fresh()), 'nothing was added');
+
+        // the rest of the scenario: D1 can never go live through R
+        app(ReleaseService::class)->transition($rollback->fresh(), 'submit', $this->author);
+        app(ReleaseService::class)->transition($rollback->fresh(), 'approve', $this->author);
+        app(ConfigOverrideStore::class)->discardDraft(self::ROOT);
+        $this->saveDraft('D2');
+        app(ReleaseService::class)->transition($rollback->fresh(), 'publish', $this->author);
+        $this->assertSame('published', $rollback->fresh()->status, 'the rollback publishes its own (page) pins');
+        $this->assertNotSame($d1, $this->scope()->published_version, 'the discarded D1 never went live');
+        $this->assertNull($this->scope()->published_version, 'no config pin moved at all');
+    }
+
+    public function test_discard_never_drops_a_rollback_releases_config_member(): void
+    {
+        // ux-08fix review S1: a rollback Release's config member pins a PRIOR pin rollback() selected, which can be the
+        // very head a discard throws away (rolling back a rollback). It is not a draft member, so the discard keeps it.
+        $rollback = $this->rollbackRelease();
+        $this->saveDraft('X');
+        $head = $this->scope()->head_version;
+        // the member as rollback() places it (kind, ref, the selected version), on the rollback Release
+        (new BeamUxReleaseMember)->forceFill(['release_id' => $rollback->id, 'member_kind' => BeamUxReleaseMember::KIND_CONFIG,
+            'member_ref' => self::ROOT, 'version_id' => $head])->save();
+        $this->assertSame('draft', $rollback->fresh()->status);
+
+        app(ConfigOverrideStore::class)->discardDraft(self::ROOT);
+
+        $this->assertSame($head, $this->configMember($rollback->fresh())?->version_id, 'the rollback member is kept');
+    }
+
+    public function test_a_restore_to_the_published_version_counts_as_a_discard(): void
+    {
+        // ux-08fix review S2, pinned: laravel-beam's restore first saves head = <target>, then mints the new head. Restoring
+        // to the PUBLISHED version abandons the draft exactly as a discard does, so the draft member is dropped.
+        $this->saveDraft('live');
+        app(ConfigOverrideStore::class)->publish(self::ROOT);
+        $published = $this->scope()->published_version;
+        $this->saveDraft('draft');
+        $release = $this->releaseWithConfig();
+        $this->assertNotNull($this->configMember($release));
+
+        app(ConfigOverrideStore::class)->restore(self::ROOT, $published);
+
+        $this->assertNull($this->configMember($release->fresh()), 'a restore to the published version drops the draft member, as a discard');
+    }
+
+    /** A real rollback Release (draft, rollback_of set): a page Release published, then rolled back. */
+    private function rollbackRelease(): BeamUxRelease
+    {
+        $page = $this->page();
+        $live = $this->entryDraft($page);
+        app(EntryPublication::class)->publishVersion($page->fresh(), $live);
+        $service = app(ReleaseService::class);
+        $release = $service->create($page, 'Pages', $this->author);
+        $service->putMember($release, $page->id, $this->entryDraft($page), $this->author);
+        $service->transition($release->fresh(), 'publish', $this->author);
+
+        return $service->rollback($release->fresh(), $this->author);
+    }
+
+    private function entryDraft(BeamUxEntry $page): string
+    {
+        return (string) app(EntryPublication::class)->recordDraft($page->fresh(), [['kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []]])->headVersion;
     }
 
     /** Enter a tenant hop: tenancy active, default connection = the tenant's store (08's harness). */

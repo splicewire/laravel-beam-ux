@@ -160,9 +160,21 @@ final class ReleaseService
      */
     public function putMemberByKind(BeamUxRelease $release, string $kind, string $ref, Authenticatable $actor): void
     {
-        // config-sections 10b (08 defect, root ruling 012b6388): the head is read UNDER the Release lock, inside place(),
-        // not before it, so a Save draft racing the add cannot leave the member pinning a head read outside the lock.
-        $this->place($release, $kind, $ref, fn (BeamUxRelease $locked): ?string => $this->kinds()->for($kind)->headVersion($locked, $ref), $actor, null, false);
+        // config-sections 10b (08 defect, root ruling 012b6388; ux-08fix review B1, S3), inside place()'s transaction,
+        // after the Release row is locked:
+        // - A rollback Release takes no hand-added member. Its members are the prior pins rollback() places through
+        //   place() directly, and the rollback publish path does not check a hand-added head draft.
+        // - The head is read by the kind, which locks the SECTION SCOPE row FOR UPDATE
+        //   (ConfigOverrideMemberKind::headVersion()). Save draft and Discard draft lock that same row, so an add
+        //   serializes with them: the member pins the head as it stands, and a discard's drop sees a committed member.
+        //   Publish's MemberNotHeadDraft check remains the guarantee, whatever the interleaving.
+        $this->place($release, $kind, $ref, function (BeamUxRelease $locked) use ($kind, $ref): ?string {
+            if ($locked->rollback_of !== null) {
+                $this->refuse(ReleaseError::RollbackMembersFixed, ['ref' => $ref]);
+            }
+
+            return $this->kinds()->for($kind)->headVersion($locked, $ref);
+        }, $actor, null, false);
     }
 
     /**

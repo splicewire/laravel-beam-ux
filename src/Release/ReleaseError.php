@@ -72,6 +72,11 @@ enum ReleaseError: string implements CodedError
     #[Message('This Release holds an earlier draft of :ref. Add :ref to the Release again to take its current draft.')]
     case MemberNotHeadDraft = 'release_member_not_head_draft';
 
+    // config-sections 10b (ux-08fix review B1): a rollback Release holds only the prior pins rollback() selected. A
+    // member added by hand would pin a live head draft that the rollback's publish path does not check.
+    #[Message('A rollback Release holds only what it rolls back, so :ref cannot be added to it.')]
+    case RollbackMembersFixed = 'release_rollback_members_fixed';
+
     #[Message('A redirect target cannot be taken down in the same Release.')]
     case RedirectTargetTakenDown = 'release_redirect_target_taken_down';
 
