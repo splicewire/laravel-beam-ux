@@ -42,7 +42,8 @@ final class PreviewBar
         $release = $preview->grant->release;
         $here = $request->getRequestUri();
         $added = ! $live && $entry !== null && $entry->published_version === null;
-        $changes = $release === null ? null : $this->changes->of($release);
+        // The bar reads only pages and reach: it never builds the config list (config-sections 11), whose read is heavy.
+        $changes = $release === null ? null : $this->changes->of($release, withConfig: false);
 
         return [
             'label' => $release?->title ?? 'saved version',

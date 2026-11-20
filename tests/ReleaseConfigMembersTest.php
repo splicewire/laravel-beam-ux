@@ -28,10 +28,11 @@ use Splicewire\Beam\Ux\Particle\ReleaseCommandOp;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
 use Splicewire\Beam\Ux\Release\ReleaseChanges;
 use Splicewire\Beam\Ux\Release\ReleaseConfigChanges;
-use Splicewire\Beam\Ux\Release\ReleaseConfigSecretChange;
 use Splicewire\Beam\Ux\Release\ReleaseService;
 use Splicewire\Beam\Ux\Tests\Fixtures\Config\ReleaseConfigSection;
 use Splicewire\Beam\Ux\Tests\Fixtures\Config\ReleaseKeysSection;
+use Splicewire\Beam\Ux\Type\ReleaseConfigSecretChange;
+use Splicewire\Beam\Ux\Type\UxType;
 
 /**
  * config-sections ticket 11: a reviewer opening a Release that holds config sees each config member beside its entries.
@@ -176,6 +177,32 @@ class ReleaseConfigMembersTest extends AuthoredComponentNativeTestCase
         $this->assertFalse($config->stale);
     }
 
+    public function test_a_mixed_release_carries_each_members_type_for_the_page_theme_config_grouping(): void
+    {
+        $this->saveDraft([['pointer' => '/heading', 'op' => 'set', 'value' => 'Hello']]);
+        $page = $this->page();
+        $version = (string) app(EntryPublication::class)->recordDraft($page->fresh(), [
+            ['kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []],
+        ])->headVersion;
+        $release = app(ReleaseService::class)->create($page->fresh(), 'page theme config', $this->author);
+        app(ReleaseService::class)->putMember($release, (string) $page->id, $version, $this->author);
+        app(ReleaseService::class)->putMemberByKind($release, BeamUxReleaseMember::KIND_CONFIG, self::ROOT, $this->author);
+        // A theme member as the projection reads it (an entry member row); its saved version is not what this test is about.
+        $theme = BeamUxEntry::create(['slug' => 'brand-theme', 'title' => 'Brand', 'type' => 'theme', 'format' => 'css', 'realm' => 'site', 'namespace' => 'theme']);
+        (new BeamUxReleaseMember)->forceFill(['release_id' => $release->id, 'entry_id' => $theme->id, 'member_kind' => BeamUxReleaseMember::KIND_ENTRY,
+            'member_ref' => $theme->id, 'version_id' => 'theme-v2', 'observed_pin' => null])->save();
+
+        $members = collect(ReleaseData::project($release->fresh())->members);
+
+        $this->assertCount(3, $members);
+        $this->assertSame([UxType::Page, 'About'], [$members->firstWhere('entryId', (string) $page->id)->entryType, $members->firstWhere('entryId', (string) $page->id)->label]);
+        $this->assertSame([UxType::Theme, 'Brand'], [$members->firstWhere('entryId', (string) $theme->id)->entryType, $members->firstWhere('entryId', (string) $theme->id)->label]);
+        $config = $members->firstWhere('kind', 'config-override');
+        $this->assertSame([null, null], [$config->entryType, $config->entryId]);
+        $this->assertSame(['page', 'theme', null], [$members[0]->toArray()['entryType'], $members->firstWhere('entryId', (string) $theme->id)->toArray()['entryType'], $config->toArray()['entryType']],
+            'the wire carries the type as its string');
+    }
+
     public function test_a_config_member_is_stale_when_the_published_pin_moves_after_it_joined(): void
     {
         $this->saveDraft([['pointer' => '/heading', 'op' => 'set', 'value' => 'Hello']]);
@@ -307,6 +334,43 @@ class ReleaseConfigMembersTest extends AuthoredComponentNativeTestCase
         $this->assertNull($keys['/mail']->after['password'] ?? null, 'the secret leaf is masked inside the object');
         $this->assertSame(['host' => 'mail.host.test', 'password' => null], $keys['/mail']->published);
         $this->assertStringNotContainsString('fake-object-secret', json_encode([$change->toArray(), ReleaseData::project($release)->toArray()]));
+    }
+
+    public function test_dropping_a_secret_override_never_shows_the_host_secret_it_falls_back_to(): void
+    {
+        $this->withLocalMirrorDisk();
+        $this->saveDraft([['pointer' => '/token', 'op' => 'set', 'value' => 'op-secret-y']]);
+        app(ConfigOverrideStore::class)->publish(self::ROOT);
+        $this->saveDraft([['pointer' => '/token', 'op' => 'unset']]);
+        $release = $this->releaseWithConfig();
+
+        $token = $this->keysOf($this->change($release))['/token'];
+
+        $this->assertSame([null, ReleaseConfigSecretChange::Removed, null, null, ConfigTier::Host],
+            [$token->op, $token->secretChange, $token->published, $token->after, $token->setBy], 'it falls back to the host tier, valueless');
+        $wire = json_encode([ReleaseData::project($release)->toArray(), app(ReleaseChanges::class)->of($release)->toArray()]);
+        foreach (['host-secret-x', 'op-secret-y'] as $secret) {
+            $this->assertStringNotContainsString($secret, $wire);
+        }
+    }
+
+    public function test_a_published_compound_drop_falls_back_to_the_hosts_object_with_its_secret_masked(): void
+    {
+        $this->saveDraft([['pointer' => '/mail', 'op' => 'set', 'value' => ['host' => 'smtp.op.test', 'password' => 'op-pw-y']]], self::KEYS);
+        app(ConfigOverrideStore::class)->publish(self::KEYS); // v1: the operator overrides the whole /mail object
+        $this->saveDraft([['pointer' => '/mail', 'op' => 'unset']], self::KEYS);
+        $release = $this->releaseWithConfig(self::KEYS);
+        // The drop publishes: the published layer no longer has /mail, so the reader resolves only its leaves.
+        app(ConfigOverrideStore::class)->publish(self::KEYS);
+
+        $mail = $this->keysOf($this->change($release->fresh(), self::KEYS))['/mail'];
+
+        $this->assertSame([null, ['host' => 'mail.host.test', 'password' => null], ConfigTier::Host], [$mail->op, $mail->after, $mail->setBy],
+            "the host's object is in force again, its secret leaf masked");
+        $wire = json_encode([ReleaseData::project($release->fresh())->toArray(), app(ReleaseChanges::class)->of($release->fresh())->toArray()]);
+        foreach (['host-pw-x', 'op-pw-y'] as $secret) {
+            $this->assertStringNotContainsString($secret, $wire);
+        }
     }
 
     public function test_a_tenant_release_shows_the_tenant_tier_with_no_file(): void

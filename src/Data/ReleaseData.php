@@ -83,7 +83,8 @@ final class ReleaseData extends BeamData
                 $model->status !== 'published' && (! $entries->has($member->entry_id) || $entries[$member->entry_id]->published_version !== $member->observed_pin
                     || $entries[$member->entry_id]->workflow_marking !== $member->observed_marking),
                 BeamUxReleaseMember::KIND_ENTRY, (string) $member->entry_id,
-                (string) ($entries->get($member->entry_id)?->title ?? $member->entry_id)))->all(),
+                (string) ($entries->get($member->entry_id)?->title ?? $member->entry_id),
+                self::entryType($entries->get($member->entry_id))))->all(),
                 ...self::configMembers($model)],
             $projection === null ? null : WorkflowProjectionData::from($projection),
             app()->bound(\Splicewire\Beam\Calendars\Actions\ActionService::class),
@@ -128,8 +129,16 @@ final class ReleaseData extends BeamData
             return new ReleaseMemberData(null, $member->version_id, $member->observed_pin, null,
                 $model->status !== 'published' && $scope !== null && $scope->published_version !== $member->observed_pin,
                 BeamUxReleaseMember::KIND_CONFIG, $root,
-                $registered === null ? $root : (string) ($registered->section::declaration()->title ?? $root));
+                $registered === null ? $root : (string) ($registered->section::declaration()->title ?? $root), null);
         })->values()->all();
+    }
+
+    /** An entry's type (cast to UxType on the model), or null when the entry is gone or holds no known type. */
+    private static function entryType(?BeamUxEntry $entry): ?\Splicewire\Beam\Ux\Type\UxType
+    {
+        $type = $entry?->type;
+
+        return $type instanceof \Splicewire\Beam\Ux\Type\UxType ? $type : \Splicewire\Beam\Ux\Type\UxType::tryFrom((string) $type);
     }
 
     /** @return list<ReleaseRedirectRowData> */

@@ -8,7 +8,7 @@ use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Enums\ConfigEffect;
 use Splicewire\Beam\Enums\ConfigOverrideOp;
 use Splicewire\Beam\Enums\ConfigTier;
-use Splicewire\Beam\Ux\Release\ReleaseConfigSecretChange;
+use Splicewire\Beam\Ux\Type\ReleaseConfigSecretChange;
 
 /**
  * One key a config member of a Release changes (config-sections ticket 11): what is published, what publishing leaves,

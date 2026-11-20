@@ -22,6 +22,7 @@ use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Recording\ConfigOverrideMirror;
 use Splicewire\Beam\Ux\Recording\ReleaseRecording;
+use Splicewire\Beam\Ux\Type\ReleaseConfigSecretChange;
 
 /**
  * What each config member of a Release changes, key by key (config-sections ticket 11), for the Release panel.
@@ -98,7 +99,7 @@ final class ReleaseConfigChanges
         sort($pointers);
         foreach ($pointers as $pointer) {
             $key = $this->key($registered->section, (string) $pointer, $before[$pointer] ?? null, $after[$pointer] ?? null, $tier,
-                $resolved->get((string) $pointer), is_array($read->values) ? $read->values : []);
+                $resolved, is_array($read->values) ? $read->values : []);
             if ($key !== null) {
                 $keys[] = $key;
             }
@@ -124,9 +125,10 @@ final class ReleaseConfigChanges
      * @param  class-string<\Splicewire\Beam\Config\ConfigSection>  $section
      * @param  array<string, mixed>|null  $was
      * @param  array<string, mixed>|null  $now
+     * @param  \Illuminate\Support\Collection<string, ConfigKeyData>  $keys  the reader's resolved keys, by pointer
      * @param  array<array-key, mixed>  $values  the section's effective values, secrets already masked by the reader
      */
-    private function key(string $section, string $pointer, ?array $was, ?array $now, ConfigTier $tier, ?ConfigKeyData $resolved, array $values): ?ReleaseConfigKeyChangeData
+    private function key(string $section, string $pointer, ?array $was, ?array $now, ConfigTier $tier, \Illuminate\Support\Collection $keys, array $values): ?ReleaseConfigKeyChangeData
     {
         $declared = $section::keyDeclaration(JsonPointer::segments($pointer));
         $secret = $declared->secret || (bool) ($was['secret'] ?? false) || (bool) ($now['secret'] ?? false);
@@ -135,7 +137,8 @@ final class ReleaseConfigChanges
         }
 
         $op = $now === null ? null : ConfigOverrideOp::tryFrom((string) ($now['op'] ?? ''));
-        [$fallback, $fallbackTier] = $now === null ? self::fallback($resolved, $tier) : [null, $tier];
+        $resolved = $keys->get($pointer);
+        [$fallback, $fallbackTier] = $now === null ? self::fallback($keys, $pointer, $tier) : [null, $tier];
         $after = match (true) {
             $now === null => $fallback,
             $op === ConfigOverrideOp::Set => $now['value'] ?? null,
@@ -161,21 +164,60 @@ final class ReleaseConfigChanges
     }
 
     /**
-     * The value a key falls back to when this tier's override is dropped, and the tier that sets it: the highest layer
-     * BELOW the Release's tier that the reader resolved for the key. Without a resolved layer below (a pointer no lower
-     * tier sets), the key holds nothing, and the package tier is named as its source.
+     * The value a key falls back to when this tier's override is dropped, and the tier that sets it.
      *
+     * - A key the reader resolved at this pointer: its highest layer BELOW the Release's tier.
+     * - A COMPOUND key with no key of its own at the pointer (the fold emits a parent pointer only while a published
+     *   layer has an entry there, so once the drop publishes only its leaves remain): the object built from every
+     *   resolved key under `<pointer>/`, each at its own highest layer below the Release's tier, set by the highest of
+     *   those tiers.
+     * - Nothing below: the key holds nothing, and the package tier is named as its source.
+     *
+     * @param  \Illuminate\Support\Collection<string, ConfigKeyData>  $keys
      * @return array{0: mixed, 1: ConfigTier}
      */
-    private static function fallback(?ConfigKeyData $resolved, ConfigTier $tier): array
+    private static function fallback(\Illuminate\Support\Collection $keys, string $pointer, ConfigTier $tier): array
     {
-        $rank = fn (ConfigTier $t): int => (int) array_search($t, ConfigTier::cases(), true);
-        $below = collect($resolved?->layers ?? [])
-            ->filter(fn (ConfigLayerData $layer) => ! $layer->removed && $rank($layer->tier) < $rank($tier))
-            ->sortBy(fn (ConfigLayerData $layer) => $rank($layer->tier));
-        $layer = $below->last();
+        $own = $keys->get($pointer);
+        if ($own !== null) {
+            $layer = self::layerBelow($own, $tier);
 
-        return $layer === null ? [null, ConfigTier::Package] : [$layer->value, $layer->tier];
+            return $layer === null ? [null, ConfigTier::Package] : [$layer->value, $layer->tier];
+        }
+
+        $value = [];
+        $top = null;
+        $depth = count(JsonPointer::segments($pointer));
+        foreach ($keys as $childPointer => $child) {
+            if (! str_starts_with((string) $childPointer, $pointer.'/')) {
+                continue;
+            }
+            $layer = self::layerBelow($child, $tier);
+            if ($layer === null) {
+                continue;
+            }
+            $cursor = &$value;
+            foreach (array_slice(JsonPointer::segments((string) $childPointer), $depth) as $segment) {
+                if (! is_array($cursor)) {
+                    $cursor = [];
+                }
+                $cursor = &$cursor[$segment];
+            }
+            $cursor = $layer->value;
+            unset($cursor);
+            $top = $top === null || $layer->tier->rank() > $top->rank() ? $layer->tier : $top;
+        }
+
+        return $top === null ? [null, ConfigTier::Package] : [$value, $top];
+    }
+
+    /** A key's highest non-removed layer below `$tier`, or null. */
+    private static function layerBelow(ConfigKeyData $key, ConfigTier $tier): ?ConfigLayerData
+    {
+        return collect($key->layers)
+            ->filter(fn (ConfigLayerData $layer) => ! $layer->removed && $layer->tier->rank() < $tier->rank())
+            ->sortBy(fn (ConfigLayerData $layer) => $layer->tier->rank())
+            ->last();
     }
 
     /**

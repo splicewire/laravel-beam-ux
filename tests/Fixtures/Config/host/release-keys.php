@@ -5,6 +5,7 @@ return [
     'workers' => 'two',
     'mail' => [
         'host' => 'mail.host.test',
-        'password' => null,
+        // A FAKE secret leaf on the host tier, inside an object (config-sections 11).
+        'password' => 'host-pw-x',
     ],
 ];

@@ -1,6 +1,6 @@
 <?php
 
-namespace Splicewire\Beam\Ux\Release;
+namespace Splicewire\Beam\Ux\Type;
 
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 
