@@ -463,7 +463,7 @@ return [
     | The HOST's own information architecture — which resource nests under which
     | shell, which gets a heavyweight editor — is NOT here. It arrives by binding
     | `Splicewire\Beam\Ux\Frame\RouteContextPlan` from the host's own provider,
-    | and a config mirror of those seven lists is deliberately absent: it would be
+    | and a config mirror of those nine lists is deliberately absent: it would be
     | a second grammar for the same facts with no host reading it.
     |
     | ⚠️ An empty plan is not the same as an unnecessary one. A resource reaches a

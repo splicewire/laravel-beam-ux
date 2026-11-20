@@ -177,6 +177,45 @@ class FrameRouteContextProjectionTest extends TestCase
         $this->assertSame('detail', $byName['host-owned.edit']->mounts);
     }
 
+    /**
+     * pe17 (G10): an EDIT-ONLY heavyweight binding mounts the widget on the `.edit` twin ALONE — the
+     * `.create` leaf keeps the manifest's Frame form — unlike `heavyweightEditors`, which mounts the
+     * widget on both leaves (pinned, unchanged, in {@see test_each_host_list_changes_the_projection_it_names}).
+     */
+    public function test_an_edit_only_heavyweight_binding_mounts_the_widget_on_edit_but_keeps_the_create_form(): void
+    {
+        $byName = $this->byName(
+            $this->projector(new RouteContextPlan(editOnlyHeavyweightEditors: ['circuits' => 'circuit-graph']))
+                ->routeContext('tenant')
+        );
+
+        // The edit twin mounts the heavyweight widget, lazy, under its registered name.
+        $this->assertSame('widget', $byName['circuits.edit']->mounts);
+        $this->assertSame('circuit-graph', $byName['circuits.edit']->widget);
+        $this->assertTrue($byName['circuits.edit']->lazy);
+
+        // The create leaf keeps the Frame form — NOT the widget — and is not lazy.
+        $this->assertSame('edit', $byName['circuits.create']->mounts);
+        $this->assertNull($byName['circuits.create']->widget);
+        $this->assertFalse($byName['circuits.create']->lazy);
+        $this->assertSame('circuits/new', $byName['circuits.create']->path);
+    }
+
+    /**
+     * pe17 (G10): a key is a heavyweight editor in at most one mode. {@see RouteContextValidator::assertPlan},
+     * run from the projector's constructor, rejects a key bound in BOTH lists fail-closed, naming it.
+     */
+    public function test_the_validator_rejects_a_key_in_both_heavyweight_editor_lists(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('circuits');
+
+        $this->projector(new RouteContextPlan(
+            heavyweightEditors: ['circuits' => 'circuit-graph'],
+            editOnlyHeavyweightEditors: ['circuits' => 'circuit-graph'],
+        ));
+    }
+
     public function test_each_host_list_changes_the_projection_it_names(): void
     {
         $plan = new RouteContextPlan(
