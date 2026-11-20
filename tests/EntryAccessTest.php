@@ -125,6 +125,34 @@ class EntryAccessTest extends TestCase
         $this->assertStringContainsString('auth', $findings[0]->detail);
     }
 
+    /** credential-scope 07: the `root` sentinel is a Root grant, so a scoped Root token passes only with the right's strict name. */
+    public function test_a_scoped_root_token_passes_the_root_sentinel_only_with_the_rights_strict_name(): void
+    {
+        $locked = $this->entry('ops', segment: '/ops', access: ['root']);
+        $resolver = $this->app->make(EntryAccessResolver::class);
+        $root = $this->actor(roles: ['Root']);
+        $this->actingAs($root);
+        $scope = fn (?array $names) => $this->app->instance(\Rushing\PermissionCascade\Contracts\CredentialScopeResolver::class,
+            new class($names) implements \Rushing\PermissionCascade\Contracts\CredentialScopeResolver
+            {
+                public function __construct(private ?array $names) {}
+
+                public function resolve(): ?array
+                {
+                    return $this->names;
+                }
+            });
+
+        $scope(['entity.view']);
+        $this->assertFalse($resolver->canRender($root, [$locked]));
+
+        $scope([\Rushing\PermissionCascade\Facades\PermissionNamer::assemble(BeamUxEntry::class, 'access')]);
+        $this->assertTrue($resolver->canRender($root, [$locked]));
+
+        $scope(null);
+        $this->assertTrue($resolver->canRender($root, [$locked]));
+    }
+
     public function test_an_unknown_token_denies_rather_than_admits(): void
     {
         // A typo is a LOCKOUT, which is loud and self-correcting — never a leak. Under any-of, a token
