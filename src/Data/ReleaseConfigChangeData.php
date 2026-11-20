@@ -31,11 +31,21 @@ final class ReleaseConfigChangeData extends BeamData
         #[DataCollectionOf(ReleaseConfigKeyChangeData::class)]
         public array $keys,
         /**
-         * The file an operator (central) Release writes into its one commit, `config/overrides/<root>.json`; null for a
-         * tenant Release, which records database history only and never a file.
+         * The file publishing writes into the Release's one commit, `config/overrides/<root>.json`, only where the
+         * recording really writes it (central-resident, with a local mirror disk). Null for a tenant Release, which
+         * records database history only, and on a host that records no files.
          */
-        public ?string $mirrorPath = null,
-        /** The mirror file's content after publishing (secrets carry no value), as a preview; null where no file is written. */
-        public ?string $mirror = null,
+        public ?string $mirrorPath,
+        /**
+         * The mirror file's content after publishing (secrets carry no value), as a preview. Null when `mirrorPath` is
+         * null, when the reader may not read the section, or when the version removes the override (a rollback to
+         * nothing: the commit deletes the file if one exists).
+         */
+        public ?string $mirror,
+        /**
+         * Whether this reader may read the section's values (`beam-config`'s realm-aware read ability). When false,
+         * `keys` is empty, `reloadsWorkers` is false and `mirror` is null.
+         */
+        public bool $readable,
     ) {}
 }

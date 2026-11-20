@@ -25,6 +25,6 @@ final class ReleaseChangesOp
         }
 
         /** @var \Splicewire\Beam\Ux\Models\BeamUxRelease $model */
-        return app(ReleaseChanges::class)->of($model);
+        return app(ReleaseChanges::class)->of($model, $actor);
     }
 }

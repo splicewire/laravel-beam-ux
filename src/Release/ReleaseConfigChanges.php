@@ -2,9 +2,16 @@
 
 namespace Splicewire\Beam\Ux\Release;
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Support\Facades\Gate;
+use Splicewire\Beam\Config\ConfigSectionAccess;
+use Splicewire\Beam\Config\ConfigSectionReader;
 use Splicewire\Beam\Config\ConfigSectionRegistry;
 use Splicewire\Beam\Config\JsonPointer;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
+use Splicewire\Beam\Config\RegisteredConfigSection;
+use Splicewire\Beam\Data\Config\ConfigKeyData;
+use Splicewire\Beam\Data\Config\ConfigLayerData;
 use Splicewire\Beam\Enums\ConfigEffect;
 use Splicewire\Beam\Enums\ConfigOverrideOp;
 use Splicewire\Beam\Enums\ConfigTier;
@@ -14,103 +21,112 @@ use Splicewire\Beam\Ux\Data\ReleaseConfigKeyChangeData;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Recording\ConfigOverrideMirror;
-use Throwable;
+use Splicewire\Beam\Ux\Recording\ReleaseRecording;
 
 /**
  * What each config member of a Release changes, key by key (config-sections ticket 11), for the Release panel.
  *
- * A member pins a version of its section's overrides (`version_id`) and records the published pin it replaces
- * (`observed_pin`). The diff is between those two versions' snapshots, read through laravel-beam's version store on the
- * Release's own connection and tier, so it reads the same before and after publishing, and for a rollback (whose
- * `version_id` is the earlier pin, or null to remove the override).
+ * - **Which keys.** A member pins a version of its section's overrides (`version_id`) and records the published pin it
+ *   replaces (`observed_pin`). The keys listed are those whose override differs between the two versions' snapshots,
+ *   read through laravel-beam's version store on the Release's own connection and tier. So the list reads the same
+ *   before and after publishing, and for a rollback (`version_id` is the earlier pin, or null to remove the override).
+ * - **What values.** As the owner's prototype shows them (ticket 01): `published` is the key's EFFECTIVE value now,
+ *   through the whole ladder, from laravel-beam's {@see ConfigSectionReader}. `after` is the new override value, null
+ *   for an explicit null, or, for a dropped override, the value the key FALLS BACK to from the tier below, and `setBy`
+ *   is that tier.
+ * - **Who may read.** The values are `beam-config`'s: the same realm-aware read ability ({@see ConfigSectionAccess::READ})
+ *   the Config area asks. A reader it refuses gets the section, package and version move with `readable: false`, no
+ *   keys and no mirror.
+ * - **Secrets.** A secret key never carries a value (`secretChange` says replaced, removed or unchanged), and a secret
+ *   leaf inside an object value is masked to null, as the Config area masks it.
+ * - **The mirror.** The file and its preview appear only when publishing really writes it
+ *   ({@see ReleaseRecording::writesConfigMirror()}): central-resident, with a local mirror disk.
  *
- * Secrets: a snapshot never holds a secret's value (it is stored encrypted, apart), and neither does this projection.
- * A secret key says only `replaced`, `removed` or `unchanged`.
- *
- * Read-only: nothing here locks, publishes or writes. A section that is no longer registered, or a store this realm
- * cannot read, yields no entry rather than failing the whole Release read.
+ * Read-only: nothing here locks, publishes or writes. A member whose section is no longer registered has no entry.
  */
 final class ReleaseConfigChanges
 {
     /** @return list<ReleaseConfigChangeData> */
-    public function of(BeamUxRelease $release): array
+    public function of(BeamUxRelease $release, ?Authenticatable $actor = null): array
     {
-        $members = $release->allMembers()->where('member_kind', BeamUxReleaseMember::KIND_CONFIG)->orderBy('member_ref')->get();
+        // Filter by kind() in PHP, not by the member_kind column in SQL, so a read before the kind migration still works.
+        $members = $release->allMembers()->get()
+            ->filter(fn (BeamUxReleaseMember $member) => $member->kind() === BeamUxReleaseMember::KIND_CONFIG)
+            ->sortBy(fn (BeamUxReleaseMember $member) => $member->ref())->values();
         if ($members->isEmpty()) {
             return [];
         }
 
+        $actor ??= auth()->user();
+        $readable = $actor !== null && Gate::forUser($actor)->allows(ConfigSectionAccess::READ);
         $tier = app(TenancyContext::class)->isActive() ? ConfigTier::Tenant : ConfigTier::Operator;
         $store = app(ConfigOverrideStore::class)->forTier($tier)->on($release->getConnectionName());
+        $writesMirror = app(ReleaseRecording::class)->writesConfigMirror($release);
+
         $changes = [];
         foreach ($members as $member) {
-            $change = $this->member($store, $tier, $member, $release->getConnectionName());
-            if ($change !== null) {
-                $changes[] = $change;
+            $registered = app(ConfigSectionRegistry::class)->get($member->ref());
+            if ($registered !== null) {
+                $changes[] = $this->member($store, $tier, $member, $registered, $readable, $writesMirror, $release->getConnectionName());
             }
         }
 
         return $changes;
     }
 
-    private function member(ConfigOverrideStore $store, ConfigTier $tier, BeamUxReleaseMember $member, string $connection): ?ReleaseConfigChangeData
+    private function member(ConfigOverrideStore $store, ConfigTier $tier, BeamUxReleaseMember $member, RegisteredConfigSection $registered,
+        bool $readable, bool $writesMirror, string $connection): ReleaseConfigChangeData
     {
         $root = $member->ref();
-        $registered = app(ConfigSectionRegistry::class)->get($root);
-        if ($registered === null) {
-            return null;
-        }
-
-        try {
-            $versions = collect($store->versionsOf($root))->keyBy(fn ($version) => (string) $version->getKey());
-        } catch (Throwable) {
-            return null;
-        }
+        $versions = collect($store->versionsOf($root))->keyBy(fn ($version) => (string) $version->getKey());
         $from = $member->observed_pin === null ? null : $versions->get((string) $member->observed_pin);
         $to = $member->version_id === null ? null : $versions->get((string) $member->version_id);
+        $title = (string) ($registered->section::declaration()->title ?? $root);
+        $mirrorPath = $writesMirror ? ConfigOverrideMirror::pathFor($root) : null;
+
+        if (! $readable) {
+            return new ReleaseConfigChangeData($root, $title, $registered->owner, $from?->version, $to?->version, false, [], $mirrorPath, null, false);
+        }
+
         $before = self::draft($from?->snapshot);
         $after = self::draft($to?->snapshot);
+        $read = app(ConfigSectionReader::class)->read($registered);
+        $resolved = collect($read->keys)->keyBy(fn (ConfigKeyData $key) => $key->pointer);
 
         $keys = [];
         $pointers = array_unique([...array_keys($before), ...array_keys($after)]);
         sort($pointers);
         foreach ($pointers as $pointer) {
-            $key = $this->key($registered->section, (string) $pointer, $before[$pointer] ?? null, $after[$pointer] ?? null, $tier);
+            $key = $this->key($registered->section, (string) $pointer, $before[$pointer] ?? null, $after[$pointer] ?? null, $tier,
+                $resolved->get((string) $pointer), is_array($read->values) ? $read->values : []);
             if ($key !== null) {
                 $keys[] = $key;
             }
         }
 
-        // Only a CENTRAL Release writes the mirror file (the recording refuses while tenancy is active): a tenant Release
-        // shows no file, which the panel reads as "database history only".
-        $central = $tier === ConfigTier::Operator;
-        try {
-            $mirror = $central ? app(ConfigOverrideMirror::class)->preview($root, $connection, $member->version_id) : null;
-        } catch (Throwable) {
-            $mirror = null;
-        }
-
         return new ReleaseConfigChangeData(
             $root,
-            (string) ($registered->section::declaration()->title ?? $root),
+            $title,
             $registered->owner,
             $from?->version,
             $to?->version,
             collect($keys)->contains(fn (ReleaseConfigKeyChangeData $key) => $key->applies === ConfigEffect::Reload),
             $keys,
-            $central ? ConfigOverrideMirror::pathFor($root) : null,
-            $mirror,
+            $mirrorPath,
+            $mirrorPath === null ? null : app(ConfigOverrideMirror::class)->preview($root, $connection, $member->version_id),
+            true,
         );
     }
 
     /**
-     * One key's change, or null when the two versions hold the same thing for it.
+     * One key's change, or null when the two versions hold the same override for it.
      *
      * @param  class-string<\Splicewire\Beam\Config\ConfigSection>  $section
      * @param  array<string, mixed>|null  $was
      * @param  array<string, mixed>|null  $now
+     * @param  array<array-key, mixed>  $values  the section's effective values, secrets already masked by the reader
      */
-    private function key(string $section, string $pointer, ?array $was, ?array $now, ConfigTier $tier): ?ReleaseConfigKeyChangeData
+    private function key(string $section, string $pointer, ?array $was, ?array $now, ConfigTier $tier, ?ConfigKeyData $resolved, array $values): ?ReleaseConfigKeyChangeData
     {
         $declared = $section::keyDeclaration(JsonPointer::segments($pointer));
         $secret = $declared->secret || (bool) ($was['secret'] ?? false) || (bool) ($now['secret'] ?? false);
@@ -118,21 +134,69 @@ final class ReleaseConfigChanges
             return null;
         }
 
+        $op = $now === null ? null : ConfigOverrideOp::tryFrom((string) ($now['op'] ?? ''));
+        [$fallback, $fallbackTier] = $now === null ? self::fallback($resolved, $tier) : [null, $tier];
+        $after = match (true) {
+            $now === null => $fallback,
+            $op === ConfigOverrideOp::Set => $now['value'] ?? null,
+            default => null,
+        };
+        $published = $resolved !== null ? $resolved->value : JsonPointer::get($values, $pointer)[1];
+
         return new ReleaseConfigKeyChangeData(
             pointer: $pointer,
-            op: $now === null ? null : ConfigOverrideOp::tryFrom((string) ($now['op'] ?? '')),
-            published: $secret ? null : self::value($was),
+            op: $op,
+            published: $secret ? null : self::masked($section, $pointer, $published),
             publishedSet: $was !== null,
-            after: $secret ? null : self::value($now),
-            setBy: $now === null ? 'inherited' : $tier->value,
+            after: $secret ? null : self::masked($section, $pointer, $after),
+            setBy: $fallbackTier,
             applies: $declared->effect,
             secret: $secret,
             secretChange: ! $secret ? null : match (true) {
-                $now === null => 'removed',
-                ($now['op'] ?? null) === ConfigOverrideOp::Set->value && ! self::sameSet($was, $now) => 'replaced',
-                default => 'unchanged',
+                $now === null, ($now['op'] ?? null) !== ConfigOverrideOp::Set->value => ReleaseConfigSecretChange::Removed,
+                ! self::sameSet($was, $now) || ($was['op'] ?? null) !== ConfigOverrideOp::Set->value => ReleaseConfigSecretChange::Replaced,
+                default => ReleaseConfigSecretChange::Unchanged,
             },
         );
+    }
+
+    /**
+     * The value a key falls back to when this tier's override is dropped, and the tier that sets it: the highest layer
+     * BELOW the Release's tier that the reader resolved for the key. Without a resolved layer below (a pointer no lower
+     * tier sets), the key holds nothing, and the package tier is named as its source.
+     *
+     * @return array{0: mixed, 1: ConfigTier}
+     */
+    private static function fallback(?ConfigKeyData $resolved, ConfigTier $tier): array
+    {
+        $rank = fn (ConfigTier $t): int => (int) array_search($t, ConfigTier::cases(), true);
+        $below = collect($resolved?->layers ?? [])
+            ->filter(fn (ConfigLayerData $layer) => ! $layer->removed && $rank($layer->tier) < $rank($tier))
+            ->sortBy(fn (ConfigLayerData $layer) => $rank($layer->tier));
+        $layer = $below->last();
+
+        return $layer === null ? [null, ConfigTier::Package] : [$layer->value, $layer->tier];
+    }
+
+    /**
+     * A value with every SECRET leaf inside it masked to null, by the section's own declarations (a key nested under a
+     * declared map inherits the map's), so an object value never carries a secret below it.
+     *
+     * @param  class-string<\Splicewire\Beam\Config\ConfigSection>  $section
+     */
+    private static function masked(string $section, string $pointer, mixed $value): mixed
+    {
+        if ($section::keyDeclaration(JsonPointer::segments($pointer))->secret) {
+            return null;
+        }
+        if (! is_array($value)) {
+            return $value;
+        }
+        foreach ($value as $key => $child) {
+            $value[$key] = self::masked($section, JsonPointer::from([...JsonPointer::segments($pointer), (string) $key]), $child);
+        }
+
+        return $value;
     }
 
     /**
@@ -162,12 +226,6 @@ final class ReleaseConfigChanges
     {
         return $was !== null && ($was['setAt'] ?? null) === ($now['setAt'] ?? null)
             && ($was['revision'] ?? null) === ($now['revision'] ?? null);
-    }
-
-    /** @param  array<string, mixed>|null  $entry */
-    private static function value(?array $entry): mixed
-    {
-        return $entry !== null && ($entry['op'] ?? null) === ConfigOverrideOp::Set->value ? ($entry['value'] ?? null) : null;
     }
 
     /** @return array<string, array<string, mixed>> */

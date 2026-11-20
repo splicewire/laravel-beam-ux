@@ -19,7 +19,7 @@ final class ReleaseChanges
 {
     public function __construct(private Reach $reach) {}
 
-    public function of(BeamUxRelease $release): ReleaseChangesData
+    public function of(BeamUxRelease $release, ?\Illuminate\Contracts\Auth\Authenticatable $actor = null): ReleaseChangesData
     {
         $map = $this->reach->map((string) $release->realm, $release->getConnectionName(), new PreviewContext(self::grant($release)));
         $pages = $reach = [];
@@ -45,7 +45,7 @@ final class ReleaseChanges
         }
 
         // config-sections 11: config members are listed apart, never in the page-reach map (they reach no page).
-        return new ReleaseChangesData($pages, $reach, app(ReleaseConfigChanges::class)->of($release));
+        return new ReleaseChangesData($pages, $reach, app(ReleaseConfigChanges::class)->of($release, $actor));
     }
 
     /** The Release-scoped grant its Preview reads through, built in memory and never saved. */

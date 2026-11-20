@@ -7,14 +7,16 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Enums\ConfigEffect;
 use Splicewire\Beam\Enums\ConfigOverrideOp;
+use Splicewire\Beam\Enums\ConfigTier;
+use Splicewire\Beam\Ux\Release\ReleaseConfigSecretChange;
 
 /**
  * One key a config member of a Release changes (config-sections ticket 11): what is published, what publishing leaves,
  * which tier sets it after publishing, and when it applies.
  *
  * A SECRET key never carries a value either side: `published` and `after` are null, and `secretChange` says what the
- * Release does to it (`replaced`, `removed`, or `unchanged` when only its op moved), the way the Config area shows a
- * secret as set or not set and never its value.
+ * Release does to it ({@see ReleaseConfigSecretChange}), the way the Config area shows a secret as set or not set and
+ * never its value.
  */
 #[TypeScript, Title('Release config key change')]
 final class ReleaseConfigKeyChangeData extends BeamData
@@ -24,18 +26,25 @@ final class ReleaseConfigKeyChangeData extends BeamData
         public string $pointer,
         /** The op the Release's version holds for the key; null when the version drops the override (the key inherits). */
         public ?ConfigOverrideOp $op,
-        /** The override value published now (the replaced version's), or null: not overridden, an explicit null, or a secret. */
+        /**
+         * The key's EFFECTIVE value now, through the whole ladder (package, host, provider, operator, tenant), as the
+         * Config area shows it. On a published Release that is the value now in force. Null for a secret; a secret leaf
+         * inside an object is masked to null.
+         */
         public mixed $published,
-        /** Whether the replaced version overrode the key at all (false: the published value is inherited from a lower tier). */
+        /** Whether the replaced version overrode the key on the Release's tier (false: `published` comes from a lower tier). */
         public bool $publishedSet,
-        /** The value publishing leaves on this tier, or null: inherited, an explicit null, or a secret. */
+        /**
+         * The effective value after publishing: the new value for a `set`, null for an explicit null, and for a dropped
+         * override the value it falls back to from the tier below. Secrets masked as for `published`.
+         */
         public mixed $after,
-        /** The tier that sets the key after publishing: the Release's own tier, or `inherited` when the override is dropped. */
-        public string $setBy,
+        /** The tier that sets the key after publishing (a ConfigTier value): the Release's tier, or the fallback tier. */
+        public ConfigTier $setBy,
         /** When the change applies: the next request (`live`), after workers reload (`reload`), or only on a deploy. */
         public ConfigEffect $applies,
         public bool $secret,
-        /** For a secret only: `replaced`, `removed` or `unchanged`. Null for a non-secret key. */
-        public ?string $secretChange = null,
+        /** For a secret only: what the Release does to it. Null for a non-secret key. */
+        public ?ReleaseConfigSecretChange $secretChange = null,
     ) {}
 }

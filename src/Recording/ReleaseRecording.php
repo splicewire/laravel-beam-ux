@@ -533,6 +533,19 @@ class ReleaseRecording
      * Whether the Release lives in the central realm: no tenant is active, and a probe on the Release's connection is
      * central-resident ({@see EntryResidency}). It fails closed: residency that cannot be determined is not central.
      */
+    /**
+     * Whether publishing this Release writes its config overrides' mirror files into the one commit
+     * (config-sections ticket 11): the same two conditions {@see prepareConfig()} acts on, a central-resident Release and
+     * a configured LOCAL mirror disk ({@see disk()}). The Release panel previews a file only when this holds.
+     */
+    public function writesConfigMirror(BeamUxRelease $release): bool
+    {
+        $name = config('beam.ux.storage.mirror_disk');
+
+        return is_string($name) && $name !== '' && config('filesystems.disks.'.$name.'.driver') === 'local'
+            && $this->centralResident($release);
+    }
+
     private function centralResident(BeamUxRelease $release): bool
     {
         try {

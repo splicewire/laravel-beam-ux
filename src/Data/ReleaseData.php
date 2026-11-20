@@ -110,7 +110,9 @@ final class ReleaseData extends BeamData
      */
     private static function configMembers(BeamUxRelease $model): array
     {
-        $members = $model->allMembers()->where('member_kind', BeamUxReleaseMember::KIND_CONFIG)->orderBy('member_ref')->get();
+        // Filter by kind() in PHP, not by the member_kind column in SQL, so a read before the kind migration still works.
+        $members = $model->allMembers()->get()->filter(fn (BeamUxReleaseMember $member) => $member->kind() === BeamUxReleaseMember::KIND_CONFIG)
+            ->sortBy(fn (BeamUxReleaseMember $member) => $member->ref())->values();
         if ($members->isEmpty()) {
             return [];
         }
@@ -121,11 +123,7 @@ final class ReleaseData extends BeamData
         return $members->map(function (BeamUxReleaseMember $member) use ($model, $store, $registry) {
             $root = $member->ref();
             $registered = $registry->get($root);
-            try {
-                $scope = $store->scope($root);
-            } catch (\Throwable) {
-                $scope = null;
-            }
+            $scope = $store->scope($root);
 
             return new ReleaseMemberData(null, $member->version_id, $member->observed_pin, null,
                 $model->status !== 'published' && $scope !== null && $scope->published_version !== $member->observed_pin,

@@ -20,6 +20,6 @@ final class ReleaseChangesData extends BeamData
     public function __construct(
         #[DataCollectionOf(ReachPageData::class)] public array $pages,
         #[DataCollectionOf(ReleaseMemberReachData::class)] public array $reach,
-        #[DataCollectionOf(ReleaseConfigChangeData::class)] public array $config = [],
+        #[DataCollectionOf(ReleaseConfigChangeData::class)] public array $config,
     ) {}
 }

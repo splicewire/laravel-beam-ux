@@ -23,8 +23,8 @@ final class ReleaseMemberData extends BeamData
         public ?string $observedPin,
         public ?string $redirectTarget,
         public bool $stale,
-        public string $kind = 'entry',
-        public string $ref = '',
-        public string $label = '',
+        public string $kind,
+        public string $ref,
+        public string $label,
     ) {}
 }
