@@ -8,4 +8,6 @@ return [
         // A FAKE secret leaf on the host tier, inside an object (config-sections 11).
         'password' => 'host-pw-x',
     ],
+    // Shares `mail`'s string prefix, never its pointer prefix (`/mail/`).
+    'mailer' => 'mailer-host-x',
 ];

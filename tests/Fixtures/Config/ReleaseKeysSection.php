@@ -25,7 +25,8 @@ class ReleaseKeysMail extends Data
 
 /**
  * Fixture (config-sections 11): a section for the Release panel's key diff. `workers` applies only after long-lived
- * workers RELOAD; `mail` is an object with a secret leaf.
+ * workers RELOAD; `mail` is an object with a secret leaf; `mailer` shares `mail`'s prefix, so a fallback built from
+ * the keys under `/mail/` must not take it.
  */
 #[ConfigRoot(root: 'release-keys', title: 'Release Keys', description: 'Keys a Release changes in the panel tests.')]
 class ReleaseKeysSection extends ConfigSection
@@ -35,5 +36,7 @@ class ReleaseKeysSection extends ConfigSection
         public string $workers,
         #[ConfigKey(ceiling: ConfigTier::Operator)]
         public ReleaseKeysMail $mail,
+        #[ConfigKey(ceiling: ConfigTier::Operator)]
+        public ?string $mailer = null,
     ) {}
 }

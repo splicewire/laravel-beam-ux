@@ -366,11 +366,21 @@ class ReleaseConfigMembersTest extends AuthoredComponentNativeTestCase
         $mail = $this->keysOf($this->change($release->fresh(), self::KEYS))['/mail'];
 
         $this->assertSame([null, ['host' => 'mail.host.test', 'password' => null], ConfigTier::Host], [$mail->op, $mail->after, $mail->setBy],
-            "the host's object is in force again, its secret leaf masked");
+            "the host's object is in force again, its secret leaf masked, and /mailer (a string prefix, not a pointer prefix) is not taken");
         $wire = json_encode([ReleaseData::project($release->fresh())->toArray(), app(ReleaseChanges::class)->of($release->fresh())->toArray()]);
         foreach (['host-pw-x', 'op-pw-y'] as $secret) {
             $this->assertStringNotContainsString($secret, $wire);
         }
+    }
+
+    public function test_changes_without_the_config_list_never_resolve_the_config_reader(): void
+    {
+        $this->saveDraft([['pointer' => '/heading', 'op' => 'set', 'value' => 'Hello']]);
+        $release = $this->releaseWithConfig();
+        // What the Preview bar asks for: the reader (file scans, schema build, decrypting layers) must not run at all.
+        $this->app->bind(ConfigSectionReader::class, fn () => throw new \LogicException('the config reader was resolved'));
+
+        $this->assertSame([], app(ReleaseChanges::class)->of($release, withConfig: false)->config);
     }
 
     public function test_a_tenant_release_shows_the_tenant_tier_with_no_file(): void
