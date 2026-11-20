@@ -12,6 +12,7 @@ use Schemastud\Frame\Contracts\FrameNavContributor;
 use Schemastud\Frame\Contracts\ResourceSummaryProvider;
 use Schemastud\Frame\Data\SummaryResponseData;
 use Schemastud\Frame\Registry\ResourceDefinition;
+use Schemastud\Frame\Registry\WidgetContextProjector;
 use Splicewire\Beam\Authorization\ActorPort;
 use Splicewire\Beam\Authorization\AuthenticatedActor;
 use Splicewire\Beam\Authorization\ResourceVisibility;
@@ -182,6 +183,9 @@ class DashboardBacking implements Unpaged
     {
         $particles = $container->make(ParticleResourceRegistry::class);
         $visibility = $container->make(ResourceVisibility::class);
+        // frame-foundation 89: frame's projector is GIVEN to the participation rule, taken from the container like every
+        // other collaborator here (this backing is a boot-time value object, so its constructor cannot receive it).
+        $projector = $container->make(WidgetContextProjector::class);
         $actor = $this->actor($container);
         $hrefs = $this->hrefs($container);
         $confined = $this->confinedSections($container, $items, $hrefs);
@@ -214,7 +218,7 @@ class DashboardBacking implements Unpaged
                 continue;
             }
 
-            $context = DashboardParticipation::contextFor($definition, $rail, $href, $seat);
+            $context = DashboardParticipation::contextFor($definition, $rail, $href, $seat, $projector);
 
             if ($context === null) {
                 continue;
