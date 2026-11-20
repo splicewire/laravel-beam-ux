@@ -12,6 +12,7 @@ use Splicewire\Beam\Localization\CodedValidationException;
 use Splicewire\Beam\Ux\Bindings\RecordPages;
 use Splicewire\Beam\Ux\Containment\EntryPathResolver;
 use Splicewire\Beam\Ux\Data\RedirectInputData;
+use Splicewire\Beam\Ux\Data\RedirectRowData;
 use Splicewire\Beam\Ux\Http\PublicEntryGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRedirect;
@@ -140,7 +141,7 @@ final class RedirectService
      * The Redirects that lead to a page (ADR-0236 d14): those holding it by identity, and those naming a path at its
      * current URL, in its realms. Its settings list them, so an author sees what moving or deleting it would strand.
      *
-     * @return list<array{path: string, match: string, permanent: bool, origin: string}>
+     * @return list<RedirectRowData>
      */
     public function leadingTo(BeamUxEntry $page): array
     {
@@ -154,8 +155,8 @@ final class RedirectService
             ->where(fn ($q) => $q->where(fn ($q) => $q->where('target_kind', 'page')->where('target_entry_id', (string) $page->getKey()))
                 ->when($url !== null, fn ($q) => $q->orWhere(fn ($q) => $q->where('target_kind', 'path')->where('target_path', $url))))
             ->orderBy('path')->orderBy('match')->get()
-            ->map(fn (BeamUxRedirect $redirect) => ['path' => $redirect->path, 'match' => $redirect->match,
-                'permanent' => (bool) $redirect->permanent, 'origin' => $redirect->origin])
+            ->map(fn (BeamUxRedirect $redirect) => new RedirectRowData($redirect->path, $redirect->match,
+                (bool) $redirect->permanent, $redirect->origin))
             ->values()->all();
     }
 

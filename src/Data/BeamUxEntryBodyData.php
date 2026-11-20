@@ -111,9 +111,9 @@ class BeamUxEntryBodyData extends BeamData
         /**
          * A page's Redirects that lead to it (ADR-0236 d14), shown in its settings; null for an entry that isn't a page.
          *
-         * @var list<array{path: string, match: string, permanent: bool, origin: string}>|null
+         * @var list<RedirectRowData>|null
          */
-        #[Optional, \Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType('Array<{ path: string; match: string; permanent: boolean; origin: string }> | null')]
+        #[Optional, \Spatie\LaravelData\Attributes\DataCollectionOf(RedirectRowData::class)]
         public ?array $redirects = null,
     ) {}
 }

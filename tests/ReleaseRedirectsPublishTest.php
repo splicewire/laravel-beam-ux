@@ -164,14 +164,14 @@ class ReleaseRedirectsPublishTest extends AuthoredComponentNativeTestCase
         $this->assertContains(['stays-hidden', $late->id], $notes);
         $open = \Splicewire\Beam\Ux\Data\ReleaseData::project($release->fresh())->redirects;
         $this->assertSame([['id' => null, 'path' => '/old', 'match' => 'exact', 'to' => '/new', 'origin' => 'release'],
-            ['id' => null, 'path' => '/plans', 'match' => 'exact', 'to' => '/pricing', 'origin' => 'release']], collect($open)->sortBy('path')->values()->all());
+            ['id' => null, 'path' => '/plans', 'match' => 'exact', 'to' => '/pricing', 'origin' => 'release']], collect($open)->map->toArray()->sortBy('path')->values()->all());
 
         $service->dropMember($release, $late->id, $this->author);
         $service->transition($release, 'publish', $this->author);
 
         $made = collect(\Splicewire\Beam\Ux\Data\ReleaseData::project($release->fresh())->redirects)->sortBy('path')->values();
-        $this->assertSame([['/old', '/new', 'release'], ['/plans', '/pricing', 'release']], $made->map(fn ($r) => [$r['path'], $r['to'], $r['origin']])->all());
-        $this->assertSame(BeamUxRedirect::query()->where('path', '/old')->value('id'), $made[0]['id']);
+        $this->assertSame([['/old', '/new', 'release'], ['/plans', '/pricing', 'release']], $made->map(fn ($r) => [$r->path, $r->to, $r->origin])->all());
+        $this->assertSame(BeamUxRedirect::query()->where('path', '/old')->value('id'), $made[0]->id);
     }
 
     public function test_an_exact_redirect_already_at_a_url_a_move_takes_away_now_leads_to_the_page(): void

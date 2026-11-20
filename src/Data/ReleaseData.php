@@ -51,9 +51,9 @@ final class ReleaseData extends BeamData
          * ADR-0236 d2: the Redirects the Release leaves. While it is open, the ones it would leave (no id yet); once
          * published, the ones it left, each with its id so an unwanted one is removed through the Redirect resource.
          *
-         * @var list<array{id: ?string, path: string, match: string, to: ?string, origin: string}>
+         * @var list<ReleaseRedirectRowData>
          */
-        #[\Spatie\TypeScriptTransformer\Attributes\LiteralTypeScriptType('Array<{ id: string | null; path: string; match: string; to: string | null; origin: string }>')]
+        #[DataCollectionOf(ReleaseRedirectRowData::class)]
         public array $redirects = [],
     ) {}
 
@@ -91,7 +91,7 @@ final class ReleaseData extends BeamData
         );
     }
 
-    /** @return list<array{id: ?string, path: string, match: string, to: ?string, origin: string}> */
+    /** @return list<ReleaseRedirectRowData> */
     private static function redirects(BeamUxRelease $model): array
     {
         if (! \Illuminate\Support\Facades\Schema::connection($model->getConnectionName())->hasTable('beam_ux_redirects')) {
@@ -100,12 +100,12 @@ final class ReleaseData extends BeamData
         if ($model->status === 'published') {
             return \Splicewire\Beam\Ux\Models\BeamUxRedirect::on($model->getConnectionName())->where('origin_ref', (string) $model->getKey())
                 ->whereIn('origin', ['release', 'takedown'])->orderBy('path')->get()
-                ->map(fn ($row) => ['id' => (string) $row->getKey(), 'path' => $row->path, 'match' => $row->match,
-                    'to' => RedirectData::project($row)->target, 'origin' => $row->origin])->all();
+                ->map(fn ($row) => new ReleaseRedirectRowData((string) $row->getKey(), $row->path, $row->match,
+                    RedirectData::project($row)->target, $row->origin))->all();
         }
 
-        return array_map(fn (array $row) => ['id' => null, 'path' => $row['path'], 'match' => $row['match'], 'to' => $row['to'],
-            'origin' => $row['reason'] === 'takedown' ? 'takedown' : 'release'],
+        return array_map(fn (array $row) => new ReleaseRedirectRowData(null, $row['path'], $row['match'], $row['to'],
+            $row['reason'] === 'takedown' ? 'takedown' : 'release'),
             app(\Splicewire\Beam\Ux\Redirect\ReleaseRedirects::class)->forRelease($model)['redirects']);
     }
 

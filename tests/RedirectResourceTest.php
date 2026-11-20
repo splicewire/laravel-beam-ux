@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Gate;
 use Splicewire\Beam\Facades\Particle;
 use Splicewire\Beam\Particle\Attributes\AttributedParticleDiscovery;
 use Splicewire\Beam\Ux\Data\RedirectData;
+use Splicewire\Beam\Ux\Data\RedirectRowData;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRedirect;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
@@ -139,9 +140,10 @@ class RedirectResourceTest extends AuthoredComponentNativeTestCase
         $this->assertSame([
             ['path' => '/old-pricing', 'match' => 'prefix', 'permanent' => false, 'origin' => 'author'],
             ['path' => '/plans', 'match' => 'exact', 'permanent' => true, 'origin' => 'author'],
-        ], $redirects);
+        ], array_map(fn (RedirectRowData $r) => $r->toArray(), $redirects));
         $this->assertSame([['path' => '/team', 'match' => 'exact', 'permanent' => true, 'origin' => 'author']],
-            app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->read($about->fresh())->redirects);
+            array_map(fn (RedirectRowData $r) => $r->toArray(),
+                app(\Splicewire\Beam\Ux\Particle\EntryBodyEnvelope::class)->read($about->fresh())->redirects));
     }
 
     private function livePage(string $segment): BeamUxEntry
