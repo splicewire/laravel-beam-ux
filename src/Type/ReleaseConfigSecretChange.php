@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Type;
 
+use Schemastud\DataSchemas\Contracts\ProvidesEnumLabel;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 
 /**
@@ -9,7 +10,7 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScript;
  * Generated to TypeScript, so the wire type is this union and not a bare string.
  */
 #[TypeScript]
-enum ReleaseConfigSecretChange: string
+enum ReleaseConfigSecretChange: string implements ProvidesEnumLabel
 {
     /** Set to a new secret value (including a secret set where none was before). */
     case Replaced = 'replaced';
@@ -19,4 +20,10 @@ enum ReleaseConfigSecretChange: string
 
     /** The same secret: listed only when something else about the key moved. */
     case Unchanged = 'unchanged';
+
+    /** The case's label: the word the panel shows (the identifier-label convention; as UxType). */
+    public function label(): string
+    {
+        return $this->value;
+    }
 }
