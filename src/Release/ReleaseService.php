@@ -251,6 +251,23 @@ final class ReleaseService
         });
     }
 
+    /**
+     * Drop a NON-entry member by its kind and ref (config-sections ticket 11): the config section a reviewer takes out of
+     * the Release, as {@see dropMember()} takes out an entry. The kind resolves and authorizes its subject with the same
+     * realm-aware edit rule that placed it, and the Release revises, revoking any approval, exactly as for an entry.
+     */
+    public function dropMemberByKind(BeamUxRelease $release, string $kind, string $ref, Authenticatable $actor): void
+    {
+        $release->getConnection()->transaction(function () use ($release, $kind, $ref, $actor) {
+            $locked = $release->newQuery()->lockForUpdate()->findOrFail($release->id);
+            $this->assertEditable($locked);
+            $memberKind = $this->kinds()->for($kind);
+            $memberKind->authorize($locked, $memberKind->subject($locked, $ref), $actor, ReleaseAccess::Edit);
+            $this->transition($locked, 'revise', $actor);
+            $locked->allMembers()->where('member_kind', $kind)->where('member_ref', $ref)->delete();
+        });
+    }
+
     /** Rebase keeps the selected version; use-latest explicitly changes it. Both revoke approval. */
     public function rebase(BeamUxRelease $release, string $entryId, Authenticatable $actor, bool $useLatest = false): void
     {

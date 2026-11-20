@@ -38,7 +38,8 @@ final class ReleaseCommandData extends BeamData
         $kind = $context->payload['kind'] ?? BeamUxReleaseMember::KIND_ENTRY;
         // A NON-entry `member` (config-sections 08) identifies its subject by kind + ref (the section root) — no entryId —
         // and routes to putMemberByKind; an entry `member` is unchanged (entryId required, ref is the version).
-        $nonEntryMember = $action === 'member' && $kind !== BeamUxReleaseMember::KIND_ENTRY;
+        // config-sections 11: `drop` takes the same kind + ref, so a reviewer drops a config section as they drop an entry.
+        $nonEntryMember = in_array($action, ['member', 'drop'], true) && $kind !== BeamUxReleaseMember::KIND_ENTRY;
 
         return [
             'action' => ['required', 'in:member,drop,rebase,use-latest,submit,approve,publish,schedule,rollback,links-on,links-off,rotate-links'],

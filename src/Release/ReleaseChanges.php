@@ -44,7 +44,8 @@ final class ReleaseChanges
             $reach[] = new ReleaseMemberReachData((string) $entry->getKey(), $name, $kind, $of->everyPage, $of->count, $of->pages);
         }
 
-        return new ReleaseChangesData($pages, $reach);
+        // config-sections 11: config members are listed apart, never in the page-reach map (they reach no page).
+        return new ReleaseChangesData($pages, $reach, app(ReleaseConfigChanges::class)->of($release));
     }
 
     /** The Release-scoped grant its Preview reads through, built in memory and never saved. */

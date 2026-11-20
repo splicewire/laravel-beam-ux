@@ -31,7 +31,10 @@ final class ReleaseCommandOp
             'member' => ($input->kind !== null && $input->kind !== BeamUxReleaseMember::KIND_ENTRY)
                 ? $service->putMemberByKind($model, $input->kind, (string) $input->ref, $actor)
                 : $service->putMember($model, $input->entryId, $input->ref, $actor, $input->redirectTarget),
-            'drop' => $service->dropMember($model, $input->entryId, $actor),
+            // config-sections 11: a non-entry member drops by kind + ref, through the kind's own edit rule.
+            'drop' => ($input->kind !== null && $input->kind !== BeamUxReleaseMember::KIND_ENTRY)
+                ? $service->dropMemberByKind($model, $input->kind, (string) $input->ref, $actor)
+                : $service->dropMember($model, $input->entryId, $actor),
             'rebase', 'use-latest' => $service->rebase($model, $input->entryId, $actor, $input->action === 'use-latest'),
             'schedule' => $service->schedule($model, $input->dueAt, $input->timezone, $actor),
             'links-on', 'links-off' => $service->previewLinks($model, $input->action === 'links-on', $actor),

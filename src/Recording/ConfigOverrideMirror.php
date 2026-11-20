@@ -82,6 +82,38 @@ class ConfigOverrideMirror
     }
 
     /**
+     * The mirror bytes a Release WOULD write for a root once `$version` is published (config-sections ticket 11): the
+     * Release panel's mirror preview. The same serialization as {@see bytes()}, read from the version the member pins
+     * instead of the published one, so the preview and the committed file cannot drift. Read-only: the scope is copied
+     * in memory with that pin, never saved. Null when the version is null (a rollback that removes the override leaves
+     * no file) or the root has no scope on this connection. Secrets carry no value, exactly as in the committed file.
+     */
+    public function preview(string $root, string $connection, ?string $version): ?string
+    {
+        if ($version === null) {
+            return null;
+        }
+        $store = $this->store->forTier(ConfigTier::Operator)->on($connection);
+        $scope = $store->scope($root);
+        if ($scope === null) {
+            return null;
+        }
+        $pinned = (clone $scope)->forceFill(['published_version' => $version]);
+        $overrides = [];
+        foreach ($store->publishedLayer($pinned) as $pointer => $entry) {
+            $overrides[] = $this->row($pointer, $entry);
+        }
+        usort($overrides, fn (array $a, array $b): int => strcmp($a['pointer'], $b['pointer']));
+
+        return json_encode([
+            '$schema' => $this->schemaRef($root),
+            'root' => $root,
+            'version' => $store->versionNumber($scope, $version),
+            'overrides' => $overrides,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n";
+    }
+
+    /**
      * The `saveDraft` ops a mirror document reconstructs — the input shape {@see ConfigOverrideStore::saveDraft()}
      * takes (`list<array{pointer, op, value?}>`).
      *

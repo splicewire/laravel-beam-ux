@@ -8,10 +8,16 @@ use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\Column;
 use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
+use Splicewire\Beam\Config\ConfigSectionRegistry;
+use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
 use Splicewire\Beam\Data\BeamData;
+use Splicewire\Beam\Enums\ConfigTier;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
+use Splicewire\Beam\Realm\Contracts\TenancyContext;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Models\BeamUxRelease;
+use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
+use Splicewire\Beam\Ux\Release\Kinds\ConfigOverrideMemberKind;
 use Splicewire\Beam\Workflows\Control\WorkflowActuator;
 use Splicewire\Beam\Workflows\Data\WorkflowProjectionData;
 
@@ -72,10 +78,13 @@ final class ReleaseData extends BeamData
             && app(\Splicewire\Beam\Ux\Release\ReleaseService::class)->mayManageLinks($model, request()->user());
 
         return new self($model->id, $model->title, $model->realm, $model->status, $model->reviewed_by,
-            $members->map(fn ($member) => new ReleaseMemberData($member->entry_id, $member->version_id,
+            [...$members->map(fn ($member) => new ReleaseMemberData($member->entry_id, $member->version_id,
                 $member->observed_pin, $member->redirect_target,
                 $model->status !== 'published' && (! $entries->has($member->entry_id) || $entries[$member->entry_id]->published_version !== $member->observed_pin
-                    || $entries[$member->entry_id]->workflow_marking !== $member->observed_marking)))->all(),
+                    || $entries[$member->entry_id]->workflow_marking !== $member->observed_marking),
+                BeamUxReleaseMember::KIND_ENTRY, (string) $member->entry_id,
+                (string) ($entries->get($member->entry_id)?->title ?? $member->entry_id)))->all(),
+                ...self::configMembers($model)],
             $projection === null ? null : WorkflowProjectionData::from($projection),
             app()->bound(\Splicewire\Beam\Calendars\Actions\ActionService::class),
             (bool) config('beam.ux.releases.review_required', false),
@@ -89,6 +98,40 @@ final class ReleaseData extends BeamData
             $manages,
             self::redirects($model),
         );
+    }
+
+    /**
+     * The Release's members of NON-entry kinds (config-sections ticket 11), after its entries: today the config section
+     * overrides (`config-override`), each labelled by its section's title. `members()` reads entries only, so these come
+     * from `allMembers()`. A config member is stale, as an entry is, when the section's published pin moved after it
+     * joined (the {@see ConfigOverrideMemberKind::moved()} rule); a section this realm cannot read is not called stale.
+     *
+     * @return list<ReleaseMemberData>
+     */
+    private static function configMembers(BeamUxRelease $model): array
+    {
+        $members = $model->allMembers()->where('member_kind', BeamUxReleaseMember::KIND_CONFIG)->orderBy('member_ref')->get();
+        if ($members->isEmpty()) {
+            return [];
+        }
+        $tier = app(TenancyContext::class)->isActive() ? ConfigTier::Tenant : ConfigTier::Operator;
+        $store = app(ConfigOverrideStore::class)->forTier($tier)->on($model->getConnectionName());
+        $registry = app(ConfigSectionRegistry::class);
+
+        return $members->map(function (BeamUxReleaseMember $member) use ($model, $store, $registry) {
+            $root = $member->ref();
+            $registered = $registry->get($root);
+            try {
+                $scope = $store->scope($root);
+            } catch (\Throwable) {
+                $scope = null;
+            }
+
+            return new ReleaseMemberData(null, $member->version_id, $member->observed_pin, null,
+                $model->status !== 'published' && $scope !== null && $scope->published_version !== $member->observed_pin,
+                BeamUxReleaseMember::KIND_CONFIG, $root,
+                $registered === null ? $root : (string) ($registered->section::declaration()->title ?? $root));
+        })->values()->all();
     }
 
     /** @return list<ReleaseRedirectRowData> */
