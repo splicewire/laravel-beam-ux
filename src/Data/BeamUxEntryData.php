@@ -6,11 +6,14 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Schemastud\DataSchemas\Attributes\Title;
 use Schemastud\Frame\Attributes\Column;
+use Schemastud\Frame\Attributes\NotInList;
 use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\RowActions;
 use Schemastud\Frame\Attributes\Widget;
+use Schemastud\Frame\Attributes\WidgetIn;
 use Spatie\LaravelData\Attributes\MapInputName;
 use Spatie\LaravelData\Attributes\MapOutputName;
+use Spatie\LaravelData\Lazy;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Particle\Attributes\ParticleResource;
@@ -103,6 +106,16 @@ class BeamUxEntryData extends BeamData
         public ?UxFormat $format = null,
         /** Declared body contract; unlike payload shape, this is stable for the entry's type and format. */
         public ?BodyKind $bodyKind = null,
+        /**
+         * The Entry's full-surface editor, declared as a composition declares its cell tree (particle-editor G10): the
+         * frame manifest's edit context names `beam-ux-canvas`, so a host shell mounts the Entry's editor without naming
+         * it. A heavyweight entry projects no `x-widget`, so the Entry's form controls are unchanged. The body itself is
+         * never loaded here (project() leaves it unset): the canvas reads and writes it through its own body and
+         * save-body operations, which this does not change.
+         */
+        #[NotInList]
+        #[WidgetIn('edit', 'beam-ux-canvas', heavyweight: true)]
+        public Lazy|array|null $body = null,
     ) {}
 
     public static function project(BeamUxEntry $model): self
@@ -112,6 +125,10 @@ class BeamUxEntryData extends BeamData
             ? $model->url() : null;
         $data->format = $model->format;
         $data->bodyKind = $model->bodyKind();
+        // The canvas declaration (particle-editor G10) never puts the body on the wire: an excluded Lazy is left out of
+        // every serialised read (index and list rows, store and update answers) unless a caller includes it, where a
+        // plain null would be emitted as "body": null.
+        $data->body = Lazy::create(fn () => null);
 
         return $data;
     }

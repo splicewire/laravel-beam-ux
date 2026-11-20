@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Schemastud\Frame\FrameServiceProvider;
+use Schemastud\Frame\Registry\ContextManifest;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
 use Spatie\LaravelData\Support\DataConfig;
 use Splicewire\Beam\Facades\Beam;
@@ -151,6 +152,49 @@ class BeamUxEntryDataTest extends TestCase
         config(['beam.ux.file_language' => 'mdx']);
         $root = BeamUxEntry::findOrFail($create(['title' => 'Root', 'slug' => 'root'])->assertSuccessful()->json('data.id'));
         $this->assertSame('mdx', $root->format->value, "then the host's");
+    }
+
+    public function test_the_entry_names_its_canvas_as_its_heavyweight_edit_widget_in_the_frame_manifest(): void
+    {
+        // particle-editor G10: as a composition names its cell tree, so a host shell mounts the Entry's editor without
+        // naming it. Heavyweight: a full-surface editor, never a form control.
+        $edit = (new ContextManifest)->forResource(BeamUxEntryData::class, key: 'beam-ux-entry')['byNode']['body']['edit'] ?? null;
+
+        $this->assertSame('beam-ux-canvas', $edit['widget'] ?? null);
+        $this->assertTrue($edit['heavyweight'] ?? false);
+    }
+
+    public function test_the_canvas_declaration_puts_no_body_on_any_read_of_the_entry(): void
+    {
+        // The wire is unchanged (G10 ruling): project() sets the body to an EXCLUDED Lazy, so no read that carries
+        // BeamUxEntryData serialises it. Those reads are the store and update answers, the frame index rows and the
+        // central index rows (records/{id} serves the edit shape, BeamUxEntryInputData, so it is not one of them). A
+        // heavyweight entry also projects no x-widget, so the form schema gains no body either.
+        $this->mountCentralIndex();
+        $this->actingAs((new User)->forceFill(['id' => 1]));
+        Gate::policy(BeamUxEntry::class, EntryFormPolicy::class);
+        $input = ['type' => 'page', 'title' => 'Canvas page', 'slug' => 'canvas-page', 'realm' => 'site'];
+
+        $stored = $this->postJson('/frame/resources/beam-ux-entry', $input)->assertSuccessful()->json('data');
+        $this->assertArrayNotHasKey('body', $stored, 'the store answer');
+        $entry = BeamUxEntry::findOrFail($stored['id']);
+
+        $updated = $this->putJson('/frame/resources/beam-ux-entry/records/'.$entry->id, [...$input, 'slug' => 'canvas-page-renamed'])->assertSuccessful()->json('data');
+        $this->assertArrayNotHasKey('body', $updated, 'the update answer');
+
+        $rows = $this->getJson('/frame/resources/beam-ux-entry')->assertOk()->json('data');
+        $this->assertNotEmpty($rows);
+        foreach ($rows as $row) {
+            $this->assertArrayNotHasKey('body', $row, 'a frame index row');
+        }
+        $central = $this->getJson('/api/v1/beam-ux-entries')->assertOk()->json('data');
+        $this->assertNotEmpty($central);
+        foreach ($central as $row) {
+            $this->assertArrayNotHasKey('body', $row, 'a central index row');
+        }
+
+        $this->assertArrayNotHasKey('body', BeamUxEntryData::project($entry->fresh())->toArray(), 'the projection itself');
+        $this->assertArrayNotHasKey('body', $this->getJson('/frame/resources/beam-ux-entry/schema')->assertOk()->json('properties'), 'the form schema');
     }
 
     public function test_mounted_create_generates_identity_and_body_and_edit_preserves_them(): void
