@@ -219,6 +219,15 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
 
     public function packageBooted(): void
     {
+        // credential-scope 07: the `root` access sentinel answers a scoped Root token only for the right's strict name
+        // on the entry (Access\TokenAccessGate); offered to the widest token set so a Root principal can still mint it.
+        $this->callAfterResolving(\Rushing\PermissionCascade\Authorization\DecisionNames::class, function ($names): void {
+            $names->offer(fn (): array => array_map(
+                fn (Access\Right $right): string => \Rushing\PermissionCascade\Facades\PermissionNamer::assemble(BeamUxEntry::class, $right->value),
+                Access\Right::cases(),
+            ));
+        });
+
         \Illuminate\Foundation\Http\Middleware\TrimStrings::skipWhen(
             fn (\Illuminate\Http\Request $request): bool => JsonDoc\PreservesJsonDocStrings::matches($request, ['refine-node']),
         );

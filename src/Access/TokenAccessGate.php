@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Access;
 
 use Illuminate\Contracts\Auth\Access\Authorizable;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Rushing\PermissionCascade\Authorization\CredentialScopeGate;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 
 /**
@@ -66,7 +67,7 @@ class TokenAccessGate implements EntryAccessGate
         }
 
         foreach ($tokens as $token) {
-            if ($this->allowsToken($actor, $token)) {
+            if ($this->allowsToken($actor, $token, $entry, $right)) {
                 return true;
             }
         }
@@ -95,8 +96,14 @@ class TokenAccessGate implements EntryAccessGate
         return (bool) preg_match('/^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/', $token);
     }
 
-    /** Whether the actor satisfies one token. */
-    private function allowsToken(?Authenticatable $actor, string $token): bool
+    /**
+     * Whether the actor satisfies one token.
+     *
+     * The `root` sentinel is a Root grant read outside the Gate, so under a scoped credential it answers only for the
+     * strict name of the right on this entry, `beam-ux-entry.{right}` / `beam-ux-entry.{id}.{right}` (fleet ADR 0006 C3;
+     * credential-scope 07 R2; offered to the widest token set by the provider). A session or a `*` token is unchanged.
+     */
+    private function allowsToken(?Authenticatable $actor, string $token, BeamUxEntry $entry, Right $right): bool
     {
         if ($token === self::AUTH) {
             return $actor !== null;
@@ -105,7 +112,8 @@ class TokenAccessGate implements EntryAccessGate
         if ($token === self::ROOT) {
             return $actor !== null
                 && method_exists($actor, 'hasRole')
-                && $actor->hasRole($this->rootRole);
+                && $actor->hasRole($this->rootRole)
+                && app(CredentialScopeGate::class)->superuserMay($actor, $right->value, $entry);
         }
 
         // A morph-alias permission token — a live, tenant-scoped `can()` check. Root bypasses via
