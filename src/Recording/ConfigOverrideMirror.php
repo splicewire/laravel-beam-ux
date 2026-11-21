@@ -2,6 +2,8 @@
 
 namespace Splicewire\Beam\Ux\Recording;
 
+use Splicewire\Beam\Config\ConfigSectionRegistry;
+use Splicewire\Beam\Config\JsonPointer;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideEntry;
 use Splicewire\Beam\Config\Overrides\ConfigOverrideStore;
 use Splicewire\Beam\Enums\ConfigOverrideOp;
@@ -54,8 +56,9 @@ class ConfigOverrideMirror
         }
 
         $overrides = [];
+        $section = $this->sectionOf($root);
         foreach ($store->publishedLayer($scope) as $pointer => $entry) {
-            $overrides[] = $this->row($pointer, $entry);
+            $overrides[] = $this->row($pointer, $entry, $section);
         }
 
         return [
@@ -100,8 +103,9 @@ class ConfigOverrideMirror
         }
         $pinned = (clone $scope)->forceFill(['published_version' => $version]);
         $overrides = [];
+        $section = $this->sectionOf($root);
         foreach ($store->publishedLayer($pinned) as $pointer => $entry) {
-            $overrides[] = $this->row($pointer, $entry);
+            $overrides[] = $this->row($pointer, $entry, $section);
         }
         usort($overrides, fn (array $a, array $b): int => strcmp($a['pointer'], $b['pointer']));
 
@@ -155,12 +159,20 @@ class ConfigOverrideMirror
      * One mirror row for a published entry. `value` is present only for a non-secret `set`; a secret carries
      * `secret: true` and NO value (ADR-0245 §6); `null`/`unset` carry the op alone.
      *
+     * Secret means the STORED entry's flag OR the section's CURRENT declaration (config-sections 11, build-qa HIGH): a
+     * version saved while a key was declared non-secret holds its plaintext with `secret: false`, and once the key is
+     * declared secret that plaintext must not reach the committed file nor the Release panel's preview (both serialize
+     * here). The declaration counts for the pointer itself (a key under a declared map or object inherits it) and for
+     * every leaf inside a `set` value; either way the row is the secret marker, with no value. An entry of a section
+     * this host no longer registers has no declaration to read, so its stored flag alone decides, as before.
+     *
+     * @param  class-string<\Splicewire\Beam\Config\ConfigSection>|null  $section
      * @return MirrorOverride
      */
-    protected function row(string $pointer, ConfigOverrideEntry $entry): array
+    protected function row(string $pointer, ConfigOverrideEntry $entry, ?string $section = null): array
     {
         $row = ['pointer' => $pointer, 'op' => $entry->op->value];
-        if ($entry->secret) {
+        if ($entry->secret || ($section !== null && self::declaredSecret($section, $pointer, $entry->op === ConfigOverrideOp::Set ? $entry->value : null))) {
             $row['secret'] = true;
 
             return $row;
@@ -177,6 +189,35 @@ class ConfigOverrideMirror
         }
 
         return $row;
+    }
+
+    /** @return class-string<\Splicewire\Beam\Config\ConfigSection>|null the registered section class for a root, or null */
+    protected function sectionOf(string $root): ?string
+    {
+        return app(ConfigSectionRegistry::class)->get($root)?->section;
+    }
+
+    /**
+     * Whether the section's current declaration makes this pointer secret, or any leaf inside its value.
+     *
+     * @param  class-string<\Splicewire\Beam\Config\ConfigSection>  $section
+     */
+    protected static function declaredSecret(string $section, string $pointer, mixed $value): bool
+    {
+        $segments = JsonPointer::segments($pointer);
+        if ($section::keyDeclaration($segments)->secret) {
+            return true;
+        }
+        if (! is_array($value)) {
+            return false;
+        }
+        foreach ($value as $key => $child) {
+            if (self::declaredSecret($section, JsonPointer::from([...$segments, (string) $key]), $child)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** A stable, secret-free schema anchor for the mirror — the section root, which names the schema the draft validates against. */

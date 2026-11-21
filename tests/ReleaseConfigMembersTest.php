@@ -26,11 +26,14 @@ use Splicewire\Beam\Ux\Models\BeamUxRelease;
 use Splicewire\Beam\Ux\Models\BeamUxReleaseMember;
 use Splicewire\Beam\Ux\Particle\ReleaseCommandOp;
 use Splicewire\Beam\Ux\Publish\EntryPublication;
+use Splicewire\Beam\Ux\Recording\ConfigOverrideMirror;
 use Splicewire\Beam\Ux\Release\ReleaseChanges;
 use Splicewire\Beam\Ux\Release\ReleaseConfigChanges;
 use Splicewire\Beam\Ux\Release\ReleaseService;
 use Splicewire\Beam\Ux\Tests\Fixtures\Config\ReleaseConfigSection;
 use Splicewire\Beam\Ux\Tests\Fixtures\Config\ReleaseKeysSection;
+use Splicewire\Beam\Ux\Tests\Fixtures\Config\ReleaseLaterPlainSection;
+use Splicewire\Beam\Ux\Tests\Fixtures\Config\ReleaseLaterSecretSection;
 use Splicewire\Beam\Ux\Type\ReleaseConfigSecretChange;
 use Splicewire\Beam\Ux\Type\UxType;
 
@@ -381,6 +384,41 @@ class ReleaseConfigMembersTest extends AuthoredComponentNativeTestCase
         $this->app->bind(ConfigSectionReader::class, fn () => throw new \LogicException('the config reader was resolved'));
 
         $this->assertSame([], app(ReleaseChanges::class)->of($release, withConfig: false)->config);
+    }
+
+    public function test_a_value_saved_plain_never_reaches_any_wire_once_its_key_is_declared_secret(): void
+    {
+        // build-qa HIGH: versions saved while `apiKey` and `relay.token` were declared NOT secret hold their plaintext
+        // with `secret: false`. Once the host declares them secret, neither the Release read nor the mirror may carry it.
+        class_exists(ReleaseLaterSecretSection::class); // loads the fixture file, which declares both versions of the section
+        $this->withLocalMirrorDisk();
+        config(['release-later' => require self::FIXTURES.'/host/release-later.php']);
+        app(ConfigSectionRegistry::class)->section(ReleaseLaterPlainSection::class, owner: 'qa/later');
+        $this->saveDraft([['pointer' => '/apiKey', 'op' => 'set', 'value' => 'FAKE-OLD-PLAINTEXT'],
+            ['pointer' => '/relay', 'op' => 'set', 'value' => ['host' => 'relay.op.test', 'token' => 'FAKE-OLD-RELAY-TOKEN']]], 'release-later');
+        app(ConfigOverrideStore::class)->publish('release-later'); // v1, plaintext, secret: false
+        $this->saveDraft([['pointer' => '/relay', 'op' => 'set', 'value' => ['host' => 'relay.v2.test', 'token' => 'FAKE-OLD-RELAY-TOKEN-2']]], 'release-later');
+
+        // The host re-declares the keys secret.
+        $this->app->instance(ConfigSectionRegistry::class, new ConfigSectionRegistry);
+        $this->app->forgetInstance(ConfigOverrideStore::class);
+        $this->app->forgetInstance(\Splicewire\Beam\Config\Overrides\ConfigOverlay::class);
+        app(ConfigSectionRegistry::class)->section(ReleaseConfigSection::class, owner: 'qa/fixture');
+        app(ConfigSectionRegistry::class)->section(ReleaseLaterSecretSection::class, owner: 'qa/later');
+        $release = $this->releaseWithConfig('release-later');
+
+        $change = $this->change($release, 'release-later');
+        $wire = json_encode([ReleaseData::project($release)->toArray(), app(ReleaseChanges::class)->of($release)->toArray()]);
+        $committed = (string) app(ConfigOverrideMirror::class)->bytes('release-later', $release->getConnectionName());
+        foreach (['FAKE-OLD-PLAINTEXT', 'FAKE-OLD-RELAY-TOKEN'] as $plaintext) {
+            $this->assertStringNotContainsString($plaintext, $wire, 'the Release read');
+            $this->assertStringNotContainsString($plaintext, (string) $change->mirror, 'the mirror preview');
+            $this->assertStringNotContainsString($plaintext, $committed, 'the committed mirror file (08) serializes the same way');
+        }
+        $rows = collect(json_decode((string) $change->mirror, true)['overrides'])->keyBy('pointer');
+        $this->assertSame(['pointer' => '/apiKey', 'op' => 'set', 'secret' => true], $rows['/apiKey'], 'secret by its declaration now');
+        $this->assertSame(['pointer' => '/relay', 'op' => 'set', 'secret' => true], $rows['/relay'], 'a secret leaf inside the object makes the row the marker');
+        $this->assertNull(((array) $this->keysOf($change)['/relay']->after)['token'] ?? null, 'the key table masks the leaf by declaration too');
     }
 
     public function test_a_tenant_release_shows_the_tenant_tier_with_no_file(): void
