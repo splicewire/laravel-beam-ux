@@ -258,6 +258,13 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         $this->app->make(\Illuminate\Contracts\Events\Dispatcher::class)
             ->listen(\Splicewire\Beam\Events\BeamParticlePersisted::class, [Redirect\RecordUrlChanges::class, 'handle']);
 
+        // browser-journeys 08 (config-sections 11): declare this package's flows (the Release panel) into beam-core's
+        // `beam.flows` catalog, inside this provider's ScopesRegistrant scope (registrant splicewire/laravel-beam-ux). Guarded
+        // as beam-accounts does: the catalog is beam-core's.
+        if (class_exists(\Splicewire\Beam\Flows\FlowCatalog::class)) {
+            $this->app->make(\Splicewire\Beam\Flows\FlowCatalog::class)->declare(Flows\BeamUxFlows::class);
+        }
+
         // UX-08c: the read ability the Developer-zone diagnostics declare (who may update entries; Root passes).
         DiagnosticsAbility::define();
         // analytics-area 20: the Site area's ability, `site.edit` in tenant scope (failing closed) and DiagnosticsAbility on the

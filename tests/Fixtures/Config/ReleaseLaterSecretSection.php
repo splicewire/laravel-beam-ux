@@ -3,6 +3,7 @@
 namespace Splicewire\Beam\Ux\Tests\Fixtures\Config;
 
 use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Optional;
 use Splicewire\Beam\Config\Attributes\ConfigKey;
 use Splicewire\Beam\Config\Attributes\ConfigRoot;
 use Splicewire\Beam\Config\ConfigSection;
@@ -30,6 +31,8 @@ class ReleaseLaterPlainRelay extends Data
         #[ConfigKey(ceiling: ConfigTier::Operator)]
         public ?string $host = null,
         #[ConfigKey(ceiling: ConfigTier::Operator)]
+        public string|Optional|null $region = null,
+        #[ConfigKey(ceiling: ConfigTier::Operator)]
         public ?string $token = null,
     ) {}
 }
@@ -51,6 +54,8 @@ class ReleaseLaterSecretRelay extends Data
     public function __construct(
         #[ConfigKey(ceiling: ConfigTier::Operator)]
         public ?string $host = null,
+        #[ConfigKey(ceiling: ConfigTier::Operator)]
+        public string|Optional|null $region = null,
         #[ConfigKey(ceiling: ConfigTier::Operator, secret: true)]
         public ?string $token = null,
     ) {}

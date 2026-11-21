@@ -55,17 +55,11 @@ class ConfigOverrideMirror
             return null;
         }
 
-        $overrides = [];
-        $section = $this->sectionOf($root);
-        foreach ($store->publishedLayer($scope) as $pointer => $entry) {
-            $overrides[] = $this->row($pointer, $entry, $section);
-        }
-
         return [
             '$schema' => $this->schemaRef($root),
             'root' => $root,
             'version' => $store->versionNumber($scope, $scope->published_version),
-            'overrides' => $overrides,
+            'overrides' => $this->overridesOf($store->publishedLayer($scope), $this->sectionOf($root)),
         ];
     }
 
@@ -102,18 +96,12 @@ class ConfigOverrideMirror
             return null;
         }
         $pinned = (clone $scope)->forceFill(['published_version' => $version]);
-        $overrides = [];
-        $section = $this->sectionOf($root);
-        foreach ($store->publishedLayer($pinned) as $pointer => $entry) {
-            $overrides[] = $this->row($pointer, $entry, $section);
-        }
-        usort($overrides, fn (array $a, array $b): int => strcmp($a['pointer'], $b['pointer']));
 
         return json_encode([
             '$schema' => $this->schemaRef($root),
             'root' => $root,
             'version' => $store->versionNumber($scope, $version),
-            'overrides' => $overrides,
+            'overrides' => $this->overridesOf($store->publishedLayer($pinned), $this->sectionOf($root)),
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n";
     }
 
@@ -125,18 +113,33 @@ class ConfigOverrideMirror
      * OVERRIDE ALONE — not an `unset`, not an explicit null. Emitting `{pointer, set}` with no value would wipe or
      * fabricate the secret on a round trip. The same holds for any pointer the mirror omits by design: no row, no op.
      *
+     * A PARENT `set` with a secret marker row BELOW it replays as one `set` per owned leaf, not as one parent `set`
+     * (config-sections 11, lead RT-1425). laravel-beam's saveDraft drops a parent's split-out secret children on any
+     * parent op (ConfigOverrideStore.php:209), so a parent `set` would DROP a target secret split out of that parent,
+     * breaking the rule above. Child ops never drop it: the public keys update and the secret override survives. The
+     * trade, by design: a public key the target holds under that parent but the file lacks is NOT removed (child sets
+     * update, they do not replace the whole object). Every other row replays exactly as before.
+     *
      * @param  Mirror|array<string, mixed>  $document
      * @return list<array{pointer: string, op: string, value?: mixed}>
      */
     public static function toOps(array $document): array
     {
         $ops = [];
-        foreach (($document['overrides'] ?? []) as $override) {
-            if (! is_array($override) || ! isset($override['pointer'], $override['op'])) {
-                continue;
-            }
+        $rows = array_values(array_filter($document['overrides'] ?? [], fn ($row): bool => is_array($row) && isset($row['pointer'], $row['op'])));
+        $markers = array_map(fn (array $row): string => (string) $row['pointer'], array_filter($rows, fn (array $row): bool => ($row['secret'] ?? false) === true));
+        foreach ($rows as $override) {
             // A secret row is a marker only: import leaves the existing secret override alone (lead ruling 14:55Z).
             if (($override['secret'] ?? false) === true) {
+                continue;
+            }
+            $at = (string) $override['pointer'];
+            if ($override['op'] === ConfigOverrideOp::Set->value && is_array($override['value'] ?? null)
+                && array_filter($markers, fn (string $marker): bool => str_starts_with($marker, $at.'/')) !== []) {
+                foreach (JsonPointer::leaves($override['value']) as $leaf) {
+                    $ops[] = ['pointer' => $at.$leaf, 'op' => ConfigOverrideOp::Set->value, 'value' => JsonPointer::get($override['value'], $leaf)[1]];
+                }
+
                 continue;
             }
             $op = ['pointer' => (string) $override['pointer'], 'op' => (string) $override['op']];
@@ -156,68 +159,156 @@ class ConfigOverrideMirror
     }
 
     /**
-     * One mirror row for a published entry. `value` is present only for a non-secret `set`; a secret carries
-     * `secret: true` and NO value (ADR-0245 §6); `null`/`unset` carry the op alone.
+     * Every mirror row of a published layer (CONTRACT-11 rev 4, section 2b), sorted by pointer. One pointer is written
+     * once: when an entry's own marker row and a marker row derived from a parent's secret leaf name the same pointer
+     * (a secret split out at save time is its own entry), the marker is kept, so a secret is never written twice nor
+     * written with a value.
      *
-     * Secret means the STORED entry's flag OR the section's CURRENT declaration (config-sections 11, build-qa HIGH): a
-     * version saved while a key was declared non-secret holds its plaintext with `secret: false`, and once the key is
-     * declared secret that plaintext must not reach the committed file nor the Release panel's preview (both serialize
-     * here). The declaration counts for the pointer itself (a key under a declared map or object inherits it) and for
-     * every leaf inside a `set` value; either way the row is the secret marker, with no value. An entry of a section
-     * this host no longer registers has no declaration to read, so its stored flag alone decides, as before.
+     * @param  array<string, ConfigOverrideEntry>  $layer  pointer => entry
+     * @param  class-string<\Splicewire\Beam\Config\ConfigSection>|null  $section
+     * @return list<MirrorOverride>
+     */
+    protected function overridesOf(array $layer, ?string $section): array
+    {
+        $rows = [];
+        foreach ($layer as $pointer => $entry) {
+            foreach ($this->rows((string) $pointer, $entry, $section) as $row) {
+                $existing = $rows[$row['pointer']] ?? null;
+                if ($existing === null || (($row['secret'] ?? false) === true && ($existing['secret'] ?? false) !== true)) {
+                    $rows[$row['pointer']] = $row;
+                }
+            }
+        }
+        ksort($rows, SORT_STRING);
+
+        return array_values($rows);
+    }
+
+    /**
+     * The mirror rows for one published entry, in the three forms CONTRACT-11 rev 4 section 2b allows:
+     *
+     * - **A secret marker row**, `{pointer, op, secret: true}` with no value: when the STORED entry is secret, or the
+     *   section's CURRENT declaration makes the pointer itself secret (a key under a declared map or object inherits
+     *   it). A version saved while the key was declared non-secret still holds plaintext with `secret: false`; the
+     *   declaration masks it (config-sections 11, build-qa HIGH), in the committed file and the preview alike.
+     * - **A parent row** `{pointer, op: set, value, inherit}`: a `set` whose value holds leaves the CURRENT declaration
+     *   makes secret keeps its PUBLIC parts (Codex re-verify HIGH: the whole parent used to become a marker, so import
+     *   lost its public siblings). Each secret leaf is taken out of `value` and listed in `inherit` as a pointer
+     *   RELATIVE to the row's pointer (laravel-beam's form, with the entry's own inherit), so import rebuilds the public
+     *   keys and leaves each secret as the target holds it; and each secret leaf gets its own marker row (ABSOLUTE
+     *   pointer) so the file says the Release sets it.
+     * - **A plain row**: `{pointer, op: set, value}` (with the entry's own `inherit` when it has one), or `{pointer, op}`
+     *   for `null`.
+     *
+     * An entry of a section this host no longer registers has no declaration to read, so its stored flags alone decide.
+     *
+     * @param  class-string<\Splicewire\Beam\Config\ConfigSection>|null  $section
+     * @return list<MirrorOverride>
+     */
+    protected function rows(string $pointer, ConfigOverrideEntry $entry, ?string $section = null): array
+    {
+        $marker = fn (string $at, ConfigOverrideOp $op): array => ['pointer' => $at, 'op' => $op->value, 'secret' => true];
+        if ($entry->secret || ($section !== null && $section::keyDeclaration(JsonPointer::segments($pointer))->secret)) {
+            return [$marker($pointer, $entry->op)];
+        }
+        if ($entry->op !== ConfigOverrideOp::Set) {
+            return [['pointer' => $pointer, 'op' => $entry->op->value]];
+        }
+
+        $value = $entry->value;
+        $inherit = $entry->inherit;
+        $markers = [];
+        if ($section !== null && is_array($value)) {
+            foreach (self::secretLeaves($section, JsonPointer::segments($pointer), $value) as [$relative, $leaf]) {
+                $value = self::without($value, JsonPointer::segments($relative));
+                $inherit[] = $relative;
+                $markers[] = $marker($pointer.$relative, $leaf === null ? ConfigOverrideOp::Null : ConfigOverrideOp::Set);
+            }
+        }
+
+        $row = ['pointer' => $pointer, 'op' => $entry->op->value, 'value' => $value];
+        // config-sections 08 (Spec HIGH): record the leaves this set does NOT own (host-owned children and split
+        // secrets, inherited from the tier below), now also the declared-secret leaves taken out above. Without them, a
+        // parent set imports as a DESTRUCTIVE set that drops the inherited leaves. Only the pointers are written.
+        $inherit = array_values(array_unique(array_map('strval', $inherit)));
+        sort($inherit, SORT_STRING);
+        if ($inherit !== []) {
+            $row['inherit'] = $inherit;
+        }
+
+        return [$row, ...$markers];
+    }
+
+    /**
+     * The entry's OWN row (the first of {@see rows()}): its marker, its parent row or its plain row, without the marker
+     * rows derived from its secret leaves. Kept for callers that serialize one entry (ticket 08's import test).
      *
      * @param  class-string<\Splicewire\Beam\Config\ConfigSection>|null  $section
      * @return MirrorOverride
      */
     protected function row(string $pointer, ConfigOverrideEntry $entry, ?string $section = null): array
     {
-        $row = ['pointer' => $pointer, 'op' => $entry->op->value];
-        if ($entry->secret || ($section !== null && self::declaredSecret($section, $pointer, $entry->op === ConfigOverrideOp::Set ? $entry->value : null))) {
-            $row['secret'] = true;
+        return $this->rows($pointer, $entry, $section)[0];
+    }
 
-            return $row;
-        }
-        if ($entry->op === ConfigOverrideOp::Set) {
-            $row['value'] = $entry->value;
-            // config-sections 08 (Spec HIGH): record the leaves this set does NOT own — host-owned children and split
-            // secrets, inherited from the tier below (ConfigOverrideEntry::$inherit). Without them, a parent set imports
-            // as a DESTRUCTIVE set that drops the inherited leaves, which the real normalize refuses. The inherited
-            // VALUES are never written (the override never pins the host's value of the day); only the pointers are.
-            if ($entry->inherit !== []) {
-                $row['inherit'] = $entry->inherit;
+    /**
+     * The declared-secret leaves inside a `set` value, each as [pointer RELATIVE to the row, its value]. A leaf whose
+     * own declaration (or an ancestor's below the row) is secret is reported once, whole: what lies under it is not
+     * walked again.
+     *
+     * @param  class-string<\Splicewire\Beam\Config\ConfigSection>  $section
+     * @param  list<string>  $base  the row pointer's segments
+     * @param  array<array-key, mixed>  $value
+     * @param  list<string>  $below  the segments walked below the row
+     * @return list<array{0: string, 1: mixed}>
+     */
+    protected static function secretLeaves(string $section, array $base, array $value, array $below = []): array
+    {
+        $found = [];
+        foreach ($value as $key => $child) {
+            $path = [...$below, (string) $key];
+            if ($section::keyDeclaration([...$base, ...$path])->secret) {
+                $found[] = [JsonPointer::from($path), $child];
+
+                continue;
+            }
+            if (is_array($child)) {
+                $found = [...$found, ...self::secretLeaves($section, $base, $child, $path)];
             }
         }
 
-        return $row;
+        return $found;
+    }
+
+    /**
+     * `$value` with the key at `$segments` removed (a missing path leaves it as it is).
+     *
+     * @param  array<array-key, mixed>  $value
+     * @param  list<string>  $segments
+     * @return array<array-key, mixed>
+     */
+    protected static function without(array $value, array $segments): array
+    {
+        $key = array_shift($segments);
+        if ($key === null || ! array_key_exists($key, $value)) {
+            return $value;
+        }
+        if ($segments === []) {
+            unset($value[$key]);
+
+            return $value;
+        }
+        if (is_array($value[$key])) {
+            $value[$key] = self::without($value[$key], $segments);
+        }
+
+        return $value;
     }
 
     /** @return class-string<\Splicewire\Beam\Config\ConfigSection>|null the registered section class for a root, or null */
     protected function sectionOf(string $root): ?string
     {
         return app(ConfigSectionRegistry::class)->get($root)?->section;
-    }
-
-    /**
-     * Whether the section's current declaration makes this pointer secret, or any leaf inside its value.
-     *
-     * @param  class-string<\Splicewire\Beam\Config\ConfigSection>  $section
-     */
-    protected static function declaredSecret(string $section, string $pointer, mixed $value): bool
-    {
-        $segments = JsonPointer::segments($pointer);
-        if ($section::keyDeclaration($segments)->secret) {
-            return true;
-        }
-        if (! is_array($value)) {
-            return false;
-        }
-        foreach ($value as $key => $child) {
-            if (self::declaredSecret($section, JsonPointer::from([...$segments, (string) $key]), $child)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /** A stable, secret-free schema anchor for the mirror — the section root, which names the schema the draft validates against. */

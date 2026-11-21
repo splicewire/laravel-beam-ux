@@ -417,7 +417,11 @@ class ReleaseConfigMembersTest extends AuthoredComponentNativeTestCase
         }
         $rows = collect(json_decode((string) $change->mirror, true)['overrides'])->keyBy('pointer');
         $this->assertSame(['pointer' => '/apiKey', 'op' => 'set', 'secret' => true], $rows['/apiKey'], 'secret by its declaration now');
-        $this->assertSame(['pointer' => '/relay', 'op' => 'set', 'secret' => true], $rows['/relay'], 'a secret leaf inside the object makes the row the marker');
+        // CONTRACT-11 rev 4: the parent keeps its PUBLIC parts; the secret leaf leaves `value`, is inherited (relative), and
+        // is its own marker row (absolute).
+        $this->assertSame(['pointer' => '/relay', 'op' => 'set', 'value' => ['host' => 'relay.v2.test'], 'inherit' => ['/token']], $rows['/relay'],
+            'the public key is kept, the secret leaf inherited');
+        $this->assertSame(['pointer' => '/relay/token', 'op' => 'set', 'secret' => true], $rows['/relay/token'], 'the secret leaf is its own marker row');
         $this->assertNull(((array) $this->keysOf($change)['/relay']->after)['token'] ?? null, 'the key table masks the leaf by declaration too');
     }
 
