@@ -30,6 +30,29 @@ use Schemastud\Frame\Registry\RouteContextEntry;
 class RouteContextValidator
 {
     /**
+     * A plan-level invariant, checked before any realm is projected: a resource key is a heavyweight
+     * editor in at most ONE mode. Binding the same key in both {@see RouteContextPlan::$heavyweightEditors}
+     * (the widget on both the create and edit leaves) and {@see RouteContextPlan::$editOnlyHeavyweightEditors}
+     * (the widget on the edit leaf only) contradicts itself — a grammar error in the host's OWN plan,
+     * discoverable from the plan alone — so it throws here, naming the key, rather than letting one list
+     * silently win.
+     *
+     * @throws InvalidArgumentException when a key appears in both heavyweight-editor lists.
+     */
+    public static function assertPlan(RouteContextPlan $plan): void
+    {
+        $both = array_keys(array_intersect_key($plan->heavyweightEditors, $plan->editOnlyHeavyweightEditors));
+
+        if ($both !== []) {
+            throw new InvalidArgumentException(
+                'A resource key is a heavyweight editor in two modes at once — ['.implode(', ', $both).'] is in both '
+                .'RouteContextPlan::$heavyweightEditors (widget on create and edit) and $editOnlyHeavyweightEditors '
+                .'(widget on edit only). A key picks one mode; remove it from one list.'
+            );
+        }
+    }
+
+    /**
      * @param  array<int, RouteContextEntry>  $routeContext
      *
      * @throws InvalidArgumentException on a duplicate, unbound, or nested route.

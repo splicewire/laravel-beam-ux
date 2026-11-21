@@ -28,7 +28,7 @@ use Throwable;
  *
  * Nothing about the derivation was host-specific — the derivation is *"a realm's resources become
  * a list leaf, an independent create leaf, an edit/widget/detail twin where declared, plus the
- * resource-less pages the host names."* What was host-specific is the seven LISTS it reads, and
+ * resource-less pages the host names."* What was host-specific is the nine LISTS it reads, and
  * those stay host-owned in {@see RouteContextPlan} (api-surface-coherence 141/142: the host still
  * spells out its realms and mounts). **The list is host code; the projection is package code.**
  *
@@ -67,7 +67,11 @@ class RouteContextProjector
         protected ParticleResourceRegistry $particles,
         protected RealmRegistry $realms,
         protected RouteContextPlan $plan,
-    ) {}
+    ) {
+        // Fail closed on a plan that contradicts itself before any realm is projected: a key cannot be
+        // both a both-leaves and an edit-only heavyweight editor (pe17). {@see RouteContextValidator::assertPlan}.
+        RouteContextValidator::assertPlan($plan);
+    }
 
     /**
      * The flat RouteContext for one realm: a list leaf for every resource the host's membership
@@ -317,6 +321,10 @@ class RouteContextProjector
         )];
 
         $widget = $this->plan->heavyweightEditors[$key] ?? null;
+        // The create leaf is driven by $widget (both-leaves bindings only). An EDIT-ONLY binding leaves
+        // $widget null — so its create leaf keeps the manifest's Frame form — and mounts the heavyweight
+        // widget on the `.edit` twin alone, via $editWidget. A both-leaves binding has $editWidget === $widget.
+        $editWidget = $widget ?? ($this->plan->editOnlyHeavyweightEditors[$key] ?? null);
 
         if ($definition->resolvedCreateAffordance() === 'frame') {
             $entries[] = new RouteContextEntry(
@@ -331,7 +339,7 @@ class RouteContextProjector
             );
         }
 
-        if ($widget !== null) {
+        if ($editWidget !== null) {
             $entries[] = new RouteContextEntry(
                 routeName: $stem.'.edit',
                 path: $path.'/:id',
@@ -339,7 +347,7 @@ class RouteContextProjector
                 lazy: true,
                 guard: $guard,
                 mounts: 'widget',
-                widget: $widget,
+                widget: $editWidget,
                 resource: $key,
             );
         } elseif ($definition->editable) {

@@ -5,7 +5,7 @@ namespace Splicewire\Beam\Ux\Frame;
 use Schemastud\Frame\Realm\RealmDefinition;
 
 /**
- * The HOST-OWNED half of the frame router projection: seven lists naming this host's own
+ * The HOST-OWNED half of the frame router projection: nine lists naming this host's own
  * information architecture. Nothing here is derived, discovered or contributed by a package —
  * a host spells every entry out, which is `api-surface-coherence` **141** ("SPELL IT OUT") and
  * **142** ("realm → host-side list") applied to the router.
@@ -19,7 +19,7 @@ use Schemastud\Frame\Realm\RealmDefinition;
  * flagship does, by subclassing the projector and handing one to `parent::__construct`). There is
  * deliberately no config-array form: a second grammar for the same lists would be vocabulary with
  * no consumer, and a `const` with a docblock is the only form in which *why* a resource sits where
- * it does survives at all — which, for these seven lists, is most of their value.
+ * it does survives at all — which, for these nine lists, is most of their value.
  *
  * @api
  */
@@ -34,6 +34,7 @@ class RouteContextPlan
      * @param  array<string, string>  $shellBases  shell key → the path segment it mounts at under the realm's `routeBase`. `''` is the no-shell case. A shell registered client-side and missing here silently drops a segment from every href built off it, so pin this set in a test.
      * @param  array<int, array{routeName: string, path: string, mounts: string, guard?: ?string, shell?: string, realm?: ?string}>  $centralStandalone  resource-less leaves for a CENTRAL realm ({@see RealmDefinition::$central}) — bespoke pages with no backing frame resource. An entry that names a `realm` is emitted in that realm only.
      * @param  array<int, array{routeName: string, path: string, mounts: string, guard?: ?string, shell?: string, realm?: ?string}>  $scopedStandalone  the same, for a non-central (workspace/user/site) realm.
+     * @param  array<string, string>  $editOnlyHeavyweightEditors  resource key → registered widget name, like `heavyweightEditors` but bound to the EDIT leaf ONLY: the `.edit` twin mounts the heavyweight `widget` (lazy) while the `.create` leaf keeps the manifest's Frame form. A key may sit in this list OR `heavyweightEditors`, never both — {@see RouteContextValidator::assertPlan} rejects the overlap fail-closed. Declared LAST because `RouteContextPlan` is `@api`: a new parameter added mid-list would silently shift every positional caller's arguments, and the lists it reads are all arrays — so a shift would type-check and corrupt quietly.
      */
     public function __construct(
         public readonly array $heavyweightEditors = [],
@@ -44,6 +45,7 @@ class RouteContextPlan
         public readonly array $shellBases = ['app' => ''],
         public readonly array $centralStandalone = [],
         public readonly array $scopedStandalone = [],
+        public readonly array $editOnlyHeavyweightEditors = [],
     ) {}
 
     /**
