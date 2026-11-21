@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Data;
 
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
+use Splicewire\Beam\Ux\Enums\DashboardWelcomeState;
 use Splicewire\Beam\Ux\Particle\Backing\DashboardWelcome;
 
 /**
@@ -29,16 +30,16 @@ use Splicewire\Beam\Ux\Particle\Backing\DashboardWelcome;
 #[TypeScript]
 class DashboardWelcomeData extends BeamData
 {
-    public const STATE_FIRST_RUN = 'first-run';
+    public const STATE_FIRST_RUN = DashboardWelcomeState::FirstRun->value;
 
-    public const STATE_EMPTY = 'empty';
+    public const STATE_EMPTY = DashboardWelcomeState::Empty->value;
 
     /**
-     * @param  'first-run'|'empty'  $state  which of the two panels this is
+     * @param  DashboardWelcomeState  $state  which of the two panels this is
      * @param  list<DashboardWelcomeActionData>  $actions  next steps, in display order; only routes the host mounts
      */
     public function __construct(
-        public string $state,
+        public DashboardWelcomeState $state,
         public string $heading,
         public string $body,
         /** @var list<DashboardWelcomeActionData> */

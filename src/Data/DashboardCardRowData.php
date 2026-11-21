@@ -5,8 +5,8 @@ namespace Splicewire\Beam\Ux\Data;
 use Schemastud\Frame\Attributes\WidgetIn;
 use Schemastud\Frame\Data\SummaryResponseData;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
-use Splicewire\Beam\Dashboard\DashboardParticipation;
 use Splicewire\Beam\Data\BeamData;
+use Splicewire\Beam\Ux\Enums\DashboardCardContext;
 use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
 
 /**
@@ -38,23 +38,23 @@ use Splicewire\Beam\Ux\Particle\Backing\DashboardBacking;
 #[WidgetIn('list-item', 'dashboard-card')]
 class DashboardCardRowData extends BeamData
 {
-    public const CONTEXT_SUMMARY = DashboardParticipation::CONTEXT_SUMMARY;
+    public const CONTEXT_SUMMARY = DashboardCardContext::Summary->value;
 
-    public const CONTEXT_OVERVIEW = DashboardParticipation::CONTEXT_OVERVIEW;
+    public const CONTEXT_OVERVIEW = DashboardCardContext::Overview->value;
 
-    public const CONTEXT_NAV = 'nav';
+    public const CONTEXT_NAV = DashboardCardContext::Nav->value;
 
-    public const CONTEXT_WELCOME = 'welcome';
+    public const CONTEXT_WELCOME = DashboardCardContext::Welcome->value;
 
     /**
      * @param  string  $id  `{context}:{resource}` for a card, `nav:{routeName|href}` for a tile, `welcome` for the welcome row — unique within the realm's page
-     * @param  'summary'|'overview'|'nav'|'welcome'  $context  the render context the row is drawn in
+     * @param  DashboardCardContext  $context  the render context the row is drawn in
      * @param  int|null  $navOrder  a card: the resource's declared nav order, null sorts last; a tile: its index in the rail's walk
      * @param  string|null  $resource  the summarized resource's key; null on a tile
      */
     public function __construct(
         public string $id,
-        public string $context,
+        public DashboardCardContext $context,
         public string $label,
         public ?string $icon,
         public string $href,
@@ -67,11 +67,11 @@ class DashboardCardRowData extends BeamData
 
     public function isTile(): bool
     {
-        return $this->context === self::CONTEXT_NAV;
+        return $this->context === DashboardCardContext::Nav;
     }
 
     public function isWelcome(): bool
     {
-        return $this->context === self::CONTEXT_WELCOME;
+        return $this->context === DashboardCardContext::Welcome;
     }
 }

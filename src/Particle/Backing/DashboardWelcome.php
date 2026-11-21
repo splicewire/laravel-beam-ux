@@ -10,6 +10,8 @@ use Splicewire\Beam\Accounts\Facades\BeamAccounts;
 use Splicewire\Beam\Ux\Data\DashboardCardRowData;
 use Splicewire\Beam\Ux\Data\DashboardWelcomeActionData;
 use Splicewire\Beam\Ux\Data\DashboardWelcomeData;
+use Splicewire\Beam\Ux\Enums\DashboardCardContext;
+use Splicewire\Beam\Ux\Enums\DashboardWelcomeState;
 use Throwable;
 
 /**
@@ -54,7 +56,7 @@ class DashboardWelcome
 
         return new DashboardCardRowData(
             id: DashboardCardRowData::CONTEXT_WELCOME,
-            context: DashboardCardRowData::CONTEXT_WELCOME,
+            context: DashboardCardContext::Welcome,
             label: $welcome->heading,
             icon: null,
             href: '',
@@ -70,7 +72,7 @@ class DashboardWelcome
             $name = $this->nameOf($actor);
 
             return new DashboardWelcomeData(
-                state: DashboardWelcomeData::STATE_FIRST_RUN,
+                state: DashboardWelcomeState::FirstRun,
                 heading: $name === null ? __('beam-ux::dashboard.welcome.heading') : __('beam-ux::dashboard.welcome.heading_named', ['name' => $name]),
                 body: __('beam-ux::dashboard.welcome.not_on_team'),
                 actions: array_values(array_filter([
@@ -84,7 +86,7 @@ class DashboardWelcome
         }
 
         return new DashboardWelcomeData(
-            state: DashboardWelcomeData::STATE_EMPTY,
+            state: DashboardWelcomeState::Empty,
             heading: __('beam-ux::dashboard.welcome.empty_heading'),
             body: __('beam-ux::dashboard.welcome.empty_body'),
             actions: array_values(array_filter([$settings])),

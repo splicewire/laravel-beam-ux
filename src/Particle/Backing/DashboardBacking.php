@@ -28,6 +28,7 @@ use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Particle\Registry\ResourceRegistryBacking;
 use Splicewire\Beam\Realm\RealmRegistry;
 use Splicewire\Beam\Ux\Data\DashboardCardRowData;
+use Splicewire\Beam\Ux\Enums\DashboardCardContext;
 use Splicewire\Beam\Ux\Frame\FrameResourcesInvocable;
 use Splicewire\Beam\Ux\Frame\RouteContextProjector;
 use Throwable;
@@ -233,7 +234,7 @@ class DashboardBacking implements Unpaged
             $seen[$href] = true;
             $cards[] = new DashboardCardRowData(
                 id: $context.':'.$key,
-                context: $context,
+                context: DashboardCardContext::from($context),
                 label: $summary->label,
                 icon: $summary->icon ?? $definition->nav->icon,
                 href: $href,
@@ -524,7 +525,7 @@ class DashboardBacking implements Unpaged
             $seen[$leaf->href] = true;
             $tiles[] = new DashboardCardRowData(
                 id: DashboardCardRowData::CONTEXT_NAV.':'.($leaf->routeName ?? $leaf->href),
-                context: DashboardCardRowData::CONTEXT_NAV,
+                context: DashboardCardContext::Nav,
                 label: $leaf->title,
                 icon: $leaf->icon,
                 href: $leaf->href,
