@@ -58,12 +58,23 @@ class ConfigImportCommand extends Command
             return self::FAILURE;
         }
 
-        $ops = ConfigOverrideMirror::toOps($document);
+        // Pass the current section so toOps leaves a now-secret key's stale plaintext in an OLD file untouched, exactly
+        // as it leaves a marker row (config-sections 11 r5): the declaration decides, not only the stored flag.
+        $section = $sections->get($root)?->section;
+        $ops = ConfigOverrideMirror::toOps($document, $section);
         $secrets = count(array_filter($document['overrides'] ?? [], fn ($o): bool => is_array($o) && ($o['secret'] ?? false) === true));
         $this->info(sprintf('Parsed %d override op(s) for %s; %d secret pointer(s) left untouched (not in the file).', count($ops), $root, $secrets));
 
         if ($this->option('dry-run')) {
             $this->line('Dry run: no draft written.');
+
+            return self::SUCCESS;
+        }
+
+        // A mirror whose rows yield no op (every row is a secret marker, or a parent whose only children are secret) is
+        // a no-op, not a failure: saveDraft refuses an empty op list, but there is simply nothing to draft here.
+        if ($ops === []) {
+            $this->info("Nothing to import for {$root}: every row is a secret pointer left untouched. No draft written.");
 
             return self::SUCCESS;
         }

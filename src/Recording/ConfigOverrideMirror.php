@@ -112,32 +112,57 @@ class ConfigOverrideMirror
      * A SECRET row produces NO op: the file never carried the secret's value, so import must LEAVE AN EXISTING SECRET
      * OVERRIDE ALONE — not an `unset`, not an explicit null. Emitting `{pointer, set}` with no value would wipe or
      * fabricate the secret on a round trip. The same holds for any pointer the mirror omits by design: no row, no op.
+     * A row whose pointer the CURRENT declaration makes secret (by the ancestor rule) is treated exactly like a marker
+     * row and produces no op, so importing an OLD file that carries a now-secret key's plaintext does not write that
+     * stale value in as the secret (config-sections 11 r5): `$section` is the registered section class, or null for a
+     * root this host no longer registers (then the stored `secret` flag alone decides).
      *
      * A PARENT `set` with a secret marker row BELOW it replays as one `set` per owned leaf, not as one parent `set`
      * (config-sections 11, lead RT-1425). laravel-beam's saveDraft drops a parent's split-out secret children on any
      * parent op (ConfigOverrideStore.php:209), so a parent `set` would DROP a target secret split out of that parent,
-     * breaking the rule above. Child ops never drop it: the public keys update and the secret override survives. The
-     * trade, by design: a public key the target holds under that parent but the file lacks is NOT removed (child sets
-     * update, they do not replace the whole object). Every other row replays exactly as before.
+     * breaking the rule above. Child ops never drop it: the public keys update and the secret override survives. A leaf
+     * that is the EMPTIED residue of a split (an intermediate map left `[]` after its secret child was taken out, which
+     * {@see JsonPointer::leaves()} still counts as a leaf) is NOT an owned value: replaying it as a parent op would make
+     * saveDraft drop the target's secret split out of THAT map (config-sections 11 r5 HIGH), so no op is emitted at or
+     * below a marker, nor one that is an ancestor of (or equal to) a marker or an inherited pointer. The trade, by
+     * design: a public key the target holds under that parent but the file lacks is NOT removed (child sets update, they
+     * do not replace the whole object). Every other row replays exactly as before.
      *
      * @param  Mirror|array<string, mixed>  $document
+     * @param  class-string<\Splicewire\Beam\Config\ConfigSection>|null  $section
      * @return list<array{pointer: string, op: string, value?: mixed}>
      */
-    public static function toOps(array $document): array
+    public static function toOps(array $document, ?string $section = null): array
     {
         $ops = [];
         $rows = array_values(array_filter($document['overrides'] ?? [], fn ($row): bool => is_array($row) && isset($row['pointer'], $row['op'])));
-        $markers = array_map(fn (array $row): string => (string) $row['pointer'], array_filter($rows, fn (array $row): bool => ($row['secret'] ?? false) === true));
+        $isMarker = fn (array $row): bool => ($row['secret'] ?? false) === true || self::declaredSecret($section, (string) $row['pointer']);
+        $markers = array_values(array_map(fn (array $row): string => (string) $row['pointer'], array_filter($rows, $isMarker)));
         foreach ($rows as $override) {
-            // A secret row is a marker only: import leaves the existing secret override alone (lead ruling 14:55Z).
-            if (($override['secret'] ?? false) === true) {
+            // A secret row — stored secret, or secret by the current declaration — is a marker only: import leaves the
+            // existing secret override alone (lead ruling 14:55Z; config-sections 11 r5 old-file plaintext).
+            if ($isMarker($override)) {
                 continue;
             }
             $at = (string) $override['pointer'];
-            if ($override['op'] === ConfigOverrideOp::Set->value && is_array($override['value'] ?? null)
-                && array_filter($markers, fn (string $marker): bool => str_starts_with($marker, $at.'/')) !== []) {
+            $below = array_values(array_filter($markers, fn (string $marker): bool => str_starts_with($marker, $at.'/')));
+            if ($override['op'] === ConfigOverrideOp::Set->value && is_array($override['value'] ?? null) && $below !== []) {
+                // Protect the markers below $at and the row's inherited pointers (absolute): never set a leaf at/below
+                // one, nor a leaf that is an ancestor of (or equal to) one — that leaf is split residue, not a value.
+                $guards = $below;
+                foreach (is_array($override['inherit'] ?? null) ? $override['inherit'] : [] as $relative) {
+                    if (is_string($relative)) {
+                        $guards[] = $at.$relative;
+                    }
+                }
                 foreach (JsonPointer::leaves($override['value']) as $leaf) {
-                    $ops[] = ['pointer' => $at.$leaf, 'op' => ConfigOverrideOp::Set->value, 'value' => JsonPointer::get($override['value'], $leaf)[1]];
+                    $pointer = $at.$leaf;
+                    $atOrBelowMarker = array_filter($below, fn (string $m): bool => $pointer === $m || str_starts_with($pointer, $m.'/')) !== [];
+                    $ancestorOfGuard = array_filter($guards, fn (string $g): bool => $g === $pointer || str_starts_with($g, $pointer.'/')) !== [];
+                    if ($atOrBelowMarker || $ancestorOfGuard) {
+                        continue;
+                    }
+                    $ops[] = ['pointer' => $pointer, 'op' => ConfigOverrideOp::Set->value, 'value' => JsonPointer::get($override['value'], $leaf)[1]];
                 }
 
                 continue;
@@ -208,7 +233,11 @@ class ConfigOverrideMirror
     protected function rows(string $pointer, ConfigOverrideEntry $entry, ?string $section = null): array
     {
         $marker = fn (string $at, ConfigOverrideOp $op): array => ['pointer' => $at, 'op' => $op->value, 'secret' => true];
-        if ($entry->secret || ($section !== null && $section::keyDeclaration(JsonPointer::segments($pointer))->secret)) {
+        // The ancestor rule, one rule for a row's own pointer and for a leaf inside a value ({@see secretLeaves()}): a
+        // pointer at or below a declared-secret key is a marker. The nearest-attribute rule disagreed when a secret
+        // object's child carried its own `#[ConfigKey]` — it emitted a plain row WITH the child's value next to the
+        // object's marker, plaintext in the file that the strict parser then refuses (config-sections 11 r5 MEDIUM).
+        if ($entry->secret || self::declaredSecret($section, $pointer)) {
             return [$marker($pointer, $entry->op)];
         }
         if ($entry->op !== ConfigOverrideOp::Set) {
@@ -226,6 +255,14 @@ class ConfigOverrideMirror
             }
         }
 
+        // A map whose only children were secret or host-owned is `[]` after they are taken out — here, or already in the
+        // store, which splits a secret child out before the serializer sees the parent. It carries `inherit` for those
+        // children, so an empty value WITH inherit is an emptied map: emit the object `{}` it is, so the grammar's
+        // "`value` present on a non-secret set" holds with the right JSON type and the file parses under section 2b
+        // (config-sections 11 r5). Import yields no op for it; the command treats a no-op document as a no-op, not an error.
+        if ($value === [] && $inherit !== []) {
+            $value = (object) [];
+        }
         $row = ['pointer' => $pointer, 'op' => $entry->op->value, 'value' => $value];
         // config-sections 08 (Spec HIGH): record the leaves this set does NOT own (host-owned children and split
         // secrets, inherited from the tier below), now also the declared-secret leaves taken out above. Without them, a
@@ -249,6 +286,29 @@ class ConfigOverrideMirror
     protected function row(string $pointer, ConfigOverrideEntry $entry, ?string $section = null): array
     {
         return $this->rows($pointer, $entry, $section)[0];
+    }
+
+    /**
+     * Whether the CURRENT declaration makes a pointer secret by the ANCESTOR rule: the pointer itself, or any ancestor
+     * below the root, carries `#[ConfigKey(secret: true)]`. The one secrecy rule for a row's own pointer and for a leaf
+     * inside a value (what {@see secretLeaves()} applies top-down), so a key under a declared-secret map or object is
+     * never written with a value. A null section (a root this host no longer registers) has no declaration to read.
+     *
+     * @param  class-string<\Splicewire\Beam\Config\ConfigSection>|null  $section
+     */
+    protected static function declaredSecret(?string $section, string $pointer): bool
+    {
+        if ($section === null) {
+            return false;
+        }
+        $segments = JsonPointer::segments($pointer);
+        for ($length = count($segments); $length >= 1; $length--) {
+            if ($section::keyDeclaration(array_slice($segments, 0, $length))->secret) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

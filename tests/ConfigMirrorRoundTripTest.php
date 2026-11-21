@@ -200,13 +200,17 @@ class ConfigMirrorRoundTripTest extends AuthoredComponentNativeTestCase
     public function test_by_design_a_parent_with_a_secret_leaf_imports_as_child_sets_so_a_public_key_the_file_lacks_is_kept(): void
     {
         // The trade lead RT-1425 accepted: such a parent replays as one `set` per owned leaf (to keep the target's secret),
-        // so it updates the keys the file carries and does not replace the whole object. Not a bug.
+        // so it updates the keys the file carries and does not replace the whole object. Not a bug. `region` is seeded
+        // INSIDE the target's own `/relay` parent value (not as its own `/relay/region` entry, which `document()` would
+        // keep over a parent set as well): only the per-leaf replay — not a parent `set` of `/relay` — explains its survival.
         $document = $this->documentOfAnOldPlainVersion();
-        $this->publish([['pointer' => '/relay/region', 'op' => 'set', 'value' => 'eu-target']]);
+        // `token` is a required (non-Optional) property, so a `/relay` object set must name it; the store splits it back
+        // out as the secret. `region` is the public key INSIDE the target's own parent value that the file lacks.
+        $this->publish([['pointer' => '/relay', 'op' => 'set', 'value' => ['host' => 'relay.target.test', 'region' => 'eu-target', 'token' => 'FAKE-TARGET-TRADE-SECRET']]]);
 
         $this->import($document);
 
         $relay = $this->effective()['relay'];
-        $this->assertSame(['relay.file.test', 'eu-target'], [$relay['host'], $relay['region']], 'region (absent from the file) is kept');
+        $this->assertSame(['relay.file.test', 'eu-target'], [$relay['host'], $relay['region']], 'host (in the file) updates; region (absent from the file, inside the target parent) is kept');
     }
 }
