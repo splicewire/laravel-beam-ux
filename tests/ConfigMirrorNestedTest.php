@@ -78,6 +78,32 @@ class ConfigMirrorNestedTest extends AuthoredComponentNativeTestCase
         $this->store()->publish(self::ROOT);
     }
 
+    /** @var list<string> throwaway directories holding mirror files for command tests, reaped in tearDown */
+    private array $mirrorDirs = [];
+
+    protected function tearDown(): void
+    {
+        foreach ($this->mirrorDirs as $dir) {
+            foreach (glob($dir.'/*') ?: [] as $file) {
+                @unlink($file);
+            }
+            @rmdir($dir);
+        }
+        parent::tearDown();
+    }
+
+    /** Write a mirror document to a THROWAWAY file (never a live checkout) and return its path. @param array<string, mixed> $document */
+    private function writeMirror(array $document): string
+    {
+        $dir = sys_get_temp_dir().'/cs11-nested-'.uniqid();
+        mkdir($dir);
+        $this->mirrorDirs[] = $dir;
+        $path = $dir.'/release-nested.json';
+        file_put_contents($path, json_encode($document));
+
+        return $path;
+    }
+
     /** The section as the published layer makes it, over the host's values. @return array<string, mixed> */
     private function effective(): array
     {
@@ -219,6 +245,31 @@ class ConfigMirrorNestedTest extends AuthoredComponentNativeTestCase
         $this->assertSame([], ConfigOverrideMirror::toOps($document), 'a document that reconstructs no op imports as a no-op');
     }
 
+    public function test_to_ops_skips_a_now_secret_leaf_nested_in_an_old_parent_value_with_no_marker(): void
+    {
+        // The r6 HIGH: an OLD file predating the child's secret declaration carries the plaintext INSIDE the parent
+        // value, with NO marker row. The current declaration makes /relay/auth/token secret, so every leaf the
+        // declaration marks secret is treated like a marker: the per-leaf replay skips it (two levels).
+        $document = ['root' => self::ROOT, 'overrides' => [
+            ['pointer' => '/relay', 'op' => 'set', 'value' => ['auth' => ['token' => 'STALE-FILE-TOKEN'], 'region' => 'eu-file']],
+        ]];
+
+        $ops = ConfigOverrideMirror::toOps($document, ReleaseNestedSecretSection::class);
+        $this->assertSame([['pointer' => '/relay/region', 'op' => 'set', 'value' => 'eu-file']], $ops);
+        $this->assertStringNotContainsString('STALE-FILE-TOKEN', json_encode($ops), 'the stale nested secret is never replayed, even with no marker row');
+    }
+
+    public function test_to_ops_skips_a_now_secret_leaf_three_levels_deep_in_an_old_parent_value(): void
+    {
+        $document = ['root' => self::ROOT, 'overrides' => [
+            ['pointer' => '/deep', 'op' => 'set', 'value' => ['outer' => ['inner' => ['token' => 'STALE-DEEP-TOKEN', 'pub' => 'shown']]]],
+        ]];
+
+        $ops = ConfigOverrideMirror::toOps($document, ReleaseNestedSecretSection::class);
+        $this->assertSame([['pointer' => '/deep/outer/inner/pub', 'op' => 'set', 'value' => 'shown']], $ops);
+        $this->assertStringNotContainsString('STALE-DEEP-TOKEN', json_encode($ops), 'the three-level stale secret is never replayed');
+    }
+
     // ---- store + serializer: the file the Release writes ----------------------------------------------------------
 
     public function test_the_file_marks_a_nested_secret_and_keeps_its_public_siblings(): void
@@ -286,6 +337,57 @@ class ConfigMirrorNestedTest extends AuthoredComponentNativeTestCase
         }
     }
 
+    public function test_the_import_command_rejects_a_marker_row_that_carries_a_value(): void
+    {
+        // r6 MEDIUM: the no-op success must not swallow a malformed file. A marker (secret:true) carrying a value
+        // violates section 2b; toOps filters it as a marker, but the command validates the grammar first and fails.
+        $this->declare(ReleaseNestedSecretSection::class);
+        $document = ['$schema' => 'beam-config-section:'.self::ROOT, 'root' => self::ROOT, 'version' => 1, 'overrides' => [
+            ['pointer' => '/relay/auth/token', 'op' => 'set', 'secret' => true, 'value' => 'FAKE-LEAK'],
+        ]];
+
+        $this->artisan('splicewire:beam:config:import', ['root' => self::ROOT, 'file' => $this->writeMirror($document)])
+            ->expectsOutputToContain('section-2b grammar')
+            ->assertFailed();
+    }
+
+    public function test_the_import_command_rejects_a_document_with_no_overrides_key(): void
+    {
+        $this->declare(ReleaseNestedSecretSection::class);
+        $document = ['$schema' => 'beam-config-section:'.self::ROOT, 'root' => self::ROOT, 'version' => 1];
+
+        $this->artisan('splicewire:beam:config:import', ['root' => self::ROOT, 'file' => $this->writeMirror($document)])
+            ->expectsOutputToContain('section-2b grammar')
+            ->assertFailed();
+    }
+
+    public function test_the_import_command_rejects_a_row_missing_its_op(): void
+    {
+        $this->declare(ReleaseNestedSecretSection::class);
+        $document = ['$schema' => 'beam-config-section:'.self::ROOT, 'root' => self::ROOT, 'version' => 1, 'overrides' => [
+            ['pointer' => '/relay/region', 'value' => 'eu'],
+        ]];
+
+        $this->artisan('splicewire:beam:config:import', ['root' => self::ROOT, 'file' => $this->writeMirror($document)])
+            ->expectsOutputToContain('section-2b grammar')
+            ->assertFailed();
+    }
+
+    public function test_the_import_command_accepts_a_valid_old_format_plain_row(): void
+    {
+        // An old-format file (a plain {pointer, op, value} row, no marker/inherit) is valid section 2b and still imports.
+        $this->declare(ReleaseNestedSecretSection::class);
+        $document = ['$schema' => 'beam-config-section:'.self::ROOT, 'root' => self::ROOT, 'version' => 1, 'overrides' => [
+            ['pointer' => '/relay/region', 'op' => 'set', 'value' => 'eu-old'],
+        ]];
+
+        $this->artisan('splicewire:beam:config:import', ['root' => self::ROOT, 'file' => $this->writeMirror($document)])
+            ->assertSuccessful();
+        // The command writes a DRAFT (it never publishes); publish it to read the imported op as effective config.
+        $this->store()->publish(self::ROOT);
+        $this->assertSame('eu-old', $this->effective()['relay']['region'], 'the old-format plain row imported into the draft');
+    }
+
     public function test_every_fixture_document_obeys_the_section_2b_grammar(): void
     {
         $documents = [];
@@ -295,13 +397,22 @@ class ConfigMirrorNestedTest extends AuthoredComponentNativeTestCase
         $this->declare(ReleaseNestedSecretSection::class);
         $this->publish([['pointer' => '/smtp/password', 'op' => 'set', 'value' => 'FAKE-SMTP-PASSWORD-2']]);
         $documents['secret object'] = json_decode((string) app(ConfigOverrideMirror::class)->bytes(self::ROOT, 'testing'), true);
-        // 3) the only-child-secret parent, plus a null-op parent, two secrets under one parent and an escaped pointer.
+        // 3) the only-child-secret parent.
         ConfigOverrideScope::query()->where('section', self::ROOT)->delete();
         $this->publish([['pointer' => '/vault', 'op' => 'set', 'value' => ['key' => 'FAKE-VAULT-KEY-2']]]);
         $documents['only-child'] = json_decode((string) app(ConfigOverrideMirror::class)->bytes(self::ROOT, 'testing'), true);
+        // 4) a hand-built valid document exercising an ARRAY value, an escaped pointer (~0/~1), TWO secrets under one
+        //    parent and a null-op row — shapes the fixtures do not naturally emit (r6 LOW 4a).
+        $documents['array, escapes, two secrets, null'] = ['$schema' => 'beam-config-section:'.self::ROOT, 'root' => self::ROOT, 'version' => 3, 'overrides' => [
+            ['pointer' => '/relay', 'op' => 'set', 'value' => ['region' => 'eu', 'tags' => ['a', 'b']], 'inherit' => ['/auth/token', '/auth/user']],
+            ['pointer' => '/relay/auth/token', 'op' => 'set', 'secret' => true],
+            ['pointer' => '/relay/auth/user', 'op' => 'set', 'secret' => true],
+            ['pointer' => '/weird~1key/with~0tilde', 'op' => 'null'],
+        ]];
 
         foreach ($documents as $label => $document) {
             $this->assertGrammar2b($document, $label);
+            $this->assertNull(ConfigOverrideMirror::grammarFault($document), "$label: the production grammar validator accepts it");
         }
     }
 
@@ -363,6 +474,44 @@ class ConfigMirrorNestedTest extends AuthoredComponentNativeTestCase
         $relay = $this->effective()['relay'];
         $this->assertSame('eu-file', $relay['region'], 'the public key updates');
         $this->assertSame('FAKE-TARGET-UNTOUCHED', $relay['auth']['token'], 'the old plaintext never overwrites the target secret');
+    }
+
+    public function test_import_of_an_old_parent_file_with_a_nested_plaintext_secret_leaves_a_different_target_secret(): void
+    {
+        // The r6 HIGH end to end: an old PARENT-shaped file (plaintext nested secret INSIDE the value, no marker) must
+        // not overwrite the DIFFERENT secret the target holds.
+        $document = ['root' => self::ROOT, 'overrides' => [
+            ['pointer' => '/relay', 'op' => 'set', 'value' => ['auth' => ['token' => 'STALE-FILE-TOKEN'], 'region' => 'eu-file']],
+        ]];
+        $this->declare(ReleaseNestedSecretSection::class);
+        $this->publish([['pointer' => '/relay/auth/token', 'op' => 'set', 'value' => 'FAKE-TARGET-DIFFERENT']]);
+
+        $this->import($document);
+
+        $relay = $this->effective()['relay'];
+        $this->assertSame('eu-file', $relay['region'], 'the public sibling imports');
+        $this->assertSame('FAKE-TARGET-DIFFERENT', $relay['auth']['token'], 'the target secret survives; the old parent file never wrote its stale token in');
+    }
+
+    public function test_the_emitted_document_is_self_consistent_when_a_stored_secret_and_the_declaration_disagree(): void
+    {
+        // r6 MEDIUM: /relay/auth/token is stored secret, then re-declared PLAIN, then a /relay parent set names it.
+        // rows() (by the current declaration) would not strip it, but the stored entry is still a marker — leaving a
+        // value leaf at a marker, which the strict parser refuses. overridesOf reconciles across entries.
+        $this->declare(ReleaseNestedSecretSection::class);
+        $this->publish([['pointer' => '/relay/auth/token', 'op' => 'set', 'value' => 'FAKE-STORED-SECRET']]);
+        $this->declare(ReleaseNestedPlainSection::class);
+        $this->publish([['pointer' => '/relay', 'op' => 'set', 'value' => ['auth' => ['token' => 'FAKE-PLAIN-NOW', 'user' => 'host.user.fixed'], 'region' => 'r']]]);
+
+        $document = json_decode((string) app(ConfigOverrideMirror::class)->bytes(self::ROOT, 'testing'), true);
+        $this->assertGrammar2b($document, 'stored-vs-declaration');
+        $this->assertNull(ConfigOverrideMirror::grammarFault($document), 'the production grammar validator accepts the self-consistent document');
+        $this->assertStringNotContainsString('FAKE-STORED-SECRET', json_encode($document), 'the stored secret value is never emitted');
+        $rows = collect($document['overrides'])->keyBy('pointer')->all();
+        if (isset($rows['/relay/auth/token']) && ($rows['/relay/auth/token']['secret'] ?? false) === true && isset($rows['/relay'])) {
+            $this->assertArrayNotHasKey('token', $rows['/relay']['value']['auth'] ?? [], 'no /relay value leaf sits at the /relay/auth/token marker');
+            $this->assertContains('/auth/token', $rows['/relay']['inherit'] ?? [], 'the reconciled leaf is recorded as inherited');
+        }
     }
 
     /**

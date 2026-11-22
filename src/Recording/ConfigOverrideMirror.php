@@ -137,7 +137,26 @@ class ConfigOverrideMirror
         $ops = [];
         $rows = array_values(array_filter($document['overrides'] ?? [], fn ($row): bool => is_array($row) && isset($row['pointer'], $row['op'])));
         $isMarker = fn (array $row): bool => ($row['secret'] ?? false) === true || self::declaredSecret($section, (string) $row['pointer']);
-        $markers = array_values(array_map(fn (array $row): string => (string) $row['pointer'], array_filter($rows, $isMarker)));
+        // Every secret pointer the replay must protect: an explicit marker row (or a row the current declaration makes
+        // secret), AND every leaf INSIDE a non-marker parent value that the current declaration marks secret. An old file
+        // written before a nested child became secret carries no marker row for it — only the plaintext leaf inside the
+        // parent value — so without this a whole-parent set would write the stale value in as the target's secret
+        // (config-sections 11 r6 HIGH).
+        $markers = [];
+        foreach ($rows as $row) {
+            $pointer = (string) $row['pointer'];
+            if ($isMarker($row)) {
+                $markers[] = $pointer;
+
+                continue;
+            }
+            if ($section !== null && $row['op'] === ConfigOverrideOp::Set->value && is_array($row['value'] ?? null)) {
+                foreach (self::secretLeaves($section, JsonPointer::segments($pointer), $row['value']) as [$relative]) {
+                    $markers[] = $pointer.$relative;
+                }
+            }
+        }
+        $markers = array_values(array_unique($markers));
         foreach ($rows as $override) {
             // A secret row — stored secret, or secret by the current declaration — is a marker only: import leaves the
             // existing secret override alone (lead ruling 14:55Z; config-sections 11 r5 old-file plaintext).
@@ -184,6 +203,93 @@ class ConfigOverrideMirror
     }
 
     /**
+     * The CONTRACT-11 rev 4 section 2b STRUCTURE of a parsed mirror document, or a message naming the first fault — the
+     * PHP side of the strict JS parser's refusal table, so `splicewire:beam:config:import` fails a malformed file rather
+     * than silently reporting nothing to import (config-sections 11 r6). It checks shape only, never the current
+     * declaration: a plain `{pointer, op, value}` row is valid, and so is one whose pointer is now secret (import skips
+     * it, it is not an error). The root carries exactly `$schema`, `root`, `version`, `overrides`; a row's keys are a
+     * subset of `{pointer, op, value, secret, inherit}`; `op` is `set` or `null`; a marker (`secret: true`, and `secret`
+     * is only ever exactly `true`) carries no `value` and no `inherit`; a `set` carries a `value`; a `null` row carries
+     * neither; `inherit` is a list of distinct pointers below the root, only on a non-marker set; pointers do not repeat.
+     *
+     * @param  array<string, mixed>  $document
+     */
+    public static function grammarFault(array $document): ?string
+    {
+        $rootKeys = array_keys($document);
+        sort($rootKeys);
+        if ($rootKeys !== ['$schema', 'overrides', 'root', 'version']) {
+            return 'the root must carry exactly $schema, root, version and overrides';
+        }
+        if (! is_string($document['$schema']) || ! is_string($document['root'])) {
+            return '$schema and root must be strings';
+        }
+        if ($document['version'] !== null && ! is_int($document['version'])) {
+            return 'version must be an integer or null';
+        }
+        if (! is_array($document['overrides']) || ! array_is_list($document['overrides'])) {
+            return 'overrides must be a list';
+        }
+        $seen = [];
+        foreach ($document['overrides'] as $index => $row) {
+            $at = 'override #'.($index + 1);
+            if (! is_array($row)) {
+                return "{$at} must be an object";
+            }
+            $extra = array_diff(array_keys($row), ['pointer', 'op', 'value', 'secret', 'inherit']);
+            if ($extra !== []) {
+                return "{$at} has a key beyond the grammar: ".implode(', ', $extra);
+            }
+            if (! isset($row['pointer']) || ! is_string($row['pointer']) || ! str_starts_with($row['pointer'], '/')) {
+                return "{$at} needs a string pointer with a leading slash";
+            }
+            if (in_array($row['pointer'], $seen, true)) {
+                return "duplicate pointer {$row['pointer']}";
+            }
+            $seen[] = $row['pointer'];
+            if (! isset($row['op']) || ! in_array($row['op'], [ConfigOverrideOp::Set->value, ConfigOverrideOp::Null->value], true)) {
+                return "{$at} ({$row['pointer']}) op must be set or null";
+            }
+            if (array_key_exists('secret', $row) && $row['secret'] !== true) {
+                return "{$at} ({$row['pointer']}) secret must be true when present";
+            }
+            if (($row['secret'] ?? null) === true) {
+                if (array_key_exists('value', $row) || array_key_exists('inherit', $row)) {
+                    return "{$at} ({$row['pointer']}) is a secret marker and must carry no value or inherit";
+                }
+
+                continue;
+            }
+            if ($row['op'] === ConfigOverrideOp::Set->value && ! array_key_exists('value', $row)) {
+                return "{$at} ({$row['pointer']}) is a set and needs a value";
+            }
+            if ($row['op'] === ConfigOverrideOp::Null->value && (array_key_exists('value', $row) || array_key_exists('inherit', $row))) {
+                return "{$at} ({$row['pointer']}) is a null row and must carry no value or inherit";
+            }
+            if (array_key_exists('inherit', $row)) {
+                if ($row['op'] !== ConfigOverrideOp::Set->value) {
+                    return "{$at} ({$row['pointer']}) inherit is only valid on a set";
+                }
+                if (! is_array($row['inherit']) || ! array_is_list($row['inherit'])) {
+                    return "{$at} ({$row['pointer']}) inherit must be a list";
+                }
+                $items = [];
+                foreach ($row['inherit'] as $item) {
+                    if (! is_string($item) || ! str_starts_with($item, '/') || $item === '/') {
+                        return "{$at} ({$row['pointer']}) inherit items must be pointers below the root";
+                    }
+                    if (in_array($item, $items, true)) {
+                        return "{$at} ({$row['pointer']}) has a duplicate inherit item {$item}";
+                    }
+                    $items[] = $item;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Every mirror row of a published layer (CONTRACT-11 rev 4, section 2b), sorted by pointer. One pointer is written
      * once: when an entry's own marker row and a marker row derived from a parent's secret leaf name the same pointer
      * (a secret split out at save time is its own entry), the marker is kept, so a secret is never written twice nor
@@ -204,6 +310,40 @@ class ConfigOverrideMirror
                 }
             }
         }
+
+        // Self-consistency (config-sections 11 r6): a marker from one entry's STORED secret flag can sit under another
+        // entry's parent value whose CURRENT declaration does NOT mark that leaf (the two disagree), leaving a value leaf
+        // at or below a marker — which the strict parser refuses. Strip any such subtree from every non-marker set value
+        // and record it as inherited, so the emitted document is always self-consistent across entries.
+        $markers = array_keys(array_filter($rows, fn (array $row): bool => ($row['secret'] ?? false) === true));
+        foreach ($rows as $pointer => &$row) {
+            if (($row['secret'] ?? false) === true || $row['op'] !== ConfigOverrideOp::Set->value || ! is_array($row['value'] ?? null)) {
+                continue;
+            }
+            $inherit = $row['inherit'] ?? [];
+            $changed = false;
+            foreach ($markers as $marker) {
+                if ($marker === $pointer || ! str_starts_with((string) $marker, $pointer.'/')) {
+                    continue;
+                }
+                $relative = substr((string) $marker, strlen($pointer));
+                $stripped = self::without($row['value'], JsonPointer::segments($relative));
+                if ($stripped !== $row['value']) {
+                    $row['value'] = $stripped;
+                    $inherit[] = $relative;
+                    $changed = true;
+                }
+            }
+            if ($changed) {
+                $inherit = array_values(array_unique(array_map('strval', $inherit)));
+                sort($inherit, SORT_STRING);
+                $row['inherit'] = $inherit;
+                if ($row['value'] === []) {
+                    $row['value'] = (object) [];
+                }
+            }
+        }
+        unset($row);
         ksort($rows, SORT_STRING);
 
         return array_values($rows);

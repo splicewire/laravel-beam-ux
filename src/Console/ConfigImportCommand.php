@@ -58,6 +58,15 @@ class ConfigImportCommand extends Command
             return self::FAILURE;
         }
 
+        // Validate the mirror grammar (CONTRACT-11 rev 4 section 2b) BEFORE anything else, so a malformed file fails with
+        // a named fault rather than being silently filtered to a no-op success (config-sections 11 r6). Shape only: a
+        // plain {pointer, op, value} row is valid, and so is one whose pointer is now secret (import skips it below).
+        if (($fault = ConfigOverrideMirror::grammarFault($document)) !== null) {
+            $this->error("Mirror file does not match the section-2b grammar: {$fault}.");
+
+            return self::FAILURE;
+        }
+
         // Pass the current section so toOps leaves a now-secret key's stale plaintext in an OLD file untouched, exactly
         // as it leaves a marker row (config-sections 11 r5): the declaration decides, not only the stored flag.
         $section = $sections->get($root)?->section;
@@ -71,10 +80,11 @@ class ConfigImportCommand extends Command
             return self::SUCCESS;
         }
 
-        // A mirror whose rows yield no op (every row is a secret marker, or a parent whose only children are secret) is
-        // a no-op, not a failure: saveDraft refuses an empty op list, but there is simply nothing to draft here.
+        // A VALID mirror whose rows reconstruct no op is a no-op, not a failure: every row is a secret marker or a
+        // now-secret pointer left untouched, or a parent whose only children are secret (its value is the empty object).
+        // saveDraft refuses an empty op list, but there is simply nothing to draft here. (Malformed input already failed.)
         if ($ops === []) {
-            $this->info("Nothing to import for {$root}: every row is a secret pointer left untouched. No draft written.");
+            $this->info("Nothing to import for {$root}: the mirror reconstructs no draft op (its rows leave existing secrets untouched). No draft written.");
 
             return self::SUCCESS;
         }

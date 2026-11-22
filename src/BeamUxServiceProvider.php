@@ -264,8 +264,10 @@ class BeamUxServiceProvider extends PackageServiceProvider implements ChainsTrai
         // Guard the CALL, not a composer minimum: the `*` on splicewire/laravel-beam is load-bearing for the ecosystem's
         // co-dev resolve/land, so `declare` is reached only when the catalog of the expected shape is present. A
         // laravel-beam that predates `FlowCatalog::declare` registers nothing here instead of a boot-time fatal
-        // (config-sections 11 r5 LOW 6). The deeper FlowDeclaration-shape mismatch is reached only when the catalog is
-        // consumed, not at this provider's boot, and is covered by the land row's deploy-order disclosure.
+        // (config-sections 11 r5 LOW 6). `method_exists` does NOT cover a FlowCatalog whose `declare` exists but whose
+        // `FlowDeclaration` constructor or `DeclaresFlows`/`ListsFlows` shape has changed: `declare()` calls
+        // `BeamUxFlows::flows()` at once, so such a mismatch is a fatal AT THIS PROVIDER'S BOOT, and is covered by the
+        // land row's deploy-order disclosure (deploy after a laravel-beam whose flow shape matches).
         if (class_exists(\Splicewire\Beam\Flows\FlowCatalog::class)
             && method_exists(\Splicewire\Beam\Flows\FlowCatalog::class, 'declare')) {
             $this->app->make(\Splicewire\Beam\Flows\FlowCatalog::class)->declare(Flows\BeamUxFlows::class);
