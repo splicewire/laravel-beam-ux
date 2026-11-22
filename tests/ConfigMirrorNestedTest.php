@@ -388,6 +388,57 @@ class ConfigMirrorNestedTest extends AuthoredComponentNativeTestCase
         $this->assertSame('eu-old', $this->effective()['relay']['region'], 'the old-format plain row imported into the draft');
     }
 
+    public function test_grammar_fault_rejects_an_invalid_rfc6901_escape(): void
+    {
+        // r7 (Codex): a `~` not followed by 0 or 1, in a row pointer or an inherit item, is a grammar fault — the JS
+        // parser refuses it, so grammarFault must too (not silently reach toOps).
+        $base = fn (array $overrides): array => ['$schema' => 'beam-config-section:'.self::ROOT, 'root' => self::ROOT, 'version' => 1, 'overrides' => $overrides];
+        $this->assertNotNull(ConfigOverrideMirror::grammarFault($base([['pointer' => '/a~2b', 'op' => 'set', 'secret' => true]])), 'a bad escape in a row pointer is a fault');
+        $this->assertNotNull(ConfigOverrideMirror::grammarFault($base([['pointer' => '/relay', 'op' => 'set', 'value' => ['x' => 1], 'inherit' => ['/auth~2token']]])), 'a bad escape in an inherit item is a fault');
+        $this->assertNull(ConfigOverrideMirror::grammarFault($base([['pointer' => '/a~1b/c~0d', 'op' => 'null']])), 'valid ~0/~1 escapes are accepted');
+    }
+
+    public function test_grammar_fault_accepts_a_fractional_version(): void
+    {
+        // r7 (Codex): section 2b's version is number|null; the JS parser accepts any number. The serializer writes an int,
+        // but a fractional value must not be refused.
+        $doc = ['$schema' => 'beam-config-section:'.self::ROOT, 'root' => self::ROOT, 'version' => 1.5, 'overrides' => [['pointer' => '/relay/region', 'op' => 'set', 'value' => 'eu']]];
+        $this->assertNull(ConfigOverrideMirror::grammarFault($doc), 'a fractional version is accepted');
+    }
+
+    public function test_the_import_command_rejects_an_invalid_pointer_escape(): void
+    {
+        $this->declare(ReleaseNestedSecretSection::class);
+        $document = ['$schema' => 'beam-config-section:'.self::ROOT, 'root' => self::ROOT, 'version' => 1, 'overrides' => [
+            ['pointer' => '/a~2b', 'op' => 'set', 'secret' => true],
+        ]];
+
+        $this->artisan('splicewire:beam:config:import', ['root' => self::ROOT, 'file' => $this->writeMirror($document)])
+            ->expectsOutputToContain('section-2b grammar')
+            ->assertFailed();
+    }
+
+    public function test_a_plain_child_row_below_a_stored_secret_marker_is_demoted_to_a_marker(): void
+    {
+        // r7 (Claude MEDIUM 2a): /smtp is a SECRET object, stored as a secret marker; the declaration makes it plain and a
+        // plain /smtp/password child row is published. A non-marker row below a marker is one the strict parser refuses,
+        // so overridesOf demotes it to a marker (the public child is not imported; no value leaks).
+        $this->declare(ReleaseNestedSecretSection::class);
+        $this->publish([['pointer' => '/smtp', 'op' => 'set', 'value' => ['password' => 'FAKE-SMTP-SECRET']]]);
+        $this->declare(ReleaseNestedPlainSection::class);
+        $this->publish([['pointer' => '/smtp/password', 'op' => 'set', 'value' => 'now-public']]);
+
+        $document = json_decode((string) app(ConfigOverrideMirror::class)->bytes(self::ROOT, 'testing'), true);
+        $this->assertGrammar2b($document, 'row-below-marker');
+        $this->assertNull(ConfigOverrideMirror::grammarFault($document), 'the emitted document passes the production validator');
+        $this->assertStringNotContainsString('FAKE-SMTP-SECRET', json_encode($document));
+        $rows = collect($document['overrides'])->keyBy('pointer')->all();
+        if (isset($rows['/smtp'], $rows['/smtp/password']) && ($rows['/smtp']['secret'] ?? false) === true) {
+            $this->assertTrue(($rows['/smtp/password']['secret'] ?? false) === true, 'the plain child below the /smtp marker is demoted to a marker');
+            $this->assertArrayNotHasKey('value', $rows['/smtp/password'], 'the demoted marker carries no value');
+        }
+    }
+
     public function test_every_fixture_document_obeys_the_section_2b_grammar(): void
     {
         $documents = [];
@@ -580,10 +631,12 @@ class ConfigMirrorNestedTest extends AuthoredComponentNativeTestCase
                 }
             }
         }
+        // No NON-marker row below a marker (a marker below a marker is redundant but accepted — e.g. a demoted child
+        // under a secret object); the JS parser refuses only a non-marker row at or below a secret pointer.
         foreach ($markers as $marker) {
             foreach ($pointers as $pointer) {
-                if ($pointer !== $marker) {
-                    $this->assertFalse(str_starts_with($pointer, $marker.'/'), "$label: no row $pointer below the marker $marker");
+                if ($pointer !== $marker && ! in_array($pointer, $markers, true)) {
+                    $this->assertFalse(str_starts_with($pointer, $marker.'/'), "$label: no non-marker row $pointer below the marker $marker");
                 }
             }
         }

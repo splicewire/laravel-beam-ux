@@ -224,8 +224,8 @@ class ConfigOverrideMirror
         if (! is_string($document['$schema']) || ! is_string($document['root'])) {
             return '$schema and root must be strings';
         }
-        if ($document['version'] !== null && ! is_int($document['version'])) {
-            return 'version must be an integer or null';
+        if ($document['version'] !== null && ! is_int($document['version']) && ! is_float($document['version'])) {
+            return 'version must be a number or null';
         }
         if (! is_array($document['overrides']) || ! array_is_list($document['overrides'])) {
             return 'overrides must be a list';
@@ -242,6 +242,9 @@ class ConfigOverrideMirror
             }
             if (! isset($row['pointer']) || ! is_string($row['pointer']) || ! str_starts_with($row['pointer'], '/')) {
                 return "{$at} needs a string pointer with a leading slash";
+            }
+            if (! self::validEscapes($row['pointer'])) {
+                return "{$at} pointer has an invalid RFC 6901 escape (every ~ must be followed by 0 or 1): {$row['pointer']}";
             }
             if (in_array($row['pointer'], $seen, true)) {
                 return "duplicate pointer {$row['pointer']}";
@@ -278,6 +281,9 @@ class ConfigOverrideMirror
                     if (! is_string($item) || ! str_starts_with($item, '/') || $item === '/') {
                         return "{$at} ({$row['pointer']}) inherit items must be pointers below the root";
                     }
+                    if (! self::validEscapes($item)) {
+                        return "{$at} ({$row['pointer']}) inherit item has an invalid RFC 6901 escape: {$item}";
+                    }
                     if (in_array($item, $items, true)) {
                         return "{$at} ({$row['pointer']}) has a duplicate inherit item {$item}";
                     }
@@ -287,6 +293,12 @@ class ConfigOverrideMirror
         }
 
         return null;
+    }
+
+    /** Whether a JSON pointer's RFC 6901 escapes are well formed: every `~` is followed by `0` or `1` (the strict JS parser refuses any other `~` sequence). */
+    private static function validEscapes(string $pointer): bool
+    {
+        return preg_match('/~(?![01])/', $pointer) !== 1;
     }
 
     /**
@@ -314,7 +326,9 @@ class ConfigOverrideMirror
         // Self-consistency (config-sections 11 r6): a marker from one entry's STORED secret flag can sit under another
         // entry's parent value whose CURRENT declaration does NOT mark that leaf (the two disagree), leaving a value leaf
         // at or below a marker — which the strict parser refuses. Strip any such subtree from every non-marker set value
-        // and record it as inherited, so the emitted document is always self-consistent across entries.
+        // and record it as inherited. (The row form of the same disagreement is demoted below; one shape the serializer
+        // cannot reach alone — a key the key table marks secret only because the REPLACED version stored it secret — is
+        // disclosed in NOTES, not fixed here.)
         $markers = array_keys(array_filter($rows, fn (array $row): bool => ($row['secret'] ?? false) === true));
         foreach ($rows as $pointer => &$row) {
             if (($row['secret'] ?? false) === true || $row['op'] !== ConfigOverrideOp::Set->value || ! is_array($row['value'] ?? null)) {
@@ -340,6 +354,25 @@ class ConfigOverrideMirror
                 $row['inherit'] = $inherit;
                 if ($row['value'] === []) {
                     $row['value'] = (object) [];
+                }
+            }
+        }
+        unset($row);
+
+        // r7 (Claude MEDIUM 2a): a non-marker ROW whose pointer is below a marker — a child entry that stayed plain after
+        // its parent went secret-to-plain, while the parent's stored secret still emits a marker — also gives a document
+        // the strict parser refuses (a non-marker row at or below a secret pointer). Demote it to a marker itself:
+        // conservative, since a stored entry under a secret pointer reads as secret. The trade: that public child is not
+        // imported, and the target keeps its own value. (Every row below a demoted marker is also below the original, so
+        // one pass over the original marker set is enough.)
+        foreach ($rows as $pointer => &$row) {
+            if (($row['secret'] ?? false) === true) {
+                continue;
+            }
+            foreach ($markers as $marker) {
+                if (str_starts_with((string) $pointer, $marker.'/')) {
+                    $row = ['pointer' => (string) $pointer, 'op' => $row['op'], 'secret' => true];
+                    break;
                 }
             }
         }

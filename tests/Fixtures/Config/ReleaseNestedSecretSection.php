@@ -28,6 +28,10 @@ class ReleaseNestedPlainSection extends ConfigSection
         public ?ReleaseNestedPlainRelay $relay = null,
         #[ConfigKey(ceiling: ConfigTier::Operator)]
         public ?ReleaseNestedPlainDeep $deep = null,
+        // `smtp` is a PLAIN object here and a SECRET object in ReleaseNestedSecretSection: the secret-to-plain transition
+        // the r7 row-demotion test needs (a stored-secret /smtp marker with a plain /smtp/password child row).
+        #[ConfigKey(ceiling: ConfigTier::Operator)]
+        public ?ReleaseNestedSmtp $smtp = null,
     ) {}
 }
 
