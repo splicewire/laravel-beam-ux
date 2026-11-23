@@ -75,8 +75,10 @@ final class SiteDestinations
             $resource = $this->particles->get($key);
             $this->readGuard->bindReadContext($resource, $read);
 
-            return array_values(app(ParticleFrameResourceHandler::class)->forRequest($read, $realm)
-                ->index($resource->toResourceDefinition(), []));
+            // The WHOLE list (attention-surfaces 29): a figure counts every row its page reports, and the handler's Frame
+            // port, index(), now answers one page.
+            return app(ParticleFrameResourceHandler::class)->forRequest($read, $realm)
+                ->rows($resource->toResourceDefinition());
         } catch (AuthorizationException|HttpExceptionInterface) {
             return null;
         }
