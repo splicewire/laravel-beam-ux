@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Schemastud\Frame\FrameServiceProvider;
+use Schemastud\Frame\Registry\ContextBlockFacts;
 use Schemastud\Frame\Registry\ContextManifest;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
 use Spatie\LaravelData\Support\DataConfig;
@@ -158,7 +159,7 @@ class BeamUxEntryDataTest extends TestCase
     {
         // particle-editor G10: as a composition names its cell tree, so a host shell mounts the Entry's editor without
         // naming it. Heavyweight: a full-surface editor, never a form control.
-        $edit = (new ContextManifest)->forResource(BeamUxEntryData::class, key: 'beam-ux-entry')['byNode']['body']['edit'] ?? null;
+        $edit = (new ContextManifest)->forResource(BeamUxEntryData::class, new ContextBlockFacts(key: 'beam-ux-entry'))['byNode']['body']['edit'] ?? null;
 
         $this->assertSame('beam-ux-canvas', $edit['widget'] ?? null);
         $this->assertTrue($edit['heavyweight'] ?? false);

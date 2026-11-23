@@ -2,6 +2,7 @@
 
 namespace Splicewire\Beam\Ux\Tests;
 
+use Schemastud\Frame\Registry\ContextBlockFacts;
 use Schemastud\Frame\Registry\ContextManifest;
 use Splicewire\Beam\Ux\Data\ReleaseData;
 
@@ -9,7 +10,7 @@ class ReleaseListColumnsTest extends TestCase
 {
     public function test_release_manifest_declares_a_compact_list_column_set(): void
     {
-        $manifest = (new ContextManifest)->forResource(ReleaseData::class, key: 'beam-ux-release');
+        $manifest = (new ContextManifest)->forResource(ReleaseData::class, new ContextBlockFacts(key: 'beam-ux-release'));
 
         $columns = collect($manifest['byNode'])
             ->filter(fn (array $contexts): bool => ($contexts['list-column']['participates'] ?? false) === true)
