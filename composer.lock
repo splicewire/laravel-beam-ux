@@ -5465,7 +5465,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/schemastud/laravel-frame.git",
-                "reference": "c63a250bfbe0b1cdf41b04f369a44ea9a91a208d"
+                "reference": "9bbcb30d4e32cfa73f425a6af0fc1874f7400652"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -16337,6 +16337,7 @@
     "minimum-stability": "dev",
     "stability-flags": {
         "rushing/php-popcorn": 20,
+        "schemastud/laravel-frame": 20,
         "splicewire/laravel-beam-sitemap": 20,
         "splicewire/laravel-composition-spine": 20
     },
