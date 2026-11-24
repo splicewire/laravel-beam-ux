@@ -53,7 +53,10 @@ final class CanvasBodyGuard
     /** Stored working metadata, falling back to the persisted row, never a prospective validation clone. */
     public function workingRecordPage(BeamUxEntry $entry): ?array
     {
-        $settings = $entry->particle?->meta['pageSettings'] ?? null;
+        // A loaded particle is read as is. An unloaded one with no key is no particle: lazy-loading it would open the entry's
+        // connection, which an unconfigured tenant entry must not do before its residency/code refusal (EntryPublication).
+        $particle = $entry->relationLoaded('particle') || $entry->particle_id !== null ? $entry->particle : null;
+        $settings = $particle?->meta['pageSettings'] ?? null;
 
         return is_array($settings) ? ($settings['recordPage'] ?? null) : $entry->getOriginal('record_page');
     }

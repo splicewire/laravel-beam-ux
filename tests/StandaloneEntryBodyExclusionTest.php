@@ -18,6 +18,7 @@ class StandaloneEntryBodyExclusionTest extends TestCase
             $table->uuid('id')->primary();
             $table->string('schema_ref');
             $table->string('source_tier');
+            $table->json('meta')->nullable(); // StandaloneRecordQuery excludes an owned particle by meta.owner
         });
         Schema::create((new BeamUxEntry)->getTable(), function (Blueprint $table): void {
             $table->uuid('id')->primary();

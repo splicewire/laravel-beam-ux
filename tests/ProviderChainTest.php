@@ -87,6 +87,9 @@ class ProviderChainTest extends TestCase
         // frame console in one host line. A macro definition reads nothing at boot, so it sits beside the other
         // route macro. The boot count moved 14 -> 15 with it.
         'bootRealmConsoleMacro',
+        // Added by frame-foundation (30dffcf) at order 53: the opt-in `Route::beamUxHome()` macro. A macro definition
+        // reads nothing at boot, so it sits beside the other route macros. The boot count moved 15 -> 16 with it.
+        'bootHomeMacro',
         // Added 2026-09-05 with the FrameResourcesInvocable lift: the collector that attaches a
         // resource declaring `section:` to its nav seat was host code at exactly one host. Registering
         // it here means any host gets it. `order: 55` seats it between `bootPublicRouteMacro` (50) and
@@ -109,6 +112,9 @@ class ProviderChainTest extends TestCase
         // dashboard. The count moved 12 -> 13 with it.
         'bootRealmDashboards',
         'registerThemeSchemas',
+        // Added by config-sections 10b (bb465e0) at order 67: a discarded draft drops its config members. It needs the
+        // release kinds registered, nothing later. The boot count moved 16 -> 17 with it.
+        'dropConfigMembersOnDiscard',
         // Added by registry-kernel ticket 38 — the three describes are boot links, and they sit in the
         // trait that owns each fill rather than in a provider block, because beam-ux's whole binding
         // surface is these traits (ticket 54's finding).
@@ -159,9 +165,10 @@ class ProviderChainTest extends TestCase
         // the order assertions comparing two empty arrays, and a provider that boots clean binding
         // nothing. This estate has found that shape four times already.
         // 13 historical links + config-sections 04's two (release kinds, publish sinks) + analytics-area 10's one
-        // + config-sections 05's one (config sections).
+        // + config-sections 05's one (config sections). Boot: 15 historical + frame-foundation's home macro + config-sections
+        // 10b's discard link.
         $this->assertCount(17, $this->chain('register'));
-        $this->assertCount(15, $this->chain('boot'));
+        $this->assertCount(17, $this->chain('boot'));
     }
 
     public function test_the_provider_declares_the_contract_so_a_detector_can_find_it(): void

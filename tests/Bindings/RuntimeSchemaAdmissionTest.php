@@ -104,28 +104,8 @@ final class RuntimeSchemaAdmissionTest extends TestCase
         self::assertTrue($seen);
     }
 
-    public function test_serialized_confirmation_is_explicit_and_an_unsupported_registry_never_writes(): void
-    {
-        $receipt = new \Splicewire\Beam\Schema\SchemaRegistrationConfirmationData(SchemaFingerprint::of($this->schema(), []), ['page-a' => 'pin-1']);
-        $job = unserialize(serialize(new \Splicewire\Tower\Jobs\FreezeSchemaVersionJob($this->schema(), $receipt)));
-        self::assertSame($receipt->publishedVersions, $job->registrationConfirmation->publishedVersions);
-        $registry = Mockery::mock(\Schemastud\DataSchemas\Contracts\SchemaRegistry::class);
-        $registry->shouldNotReceive('register');
-        $this->expectExceptionMessage('does not support explicit impact confirmation');
-        $job->handle($registry);
-    }
-
-    public function test_confirmed_native_registration_delivers_the_serialized_receipt_to_preflight(): void
-    {
-        $receipt = new \Splicewire\Beam\Schema\SchemaRegistrationConfirmationData(SchemaFingerprint::of($this->schema(), []), ['page-a' => 'pin-1']);
-        $job = unserialize(serialize(new \Splicewire\Tower\Jobs\FreezeSchemaVersionJob($this->schema(), $receipt)));
-        app('events')->listen(SchemaVersionRegistering::class, function ($event) use ($receipt) {
-            self::assertSame($receipt->publishedVersions, $event->confirmation->publishedVersions);
-            throw new \RuntimeException('Receipt does not bypass preflight');
-        });
-        $this->expectExceptionMessage('Receipt does not bypass preflight');
-        $job->handle($this->registry(null, false));
-    }
+    // The serialized-receipt tests for tower's FreezeSchemaVersionJob were here (c438895). beam-ux may never require tower
+    // (composer.json), so they could not run in this package; they are tower's (config-sections 25 hand-off).
 
     public function test_wire_schema_declares_confirmation_map_and_typed_impact_pages(): void
     {

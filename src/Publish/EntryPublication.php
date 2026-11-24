@@ -664,6 +664,7 @@ class EntryPublication
     public function writeImmediate(BeamUxEntry $entry, array $body): array
     {
         $this->requireVersionStore();
+        $this->assertAdmittedBeforeAnUnconfiguredConnection($entry, $body);
 
         $written = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reservationTransaction($entry->getConnection(), function () use ($entry, $body): array {
             $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
@@ -758,11 +759,7 @@ class EntryPublication
      */
     public function write(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings = null): array
     {
-        $connection = $entry->getConnectionName();
-        if ($connection !== null && ! array_key_exists($connection, config('database.connections', []))) {
-            // Preserve the residency/code refusal before opening an uninitialized tenant connection.
-            app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
-        }
+        $this->assertAdmittedBeforeAnUnconfiguredConnection($entry, $body);
         $written = app(\Splicewire\Beam\Ux\Components\AuthoredComponents::class)->reservationTransaction($entry->getConnection(), function () use ($entry, $body, $pageSettings) {
             $locked = $entry->newQuery()->lockForUpdate()->findOrFail($entry->getKey());
 
@@ -771,6 +768,20 @@ class EntryPublication
         $entry->refresh();
 
         return $written;
+    }
+
+    /**
+     * Preserve the residency/code refusal before opening an uninitialized tenant connection: an entry whose
+     * connection is not configured is refused on its body alone, before any lock or baseline touches that connection.
+     *
+     * @param  array<int|string, mixed>  $body
+     */
+    private function assertAdmittedBeforeAnUnconfiguredConnection(BeamUxEntry $entry, array $body): void
+    {
+        $connection = $entry->getConnectionName();
+        if ($connection !== null && ! array_key_exists($connection, config('database.connections', []))) {
+            app(CanvasBodyGuard::class)->assertAdmitted($entry, $body);
+        }
     }
 
     private function writeAfterLocks(BeamUxEntry $entry, array $body, ?\Splicewire\Beam\Ux\Data\EntryPageSettingsData $pageSettings): array

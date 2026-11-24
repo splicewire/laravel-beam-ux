@@ -835,8 +835,11 @@ class RealmDashboardTest extends TestCase
 
     /**
      * ADR-0222 decision 9: with no flagged seat, this host's dashboard and manifest are byte-identical. The files were captured
-     * from the source at 81bfcdd, before overviews existed. Do not regenerate them: a difference here is a change to what every
-     * unflagged host serves.
+     * from the source at 81bfcdd, before overviews existed, and re-captured at e95f49e (config-sections 25) for four landed
+     * changes to what every host serves, none of them a flag: frame's `form` defaults to `enriched` and follows `nav`
+     * (laravel-frame 8266df9); laravel-beam's `beam-config` resource and its contexts (config-sections); and the declared
+     * `badge` state column on mirror-status and site-health reaching the contexts block. staff-rows.json was unchanged.
+     * Do not regenerate them otherwise: a difference here is a change to what every unflagged host serves.
      */
     public function test_an_unflagged_dashboard_and_manifest_are_byte_identical_to_their_capture(): void
     {

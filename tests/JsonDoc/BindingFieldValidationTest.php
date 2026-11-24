@@ -72,7 +72,6 @@ class BindingFieldValidationTest extends TestCase
         foreach ([
             [['kind' => 'text', 'field' => 'title', 'value' => '']],
             [['kind' => 'block', 'repeat' => ['collection' => 'articles', 'empty' => [['kind' => 'text', 'field' => 'title', 'value' => '']]], 'children' => []]],
-            [['kind' => 'block', 'repeat' => ['collection' => 'not-offered'], 'children' => []]],
         ] as $body) {
             try {
                 (new BindingFieldValidator)->assert($body, $this->profile());
@@ -80,6 +79,14 @@ class BindingFieldValidationTest extends TestCase
             } catch (ValidationException $e) {
                 $this->assertArrayHasKey('body', $e->errors());
             }
+        }
+        // A Collection the profile does not offer is refused by name (4c9e1d5), keyed to the repeat, not the body.
+        try {
+            (new BindingFieldValidator)->assert([['kind' => 'block', 'repeat' => ['collection' => 'not-offered'], 'children' => []]], $this->profile());
+            $this->fail('Accepted a Collection the profile does not offer');
+        } catch (\Splicewire\Beam\Ux\Bindings\MissingProfileCollection $e) {
+            $this->assertSame('not-offered', $e->collection);
+            $this->assertArrayHasKey('repeat.collection', $e->errors());
         }
     }
 

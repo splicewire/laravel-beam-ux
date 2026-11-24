@@ -18,7 +18,7 @@ final class EntryFrontmatterNamingContractTest extends TestCase
         ]));
 
         self::assertStringStartsWith(
-            '/Volumes/RigScratch/tmp/dto-c-beam-ux-20261101/src/',
+            dirname(__DIR__, 3).'/src/',
             (new \ReflectionClass(EntryFrontmatterData::class))->getFileName(),
         );
 

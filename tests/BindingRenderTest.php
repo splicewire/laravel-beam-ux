@@ -286,10 +286,12 @@ class BindingRenderTest extends TestCase
         $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.conditional.records', [['title' => 'Visible A', 'url' => null]]);
     }
 
-    public function test_an_undeclared_source_refuses_instead_of_enumerating_resources(): void
+    public function test_an_undeclared_source_enumerates_no_resources(): void
     {
+        // No ManifestCollectionSource offers nothing: the repeat's Collection is missing, and a missing Collection has no
+        // Records (4c9e1d5, BindingResolver::records). It must never fall back to enumerating the registered resources.
         $this->app->forgetInstance(ManifestCollectionSource::class);
-        $this->getJson('/bound')->assertUnprocessable();
+        $this->getJson('/bound')->assertOk()->assertJsonPath('props.bindings.repeat-one.records', []);
     }
 
     public function test_no_public_read_returns_the_same_empty_shape_as_no_records(): void
