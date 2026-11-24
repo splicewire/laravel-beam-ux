@@ -76,7 +76,25 @@ trait WiresThemeSchemas
         }
 
         foreach (glob(ThemeSchemas::directory().'/*.schema.json') ?: [] as $path) {
-            $decoded = json_decode((string) file_get_contents($path), true);
+            // The glob lists the directory as it was; another host sharing it may have removed the file since,
+            // or the entry is a link whose target is gone. A file that is gone holds no stale `$id` to forget,
+            // and its read's warning must not fail the boot (Fix B, calcucrypt root ruling 0bc3e9ce). ONLY that is
+            // skipped: an entry that is still there but cannot be read (unreadable, a directory, any I/O error)
+            // is a broken install, and fails loudly with the read's own reason.
+            error_clear_last();
+            $contents = @file_get_contents($path);
+            if ($contents === false || is_dir($path)) {
+                clearstatcache(true, $path);
+                if (! file_exists($path)) {
+                    continue; // gone, or a link to nothing (file_exists follows the link)
+                }
+
+                throw new \RuntimeException(
+                    "Cannot read the theme-schema artifact [{$path}]: ".(error_get_last()['message'] ?? 'not a file'),
+                );
+            }
+
+            $decoded = json_decode($contents, true);
 
             if (is_array($decoded) && ($decoded['$id'] ?? null) === $id) {
                 @unlink($path);
