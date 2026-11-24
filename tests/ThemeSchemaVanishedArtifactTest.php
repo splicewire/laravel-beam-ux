@@ -26,6 +26,12 @@ use Splicewire\Beam\Ux\Schema\ThemeSchemas;
  * Only a CONFIRMED vanished entry is skipped. Any other read failure (a file that is there but unreadable, a
  * directory under an artifact's name, any other I/O error) still fails loudly: it is a broken install, not this
  * race, and swallowing it would leave a stale root in place behind a frozen-schema conflict.
+ *
+ * The sweep decides what to remove from what the directory holds, then registers. Another process registering
+ * between the two used to make this boot throw a frozen-schema conflict (or have its own artifact swept under
+ * it). The sweep and the register now run inside the registry's {@see FilesystemSchemaRegistry::withLock()},
+ * so for every other process they are one step. Checked with a second real process (pcntl_fork; skipped
+ * without pcntl/posix) that holds the lock with the other side's root in place.
  */
 class ThemeSchemaVanishedArtifactTest extends TestCase
 {
@@ -95,6 +101,90 @@ class ThemeSchemaVanishedArtifactTest extends TestCase
     {
         $provider = $this->app->getProvider(BeamUxServiceProvider::class);
         $this->underLaravelsErrorHandling(fn () => (fn () => $this->registerThemeSchemas())->call($provider));
+    }
+
+    public function test_the_boot_sweeps_and_registers_under_the_registry_lock(): void
+    {
+        if (! function_exists('pcntl_fork') || ! function_exists('posix_kill')) {
+            $this->markTestSkipped('pcntl and posix are needed to run a second process.');
+        }
+
+        $dir = ThemeSchemas::directory();
+        $this->assertStringStartsWith($this->root, $dir, 'the test must own its artifact directory');
+        File::ensureDirectoryExists($dir);
+        $signals = $this->root.'-signals';
+        File::ensureDirectoryExists($signals);
+
+        // The other side of a deploy: the same root $id in another shape.
+        $current = ThemeSchemas::all();
+        $root = end($current);
+        $other = $root;
+        $other['properties']['retired-namespace'] = ['type' => 'object'];
+
+        // Every other theme schema is already stored in its current shape, as on any boot after the first: its
+        // sweep and register return before the lock, so the root's sweep is the step that meets the other process.
+        $registry = new FilesystemSchemaRegistry($dir);
+        foreach ($current as $schema) {
+            if ($schema['$id'] !== ThemeSchemas::ROOT_ID) {
+                $registry->register($schema);
+            }
+        }
+
+        $await = static function (string $file): void {
+            $deadline = microtime(true) + 10;
+            while (! is_file($file)) {
+                if (microtime(true) > $deadline) {
+                    throw new RuntimeException("timed out waiting for [{$file}]");
+                }
+                usleep(5000);
+            }
+        };
+
+        $child = pcntl_fork();
+        if ($child === -1) {
+            $this->fail('pcntl_fork failed');
+        }
+
+        if ($child === 0) {
+            // The second process: it holds the lock, registers its root, and checks that root is still its own when
+            // it lets go. A boot that honours the lock cannot sweep it in between.
+            try {
+                (new FilesystemSchemaRegistry($dir))->withLock(function (FilesystemSchemaRegistry $locked) use ($other, $signals, $await): void {
+                    $locked->register($other);
+                    touch($signals.'/second-holds');
+                    $await($signals.'/boot-starting');
+                    usleep(400_000); // the boot is now running: at the lock, or (without it) through the sweep
+                    $stored = $locked->get(ThemeSchemas::ROOT_ID);
+                    $kept = $stored !== null && SchemaFingerprint::of($stored) === SchemaFingerprint::of($other);
+                    file_put_contents($signals.'/second-result', $kept ? 'kept' : 'swept under the lock');
+                });
+                file_put_contents($signals.'/second-released', sprintf('%.6f', microtime(true)));
+            } catch (\Throwable $e) {
+                file_put_contents($signals.'/second-result', 'error: '.$e->getMessage());
+            }
+            posix_kill(posix_getpid(), SIGKILL); // leave without running the parent's PHPUnit shutdown
+        }
+
+        try {
+            $await($signals.'/second-holds');
+            touch($signals.'/boot-starting');
+            $this->bootThemeSchemas();
+            $booted = microtime(true);
+
+            pcntl_waitpid($child, $status);
+            $child = 0;
+
+            $this->assertSame('kept', (string) file_get_contents($signals.'/second-result'), 'the boot must not sweep an artifact while another process holds the registry lock');
+            $this->assertGreaterThan((float) file_get_contents($signals.'/second-released'), $booted, 'the boot finished only after the lock was free');
+            // Then the boot swept the other side's root and registered its own, without throwing.
+            $this->assertSame(SchemaFingerprint::of($root), SchemaFingerprint::of($registry->get(ThemeSchemas::ROOT_ID)));
+        } finally {
+            if ($child > 0) {
+                posix_kill($child, SIGKILL);
+                pcntl_waitpid($child, $status);
+            }
+            File::deleteDirectory($signals);
+        }
     }
 
     public function test_the_stale_sweep_still_fails_on_an_artifact_that_is_there_but_unreadable(): void

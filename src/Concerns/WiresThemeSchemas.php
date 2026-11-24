@@ -42,8 +42,13 @@ trait WiresThemeSchemas
         $registry = new FilesystemSchemaRegistry(ThemeSchemas::directory());
 
         foreach (ThemeSchemas::all() as $schema) {
-            $this->forgetStaleThemeArtifact($registry, $schema);
-            $registry->register($schema);
+            // The sweep decides what to remove from what the directory holds, then registers. Another process
+            // registering in between made this boot throw a frozen-schema conflict, or had its artifact swept
+            // under it. Inside the registry's lock the two are one step for every other process (Fix B, CL0363Y).
+            $registry->withLock(function (FilesystemSchemaRegistry $locked) use ($schema): void {
+                $this->forgetStaleThemeArtifact($locked, $schema);
+                $locked->register($schema);
+            });
         }
 
         if (class_exists(SchemaSources::class)) {
