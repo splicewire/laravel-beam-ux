@@ -127,12 +127,35 @@ class ReleaseRecording
     /**
      * Whether local recording applies to this Release at all: only a central-resident Release records. A tenant's
      * Release publishes to its own store and never reaches the central mirror or its Git (config-sections 08 AC4), so
-     * the recording reports `not-applicable` for it rather than a failure. Residency that cannot be determined is not
-     * central ({@see centralResident()}).
+     * the recording reports `not-applicable` for it rather than a failure. It is decided by the RELEASE'S OWN residency,
+     * never by the ambient tenancy: only a positive answer that the Release is tenant-resident makes recording not
+     * apply ({@see tenantResident()}). A central-pinned Release under an active tenant context, or wherever residency
+     * cannot be answered, takes the recording path and refuses there visibly with reason `tenancy` ({@see authorize()}).
      */
     public function applies(BeamUxRelease $release): bool
     {
-        return $this->centralResident($release);
+        return ! $this->tenantResident($release);
+    }
+
+    /**
+     * A POSITIVE answer that the Release lives in a tenant's store: the tenancy context answers, a central connection is
+     * configured, and the {@see EntryResidency} probe on the Release's connection says it is not central. A context
+     * that throws, or a split with no central connection named, is no answer (false), so it never reads as
+     * not-applicable; {@see authorize()} refuses it instead.
+     */
+    private function tenantResident(BeamUxRelease $release): bool
+    {
+        try {
+            $tenancy = app(TenancyContext::class);
+            $tenancy->isActive();
+            if ($tenancy->centralConnection() === null) {
+                return false;
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return ! app(EntryResidency::class)->isCentralResident((new BeamUxEntry)->setConnection($release->getConnectionName()));
     }
 
     /** @param  list<array<int, mixed>>  $members */

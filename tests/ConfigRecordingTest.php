@@ -682,6 +682,45 @@ class ConfigRecordingTest extends AuthoredComponentNativeTestCase
         $this->assertSame('', $this->git(['status', '--porcelain']), 'the mirror tree is clean after the second recording');
     }
 
+    public function test_a_central_pinned_release_published_inside_a_tenant_hop_reads_its_tenancy_refusal(): void // 08 amend H1
+    {
+        // Recording applies by the RELEASE'S OWN residency, never by the ambient tenancy. A Release pinned on the central
+        // connection and published while a tenant context is active is central: it freezes its receipt and refuses
+        // visibly with reason `tenancy`, as at base. It must not read `not-applicable`, which is only for a positive
+        // answer that the Release lives in a tenant's store; neither may a context that cannot be read.
+        $this->migrateOn('tenant');
+        $page = BeamUxEntry::on('central')->findOrFail($this->page()->id);
+        $version = (string) app(EntryPublication::class)->recordDraft($page, [
+            ['kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []],
+        ])->headVersion;
+        $release = app(ReleaseService::class)->create($page->fresh(), 'central in a tenant hop', $this->author);
+        app(ReleaseService::class)->putMember($release, (string) $page->id, $version, $this->author);
+        $this->assertSame('central', $release->fresh()->getConnectionName(), 'precondition: the Release is pinned on central');
+        $base = $this->git(['rev-parse', 'HEAD']);
+
+        $this->enterTenantRealm();
+        app(ReleaseService::class)->transition($release->fresh(), 'publish', $this->author);
+
+        $this->assertSame('published', $release->fresh()->status);
+        $this->assertSame($base, $this->git(['rev-parse', 'HEAD']), 'no commit while tenancy is active');
+        $this->assertTrue(app(ReleaseRecording::class)->applies($release->fresh()), 'recording applies to a central Release');
+        $receipt = app(ReleaseRecording::class)->receipt($release->fresh());
+        $this->assertNotNull($receipt, 'the central Release froze its receipt');
+        $this->assertSame('failed', $receipt->state);
+        $this->assertSame('tenancy', $receipt->error, 'the receipt reads the tenancy refusal');
+        $data = \Splicewire\Beam\Ux\Data\ReleaseRecordingData::project($release->fresh(), $this->author);
+        $this->assertSame('failed', $data->status, 'not not-applicable');
+        $this->assertSame(__('beam-ux::recording.status.failed.tenancy'), $data->message);
+
+        // A context that cannot be read is no answer either: the same refusal, never not-applicable.
+        $throwing = \Mockery::mock(\Splicewire\Beam\Realm\Contracts\TenancyContext::class)->shouldIgnoreMissing();
+        $throwing->shouldReceive('isActive')->andThrow(new \RuntimeException('unknown topology'));
+        $this->app->instance(\Splicewire\Beam\Realm\Contracts\TenancyContext::class, $throwing);
+        $this->assertTrue(app(ReleaseRecording::class)->applies($release->fresh()));
+        $this->assertSame('failed', \Splicewire\Beam\Ux\Data\ReleaseRecordingData::project($release->fresh(), $this->author)->status);
+        $this->leaveTenantRealm();
+    }
+
     public function test_a_failed_recording_keeps_its_work_directory_for_recovery(): void // finding D (only recorded is cleaned)
     {
         file_put_contents($this->repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 1\n");
