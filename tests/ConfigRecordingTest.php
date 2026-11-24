@@ -611,6 +611,75 @@ class ConfigRecordingTest extends AuthoredComponentNativeTestCase
             'precondition: the attempt ran in the per-recording work directory');
         $this->assertDirectoryDoesNotExist(ReleaseRecording::workRoot((string) $receipt->id), 'the work directory is removed after the result is saved');
         $this->assertSame($head, $this->git(['rev-parse', 'refs/beam-ux-recordings/'.$receipt->id]), 'the commit stays anchored');
+        $this->assertSame('', $this->git(['status', '--porcelain']), 'the mirror tree is clean');
+    }
+
+    public function test_a_recording_leaves_an_operators_own_staged_and_dirty_work_exactly_as_it_was(): void // index refresh (iii)
+    {
+        // The mirror is an owner environment: the index refresh is limited to the recorded paths, so an operator's
+        // unrelated STAGED file and unrelated DIRTY tracked file are untouched, in the index and on disk.
+        file_put_contents($this->repo.'/unrelated', "base\noperator edit\n");
+        file_put_contents($this->repo.'/operator-staged', "staged by the operator\n");
+        $this->git(['add', '--', 'operator-staged']);
+        $before = [$this->git(['status', '--porcelain']), $this->git(['diff', '--cached']), $this->git(['diff'])];
+        $this->assertSame("A  operator-staged\n M unrelated", $before[0], 'precondition: the operator work');
+
+        [$release] = $this->buildAndPublish(configFirst: false);
+
+        $this->assertSame('recorded', app(ReleaseRecording::class)->receipt($release)->state);
+        $this->assertSame($before, [$this->git(['status', '--porcelain']), $this->git(['diff', '--cached']), $this->git(['diff'])],
+            'the operator staged and dirty work is exactly as it was, and the recorded paths read clean');
+        $this->assertSame("base\noperator edit\n", file_get_contents($this->repo.'/unrelated'));
+        $this->assertSame('', $this->git(['diff', '--cached', '--name-only', '--', ConfigOverrideMirror::pathFor('release-fixture')]));
+    }
+
+    public function test_a_recording_that_deletes_a_path_leaves_the_index_without_it(): void // index refresh (iv)
+    {
+        // The rollback of a first config publish deletes the override file in its commit; the index drops it too.
+        $page = $this->page();
+        $v0 = (string) app(EntryPublication::class)->recordDraft($page->fresh(), [
+            ['kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []],
+        ])->headVersion;
+        app(EntryPublication::class)->publishVersions((new BeamUxEntry)->setConnection($page->getConnectionName()),
+            [$page->id => $v0], $this->author, leaveRedirects: false);
+        app(ConfigOverrideStore::class)->saveDraft('release-fixture', [['pointer' => '/heading', 'op' => 'set', 'value' => 'v1']]);
+        $v1 = (string) app(EntryPublication::class)->recordDraft($page->fresh(), [
+            ['kind' => 'block', 'name' => 'span', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []],
+        ])->headVersion;
+        $release = app(ReleaseService::class)->create($page->fresh(), 'page and config', $this->author);
+        app(ReleaseService::class)->putMember($release, (string) $page->id, $v1, $this->author);
+        app(ReleaseService::class)->putMemberByKind($release, BeamUxReleaseMember::KIND_CONFIG, 'release-fixture', $this->author);
+        app(ReleaseService::class)->transition($release->fresh(), 'publish', $this->author);
+        $this->assertSame('', $this->git(['status', '--porcelain']), 'clean after the forward recording');
+
+        $rollback = app(ReleaseService::class)->rollback($release->fresh(), $this->author);
+        app(ReleaseService::class)->transition($rollback->fresh(), 'publish', $this->author);
+
+        $path = ConfigOverrideMirror::pathFor('release-fixture');
+        $this->assertStringContainsString('D'."\t".$path, $this->git(['show', '--name-status', '--format=', 'HEAD']), 'precondition: the commit deletes it');
+        $this->assertSame('', $this->git(['ls-files', '--', $path]), 'the index no longer holds the deleted path');
+        $this->assertSame('', $this->git(['status', '--porcelain']), 'the mirror tree is clean after the deleting recording');
+    }
+
+    public function test_a_second_recording_on_top_of_the_first_is_still_clean(): void // index refresh (v)
+    {
+        [$first] = $this->buildAndPublish(configFirst: false);
+        $this->assertSame('recorded', app(ReleaseRecording::class)->receipt($first)->state);
+        $afterFirst = $this->git(['rev-parse', 'HEAD']);
+
+        app(ConfigOverrideStore::class)->saveDraft('release-fixture', [['pointer' => '/heading', 'op' => 'set', 'value' => 'Second heading']]);
+        $page = $this->page();
+        $version = (string) app(EntryPublication::class)->recordDraft($page->fresh(), [
+            ['kind' => 'block', 'name' => 'section', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []],
+        ])->headVersion;
+        $second = app(ReleaseService::class)->create($page->fresh(), 'second', $this->author);
+        app(ReleaseService::class)->putMember($second, (string) $page->id, $version, $this->author);
+        app(ReleaseService::class)->putMemberByKind($second, BeamUxReleaseMember::KIND_CONFIG, 'release-fixture', $this->author);
+        app(ReleaseService::class)->transition($second->fresh(), 'publish', $this->author);
+
+        $this->assertSame('recorded', app(ReleaseRecording::class)->receipt($second->fresh())->state);
+        $this->assertSame($afterFirst, $this->git(['rev-parse', 'HEAD^']), 'the second commit sits on the first');
+        $this->assertSame('', $this->git(['status', '--porcelain']), 'the mirror tree is clean after the second recording');
     }
 
     public function test_a_failed_recording_keeps_its_work_directory_for_recovery(): void // finding D (only recorded is cleaned)

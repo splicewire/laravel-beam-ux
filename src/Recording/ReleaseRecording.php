@@ -729,7 +729,27 @@ class ReleaseRecording
             $git->install($row->candidate, $row->base);
         }
         $this->persistResult($row, $row->candidate);
+        $this->refreshMirrorIndex($git, $row->candidate, $manifest);
         $this->discardWork($row);
+    }
+
+    /**
+     * The commit was built in the attempt's private index, so the checkout's own index still describes the parent:
+     * after installing, every recorded path read as a staged deletion (plus an untracked file), and a plain `git commit`
+     * in the mirror would have committed the deletion of the Release's own record (config-sections 08). Refresh the
+     * index for exactly the recorded paths, and only while the branch still points at the recorded commit; once it has
+     * moved on, the index belongs to whoever moved it. A failure is reported, never thrown: the commit exists and the
+     * recording stands.
+     */
+    private function refreshMirrorIndex(LocalGit $git, string $sha, array $manifest): void
+    {
+        try {
+            if ($git->head() === $sha) {
+                $git->refreshIndex($sha, array_values(array_unique(array_column($manifest, 'path'))));
+            }
+        } catch (\Throwable $failure) {
+            report($failure);
+        }
     }
 
     /** The per-recording directory under storage/framework that holds each attempt's private Git directory. */

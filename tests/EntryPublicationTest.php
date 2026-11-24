@@ -1469,7 +1469,7 @@ class EntryPublicationTest extends TestCase
         file_put_contents($repo.'/unrelated', "staged by developer\n");
         $git(['add', '--', 'unrelated']);
         file_put_contents($repo.'/untracked', 'untouched');
-        $index = hash_file('sha256', $repo.'/.git/index');
+        $staged = [$git(['diff', '--cached']), $git(['ls-files', '--stage', '--', 'unrelated'])];
         $base = $git(['rev-parse', 'HEAD']);
         $state = $this->publishDraftAs($entry, $author);
         $release = \Splicewire\Beam\Ux\Models\BeamUxRelease::findOrFail($state->release->id);
@@ -1477,9 +1477,11 @@ class EntryPublicationTest extends TestCase
         $this->assertSame('recorded', $receipt?->state, $receipt?->error ?? '');
         $this->assertSame($git(['rev-parse', 'HEAD']), $receipt->sha);
         $this->assertSame($base, $git(['rev-parse', 'HEAD^']));
-        $this->assertSame($index, hash_file('sha256', $repo.'/.git/index'));
+        // The developer's staged work survives exactly; the index moves only for the recorded path (config-sections 08).
+        $this->assertSame($staged, [$git(['diff', '--cached']), $git(['ls-files', '--stage', '--', 'unrelated'])]);
         $this->assertSame('untouched', file_get_contents($repo.'/untracked'));
         $path = app(\Splicewire\Beam\Ux\Placement\PlacementResolver::class)->resolve($entry)->pathFor($entry);
+        $this->assertSame('', $git(['status', '--porcelain', '--', $path]), 'the recorded path reads clean, not a staged deletion');
         $this->assertSame($path, $git(['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD']));
         $blob = new \Symfony\Component\Process\Process(['git', 'show', 'HEAD:'.$path], $repo);
         $blob->mustRun();

@@ -225,6 +225,21 @@ class LocalGit
         $this->run($this->root, ['update-ref', $this->branch, $sha, $base]);
     }
 
+    /**
+     * Bring the checkout's OWN index into line with an installed commit for exactly `$paths` (config-sections 08): a
+     * path-limited `reset` touches only those index entries (added, changed, or removed when the commit deletes them)
+     * and never the worktree or any other path, so an operator's own staged or unstaged work stands. Pathspecs are
+     * literal (see process()).
+     *
+     * @param  list<string>  $paths
+     */
+    public function refreshIndex(string $sha, array $paths): void
+    {
+        if ($paths !== []) {
+            $this->run($this->root, ['reset', '-q', $sha, '--', ...$paths]);
+        }
+    }
+
     public function anchor(string $identity, string $sha): void
     {
         $this->run($this->root, ['update-ref', 'refs/beam-ux-recordings/'.$identity, $sha]);
