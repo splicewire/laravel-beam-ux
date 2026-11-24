@@ -752,7 +752,7 @@ class ReleaseRecording
             $git->install($row->candidate, $row->base);
         }
         $this->persistResult($row, $row->candidate);
-        $this->refreshMirrorIndex($git, $row->candidate, $manifest);
+        $this->refreshMirrorIndex($git, $row->candidate, (string) $row->base, $manifest);
         $this->discardWork($row);
     }
 
@@ -761,14 +761,20 @@ class ReleaseRecording
      * after installing, every recorded path read as a staged deletion (plus an untracked file), and a plain `git commit`
      * in the mirror would have committed the deletion of the Release's own record (config-sections 08). Refresh the
      * index for exactly the recorded paths, and only while the branch still points at the recorded commit; once it has
-     * moved on, the index belongs to whoever moved it. A failure is reported, never thrown: the commit exists and the
-     * recording stands.
+     * moved on, the index belongs to whoever moved it. A path whose index entry is neither the parent's nor the recorded
+     * commit's holds content the operator staged; it is left exactly as it is (ADR-0226 d3) and reported by path, so
+     * the operator sees their staged content against the new HEAD. A failure is reported, never thrown: the commit
+     * exists and the recording stands.
      */
-    private function refreshMirrorIndex(LocalGit $git, string $sha, array $manifest): void
+    private function refreshMirrorIndex(LocalGit $git, string $sha, string $base, array $manifest): void
     {
         try {
             if ($git->head() === $sha) {
-                $git->refreshIndex($sha, array_values(array_unique(array_column($manifest, 'path'))));
+                $kept = $git->refreshIndex($sha, $base, array_values(array_unique(array_column($manifest, 'path'))));
+                if ($kept !== []) {
+                    report(new \RuntimeException('Release recording '.$sha.' left the operator\'s own staged index entry as it was for: '
+                        .implode(', ', $kept).'. Those paths now show the staged content against the recorded commit.'));
+                }
             }
         } catch (\Throwable $failure) {
             report($failure);

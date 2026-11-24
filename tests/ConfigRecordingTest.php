@@ -721,6 +721,74 @@ class ConfigRecordingTest extends AuthoredComponentNativeTestCase
         $this->leaveTenantRealm();
     }
 
+    public function test_a_recording_leaves_an_operators_staged_blob_on_a_recorded_path_as_it_was(): void // 08 amend H2 (4)
+    {
+        // ADR-0226 d3: the index refresh never discards an operator's staged content. The operator stages their own
+        // blob for the override file (index only); the Release records that path again. The entry stays exactly as
+        // it was, and the operator then sees it staged against the NEW HEAD.
+        $path = $this->recordOverOperatorStaging(function (string $path): void {
+            file_put_contents($this->repo.'/.git/operator-blob', "{\"operator\":\"staged\"}\n");
+            $blob = $this->git(['hash-object', '-w', '--', '.git/operator-blob']);
+            $this->git(['update-index', '--cacheinfo', '100644,'.$blob.','.$path]);
+        });
+        $this->assertSame('M'."\t".$path, $this->git(['diff', '--cached', '--name-status', '--', $path]),
+            'what the operator sees: their staged blob against the new HEAD');
+    }
+
+    public function test_a_recording_leaves_an_operators_staged_deletion_of_a_recorded_path_as_it_was(): void // 08 amend H2 (5)
+    {
+        $path = $this->recordOverOperatorStaging(function (string $path): void {
+            $this->git(['rm', '-q', '--cached', '--', $path]);
+        });
+        $this->assertSame('', $this->git(['ls-files', '--stage', '--', $path]), 'the staged deletion stands');
+        $this->assertSame('D'."\t".$path, $this->git(['diff', '--cached', '--name-status', '--', $path]),
+            'what the operator sees: their staged deletion against the new HEAD');
+    }
+
+    /**
+     * (4) and (5): a first recording puts the override file at HEAD (the next recording's parent); `$stage` stages the
+     * operator's own change to it; a second Release records that path again. Asserts the path's index entry and its
+     * staged diff against the PARENT are byte-identical before and after (against HEAD it necessarily moves: HEAD did),
+     * the receipt is recorded, the path is reported by name, and every other recorded path is refreshed and clean.
+     */
+    private function recordOverOperatorStaging(\Closure $stage): string
+    {
+        [$first] = $this->buildAndPublish(configFirst: false);
+        $this->assertSame('recorded', app(ReleaseRecording::class)->receipt($first)->state);
+        $parent = $this->git(['rev-parse', 'HEAD']);
+        $path = ConfigOverrideMirror::pathFor('release-fixture');
+        $this->assertNotSame('', $this->git(['ls-tree', '--name-only', $parent, '--', $path]), 'precondition: the parent holds the path');
+        $stage($path);
+        $before = [$this->git(['ls-files', '--stage', '--', $path]), $this->git(['diff', '--cached', $parent, '--', $path])];
+        $this->assertNotSame('', $before[1], 'precondition: the operator staged a change to the path');
+
+        \Illuminate\Support\Facades\Exceptions::fake();
+        app(ConfigOverrideStore::class)->saveDraft('release-fixture', [['pointer' => '/heading', 'op' => 'set', 'value' => 'Second heading']]);
+        $page = $this->page();
+        $version = (string) app(EntryPublication::class)->recordDraft($page->fresh(), [
+            ['kind' => 'block', 'name' => 'section', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []],
+        ])->headVersion;
+        $second = app(ReleaseService::class)->create($page->fresh(), 'second', $this->author);
+        app(ReleaseService::class)->putMember($second, (string) $page->id, $version, $this->author);
+        app(ReleaseService::class)->putMemberByKind($second, BeamUxReleaseMember::KIND_CONFIG, 'release-fixture', $this->author);
+        app(ReleaseService::class)->transition($second->fresh(), 'publish', $this->author);
+
+        $receipt = app(ReleaseRecording::class)->receipt($second->fresh());
+        $this->assertSame('recorded', $receipt->state, (string) $receipt->error);
+        $this->assertSame($parent, $this->git(['rev-parse', 'HEAD^']), 'the recording sits on the parent');
+        $this->assertContains($path, array_column($receipt->manifest, 'path'), 'precondition: the Release records the path');
+        $this->assertSame($before, [$this->git(['ls-files', '--stage', '--', $path]), $this->git(['diff', '--cached', $parent, '--', $path])],
+            'the operator staged entry is exactly as it was');
+        \Illuminate\Support\Facades\Exceptions::assertReported(fn (\RuntimeException $e): bool => str_contains($e->getMessage(), $path));
+        $others = array_values(array_diff(array_unique(array_column($receipt->manifest, 'path')), [$path]));
+        $this->assertNotSame([], $others, 'precondition: the Release records other paths');
+        foreach ($others as $other) {
+            $this->assertSame('', $this->git(['status', '--porcelain', '--', $other]), $other.' is refreshed and clean');
+        }
+
+        return $path;
+    }
+
     public function test_a_failed_recording_keeps_its_work_directory_for_recovery(): void // finding D (only recorded is cleaned)
     {
         file_put_contents($this->repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 1\n");

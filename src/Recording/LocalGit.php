@@ -226,18 +226,68 @@ class LocalGit
     }
 
     /**
-     * Bring the checkout's OWN index into line with an installed commit for exactly `$paths` (config-sections 08): a
-     * path-limited `reset` touches only those index entries (added, changed, or removed when the commit deletes them)
-     * and never the worktree or any other path, so an operator's own staged or unstaged work stands. Pathspecs are
+     * Bring the checkout's OWN index into line with an installed commit for exactly `$paths` (config-sections 08), never
+     * discarding an operator's staged content (ADR-0226 d3). Per path, the current index entry is compared with the
+     * PARENT commit's (`$base`):
+     * - the same, or absent in both: the entry is merely stale, so it is reset to the recorded commit (added, changed, or
+     *   removed when the commit deletes the path);
+     * - already the recorded commit's: nothing to do;
+     * - anything else (a staged blob, a staged deletion, a mode change or a conflict): the operator staged it, so it is
+     *   left exactly as it is and returned.
+     * A path-limited `reset` touches only the stale entries and never the worktree or any other path. Pathspecs are
      * literal (see process()).
      *
      * @param  list<string>  $paths
+     * @return list<string> the paths whose operator-staged entry was left as it is
      */
-    public function refreshIndex(string $sha, array $paths): void
+    public function refreshIndex(string $sha, string $base, array $paths): array
     {
-        if ($paths !== []) {
-            $this->run($this->root, ['reset', '-q', $sha, '--', ...$paths]);
+        $stale = [];
+        $kept = [];
+        foreach ($paths as $path) {
+            $staged = $this->indexEntry($path);
+            if ($staged === $this->treeEntry($sha, $path)) {
+                continue;
+            }
+            if ($staged === $this->treeEntry($base, $path)) {
+                $stale[] = $path;
+            } else {
+                $kept[] = $path;
+            }
         }
+        if ($stale !== []) {
+            $this->run($this->root, ['reset', '-q', $sha, '--', ...$stale]);
+        }
+
+        return $kept;
+    }
+
+    /** The checkout index's entry for one path as "mode object", '' when absent, or every stage line when conflicted. */
+    private function indexEntry(string $path): string
+    {
+        $lines = array_filter(explode("\n", $this->run($this->root, ['ls-files', '--stage', '--', $path])));
+        if (count($lines) !== 1) {
+            return implode("\n", $lines);
+        }
+        [$meta, $name] = explode("\t", reset($lines), 2) + [1 => ''];
+        [$mode, $object, $stage] = explode(' ', $meta) + [1 => '', 2 => ''];
+
+        return $name === $path && $stage === '0' ? $mode.' '.$object : reset($lines);
+    }
+
+    /** A commit's entry for one path as "mode object", '' when the commit has no such path. */
+    private function treeEntry(string $commit, string $path): string
+    {
+        foreach (array_filter(explode("\n", $this->run($this->root, ['ls-tree', '-r', '--full-tree', $commit, '--', $path]))) as $line) {
+            [$meta, $name] = explode("\t", $line, 2) + [1 => ''];
+            if ($name === $path) {
+                [$mode, , $object] = explode(' ', $meta) + [1 => '', 2 => ''];
+
+                return $mode.' '.$object;
+            }
+        }
+
+        return '';
     }
 
     public function anchor(string $identity, string $sha): void
