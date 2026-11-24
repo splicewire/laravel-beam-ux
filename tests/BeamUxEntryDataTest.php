@@ -195,7 +195,21 @@ class BeamUxEntryDataTest extends TestCase
         }
 
         $this->assertArrayNotHasKey('body', BeamUxEntryData::project($entry->fresh())->toArray(), 'the projection itself');
-        $this->assertArrayNotHasKey('body', $this->getJson('/frame/resources/beam-ux-entry/schema')->assertOk()->json('properties'), 'the form schema');
+
+        // The write/form schema (the default, built with forRequest() from the edit DTO) carries no body —
+        // but that is vacuous: a heavyweight entry projects no x-widget form control, so body was never going
+        // to appear there regardless of the exclusion. The schema that WOULD surface body is the read/response
+        // one (forResponse() over BeamUxEntryData): the generator keeps a Lazy property as a readOnly, `x-lazy`
+        // field, and the purpose-agnostic widget-contexts strategy stamps the canvas context onto it. So the
+        // real contract is that the read schema declares body as an off-the-wire, canvas-bound field — present
+        // and annotated, never serialised. Asserting that (not the vacuous absence) is what guards the G10 ruling.
+        $readProperties = $this->getJson('/frame/resources/beam-ux-entry/schema?purpose=read')->assertOk()->json('properties');
+        $this->assertArrayHasKey('body', $readProperties, 'the read schema declares the canvas body');
+        $body = $readProperties['body'];
+        $this->assertTrue($body['x-lazy'] ?? false, 'read-schema body stays lazy — off the wire unless explicitly included');
+        $this->assertTrue($body['readOnly'] ?? false, 'and read-only — never a writable field');
+        $this->assertArrayHasKey('x-stud-widget-contexts', $body, 'and carries its widget context');
+        $this->assertStringContainsString('beam-ux-canvas', json_encode($body['x-stud-widget-contexts']), 'bound to the beam-ux canvas');
     }
 
     public function test_mounted_create_generates_identity_and_body_and_edit_preserves_them(): void
