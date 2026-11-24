@@ -219,7 +219,9 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertTrue($body['x-lazy'] ?? false, 'read-schema body stays lazy — off the wire unless explicitly included');
         $this->assertTrue($body['readOnly'] ?? false, 'and read-only — never a writable field');
         $this->assertArrayHasKey('x-stud-widget-contexts', $body, 'and carries its widget context');
-        $this->assertStringContainsString('beam-ux-canvas', json_encode($body['x-stud-widget-contexts']), 'bound to the beam-ux canvas');
+        $contexts = $body['x-stud-widget-contexts'];
+        $this->assertSame('beam-ux-canvas', $contexts['edit']['widget'] ?? null, 'the edit context binds the beam-ux canvas widget');
+        $this->assertTrue($contexts['edit']['heavyweight'] ?? false, 'as a heavyweight editor');
     }
 
     public function test_mounted_create_generates_identity_and_body_and_edit_preserves_them(): void
