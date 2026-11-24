@@ -5373,7 +5373,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/schemastud/laravel-data-schemas.git",
-                "reference": "1344fac3448e604ca16a79b6a32316c79a0f48d2"
+                "reference": "7f861bb381e99e14d5716b6ec00371b13c0b453d"
             },
             "require": {
                 "galbar/jsonpath": "^3.0",
@@ -5457,7 +5457,7 @@
                 "spatie",
                 "validation"
             ],
-            "time": "2026-11-20T22:16:09+00:00"
+            "time": "2026-11-24T02:38:17+00:00"
         },
         {
             "name": "schemastud/laravel-frame",
@@ -16337,7 +16337,7 @@
     "minimum-stability": "dev",
     "stability-flags": {
         "rushing/php-popcorn": 20,
-        "schemastud/laravel-frame": 20,
+        "schemastud/laravel-data-schemas": 20,
         "splicewire/laravel-beam-sitemap": 20,
         "splicewire/laravel-composition-spine": 20
     },
