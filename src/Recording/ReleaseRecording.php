@@ -695,7 +695,7 @@ class ReleaseRecording
         // attempt may capture the current parent while retaining the same frozen Release identity.
         // A saved candidate takes the recovery-only branch above and never gets a new parent.
         $base = $git->head();
-        $work = storage_path('framework/beam-ux-recordings/'.$row->id.'/attempt-'.($row->attempt + 1));
+        $work = self::workRoot((string) $row->id).'/attempt-'.($row->attempt + 1);
         $deletionApplied = collect($manifest)->contains(fn (array $file) => ($file['action'] ?? null) === 'delete');
         $row->forceFill(['repository' => $identity, 'branch' => $git->branch, 'base' => $base,
             'preparation' => $work, 'state' => $deletionApplied ? 'mirror-deleted' : 'pending', 'error' => null,
@@ -704,6 +704,7 @@ class ReleaseRecording
         $row->forceFill(['tree' => $tree])->save();
         if ($tree === $git->baseTree($base)) {
             $row->forceFill(['state' => 'recorded', 'sha' => $base, 'no_change' => true])->save();
+            $this->discardWork($row);
 
             return;
         }
@@ -728,6 +729,33 @@ class ReleaseRecording
             $git->install($row->candidate, $row->base);
         }
         $this->persistResult($row, $row->candidate);
+        $this->discardWork($row);
+    }
+
+    /** The per-recording directory under storage/framework that holds each attempt's private Git directory. */
+    public static function workRoot(string $recordingId): string
+    {
+        return storage_path('framework/beam-ux-recordings/'.$recordingId);
+    }
+
+    /**
+     * Remove a recorded receipt's attempt directories (config-sections 08 finding D). Each attempt directory is a
+     * private GIT_DIR (HEAD, index, commondir): its objects live in the repository's common directory, and the
+     * commit is anchored by `refs/beam-ux-recordings/<id>` and the branch. Once the result is saved, completion and
+     * retry return on the saved sha before reading `preparation`, so nothing reads the directory again; left behind,
+     * it is an untracked directory in the host. Only a `recorded` receipt is cleaned: a failed or recovery-required
+     * attempt keeps its directory for recovery. A cleanup failure never affects the recording.
+     */
+    private function discardWork(BeamUxReleaseRecording $row): void
+    {
+        if ($row->state !== 'recorded' || $row->sha === null || ! preg_match('/^[A-Za-z0-9-]+$/', (string) $row->id)) {
+            return;
+        }
+        try {
+            \Illuminate\Support\Facades\File::deleteDirectory(self::workRoot((string) $row->id));
+        } catch (\Throwable) {
+            // The recording result stands; a leftover work directory is only clutter.
+        }
     }
 
     /** Separate seam for a real result-write failure test after successful branch CAS. */

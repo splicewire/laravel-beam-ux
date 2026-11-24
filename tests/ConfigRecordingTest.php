@@ -592,6 +592,38 @@ class ConfigRecordingTest extends AuthoredComponentNativeTestCase
         $this->leaveTenantRealm();
     }
 
+    public function test_an_operator_release_still_records_and_leaves_no_work_directory(): void // finding B (unchanged) + D
+    {
+        // The central answer must not change: recorded, with the commit's sha. Finding D: the attempt's private Git
+        // directory under storage/framework/beam-ux-recordings/<id> is removed once the result is saved.
+        $base = $this->git(['rev-parse', 'HEAD']);
+        [$release] = $this->buildAndPublish(configFirst: false);
+
+        $receipt = app(ReleaseRecording::class)->receipt($release);
+        $this->assertSame('recorded', $receipt->state, (string) $receipt->error);
+        $head = $this->git(['rev-parse', 'HEAD']);
+        $this->assertNotSame($base, $head);
+        $data = \Splicewire\Beam\Ux\Data\ReleaseRecordingData::project($release, $this->author);
+        $this->assertSame('recorded', $data->status);
+        $this->assertSame($head, $data->sha);
+        $this->assertSame(__('beam-ux::recording.status.recorded'), $data->message);
+        $this->assertStringStartsWith(ReleaseRecording::workRoot((string) $receipt->id).'/attempt-', (string) $receipt->preparation,
+            'precondition: the attempt ran in the per-recording work directory');
+        $this->assertDirectoryDoesNotExist(ReleaseRecording::workRoot((string) $receipt->id), 'the work directory is removed after the result is saved');
+        $this->assertSame($head, $this->git(['rev-parse', 'refs/beam-ux-recordings/'.$receipt->id]), 'the commit stays anchored');
+    }
+
+    public function test_a_failed_recording_keeps_its_work_directory_for_recovery(): void // finding D (only recorded is cleaned)
+    {
+        file_put_contents($this->repo.'/.git/hooks/pre-commit', "#!/bin/sh\nexit 1\n");
+        [$release] = $this->buildAndPublish(configFirst: false);
+
+        $receipt = app(ReleaseRecording::class)->receipt($release);
+        $this->assertSame('failed', $receipt->state, 'precondition: the hook refused the commit');
+        $this->assertDirectoryExists(ReleaseRecording::workRoot((string) $receipt->id), 'a failed attempt keeps its directory');
+        \Illuminate\Support\Facades\File::deleteDirectory(ReleaseRecording::workRoot((string) $receipt->id));
+    }
+
     private function assertNotApplicable(BeamUxRelease $release): void
     {
         $data = \Splicewire\Beam\Ux\Data\ReleaseRecordingData::project($release, $this->author);
