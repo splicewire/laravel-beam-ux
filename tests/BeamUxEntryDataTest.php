@@ -117,7 +117,7 @@ class BeamUxEntryDataTest extends TestCase
         $this->assertSame(['tsx', 'mdx', null], $schema['properties']['fileLanguage']['enum'], 'optional: unset takes the parent\'s, then the host\'s');
         $this->assertSame(['authored', 'source', null], $schema['properties']['componentKind']['enum']);
         $this->assertNotContains('id', $schema['required']);
-        $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $schema['properties']['type']['enum']);
+        $this->assertSame(['page', 'component', 'theme'], $schema['properties']['type']['enum']);
         $this->assertSame('combobox', $schema['properties']['realm']['x-widget']);
         $this->assertArrayHasKey('x-stud-resource-ref', $schema['properties']['parentId']);
     }
@@ -324,7 +324,7 @@ class BeamUxEntryDataTest extends TestCase
 
     public function test_it_accepts_page_component_and_theme_but_rejects_layout_and_template(): void
     {
-        foreach (BeamUxEntryInputData::CREATABLE_TYPES as $type) {
+        foreach (['page', 'component', 'theme'] as $type) {
             $data = BeamUxEntryInputData::validateAndCreate([
                 'type' => $type,
                 'title' => 'Title',

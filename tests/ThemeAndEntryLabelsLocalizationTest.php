@@ -20,7 +20,7 @@ use Splicewire\Beam\Ux\Type\UxType;
  *   `docs.token_title` with the name as a parameter). In English it is the label the form drew before from the key,
  *
  *   @schemastud/seam's humanizeKey, byte for byte. Under the pseudo-locale it is marked. The registry stays English.
- * - **The entry type.** The create form's `type` options (`In(CREATABLE_TYPES)`) carry `enumNames`, and so does the entry
+ * - **The entry type.** The create form's `type` options (`In(UxType::CREATABLE)`) carry `enumNames`, and so does the entry
  *   list's `type` (UxType). In English they are the values themselves, exactly what was shown before; under the
  *   pseudo-locale they are marked.
  */
@@ -113,8 +113,8 @@ class ThemeAndEntryLabelsLocalizationTest extends TestCase
     {
         $type = $this->dataSchema(BeamUxEntryInputData::class)['properties']['type'];
 
-        $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $type['enum']);
-        $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $type['enumNames'] ?? null);
+        $this->assertSame(['page', 'component', 'theme'], $type['enum']);
+        $this->assertSame(['page', 'component', 'theme'], $type['enumNames'] ?? null);
     }
 
     public function test_the_create_forms_type_options_are_marked_under_the_pseudo_locale(): void
@@ -123,7 +123,7 @@ class ThemeAndEntryLabelsLocalizationTest extends TestCase
 
         $type = $this->dataSchema(BeamUxEntryInputData::class)['properties']['type'];
 
-        $this->assertSame(BeamUxEntryInputData::CREATABLE_TYPES, $type['enum']);
+        $this->assertSame(['page', 'component', 'theme'], $type['enum']);
         $this->assertCount(count($type['enum']), $type['enumNames'] ?? []);
         foreach ($type['enumNames'] ?? [] as $i => $name) {
             $this->assertTrue(PseudoLocale::isMarked($name), $type['enum'][$i].': '.$name);

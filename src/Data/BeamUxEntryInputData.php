@@ -15,6 +15,8 @@ use Spatie\LaravelData\Support\Validation\ValidationContext;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
+use Splicewire\Beam\Ux\Components\ComponentKind;
+use Splicewire\Beam\Ux\Format\UxFormat;
 use Splicewire\Beam\Ux\Models\BeamUxEntry;
 use Splicewire\Beam\Ux\Schema\EnumValueLabels;
 use Splicewire\Beam\Ux\Type\UxType;
@@ -48,12 +50,9 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
 {
     use RejectsUnknownInputKeys;
 
-    /** @var list<string> */
-    public const CREATABLE_TYPES = ['page', 'component', 'theme'];
-
     public function __construct(
         // localization 23c: the create form's options read each type's label (UxType::label(), translated).
-        #[Title('Type'), In(self::CREATABLE_TYPES), EnumValueLabels(UxType::class)]
+        #[Title('Type'), In(UxType::CREATABLE), EnumValueLabels(UxType::class)]
         public string $type,
         #[Title('Title')]
         public string $title,
@@ -76,9 +75,11 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         public ?int $navOrder = null,
         // ADR-0233 d5: a page's File Language, chosen at creation. Unset, it is the parent's, then the host's
         // (`beam.ux.file_language`). Afterwards page settings change it and Publish moves the mirror file.
-        #[Title('File language'), In(['tsx', 'mdx']), MapInputName('fileLanguage')]
+        #[Title('File language'), In(UxFormat::FILE_LANGUAGES), MapInputName('fileLanguage')]
         public ?string $fileLanguage = null,
-        #[Title('Component kind'), In(['authored', 'source']), MapInputName('componentKind')]
+        // The whole ComponentKind enum, as its cases: `#[Enum]` would project no `null` option for this nullable
+        // property (data-schemas' Enum strategy), and the schema-form offers one.
+        #[Title('Component kind'), In(ComponentKind::Authored, ComponentKind::Source), MapInputName('componentKind')]
         public ?string $componentKind = null,
     ) {}
 
@@ -108,7 +109,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
         }
 
         return [
-            'type' => ['required', 'string', Rule::in(self::CREATABLE_TYPES)],
+            'type' => ['required', 'string', Rule::in(UxType::CREATABLE)],
             'title' => ['required', 'string', 'max:255'],
             // New entries use namespace=''; edits preserve their existing namespace and exclude only
             // the persisted route target from uniqueness — the real
@@ -131,8 +132,8 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             // the documented, permitted shape (ContainmentTest::test_unplaced_page_entries_without_a_segment_are_excluded_from_nav).
             'segment' => ['nullable', 'string', 'max:255', self::segmentUniqueRule($context)],
             'navOrder' => ['nullable', 'integer'],
-            'fileLanguage' => ['nullable', 'string', Rule::in(['tsx', 'mdx'])],
-            'componentKind' => ['nullable', 'string', Rule::in(['authored', 'source'])],
+            'fileLanguage' => ['nullable', 'string', Rule::in(UxFormat::FILE_LANGUAGES)],
+            'componentKind' => ['nullable', 'string', Rule::enum(ComponentKind::class)],
         ];
     }
 
@@ -186,7 +187,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
             throw \Splicewire\Beam\Localization\CodedValidationException::for('componentKind', \Splicewire\Beam\Ux\Publish\EntryError::ComponentKindLocked);
         }
         if ($current?->type === UxType::Page) {
-            $format = $this->fileLanguage === null ? $current->getAttribute('format') : \Splicewire\Beam\Ux\Format\UxFormat::tryFrom($this->fileLanguage);
+            $format = $this->fileLanguage === null ? $current->getAttribute('format') : UxFormat::tryFrom($this->fileLanguage);
             foreach (['title' => $this->title, 'parent_id' => $this->parentId, 'segment' => $this->segment, 'nav_order' => $this->navOrder, 'format' => $format] as $column => $value) {
                 if ($current->getAttribute($column) !== $value) {
                     throw \Splicewire\Beam\Localization\CodedValidationException::for('pageSettings', \Splicewire\Beam\Ux\Containment\PageError::SettingsEditorOnly);
@@ -227,7 +228,7 @@ class BeamUxEntryInputData extends BeamData implements MapsToModelAttributes
                 throw \Splicewire\Beam\Localization\CodedValidationException::for('fileLanguage', \Splicewire\Beam\Ux\Containment\PageError::HostedNoFileLanguage);
             }
 
-            return \Splicewire\Beam\Ux\Format\UxFormat::Tsx->value;
+            return UxFormat::Tsx->value;
         }
         if ($this->fileLanguage === null) {
             return \Splicewire\Beam\Ux\Format\FileLanguage::defaultFor($probe, $this->parentId);

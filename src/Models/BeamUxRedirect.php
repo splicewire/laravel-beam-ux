@@ -22,10 +22,6 @@ class BeamUxRedirect extends Model
 {
     use HasUuids;
 
-    public const KINDS = ['page', 'record', 'path', 'address'];
-
-    public const MATCHES = ['exact', 'prefix'];
-
     /**
      * Who left it (ADR-0236 d1): an author, a publish outside any Release (EP-31 ruling 1), a Release's move, a
      * Take-down's target, or a Record's URL change.

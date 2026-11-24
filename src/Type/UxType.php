@@ -42,6 +42,15 @@ enum UxType: string implements ProvidesEnumLabel
     case Theme = 'theme';
 
     /**
+     * The creatable subset, declared once: layout and template are excluded because they have zero active
+     * consumers and no composition mechanism exists yet. A constant so the entry input's `#[In]` can read it
+     * (an attribute argument cannot call a method).
+     *
+     * @var list<self>
+     */
+    public const CREATABLE = [self::Page, self::Component, self::Theme];
+
+    /**
      * localization 23c: the type's declared (English) label, which is the value itself: exactly what forms and lists
      * showed before (no `enumNames`, so the backing value). The schema generator emits it as `enumNames` (an enum-typed
      * property, and the string properties that name this enum through {@see \Splicewire\Beam\Ux\Schema\EnumValueLabels}),

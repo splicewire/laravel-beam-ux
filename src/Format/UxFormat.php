@@ -35,6 +35,15 @@ enum UxFormat: string implements ProvidesEnumLabel, UxFormatCase
      * as a `:root { --token: value; }` block. `body_style` is meaningless here (tsx-only). */
     case Css = 'css';
 
+    /**
+     * The File Language subset (ADR-0233 d5), declared once: css is excluded because it is a theme entry's
+     * stylesheet codec, not a language a page's file is written in ({@see FileLanguage::choices()} offers only
+     * tsx and mdx). A constant so the entry input's `#[In]` can read it.
+     *
+     * @var list<self>
+     */
+    public const FILE_LANGUAGES = [self::Tsx, self::Mdx];
+
     // NOTE: there is intentionally NO `json` format. A structural page's body was briefly mirrored to
     // disk as verbatim `.json` — the category error ADR-0164's "NEXT" slice retired: json is a
     // serialization, not a SOURCE language. A structural page stays `format: tsx`, the same extension a

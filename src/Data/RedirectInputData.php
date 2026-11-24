@@ -4,11 +4,12 @@ namespace Splicewire\Beam\Ux\Data;
 
 use Schemastud\DataSchemas\Attributes\Description;
 use Schemastud\DataSchemas\Attributes\Title;
-use Spatie\LaravelData\Attributes\Validation\In;
+use Spatie\LaravelData\Attributes\Validation\Enum;
 use Spatie\TypeScriptTransformer\Attributes\TypeScript;
 use Splicewire\Beam\Data\BeamData;
 use Splicewire\Beam\Data\Concerns\RejectsUnknownInputKeys;
-use Splicewire\Beam\Ux\Models\BeamUxRedirect;
+use Splicewire\Beam\Ux\Redirect\RedirectMatch;
+use Splicewire\Beam\Ux\Redirect\RedirectTargetKind;
 use Splicewire\Beam\Write\Contracts\MapsToModelAttributes;
 
 /**
@@ -24,11 +25,11 @@ final class RedirectInputData extends BeamData implements MapsToModelAttributes
     public function __construct(
         #[Title('From'), Description('The old path, like /old-page.')]
         public string $path,
-        #[Title('Kind of target'), In(BeamUxRedirect::KINDS), Description('A page, a Record, a path on this site, or an address on another site.')]
+        #[Title('Kind of target'), Enum(RedirectTargetKind::class), Description('A page, a Record, a path on this site, or an address on another site.')]
         public string $targetKind,
         #[Title('To'), Description('A page by its current URL; a path like /new-page; an address like https://example.com; a Record as collection:id.')]
         public string $target,
-        #[Title('Match'), In(BeamUxRedirect::MATCHES), Description('`exact`: this path only. `prefix`: this path and everything under it, the rest carried to the target.')]
+        #[Title('Match'), Enum(RedirectMatch::class), Description('`exact`: this path only. `prefix`: this path and everything under it, the rest carried to the target.')]
         public string $match = 'exact',
         #[Title('Permanent'), Description('301 when permanent (the default), 302 when temporary.')]
         public bool $permanent = true,
