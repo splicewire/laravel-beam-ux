@@ -45,6 +45,14 @@ class ReleaseRecording
      */
     public function prepare(BeamUxRelease $release, array $prepared, Authenticatable $actor, array $takedowns = []): \Closure
     {
+        // config-sections 08 AC4: a tenant-resident Release makes no mirror file and no commit, so recording does not
+        // apply to it. It freezes no receipt and runs no completion: completing it could only fail (the central mirror
+        // refuses a tenant entry), which once stored a `failed` receipt for a Release that was never meant to record.
+        if (! $this->applies($release)) {
+            return function () use ($prepared, $takedowns): void {
+                $this->prune(array_merge($prepared, $takedowns));
+            };
+        }
         $manifest = [];
         $failure = null;
         try {
@@ -112,14 +120,31 @@ class ReleaseRecording
                 // A post-commit optional side effect cannot become a failed-publication HTTP result.
                 $this->failure($snapshot, 'completion');
             }
-            foreach (array_merge($prepared, $takedowns) as [$entry]) {
-                try {
-                    app(\Splicewire\Beam\Ux\Compile\CompileEntryBody::class)->artifacts()->prune($entry->fresh());
-                } catch (\Throwable) {
-                    // Retention failure is independent of publication/mirroring/recording.
-                }
-            }
+            $this->prune(array_merge($prepared, $takedowns));
         };
+    }
+
+    /**
+     * Whether local recording applies to this Release at all: only a central-resident Release records. A tenant's
+     * Release publishes to its own store and never reaches the central mirror or its Git (config-sections 08 AC4), so
+     * the recording reports `not-applicable` for it rather than a failure. Residency that cannot be determined is not
+     * central ({@see centralResident()}).
+     */
+    public function applies(BeamUxRelease $release): bool
+    {
+        return $this->centralResident($release);
+    }
+
+    /** @param  list<array<int, mixed>>  $members */
+    private function prune(array $members): void
+    {
+        foreach ($members as [$entry]) {
+            try {
+                app(\Splicewire\Beam\Ux\Compile\CompileEntryBody::class)->artifacts()->prune($entry->fresh());
+            } catch (\Throwable) {
+                // Retention failure is independent of publication/mirroring/recording.
+            }
+        }
     }
 
     /**
@@ -132,6 +157,10 @@ class ReleaseRecording
      */
     public function prepareConfig(BeamUxRelease $release, array $roots, Authenticatable $actor): \Closure
     {
+        // A tenant-resident Release: recording does not apply ({@see prepare()}), so no receipt and no completion.
+        if (! $this->applies($release)) {
+            return function (): void {};
+        }
         $manifest = [];
         $failure = null;
         try {

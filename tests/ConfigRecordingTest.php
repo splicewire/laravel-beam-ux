@@ -537,16 +537,69 @@ class ConfigRecordingTest extends AuthoredComponentNativeTestCase
             'the TENANT tier pin moved on the tenant store');
         $this->assertSame($base, $this->git(['rev-parse', 'HEAD']), 'no commit while tenancy is active');
         $this->assertFileDoesNotExist($file, "no file: the tenant's override never reaches the central mirror tree");
-        $receipt = app(ReleaseRecording::class)->receipt($release->fresh());
-        $this->assertNotNull($receipt);
-        $this->assertSame('failed', $receipt->state);
-        $this->assertStringStartsWith('tenancy', (string) $receipt->error, 'the recording refused for tenancy');
-        $this->assertSame([], array_values(array_filter($receipt->manifest ?? [], fn (array $row) => ($row['kind'] ?? null) === BeamUxReleaseMember::KIND_CONFIG)),
-            'a tenant Release freezes no config rows');
+        $this->assertNull(app(ReleaseRecording::class)->receipt($release->fresh()),
+            'recording does not apply to a tenant Release: no receipt row, so no failed one');
+        $this->assertNotApplicable($release->fresh());
 
         $this->leaveTenantRealm();
         $this->assertSame($operatorPin, app(ConfigOverrideStore::class)->forTier(ConfigTier::Operator)->scope('release-fixture')->published_version,
             'the operator tier pin on central is untouched by the tenant Release');
+    }
+
+    public function test_a_tenant_release_with_a_page_reports_recording_not_applicable_not_a_mirror_failure(): void // AC4 (10b proof finding B)
+    {
+        // The 10b flagship proof: a tenant Release holding a PAGE answered data.recording `failed` with the mirror
+        // message, because its completion asked the central mirror to write a tenant entry, which it refuses. A tenant
+        // Release makes no mirror file and no commit, so the honest answer is that recording does not apply.
+        $this->migrateOn('tenant');
+        $this->enterTenantRealm();
+        $base = $this->git(['rev-parse', 'HEAD']);
+        $page = $this->page();
+        $this->assertSame('tenant', $page->getConnectionName(), 'precondition: the page lives on the tenant store');
+        $version = (string) app(EntryPublication::class)->recordDraft($page->fresh(), [
+            ['kind' => 'block', 'name' => 'div', 'isComponent' => false, 'dynamic' => false, 'props' => [], 'children' => []],
+        ])->headVersion;
+        $release = app(ReleaseService::class)->create($page->fresh(), 'tenant page', $this->author);
+        app(ReleaseService::class)->putMember($release, (string) $page->id, $version, $this->author);
+        app(ReleaseService::class)->transition($release->fresh(), 'publish', $this->author);
+
+        $this->assertSame('published', $release->fresh()->status, 'the tenant Release published');
+        $this->assertSame($version, $page->fresh()->published_version, 'the page pin moved on the tenant store');
+        $this->assertSame($base, $this->git(['rev-parse', 'HEAD']), 'no commit');
+        $this->assertSame('', $this->git(['status', '--porcelain']), 'no file in the central mirror tree');
+        $this->assertSame(0, BeamUxReleaseRecording::on('tenant')->count(), 'no receipt row on the tenant store');
+        $this->assertNotApplicable($release->fresh());
+        $this->leaveTenantRealm();
+    }
+
+    public function test_a_tenant_release_with_an_older_failed_receipt_still_reads_not_applicable(): void // AC4 (finding B, stored rows)
+    {
+        // Releases published before this fix stored a `failed` receipt. Residency decides the answer, not the row.
+        // The section's required operator `heading` sits on central first, so the tenant's banner draft validates.
+        $this->migrateOn('tenant');
+        $op = app(ConfigOverrideStore::class)->forTier(ConfigTier::Operator);
+        $op->saveDraft('release-fixture', [['pointer' => '/heading', 'op' => 'set', 'value' => 'operator']]);
+        $op->publish('release-fixture');
+        $this->enterTenantRealm();
+        app(ConfigOverrideStore::class)->forTier(ConfigTier::Tenant)->saveDraft('release-fixture', [['pointer' => '/banner', 'op' => 'set', 'value' => 'tenant banner']]);
+        $release = app(ReleaseService::class)->create($this->page(), 'tenant config', $this->author);
+        app(ReleaseService::class)->putMemberByKind($release, BeamUxReleaseMember::KIND_CONFIG, 'release-fixture', $this->author);
+        app(ReleaseService::class)->transition($release->fresh(), 'publish', $this->author);
+        (new BeamUxReleaseRecording)->setConnection('tenant')->forceFill(['release_id' => $release->id, 'manifest' => [],
+            'state' => 'failed', 'error' => 'mirror:mirror_release_mirror_could_not_completed'])->save();
+
+        $this->assertNotApplicable($release->fresh());
+        $this->leaveTenantRealm();
+    }
+
+    private function assertNotApplicable(BeamUxRelease $release): void
+    {
+        $data = \Splicewire\Beam\Ux\Data\ReleaseRecordingData::project($release, $this->author);
+        $this->assertSame('not-applicable', $data->status, 'a tenant Release reports that recording does not apply');
+        $this->assertNull($data->sha);
+        $this->assertFalse($data->canRetry, 'nothing to retry');
+        $this->assertSame(__('beam-ux::recording.status.not-applicable'), $data->message);
+        $this->assertNotSame(__('beam-ux::recording.status.failed.mirror'), $data->message);
     }
 
     public function test_a_config_override_is_refused_across_the_realm_boundary_both_ways(): void // AC3 (Spec HIGH 2)

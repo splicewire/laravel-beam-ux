@@ -24,6 +24,11 @@ final class ReleaseRecordingData extends BeamData
     public static function project(BeamUxRelease $release, ?Authenticatable $actor = null): self
     {
         $service = app(ReleaseRecording::class);
+        // config-sections 08 AC4: a published tenant-resident Release makes no mirror file and no commit. Recording
+        // does not apply to it, which is not a failure, whatever an older receipt row stored.
+        if ($release->status === 'published' && ! $service->applies($release)) {
+            return new self($release->id, 'not-applicable', null, false, false, __('beam-ux::recording.status.not-applicable'));
+        }
         $row = $service->receiptSummary($release);
         $allowed = false;
         if ($actor !== null) {

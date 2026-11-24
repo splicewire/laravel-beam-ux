@@ -9,6 +9,7 @@
 return [
     'status' => [
         'not-published' => 'Publication has not completed.',
+        'not-applicable' => 'Local recording does not apply: this Release publishes to its own site and makes no Git commit.',
         'recorded' => 'Recorded locally.',
         'recorded-no-change' => 'Files already matched the parent commit; no new commit was created.',
         'pending' => 'Recording is pending. Files can safely resume this same attempt.',

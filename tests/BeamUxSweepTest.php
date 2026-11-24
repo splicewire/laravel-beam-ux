@@ -92,7 +92,7 @@ class BeamUxSweepTest extends TestCase
         $catalog = $this->app->make(KeyCatalog::class)->byKey();
         $this->pseudo();
 
-        foreach (['dashboard' => 8, 'analytics' => 6, 'files' => 9, 'recording' => 17] as $group => $count) {
+        foreach (['dashboard' => 8, 'analytics' => 6, 'files' => 9, 'recording' => 18] as $group => $count) {
             $lines = KeyCatalog::flatten((array) require dirname(__DIR__).'/lang/en/'.$group.'.php');
             $this->assertCount($count, $lines);
             foreach ($lines as $item => $english) {
