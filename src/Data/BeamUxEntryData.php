@@ -11,6 +11,7 @@ use Schemastud\Frame\Attributes\ResourceRef;
 use Schemastud\Frame\Attributes\RowActions;
 use Schemastud\Frame\Attributes\Widget;
 use Schemastud\Frame\Attributes\WidgetIn;
+use Schemastud\Frame\Registry\FormMode;
 use Spatie\LaravelData\Attributes\MapInputName;
 use Spatie\LaravelData\Attributes\MapOutputName;
 use Spatie\LaravelData\Lazy;
@@ -49,7 +50,7 @@ use Splicewire\Beam\Ux\Type\UxType;
     group: 'Content',
     icon: 'file-text',
     section: 'authoring',
-    form: 'enriched',
+    form: FormMode::Enriched,
 )]
 // Ticket 06: the row-actions manifest a consuming host's mounted RowActions component reads to know
 // which actions this resource supports — 'promote-to-central' is CONDITIONAL client-side (rendered

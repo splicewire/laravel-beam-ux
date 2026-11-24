@@ -5465,7 +5465,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/schemastud/laravel-frame.git",
-                "reference": "9bbcb30d4e32cfa73f425a6af0fc1874f7400652"
+                "reference": "3b31bc21acbea821b2869b50b0db582c31a5a77e"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -5526,7 +5526,7 @@
                 "MIT"
             ],
             "description": "The batteries-UX backend rung for schema-driven admin editors: the resource-definition registry (ResourceDefinition), the #[Widget] -> x-widget projector, #[ReadOnlyField], and a served GET /frame/manifest. Sits one level above a filter-schema controller; resolves a resource key to its whole editor wiring. Pairs with @schemastud/frame on the JS side.",
-            "time": "2026-11-23T17:34:27+00:00"
+            "time": "2026-11-24T11:14:00+00:00"
         },
         {
             "name": "schemastud/laravel-json-ns",
@@ -6878,7 +6878,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/splicewire/laravel-beam.git",
-                "reference": "ff8161793b9b3c3e224032f57c2cc097800a97ae"
+                "reference": "8e61b4f5b975b38cf07c86ea9264e5526ec85eeb"
             },
             "require": {
                 "illuminate/contracts": "^11.0|^12.0|^13.0",
@@ -7019,7 +7019,7 @@
                 "MIT"
             ],
             "description": "The schema-driven-CMS core: composes the open schema foundation (schemastud/laravel-data-schemas + schemastud/laravel-frame) and the open versioning foundation (rushing/laravel-versioning) into a schema-typed, snapshot-versioned, migrate-on-read BeamParticle. Depends DOWN on the open foundations (the ADR-0092 direction, paid→open); per ADR-0156 that now includes schemastud/laravel-frame — the agnostic resource-scaffolding rung — so beam natively implements Frame's FrameResourceHandler port (chain: splicewire/beam → schemastud/frame → schemastud/data-schemas, monotonic, no cycle). Also the runtime home of the host-hook registries (webhook / sitemap / doctor), the realm registry, and the particle resource declarations. The media arm (medialibrary + the media model traits + media table) was extracted DOWN into splicewire/laravel-beam-media (HTTP-03 / ADR-0178); base beam no longer requires medialibrary and does NOT require beam-media (no cycle). Headless = no editor SURFACE running; Frame's scaffolding may be present-but-inert. No Beam model is minted; beam is a substrate, not an instance.",
-            "time": "2026-11-23T17:41:08+00:00"
+            "time": "2026-11-24T13:09:46+00:00"
         },
         {
             "name": "splicewire/laravel-beam-accounts",
@@ -16337,7 +16337,6 @@
     "minimum-stability": "dev",
     "stability-flags": {
         "rushing/php-popcorn": 20,
-        "schemastud/laravel-data-schemas": 20,
         "splicewire/laravel-beam-sitemap": 20,
         "splicewire/laravel-composition-spine": 20
     },

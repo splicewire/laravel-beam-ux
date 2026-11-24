@@ -4,6 +4,7 @@ namespace Splicewire\Beam\Ux\Tests;
 
 use Schemastud\Frame\Contracts\FrameNavContributor;
 use Schemastud\Frame\Contracts\ResourceRegistry;
+use Schemastud\Frame\Registry\ResourceCreateAffordance;
 use Splicewire\Beam\Authorization\ResourceVisibility;
 use Splicewire\Beam\Authorization\SeatGate;
 use Splicewire\Beam\Authorization\SeatGateKind;
@@ -144,7 +145,7 @@ class FrameRouteContextProjectionTest extends TestCase
     public function test_creation_is_independent_of_record_edit_and_detail(): void
     {
         $registry = $this->app->make(\Splicewire\Beam\Particle\ParticleResourceRegistry::class);
-        foreach (['immutable' => 'frame', 'host-owned' => 'host'] as $key => $affordance) {
+        foreach (['immutable' => ResourceCreateAffordance::Frame, 'host-owned' => ResourceCreateAffordance::Host] as $key => $affordance) {
             $registry->register(new ParticleResource(
                 key: $key,
                 backing: 'Acme\\Particles\\Fixture',

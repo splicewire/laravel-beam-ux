@@ -13,6 +13,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Schemastud\Frame\FrameServiceProvider;
 use Schemastud\Frame\Registry\ContextBlockFacts;
 use Schemastud\Frame\Registry\ContextManifest;
+use Schemastud\Frame\Registry\FormMode;
 use Spatie\LaravelData\Mappers\CamelCaseMapper;
 use Spatie\LaravelData\Support\DataConfig;
 use Splicewire\Beam\Facades\Beam;
@@ -86,6 +87,15 @@ class BeamUxEntryDataTest extends TestCase
         // The default WriteGate delegates to the Laravel gate; grant create so afterWrite()'s body
         // write passes (same precedent as BeamUxEntryTest).
         Gate::define('create', fn ($user = null) => true);
+    }
+
+    public function test_resource_declaration_uses_the_typed_enriched_form_mode(): void
+    {
+        $attribute = (new \ReflectionClass(BeamUxEntryData::class))
+            ->getAttributes(\Splicewire\Beam\Particle\Attributes\ParticleResource::class)[0]
+            ->newInstance();
+
+        $this->assertSame(FormMode::Enriched, $attribute->form);
     }
 
     public function test_the_central_index_lists_the_declared_population_for_a_viewany_holder(): void
