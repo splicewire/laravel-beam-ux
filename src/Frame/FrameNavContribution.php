@@ -110,28 +110,104 @@ class FrameNavContribution implements FrameNavContributor
         $registry = $this->navigations->unfiltered();
         $registrant = $registry instanceof RecordsRegistrants ? $registry->registrantOf($realm) : null;
 
-        return NavTree::make(self::localizedNodes($tree->items, $registrant, app(ShellText::class)));
+        return NavTree::make($this->localizedNodes($tree->items, $registrant, app(ShellText::class)));
     }
 
     /**
      * Each authored node's title, keyed by its route name (`nav.routes.<a/b>.title` in the registrant's namespace); a node
-     * with no route name keeps its literal. An invocable item's own title is the author's, but its CHILDREN are what
-     * its invocable expanded into (resource leaves, persisted entries): those carry their own text and are never
-     * re-keyed or re-presented here.
+     * with no route name is still presented, so it reads as the author's own literal in any language.
+     *
+     * The author's text reaches below an invocable item too, through the SAME call (frame-foundation 82). The item's
+     * `input.static` rows and `input.groups` labels are words the author wrote, just like its title. Each is resolved here
+     * under the same registrant: a row keyed by its route name, a group by its tab's realm-free route name, exactly as
+     * {@see NavSectionProjector::localizedRows()} and `localizedGroups()` key a package's. The expanded children those
+     * words became (a static row's link, a group tab, at any depth) then wear the resolved word. Every other expanded
+     * child (a resource leaf, a persisted entry) carries its own text and is never re-keyed or re-presented here.
      *
      * @param  array<int, NavNode>  $nodes
      * @return array<int, NavNode>
      */
-    private static function localizedNodes(array $nodes, ?string $registrant, ShellText $shell): array
+    private function localizedNodes(array $nodes, ?string $registrant, ShellText $shell): array
     {
-        return array_map(static function (NavNode $node) use ($registrant, $shell): NavNode {
+        return array_map(function (NavNode $node) use ($registrant, $shell): NavNode {
             $copy = clone $node;
             if ($node->title !== '') {
                 $copy->title = $shell->navRouteTitle($node->routeName, $registrant, $node->title);
             }
-            if (! $node instanceof InvocableNavItem) {
-                $copy->children = self::localizedNodes($node->children, $registrant, $shell);
+            if ($node instanceof InvocableNavItem) {
+                $authored = $this->localizedInput($copy, $registrant, $shell);
+                $copy->children = self::retitled($node->children, $authored);
+            } else {
+                $copy->children = $this->localizedNodes($node->children, $registrant, $shell);
             }
+
+            return $copy;
+        }, $nodes);
+    }
+
+    /**
+     * Resolve an invocable item's authored `input.static` titles and `input.groups` labels in place, and return what each
+     * expanded child minted from them should now read: by route name (`routes`) and, for a row with none, by its literal
+     * (`literals`). A group tab's route name is the one {@see FrameResourcesInvocable::foldGroups()} mints, against the
+     * realm the item names.
+     *
+     * @return array{routes: array<string, string>, literals: array<string, string>}
+     */
+    private function localizedInput(InvocableNavItem $item, ?string $registrant, ShellText $shell): array
+    {
+        $input = $item->input;
+        $authored = ['routes' => [], 'literals' => []];
+
+        if (is_array($input['static'] ?? null)) {
+            foreach ($input['static'] as $i => $row) {
+                $title = is_array($row) ? ($row['title'] ?? null) : null;
+                if (! is_string($title) || $title === '') {
+                    continue;
+                }
+                $routeName = is_string($row['routeName'] ?? null) && $row['routeName'] !== '' ? $row['routeName'] : null;
+                $resolved = $shell->navRouteTitle($routeName, $registrant, $title);
+                $input['static'][$i]['title'] = $resolved;
+                $routeName === null ? $authored['literals'][$title] = $resolved : $authored['routes'][$routeName] = $resolved;
+            }
+        }
+
+        if (is_array($input['groups'] ?? null)) {
+            $routeBase = $this->realms->tryResolve((string) ($input['realm'] ?? ''))?->routeBase ?? '/';
+            foreach ($input['groups'] as $i => $group) {
+                if (! is_array($group) || ! is_string($group['label'] ?? null) || ! is_string($group['match'] ?? null)
+                    || ! NavGroupMatch::isWellFormed($group['match'])) {
+                    continue;
+                }
+                $resolved = $shell->navRouteTitle(NavGroupMatch::resolve($group['match'], '/')->routeName(), $registrant, $group['label']);
+                $input['groups'][$i]['label'] = $resolved;
+                $authored['routes'][NavGroupMatch::resolve($group['match'], $routeBase)->routeName()] = $resolved;
+            }
+        }
+
+        $item->input = $input;
+
+        return $authored;
+    }
+
+    /**
+     * Expanded children, at any depth, with each one an authored word became wearing its resolved form; the rest untouched.
+     *
+     * @param  array<int, NavNode>  $nodes
+     * @param  array{routes: array<string, string>, literals: array<string, string>}  $authored
+     * @return array<int, NavNode>
+     */
+    private static function retitled(array $nodes, array $authored): array
+    {
+        if ($authored['routes'] === [] && $authored['literals'] === []) {
+            return $nodes;
+        }
+
+        return array_map(static function (NavNode $node) use ($authored): NavNode {
+            $copy = clone $node;
+            $copy->title = $node->routeName !== null
+                ? $authored['routes'][$node->routeName] ?? $node->title
+                : $authored['literals'][$node->title] ?? $node->title;
+            $copy->children = self::retitled($node->children, $authored);
 
             return $copy;
         }, $nodes);
