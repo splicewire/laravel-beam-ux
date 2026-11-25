@@ -109,9 +109,10 @@ class RouteContextProjector
         $mountedRealm = is_string($mountedRealm) && $mountedRealm !== '' ? $mountedRealm : null;
 
         try {
-            $definitions = collect($this->particles->definitions($realm))->keyBy('key');
+            $definitions = $this->particles->currentRealmProjection($realm)?->byKey
+                ?? collect($this->particles->definitions($realm))->keyBy('key')->all();
         } catch (Throwable) {
-            $definitions = collect();
+            $definitions = [];
         }
 
         foreach ($entries as $entry) {
@@ -132,7 +133,7 @@ class RouteContextProjector
                 continue;
             }
 
-            $resource = $definitions->get($entry->resource);
+            $resource = $definitions[$entry->resource] ?? null;
             if ($resource !== null) {
                 try {
                     $admitted[$entry->resource] = $visibility->listable($resource, $context->user, $mountedRealm);

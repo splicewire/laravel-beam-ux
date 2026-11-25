@@ -15,6 +15,7 @@ use Splicewire\Beam\Dashboard\SectionOverview;
 use Splicewire\Beam\Localization\ShellText;
 use Splicewire\Beam\Nav\NavGroupMatch;
 use Splicewire\Beam\Nav\NavSectionRegistry;
+use Splicewire\Beam\Particle\ParticleResourceRegistry;
 use Splicewire\Beam\Realm\RealmRegistry;
 
 /**
@@ -69,6 +70,14 @@ class FrameNavContribution implements FrameNavContributor
             return null;
         }
 
+        return app(ParticleResourceRegistry::class)->withRealmProjection(
+            $realm,
+            fn (): array => $this->buildContribution($realm),
+        );
+    }
+
+    private function buildContribution(string $realm): array
+    {
         $context = $this->context($realm);
         $routeContext = $this->routes->routeContext($realm, $context);
         $nav = $this->navigation($realm, $context);
